@@ -123,11 +123,11 @@ and the records to append); `commit` performs the image-lifecycle
 transitions `attempt`, `rolled_back`, `chosen` or `no_image`. Stage0
 has only `Entry`, `CoreChosen` and `Halted`: it picks the boot loader slot
 from the boot loader records of the state log and the trial cell
-(`dagon_core::bootcore::choose`; retained-formats.md 7): the pending core
+(`dagon_core::bootcore::decide`; retained-formats.md 7): the pending core
 while fewer than `trial_attempts` starts are counted for it, else the
-confirmed one. It checks that the core's header is the one the record
-names and that its body matches the header's digest (4.7) before
-`core_slot_chosen`, starts the watchdog before a core on trial, and runs
+confirmed one. It checks that the core's header signature verifies, that
+the header is the one the record names and that its body matches the
+header's digest (4.7) before `core_slot_chosen`, starts the watchdog before a core on trial, and runs
 no extension. Stage0 never writes flash. The started boot loader settles
 the boot loader trial before its own boot decision is acted on
 (`settle_log`): the pending core appends CONFIRMED (target BOOTCORE) only
@@ -1269,38 +1269,50 @@ The one authentication rule, applied by every verifier in the chain
   by the agent before `written` and again before `pending_set` (the
   SLOT_PENDING record names its header digest).
 
-  On a self-boot MCU with
-  a stage0 whose definition sets `[layout] stage0_verifies`, stage0
-  checks the boot loader header's signature under the project key built
-  into it as well as the digests. Where it is left out, stage0 checks
-  digests only: it starts a boot loader only when its header's digest is
-  the one a boot loader record names and its body matches that header's
-  digest; the record exists only for a core whose signature the agent
-  verified, so this chain holds only as long as the state log is written
-  by DAGON's agent and boot loader alone (the sandbox, 4, keeps extensions
-  from it), and code that can write flash without the signing key (a
-  trusted-code bug, or an attacker with flash access) can make stage0
-  start an unsigned core.
-  A verifier does not fit either stage0's region within the margin below.
+  On a self-boot MCU with a stage0, stage0 checks the boot loader
+  header's signature, under the project key at the place its MCU
+  definition names (`[stage0] key`: `flash`, a constant built into
+  stage0's own flash, is the one place), as well as the digests, on
+  every path that may start a core: the pending core, the confirmed
+  core, slot A while the log names none, and each other slot it tries
+  on its own. A core whose signature does not verify never starts, so
+  code that can write flash without the signing key cannot make stage0
+  start a core of its own. Stage0's verifier (`Ed25519Small`) accepts
+  exactly what the host's and the agent's accept. The key is part of
+  stage0, which is never updated in the field: replacing the project's
+  signing key means rebuilding stage0 with the new key and writing it
+  through the MCU's ROM loader.
 
-  When the log's choice does not
-  check out (a corrupt slot, or a record naming a slot without a core),
-  stage0 tries the other slots on their own before it has nothing to
-  start.
+  When the log's choice does not check out (a corrupt slot, a record
+  naming a slot without a core, or a signature that does not verify),
+  stage0 tries the other slots on their own. When none checks out, it
+  starts nothing and waits for recovery through the ROM loader, and it
+  tells why to the node's diagnostic output: on a board whose
+  definition's `[boot]` has an LED and a blinking halt pattern, the LED
+  blinks the reason's code (1 header, 2 header digest, 3 size, 4 image
+  kind, MCU or slot, 5 load address, 6 body digest, 7 signature) five
+  times faster than that pattern, then stays dark for one period, and
+  again (such a pattern blinks every 10 ms or slower; a board with a
+  shorter one is refused when it loads). A node without a board, or on a board without that LED or with
+  its halt pattern off, shows nothing; stage0 decides the same either
+  way.
 
   On a self-boot MCU without a stage0, the boot loader is the root
   and is verified by the host before it is written and by the agent when
   it is written through the write path.
-- **Stage0 budget.** The MCU definition's `[layout] stage0.size` is the
-  whole of stage0 (vector table, the log reader, the checks, the trial
-  cell); the image's memory.x gives it exactly that region, so the link
-  fails when stage0 outgrows it. RP2040: 16 KiB with boot2 (the boot
-  ROM's 256-byte second stage). STM32F401RE: 16 KiB, all of sector 0
-  where the core fetches its reset vector (the smallest erase unit
-  holding it, so no write ever erases stage0). Every build must leave
-  1/16 of the region free (`scripts/stage0_size.py`): the board-less
-  build and one per board whose definition names the MCU, since a board
-  puts its boot LED and halt pattern into stage0. Stage0 is never written
+- **Stage0 budget.** The MCU definition's `[stage0] region_bytes`
+  (the size of `[layout] stage0`) is the whole of stage0 (vector table,
+  the log reader, the checks with the verifier, the trial cell, the
+  diagnostic output). Its linker script fails the link when the image
+  does not leave 1/16 of the region free. RP2040: 16 KiB with boot2 (the
+  boot ROM's 256-byte second stage). STM32F401RE: 16 KiB, all of sector
+  0 where the core fetches its reset vector (the smallest erase unit
+  holding it, so no write ever erases stage0). `scripts/stage0_size.py`
+  builds the board-less build and one per board whose definition names
+  the MCU, since a board puts its diagnostic output into stage0, and
+  checks each part of the image (the verifier, SHA-2, dagon-core,
+  dagon-format, the MCU package, and the rest) against the most bytes
+  the package's `stage0/budget.toml` gives it, from the linker map. Stage0 is never written
   in the field but is rebuilt for every new node with the toolchain of
   that build, so an image without spare room becomes a first write that
   cannot be built. Both stage0s use the compact SHA-256 rounds, since

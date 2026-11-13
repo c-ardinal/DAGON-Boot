@@ -347,8 +347,8 @@ mod tests {
     fn host(hub: SimHub, uplink: Medium) -> Host<Link, Link> {
         let link = Link::new(hub, uplink);
         let mut h = Host::new(link.clone(), link);
-        // The simulated hub's links: its MCU definition's.
-        h.relay_links = dagon_sim::store::relay_links(dagon_sim::Layout::RP2040_HUB.mcu);
+        let t = dagon_topology::parse_str(&yaml(uplink)).unwrap();
+        h.routes = dagon_host::configured_routes(dagon_topology::defs::Registry::builtin(), &t);
         h
     }
 

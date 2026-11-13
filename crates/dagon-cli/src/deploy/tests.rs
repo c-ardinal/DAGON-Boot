@@ -136,8 +136,7 @@ fn deploys_each_node_with_its_crate_version_through_the_simulated_hub() {
 
     let sim = sample_sim(&t, &key);
     let mut host = Host::new(sim.clone(), sim.clone());
-    // The simulated hub's relay links: its MCU definition's.
-    host.relay_links = dagon_sim::store::relay_links(dagon_sim::Layout::RP2040_HUB.mcu);
+    host.routes = dagon_host::configured_routes(dagon_topology::defs::Registry::builtin(), &t);
     crate::device::apply_bundle(
         &mut host,
         dagon_topology::defs::Registry::builtin(),
@@ -222,8 +221,7 @@ fn a_release_signed_with_another_key_is_not_applied() {
     let other = KeyPair::from_seed(Seed::new([8; 32]));
     let sim = sample_sim(&t, &other);
     let mut host = Host::new(sim.clone(), sim);
-    // The simulated hub's relay links: its MCU definition's.
-    host.relay_links = dagon_sim::store::relay_links(dagon_sim::Layout::RP2040_HUB.mcu);
+    host.routes = dagon_host::configured_routes(dagon_topology::defs::Registry::builtin(), &t);
     assert!(crate::device::apply_bundle(
         &mut host,
         dagon_topology::defs::Registry::builtin(),

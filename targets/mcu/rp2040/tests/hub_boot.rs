@@ -3,6 +3,7 @@
 
 use dagon_core::boot::{self, BootConfig, Decision};
 use dagon_core::log::{trial_room, Log, SlotRef};
+use dagon_ed25519::Ed25519Compact;
 use dagon_format::header::*;
 use dagon_format::statelog::{kind, reason, target, FaceHeader, Record};
 use dagon_format::{key_id, sha256, Version};
@@ -108,9 +109,12 @@ fn install(kp: &KeyPair) -> (Mem, SlotRef) {
     (m, a)
 }
 
-fn config(kp: &KeyPair) -> BootConfig {
+fn verifier(kp: &KeyPair) -> Ed25519Compact {
+    Ed25519Compact::new(*kp.pk)
+}
+
+fn config() -> BootConfig {
     BootConfig {
-        pubkey: *kp.pk,
         mcu_id: mcu_id::RP2040,
         target_tag: target_tag(HUB_TAG),
         max_attempts: dagon_mcu_rp2040::TRIAL_ATTEMPTS,
@@ -131,7 +135,7 @@ fn hundreds_of_updates_compact_the_log() {
         log.reserve(&mut m, trial_room(dagon_mcu_rp2040::TRIAL_ATTEMPTS))
             .unwrap();
         log.append(&mut m, kind::SLOT_PENDING, to, 0).unwrap();
-        let d = boot::decide(&mut m, &mut log, &APP_SLOTS, &config(&kp));
+        let d = boot::decide(&mut m, &mut log, &APP_SLOTS, &config(), &verifier(&kp));
         assert!(
             matches!(d, Decision::Boot { trial: true, .. }),
             "{i}: {d:?}"
@@ -147,7 +151,7 @@ fn hundreds_of_updates_compact_the_log() {
     }
     let mut log = Log::load(&mut m, &APP_LOG_LAYOUT).unwrap();
     assert!(log.generation > 1, "600 records must have compacted");
-    let d = boot::decide(&mut m, &mut log, &APP_SLOTS, &config(&kp));
+    let d = boot::decide(&mut m, &mut log, &APP_SLOTS, &config(), &verifier(&kp));
     assert!(
         matches!(
             d,
@@ -164,7 +168,7 @@ fn hundreds_of_updates_compact_the_log() {
 #[test]
 fn trial_without_confirm_rolls_back_to_a() {
     let kp = KeyPair::from_seed(Seed::new(SEED));
-    let cfg = config(&kp);
+    let cfg = config();
     let (mut m, _a) = install(&kp);
 
     let b = put_app(&mut m, &kp, 1, 1);
@@ -174,7 +178,7 @@ fn trial_without_confirm_rolls_back_to_a() {
 
     for _ in 0..dagon_mcu_rp2040::TRIAL_ATTEMPTS {
         let mut log = Log::load(&mut m, &APP_LOG_LAYOUT).unwrap();
-        let d = boot::decide(&mut m, &mut log, &APP_SLOTS, &cfg);
+        let d = boot::decide(&mut m, &mut log, &APP_SLOTS, &cfg, &verifier(&kp));
         assert!(
             matches!(
                 d,
@@ -189,7 +193,7 @@ fn trial_without_confirm_rolls_back_to_a() {
         assert_eq!(status_now(&mut m, 1).slots[1].state, SlotState::Trying);
     }
     let mut log = Log::load(&mut m, &APP_LOG_LAYOUT).unwrap();
-    let d = boot::decide(&mut m, &mut log, &APP_SLOTS, &cfg);
+    let d = boot::decide(&mut m, &mut log, &APP_SLOTS, &cfg, &verifier(&kp));
     assert!(
         matches!(
             d,
@@ -228,18 +232,18 @@ fn boot_core_refuses_another_nodes_tag() {
     let (mut m, _) = install(&kp);
     let mine = BootConfig {
         target_tag: checked_tag("my-hub"),
-        ..config(&kp)
+        ..config()
     };
     let mut log = Log::load(&mut m, &APP_LOG_LAYOUT).unwrap();
-    let d = boot::decide(&mut m, &mut log, &APP_SLOTS, &mine);
+    let d = boot::decide(&mut m, &mut log, &APP_SLOTS, &mine, &verifier(&kp));
     assert!(matches!(d, Decision::NoImage), "{d:?}");
 
     let (mut m, _) = install(&kp);
     let theirs = BootConfig {
         target_tag: checked_tag(HUB_TAG),
-        ..config(&kp)
+        ..config()
     };
     let mut log = Log::load(&mut m, &APP_LOG_LAYOUT).unwrap();
-    let d = boot::decide(&mut m, &mut log, &APP_SLOTS, &theirs);
+    let d = boot::decide(&mut m, &mut log, &APP_SLOTS, &theirs, &verifier(&kp));
     assert!(matches!(d, Decision::Boot { .. }), "{d:?}");
 }

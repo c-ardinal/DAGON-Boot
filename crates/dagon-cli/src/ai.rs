@@ -478,7 +478,7 @@ mod tests {
         let toml = dir.join("dagon.toml");
         std::fs::write(
             &toml,
-            "mcu_files = [\"m/dagon-mcu.toml\"]\n\
+            "format = 1\nmcu_files = [\"m/dagon-mcu.toml\"]\n\
              [board.my-pico]\nformat = 2\nproduct = \"My Pico\"\nmcu = \"my-m0\"\n\
              flash_bytes = 0x40_0000\ndrawing = \"pico\"\n\
              header = [{ pin = \"GPIO4\", label = \"D4\" }]\n\

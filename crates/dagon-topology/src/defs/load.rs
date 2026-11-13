@@ -4,6 +4,7 @@
 use std::fmt;
 use std::path::{Component, Path, PathBuf};
 
+use super::merge::Def;
 use super::{
     page_safe, BoardDef, McuDef, Origin, Part, Partition, Placement, Registry, Slot, Writer,
     FORMAT, HEADER, PROJECT_TEXT,
@@ -19,8 +20,9 @@ pub enum Source<'a> {
     /// `targets/boards/*/dagon-board.toml` replace the builtin set.
     Tree(&'a Path),
     /// A project's dagon.toml: `[board.<id>]` tables (the board schema
-    /// without `id`) and `mcu_files = ["<path>/dagon-mcu.toml", ...]`
-    /// inside the project.
+    /// without `id`), `mcu_files = ["<path>/dagon-mcu.toml", ...]` inside
+    /// the project, and `[mcu_override.<id>]` / `[board_override.<id>]`
+    /// merged into the definition of that id ([`super::merge`]).
     Project(&'a Path),
 }
 
@@ -39,7 +41,7 @@ impl fmt::Display for DefError {
 
 impl std::error::Error for DefError {}
 
-fn err<T>(at: impl fmt::Display, msg: impl Into<String>) -> Result<T, DefError> {
+pub(super) fn err<T>(at: impl fmt::Display, msg: impl Into<String>) -> Result<T, DefError> {
     Err(DefError {
         at: at.to_string(),
         msg: msg.into(),
@@ -47,7 +49,7 @@ fn err<T>(at: impl fmt::Display, msg: impl Into<String>) -> Result<T, DefError> 
 }
 
 /// The package a definition sits in; referenced files resolve inside it.
-enum Pkg<'a> {
+pub(super) enum Pkg<'a> {
     /// Builtin: text files embedded by name. Other referenced files are
     /// only shape-checked here; a test loads the source tree, which checks
     /// they exist.
@@ -201,23 +203,8 @@ impl Registry {
         origin: Origin,
         own: bool,
     ) -> Result<(), DefError> {
-        let mut m = parse_mcu(text, pkg)?;
-        if own {
-            let at = format!("{} (MCU '{}')", pkg.label(), m.id);
-            super::project_text::mcu(&mut m).or_else(|e| err(&at, e))?;
-            if let Pkg::Dir(dir) = pkg {
-                m.package = Some(dir.clone());
-            }
-        }
-        let files = match &m.partitions {
-            Some(rel) => vec![(rel.clone(), pkg.text(rel)?)],
-            None => Vec::new(),
-        };
-        self.mcu_sources.push(DefSource {
-            label: pkg.label(),
-            toml: text.to_string(),
-            files,
-        });
+        let (m, source) = mcu_entry(text, pkg, own)?;
+        self.mcu_sources.push(source);
         self.mcus.push(m);
         self.mcu_origins.push(origin);
         Ok(())
@@ -230,27 +217,63 @@ impl Registry {
         origin: Origin,
         own: bool,
     ) -> Result<(), DefError> {
-        let mut b = parse_board(text, pkg)?;
-        if own {
-            let at = format!("{} (board '{}')", pkg.label(), b.id);
-            super::project_text::board(&mut b).or_else(|e| err(&at, e))?;
-            if let Pkg::Dir(dir) = pkg {
-                b.package = Some(dir.clone());
-            }
-        }
+        let (b, source) = board_entry(text, pkg, own)?;
         self.boards.push(b);
         self.board_origins.push(origin);
-        self.board_sources.push(DefSource {
-            label: pkg.label(),
-            toml: text.to_string(),
-            files: Vec::new(),
-        });
+        self.board_sources.push(source);
         Ok(())
     }
 }
 
+/// A definition read from `text` in `pkg`, and what it was read from.
+pub(super) fn mcu_entry(
+    text: &str,
+    pkg: &Pkg<'_>,
+    own: bool,
+) -> Result<(McuDef, DefSource), DefError> {
+    let mut m = parse_mcu(text, pkg)?;
+    if own {
+        let at = format!("{} (MCU '{}')", pkg.label(), m.id);
+        super::project_text::mcu(&mut m).or_else(|e| err(&at, e))?;
+        if let Pkg::Dir(dir) = pkg {
+            m.package = Some(dir.clone());
+        }
+    }
+    let files = match &m.partitions {
+        Some(rel) => vec![(rel.clone(), pkg.text(rel)?)],
+        None => Vec::new(),
+    };
+    let source = DefSource {
+        label: pkg.label(),
+        toml: text.to_string(),
+        files,
+    };
+    Ok((m, source))
+}
+
+pub(super) fn board_entry(
+    text: &str,
+    pkg: &Pkg<'_>,
+    own: bool,
+) -> Result<(BoardDef, DefSource), DefError> {
+    let mut b = parse_board(text, pkg)?;
+    if own {
+        let at = format!("{} (board '{}')", pkg.label(), b.id);
+        super::project_text::board(&mut b).or_else(|e| err(&at, e))?;
+        if let Pkg::Dir(dir) = pkg {
+            b.package = Some(dir.clone());
+        }
+    }
+    let source = DefSource {
+        label: pkg.label(),
+        toml: text.to_string(),
+        files: Vec::new(),
+    };
+    Ok((b, source))
+}
+
 /// Embedded-file view of a source's owned files.
-fn file_refs(files: &[(String, String)]) -> Vec<(&str, &str)> {
+pub(super) fn file_refs(files: &[(String, String)]) -> Vec<(&str, &str)> {
     files
         .iter()
         .map(|(n, t)| (n.as_str(), t.as_str()))
@@ -263,7 +286,7 @@ fn file_refs(files: &[(String, String)]) -> Vec<(&str, &str)> {
 /// referenced text files lose their comment lines.
 pub(super) fn public_json(reg: &Registry) -> String {
     let public = |kind: &str, id: &str, origin: Origin, s: &DefSource| {
-        let scrub = origin == Origin::Project;
+        let scrub = origin.is_project_text();
         let id = if !scrub || page_safe(id) {
             id
         } else {
@@ -362,7 +385,7 @@ pub(super) fn from_json(json: &str) -> Result<Registry, DefError> {
         serde_json::from_str(json).or_else(|e| err("definitions JSON", e.to_string()))?;
     // A project's own entries are made safe again here, whatever the
     // sender did (public_json labels each by its origin).
-    let from_project = |label: &str| label.starts_with(&format!("{} ", Origin::Project.as_str()));
+    let from_project = |label: &str| Origin::of_label(label).is_some_and(Origin::is_project_text);
     let mut reg = empty();
     for s in &form.mcus {
         let files = file_refs(&s.files);
@@ -491,8 +514,7 @@ pub(super) fn files(sources: &[Source<'_>]) -> Result<Vec<PathBuf>, DefError> {
                 }
             }
             Source::Project(toml) => {
-                let defs: ProjectDefs =
-                    toml::from_str(&read(toml)?).or_else(|e| err(toml.display(), e.to_string()))?;
+                let defs = project_defs(toml)?;
                 let base = toml.parent().unwrap_or(Path::new("."));
                 for rel in &defs.mcu_files {
                     mcu(base.join(rel), &mut out)?;
@@ -504,19 +526,33 @@ pub(super) fn files(sources: &[Source<'_>]) -> Result<Vec<PathBuf>, DefError> {
     Ok(out)
 }
 
+/// The definition tables of dagon.toml; its other keys are other readers'
+/// ([`crate::project`]).
 #[derive(serde::Deserialize)]
 struct ProjectDefs {
     #[serde(default)]
     board: toml::Table,
     #[serde(default)]
     mcu_files: Vec<String>,
+    #[serde(default)]
+    mcu_override: toml::Table,
+    #[serde(default)]
+    board_override: toml::Table,
 }
 
-/// Adds a project's definitions; an id already known is an error.
+fn project_defs(dagon_toml: &Path) -> Result<ProjectDefs, DefError> {
+    let at = dagon_toml.display();
+    let text = read(dagon_toml)?;
+    crate::project::check(&text).or_else(|e| err(&at, e))?;
+    toml::from_str(&text).or_else(|e| err(&at, e.to_string()))
+}
+
+/// Adds a project's definitions (an id already known is an error), then
+/// merges its overrides into the built-in or source-tree definitions they
+/// name.
 fn project(reg: &mut Registry, dagon_toml: &Path) -> Result<(), DefError> {
     let at = dagon_toml.display();
-    let defs: ProjectDefs =
-        toml::from_str(&read(dagon_toml)?).or_else(|e| err(&at, e.to_string()))?;
+    let defs = project_defs(dagon_toml)?;
     let base = Pkg::Dir(dagon_toml.parent().unwrap_or(Path::new(".")).to_path_buf());
     for rel in &defs.mcu_files {
         base.check(rel)?;
@@ -564,7 +600,7 @@ fn project(reg: &mut Registry, dagon_toml: &Path) -> Result<(), DefError> {
             true,
         )?;
     }
-    Ok(())
+    super::overrides::apply(reg, &defs.mcu_override, &defs.board_override, &at)
 }
 
 /// Refuses a definition in a format this reader does not know, before its
@@ -592,7 +628,18 @@ fn parse_board(text: &str, pkg: &Pkg<'_>) -> Result<BoardDef, DefError> {
     check_format(text, pkg.label())?;
     let b: BoardDef = toml::from_str(text).or_else(|e| err(pkg.label(), e.to_string()))?;
     pkg.check_parts(&b.parts)?;
+    unique_keys(
+        Def::Board,
+        text,
+        &format!("{} (board '{}')", pkg.label(), b.id),
+    )?;
     Ok(b)
+}
+
+/// Each keyed array names a key once (the merge-key table's keys).
+fn unique_keys(def: Def, text: &str, at: &str) -> Result<(), DefError> {
+    let t: toml::Table = toml::from_str(text).or_else(|e| err(at, e.to_string()))?;
+    super::merge::check_keys(def, &t).or_else(|e| err(at, e))
 }
 
 fn parse_mcu(text: &str, pkg: &Pkg<'_>) -> Result<McuDef, DefError> {
@@ -619,6 +666,7 @@ fn parse_mcu(text: &str, pkg: &Pkg<'_>) -> Result<McuDef, DefError> {
         .collect::<Result<_, _>>()
         .or_else(|e| err(&at, e))?;
     super::requirements::check_mcu(&m).or_else(|e| err(&at, e))?;
+    unique_keys(Def::Mcu, text, &at)?;
     Ok(m)
 }
 

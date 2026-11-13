@@ -27,11 +27,13 @@ impl Request {
 
 /// Starts every refusal of a body for its size.
 pub const TOO_LARGE: &str = "body too large";
+/// How a request's error starts when its body has no size (`limit` failed).
+pub const NO_LIMIT: &str = "no body size";
 
 /// Reads one request from `stream`; `limit` sizes its body from its head.
 pub fn read_request(
     stream: &mut TcpStream,
-    limit: &dyn Fn(&Request) -> usize,
+    limit: &dyn Fn(&Request) -> Result<usize, String>,
 ) -> Result<Request, String> {
     let mut r = BufReader::new(stream);
     let mut head = Vec::new();
@@ -73,7 +75,8 @@ pub fn read_request(
         .map(|v| v.parse().map_err(|_| "bad content-length".to_string()))
         .transpose()?
         .unwrap_or(0);
-    if len > limit(&out) {
+    let max = limit(&out).map_err(|e| format!("{NO_LIMIT}: {e}"))?;
+    if len > max {
         return Err(if out.path == "/v1/kept" {
             format!("{TOO_LARGE}: larger than a package of this project's nodes can be")
         } else {

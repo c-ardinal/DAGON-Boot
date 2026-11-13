@@ -15,7 +15,7 @@ pub const LAYOUT_FORMAT: u32 = 1;
 const COMPAT: &str = include_str!("../../../compat.toml");
 
 /// Each contract and the number this dagon reads and writes.
-pub fn formats() -> [(&'static str, u32); 13] {
+pub fn formats() -> [(&'static str, u32); 14] {
     use dagon_format::{bundle, header, manifest, statelog, topology};
     [
         ("wire", u32::from(dagon_proto::PROTO_VERSION)),
@@ -34,6 +34,7 @@ pub fn formats() -> [(&'static str, u32); 13] {
             "boot-program",
             dagon_topology::defs::board_boot::BOOT_PROGRAM_FORMAT,
         ),
+        ("project", dagon_topology::project::FORMAT),
     ]
 }
 

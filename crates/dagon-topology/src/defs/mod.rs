@@ -10,6 +10,8 @@ pub mod dma;
 pub mod execution;
 pub mod isolation;
 mod load;
+pub mod merge;
+mod overrides;
 mod project_text;
 pub mod requirements;
 pub mod slot_layout;
@@ -17,6 +19,10 @@ pub mod slot_layout;
 mod tests;
 #[cfg(test)]
 mod tests_isolation;
+#[cfg(test)]
+mod tests_merge;
+#[cfg(test)]
+mod tests_merge_rules;
 #[cfg(test)]
 mod tests_ports;
 #[cfg(test)]
@@ -772,26 +778,47 @@ pub fn page_safe(s: &str) -> bool {
             .all(|b| b.is_ascii_alphanumeric() || matches!(b, b' ' | b'.' | b'_' | b'-'))
 }
 
-/// Where an MCU definition was read from. Commands a [`Origin::Project`]
-/// definition names (doctor probes and fixes) never run without the user's
-/// explicit confirmation.
+/// Where a definition was read from. Commands a definition holding the
+/// project's text names ([`Origin::is_project_text`]: doctor probes and
+/// fixes) never run without the user's explicit confirmation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Origin {
     /// Embedded in this dagon.
     Builtin,
     /// The project's DAGON source tree.
     Tree,
-    /// The project's own files (or definitions received as JSON).
+    /// The project's own files (or definitions received as JSON): no
+    /// package of DAGON's.
     Project,
+    /// A built-in or source-tree definition with the project's override
+    /// merged in: its package is still the built-in one (firmware and parts
+    /// are found as before), its text counts as the project's.
+    Overridden,
 }
 
 impl Origin {
+    const ALL: [Origin; 4] = [Self::Builtin, Self::Tree, Self::Project, Self::Overridden];
+
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Builtin => "builtin",
             Self::Tree => "source-tree",
             Self::Project => "project",
+            Self::Overridden => "overridden",
         }
+    }
+
+    /// Whether the definition holds text the project wrote: made safe
+    /// before it leaves the terminal, its commands confirmed before they run.
+    pub fn is_project_text(self) -> bool {
+        matches!(self, Self::Project | Self::Overridden)
+    }
+
+    /// The origin a [`Registry::to_json`] label starts with.
+    fn of_label(label: &str) -> Option<Origin> {
+        Self::ALL
+            .into_iter()
+            .find(|o| label.starts_with(&format!("{} ", o.as_str())))
     }
 }
 
@@ -819,7 +846,8 @@ impl Registry {
     }
 
     /// Builtin definitions, replaced by a DAGON source tree's when one is
-    /// given, plus project definitions (which may not redefine an id).
+    /// given, plus project definitions (which may not redefine an id), with
+    /// the project's overrides merged into the definitions they name.
     pub fn load(sources: &[Source<'_>]) -> Result<Registry, DefError> {
         load::load(sources)
     }

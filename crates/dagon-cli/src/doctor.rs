@@ -51,7 +51,7 @@ fn checks(reg: &Registry, mcus: &[String]) -> Vec<Check> {
     let mut wanted: Vec<_> = reg.mcus().iter().filter(|m| mcus.contains(&m.id)).collect();
     wanted.sort_by_key(|m| m.wire_id);
     for m in wanted {
-        let ask = reg.mcu_origin(&m.id) == Some(Origin::Project);
+        let ask = reg.mcu_origin(&m.id).is_some_and(Origin::is_project_text);
         for (i, d) in m.doctor.iter().enumerate() {
             match out.iter_mut().find(|c| c.def == *d) {
                 Some(c) => {
@@ -378,7 +378,7 @@ mod tests {
         std::fs::write(dir.join("m/dagon-mcu.toml"), format!("{toml}{extra}")).unwrap();
         std::fs::write(
             dir.join("dagon.toml"),
-            "mcu_files = [\"m/dagon-mcu.toml\"]
+            "format = 1\nmcu_files = [\"m/dagon-mcu.toml\"]
 ",
         )
         .unwrap();

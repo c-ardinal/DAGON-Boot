@@ -29,7 +29,7 @@ fn start(name: &str) -> Area {
     std::fs::write(dir.join("topology/t.yaml"), YAML).unwrap();
     std::fs::write(
         dir.join("dagon.toml"),
-        "# work area\ntopology = \"topology/t.yaml\"\n\n[build.seg]\npackage = \"targets/f401-app\"\n",
+        "# work area\nformat = 1\ntopology = \"topology/t.yaml\"\n\n[build.seg]\npackage = \"targets/f401-app\"\n",
     )
     .unwrap();
     std::fs::write(
@@ -531,7 +531,11 @@ fn connections_beyond_the_limit_get_503() {
 #[test]
 fn configured_paths_outside_the_work_area_are_refused() {
     let a = start("escape");
-    std::fs::write(a.dir.join("dagon.toml"), "topology = \"../outside.yaml\"\n").unwrap();
+    std::fs::write(
+        a.dir.join("dagon.toml"),
+        "format = 1\ntopology = \"../outside.yaml\"\n",
+    )
+    .unwrap();
     let b = auth(&a);
     let h = [("Authorization", b.as_str())];
     assert_eq!(http(&a, "GET", "/v1/topology", &h, b"").0, 403);
@@ -672,7 +676,7 @@ fn a_shape_not_updatable_yet_is_saved_and_its_updatable_part_compiled() {
     let b = auth(&a);
     let h = [("Authorization", b.as_str())];
     let y = two_hubs();
-    let report = dagon_topology::check_str(&y);
+    let report = dagon_topology::check_str_with(dagon_topology::defs::Registry::builtin(), &y);
     assert_eq!(report.errors().count(), 0, "{}", report.to_json());
     assert!(report.issues.iter().any(|i| i.rule == "V-23"));
     let (st, body) = http(&a, "PUT", "/v1/topology", &h, y.as_bytes());
@@ -747,7 +751,7 @@ fn project_with_key(home: &std::path::Path, name: &str) -> [u8; 32] {
     std::fs::create_dir_all(home.join(name)).unwrap();
     std::fs::write(
         home.join(name).join("dagon.toml"),
-        format!("topology = \"topology/t.yaml\"\npubkey = {pubkey:?}\n"),
+        format!("format = 1\ntopology = \"topology/t.yaml\"\npubkey = {pubkey:?}\n"),
     )
     .unwrap();
     k.public_key
@@ -1085,7 +1089,11 @@ fn a_project_without_any_key_is_not_opened() {
     }
     let (a, home) = with_home("proj-nokey");
     std::fs::create_dir_all(home.join("bare")).unwrap();
-    std::fs::write(home.join("bare/dagon.toml"), "topology = \"t.yaml\"\n").unwrap();
+    std::fs::write(
+        home.join("bare/dagon.toml"),
+        "format = 1\ntopology = \"t.yaml\"\n",
+    )
+    .unwrap();
     let (st, body) = post(
         &a,
         "/v1/project/open",
@@ -1101,7 +1109,7 @@ fn project_with_pubkey(home: &std::path::Path, name: &str, pubkey: &std::path::P
     std::fs::create_dir_all(home.join(name)).unwrap();
     std::fs::write(
         home.join(name).join("dagon.toml"),
-        format!("topology = \"t.yaml\"\npubkey = {pk:?}\n"),
+        format!("format = 1\ntopology = \"t.yaml\"\npubkey = {pk:?}\n"),
     )
     .unwrap();
 }
@@ -1146,7 +1154,7 @@ fn project_keys(home: &std::path::Path, name: &str, pubkey: &str, signing: &std:
     std::fs::create_dir_all(home.join(name)).unwrap();
     std::fs::write(
         home.join(name).join("dagon.toml"),
-        format!("topology = \"t.yaml\"\npubkey = {pubkey:?}\nsigning_key = {sk:?}\n"),
+        format!("format = 1\ntopology = \"t.yaml\"\npubkey = {pubkey:?}\nsigning_key = {sk:?}\n"),
     )
     .unwrap();
 }
@@ -1471,7 +1479,11 @@ fn the_layout_is_kept_beside_the_topology() {
     std::fs::write(a.dir.join("topology/t.layout.json"), &big).unwrap();
     assert_eq!(http(&a, "GET", "/v1/layout", &h, b"").0, 413);
     // A topology path out of the project: the layout beside it is refused.
-    std::fs::write(a.dir.join("dagon.toml"), "topology = \"../outside.yaml\"\n").unwrap();
+    std::fs::write(
+        a.dir.join("dagon.toml"),
+        "format = 1\ntopology = \"../outside.yaml\"\n",
+    )
+    .unwrap();
     assert_eq!(http(&a, "GET", "/v1/layout", &h, b"").0, 403);
     assert_eq!(http(&a, "PUT", "/v1/layout", &h, b"{}").0, 403);
 }
@@ -1585,7 +1597,7 @@ fn build_output_reaches_the_page_without_local_folders() {
     .unwrap();
     std::fs::write(
         a.dir.join("dagon.toml"),
-        "topology = \"topology/t.yaml\"\n[build.seg]\npackage = \"private/token/app\"\n",
+        "format = 1\ntopology = \"topology/t.yaml\"\n[build.seg]\npackage = \"private/token/app\"\n",
     )
     .unwrap();
     let rx = a.server.subscribe();
@@ -2253,6 +2265,17 @@ fn a_package_at_the_node_limit_can_always_be_kept() {
     // Without the passphrase only an ordinary body is read.
     let (st, _) = head_only(&a, "", super::http::MAX_BODY + 1);
     assert_eq!(st, 413);
+    // Project definitions that do not load size no package: the built-in
+    // ones never stand in for them.
+    let toml = std::fs::read_to_string(a.dir.join("dagon.toml")).unwrap();
+    std::fs::write(
+        a.dir.join("dagon.toml"),
+        format!("{toml}\n[board.bad]\nmcu = \"nope\"\n"),
+    )
+    .unwrap();
+    let (st, text) = head_only(&a, &format!("Authorization: {b}\r\n"), 1);
+    assert_eq!(st, 500, "{text}");
+    assert!(text.contains(super::api::DEFS_ERROR), "{text}");
 }
 
 #[test]

@@ -5,7 +5,12 @@
 
 use std::collections::BTreeSet;
 
-use dagon_topology::{check_str, compile_str, parse_str, updatable, Severity};
+use dagon_topology::defs::Registry;
+use dagon_topology::{check_str_with, compile_str, parse_str, updatable, Report, Severity};
+
+fn check_str(yaml: &str) -> Report {
+    check_str_with(Registry::builtin(), yaml)
+}
 
 const SAMPLE: &str = include_str!("../../../topology/sample.yaml");
 

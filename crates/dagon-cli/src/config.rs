@@ -85,7 +85,8 @@ impl BuildInputs {
     }
 }
 
-/// Unknown tables are ignored here.
+/// The keys of dagon.toml this reader uses; the others are other readers'
+/// (dagon_topology::project lists them all and checks the format).
 #[derive(Debug, Default, Deserialize)]
 pub struct Config {
     /// Directory of the dagon.toml read (the work area); empty when none.
@@ -129,6 +130,7 @@ impl Config {
         };
         let text = std::fs::read_to_string(&path)
             .map_err(|e| format!("cannot read {}: {e}", path.display()))?;
+        dagon_topology::project::check(&text).map_err(|e| format!("{}: {e}", path.display()))?;
         let mut c: Config =
             toml::from_str(&text).map_err(|e| format!("{}: {e}", path.display()))?;
         let dir = base_of(&path);
@@ -450,7 +452,8 @@ mod tests {
         std::fs::create_dir_all(root.join("proj")).unwrap();
         std::fs::write(
             root.join("proj/dagon.toml"),
-            "provision_dir = \"../shared/provision\"\nrelease = \"./out/../rel.dgb\"\n",
+            "format = 1
+provision_dir = \"../shared/provision\"\nrelease = \"./out/../rel.dgb\"\n",
         )
         .unwrap();
         let c = Config::load(Some(&root.join("proj/dagon.toml").to_string_lossy())).unwrap();
@@ -522,7 +525,7 @@ mod tests {
         let toml = dir.join("dagon.toml");
         std::fs::write(
             &toml,
-            "topology = \"t.yaml\"
+            "format = 1\ntopology = \"t.yaml\"
 ",
         )
         .unwrap();
@@ -531,7 +534,8 @@ mod tests {
         assert!(c.provision_dir().is_absolute());
         std::fs::write(
             &toml,
-            "provision_dir = \"p\"
+            "format = 1
+provision_dir = \"p\"
 ",
         )
         .unwrap();
@@ -565,7 +569,7 @@ mod tests {
         std::fs::create_dir_all(d.join("sub")).unwrap();
         std::fs::write(
             d.join("sub/dagon.toml"),
-            "topology = \"t.yaml\"
+            "format = 1\ntopology = \"t.yaml\"
 ",
         )
         .unwrap();
@@ -577,11 +581,28 @@ mod tests {
     }
 
     #[test]
-    fn config_ignores_unknown_tables() {
-        let c: Config = toml::from_str(
-            "topology = \"t.yaml\"\n[serve]\nx = 1\n[build.seg]\npackage = \"targets/f401-app\"\n[provision.seg]\nbootcore = \"b\"\napp = \"a\"\nversion = \"1.0.0\"\n",
+    fn config_leaves_other_readers_tables_and_refuses_unknown_keys_and_formats() {
+        let d = std::env::temp_dir().join(format!("dagon-cfg-keys-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        let path = d.join("dagon.toml");
+        let load = |text: &str| {
+            std::fs::write(&path, text).unwrap();
+            Config::load(Some(&path.to_string_lossy()))
+        };
+        let c = load(
+            "format = 1\ntopology = \"t.yaml\"\n[mcu_override.rp2040.watchdog]\ntrial_ms = 4000\n\
+             [extensions.packages]\n[build.seg]\npackage = \"targets/f401-app\"\n\
+             [provision.seg]\nbootcore = \"b\"\napp = \"a\"\nversion = \"1.0.0\"\n",
         )
         .unwrap();
         assert_eq!(c.provision["seg"].version.as_deref(), Some("1.0.0"));
+        let e = load("format = 1\n[serve]\nx = 1\n").unwrap_err();
+        assert!(e.contains("unknown key `serve`"), "{e}");
+        let e = load("topology = \"t.yaml\"\n").unwrap_err();
+        assert!(e.contains("format = 1"), "{e}");
+        let e = load("format = 2\n").unwrap_err();
+        assert!(e.contains("reads dagon.toml format 1"), "{e}");
+        let _ = std::fs::remove_dir_all(&d);
     }
 }

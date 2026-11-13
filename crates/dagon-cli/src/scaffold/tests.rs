@@ -589,6 +589,27 @@ fn regen_restores_a_deleted_dagon_dependency() {
 }
 
 #[test]
+fn an_overridden_builtin_board_keeps_its_board_package() {
+    let d = tmp("override-board");
+    let src = clone(&d);
+    let base = project(&d);
+    std::fs::write(
+        base.join("dagon.toml"),
+        "format = 1\n[board_override.nucleo-f401re.boot]\nhalt = { pattern = \"code\" }\n",
+    )
+    .unwrap();
+    let reg = dagon_topology::defs::Registry::load(&[dagon_topology::defs::Source::Project(
+        &base.join("dagon.toml"),
+    )])
+    .unwrap();
+    // The merged board is the project's text, and still the built-in package's.
+    let seg = sample().nodes.into_iter().find(|n| n.id == "seg").unwrap();
+    assert_eq!(want_of(&reg, &seg), Want::Board("nucleo-f401re".into()));
+    gen(&reg, &base, &sample(), &src, &["seg".into()], false).unwrap();
+    assert!(read(&base, "nodes/seg/Cargo.toml").contains("dagon-board-nucleo-f401re = { path = "));
+}
+
+#[test]
 fn regen_adds_a_dagon_package_the_template_newly_needs() {
     let d = tmp("regen-new");
     let src = clone(&d);
@@ -1103,11 +1124,14 @@ const FW_OFFERS: [(&str, &[&str], &[&str]); 3] = [
 
 #[test]
 fn the_hop_paths_are_exactly_the_firmware_links_contract() {
-    use dagon_topology::links::{available, Dir};
+    use dagon_topology::links::{available_in, Dir};
     assert_eq!(kind_variant(LinkKind::WifiTcp), "WifiTcp");
     for (mcu, up, down) in FW_OFFERS {
         let names = |d: Dir| -> Vec<&'static str> {
-            let mut v: Vec<&'static str> = available(mcu, d).iter().map(|k| k.name()).collect();
+            let mut v: Vec<&'static str> = available_in(Registry::builtin(), mcu, d)
+                .iter()
+                .map(|k| k.name())
+                .collect();
             v.sort_unstable();
             v
         };

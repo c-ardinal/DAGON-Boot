@@ -137,7 +137,7 @@ fn fake_project(dir: &Path) -> PathBuf {
     write(
         &toml,
         format!(
-            "topology = \"t.yaml\"\nmcu_files = [\"m/dagon-mcu.toml\"]\n\
+            "format = 1\ntopology = \"t.yaml\"\nmcu_files = [\"m/dagon-mcu.toml\"]\n\
              [build.seg]\npackage = \"private/token/app\"\n\
              [provision.seg]\nbootcore = \"boot.bin\"\napp = \"app.bin\"\nversion = \"1.0.0\"\n\
              {FAKE_BOARD}"
@@ -166,7 +166,10 @@ fn a_project_defined_mcu_and_board_go_through_every_command() {
     let yaml = std::fs::read_to_string(&topo).unwrap();
     let report = dagon_topology::check_str_with(&reg, &yaml);
     assert_eq!(report.errors().count(), 0, "{}", report.to_json());
-    assert!(!dagon_topology::check_str(&yaml).is_pushable());
+    assert!(
+        !dagon_topology::check_str_with(dagon_topology::defs::Registry::builtin(), &yaml)
+            .is_pushable()
+    );
     read_topology(&cfg, &topo).unwrap();
 
     // compile

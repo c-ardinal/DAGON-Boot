@@ -189,7 +189,7 @@ mod tests {
         std::fs::write(
             &toml,
             format!(
-                "topology = \"t.yaml\"\npubkey = {pk:?}\n[build.seg]\npackage = \"nodes/seg\"\n"
+                "format = 1\ntopology = \"t.yaml\"\npubkey = {pk:?}\n[build.seg]\npackage = \"nodes/seg\"\n"
             ),
         )
         .unwrap();

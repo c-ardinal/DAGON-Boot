@@ -1242,13 +1242,11 @@ fn kept_post(server: &Server, req: &Request) -> Res {
         .map_err(|e| Response::error(422, &e))
 }
 
-/// The most `POST /v1/kept` takes: by the open project's definitions, which
-/// may add larger MCUs, else the built-in ones.
-pub(super) fn largest_package(server: &Server) -> usize {
-    match config(server).and_then(|c| crate::defs::registry(&c)) {
-        Ok(reg) => crate::kept::largest_package(&reg),
-        Err(_) => crate::kept::largest_package(dagon_topology::defs::Registry::builtin()),
-    }
+/// The most `POST /v1/kept` takes, by the definitions in use (the open
+/// project's, overrides included, which may make slots larger); their error
+/// when they do not load.
+pub(super) fn largest_package(server: &Server) -> Result<usize, String> {
+    registry_of(server).map(|reg| crate::kept::largest_package(&reg))
 }
 
 /// GET /v1/bootcore/{node}: the node's signed boot core (the ROM path):
@@ -2078,7 +2076,7 @@ mod tests {
     /// A server on `cfg`'s work area (dagon.toml there) verifying with `key`.
     fn server_on(cfg: &Config, key: [u8; 32]) -> Arc<Server> {
         let toml = cfg.base.join("dagon.toml");
-        std::fs::write(&toml, "topology = \"t.yaml\"\n").unwrap();
+        std::fs::write(&toml, "format = 1\ntopology = \"t.yaml\"\n").unwrap();
         let s = Server::new("p".repeat(32), 1, Some(toml), PathBuf::new());
         s.set_release_key(key);
         s
@@ -2188,7 +2186,7 @@ mod tests {
         // [provision.seg] bootcore naming a file outside the project.
         std::fs::write(
             cfg.base.join("dagon.toml"),
-            "topology = \"t.yaml\"\n[provision.seg]\nbootcore = \"../outside.img\"\napp = \"a\"\n",
+            "format = 1\ntopology = \"t.yaml\"\n[provision.seg]\nbootcore = \"../outside.img\"\napp = \"a\"\n",
         )
         .unwrap();
         assert_eq!(status(bootcore_get(&server, "seg")), 403);

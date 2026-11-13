@@ -201,13 +201,22 @@ fn node_targets(cfg: &Config, t: &Topology) -> Result<(Vec<NodeRoute>, Routes), 
         })
         .filter(|(_, to, _)| *to != Some(Target::Hub))
         .collect();
-    Ok((nodes, dagon_host::configured_routes(&reg, t)))
+    Ok((nodes, routes(&reg, t)))
+}
+
+/// How the host reaches each node of `t`: from the node the PC is connected
+/// to, the 親機 the reachable part starts from.
+pub(crate) fn routes(reg: &Registry, t: &Topology) -> dagon_host::Routes {
+    match dagon_topology::reach_root(t) {
+        Some(local) => dagon_host::relay_routes(reg, t, local),
+        None => dagon_host::Routes::failed(dagon_host::RouteError::Connected { nodes: Vec::new() }),
+    }
 }
 
 /// The STATUS rows of the node on the PC's port.
 fn hub_rows(reg: &Registry, t: &Topology) -> Option<Rows> {
-    let id = dagon_host::connected_node(t).ok()?;
-    Rows::of(reg, &t.node(&id)?.mcu)
+    let id = dagon_topology::reach_root(t)?;
+    Rows::of(reg, &t.node(id)?.mcu)
 }
 
 /// The VERSION line of `dagon status` and `dagon doctor`: stage0, boot
@@ -316,7 +325,7 @@ pub fn rollback_node<T: Transport, C: HostClock>(
         .position(|n| n.id == node)
         .ok_or_else(|| format!("no updatable node '{node}' in the topology"))?;
     host.timings = node_timings(reg, t)?;
-    host.routes = dagon_host::configured_routes(reg, t);
+    host.routes = routes(reg, t);
     let bin = topology_bin(reg, t)?;
     let view = dagon_format::TopologyView::parse(&bin).map_err(|e| format!("{e:?}"))?;
     let to = Target::of_node(&view, i as u8)
@@ -581,7 +590,7 @@ where
     T::Error: std::fmt::Debug,
 {
     host.timings = node_timings(reg, t)?;
-    host.routes = dagon_host::configured_routes(reg, t);
+    host.routes = routes(reg, t);
     let bin = topology_bin(reg, t)?;
     let ids: Vec<String> = t.nodes.iter().map(|n| n.id.clone()).collect();
     let name = |n: u8| ids.get(n as usize).map_or("?", String::as_str);

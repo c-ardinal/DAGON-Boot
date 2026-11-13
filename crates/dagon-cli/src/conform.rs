@@ -282,7 +282,7 @@ pub fn command(a: &ConformArgs) -> Result<(), String> {
             let to = node_target(&reg, &t, node)?;
             (
                 to,
-                dagon_host::configured_routes(&reg, &t),
+                crate::device::routes(&reg, &t),
                 node_timings(&reg, &t, node)?,
             )
         }

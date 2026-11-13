@@ -1385,7 +1385,7 @@ fn job_conform(job: &mut Job, cfg: Config, v: Value) -> Result<Value, String> {
     let reg = crate::defs::registry(&cfg)?;
     let to = crate::conform::node_target(&reg, &t, node)?;
     let timings = crate::conform::node_timings(&reg, &t, node)?;
-    let routes = dagon_host::configured_routes(&reg, &t);
+    let routes = crate::device::routes(&reg, &t);
     // Read and written as written (never resolved); the writes go through
     // genfs, which refuses a link on the way.
     let dir = cfg.base.join(crate::conform::CONFORM_DIR).join(node);

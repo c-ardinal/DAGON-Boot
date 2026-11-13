@@ -348,7 +348,7 @@ mod tests {
         let link = Link::new(hub, uplink);
         let mut h = Host::new(link.clone(), link);
         let t = dagon_topology::parse_str(&yaml(uplink)).unwrap();
-        h.routes = dagon_host::configured_routes(dagon_topology::defs::Registry::builtin(), &t);
+        h.routes = crate::device::routes(dagon_topology::defs::Registry::builtin(), &t);
         h
     }
 

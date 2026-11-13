@@ -30,7 +30,7 @@ const TRIAL_WDT_MS: u64 = 4_000;
 /// The routes of the simulated pair (`topology/sim-pair.yaml`) from its hub.
 fn sim_routes() -> dagon_host::Routes {
     let t = dagon_topology::parse_str(include_str!("../../../../topology/sim-pair.yaml")).unwrap();
-    dagon_host::configured_routes(dagon_topology::defs::Registry::builtin(), &t)
+    crate::device::routes(dagon_topology::defs::Registry::builtin(), &t)
 }
 
 fn key() -> KeyPair {

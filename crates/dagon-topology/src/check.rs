@@ -428,6 +428,16 @@ impl<'a> Ctx<'a> {
         }
         for (i, l) in self.links() {
             let p = link_path(i);
+            // An end's `pins` are UART pins: the compiled topology holds them on a UART link only.
+            if l.kind != LinkKind::Uart {
+                for (k, _) in l.ends.iter().enumerate().filter(|(_, e)| e.pins.is_some()) {
+                    self.err(
+                        "V-01",
+                        format!("{}.pins", end_path(i, k)),
+                        format!("'pins' are UART pins; this {} link has none", l.kind.name()),
+                    );
+                }
+            }
             match l.kind {
                 LinkKind::I2c => {
                     match &l.bus {

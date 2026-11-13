@@ -294,3 +294,75 @@ fn a_new_end_starts_at_the_port_its_definitions_name() {
     );
     assert_eq!(port("rp2040", None, LinkKind::Can, None), None);
 }
+
+#[test]
+fn uart_pins_are_only_on_a_uart_link_end() {
+    // On either end of an I2C link, listed first or second: refused, never dropped.
+    for end in ["{ node: hub, port: i2c0,", "{ node: seg, port: i2c3,"] {
+        let yaml = mutate(SAMPLE, end, &format!("{end} pins: {{ tx: 0, rx: 1 }},"));
+        assert_error(
+            &yaml,
+            "V-01",
+            "'pins' are UART pins; this i2c link has none",
+        );
+    }
+    // On a kind the compiled topology does not carry either.
+    let usb = mutate(
+        SAMPLE,
+        "recovery:",
+        "  - kind: usb-cdc\n    ends:\n      - { node: seg, port: usb-otg-fs, pins: { tx: 0, rx: 1 } }\n      - { node: watch, port: usb-serial-jtag }\n\nrecovery:",
+    );
+    assert_error(&usb, "V-01", "this usb-cdc link has none");
+    // The boundary: on a UART link's end, on either end, they are the pins it runs on.
+    let watch = mutate(
+        SAMPLE,
+        "{ node: hub, port: pio-uart, pins: { tx: 26, rx: 27 } }",
+        "{ node: hub, port: pio-uart }",
+    );
+    let watch = mutate(
+        &watch,
+        WATCH_END,
+        "{ node: watch, port: uart0, pins: { tx: 43, rx: 44 } }",
+    );
+    for y in [
+        SAMPLE.to_string(),
+        swapped(SAMPLE),
+        watch.clone(),
+        swapped(&watch),
+    ] {
+        assert!(
+            messages(&y, "V-01").is_empty(),
+            "{:?}",
+            messages(&y, "V-01")
+        );
+    }
+}
+
+#[test]
+fn a_second_coordinator_without_a_link_needs_none() {
+    let yaml = mutate(
+        SAMPLE,
+        "  - id: watch\n",
+        "  - id: hub2\n    mcu: rp2040\n    role: coordinator\n    port: self-boot\n    tag: hub2\n  - id: watch\n",
+    );
+    let yaml = mutate(
+        &yaml,
+        "order: [seg, watch, hub]",
+        "order: [seg, watch, hub2, hub]",
+    );
+    for y in [yaml.clone(), swapped(&yaml)] {
+        assert!(
+            messages(&y, "V-05").is_empty(),
+            "{:?}",
+            messages(&y, "V-05")
+        );
+        assert!(check_str(&y).is_pushable(), "{:?}", check_str(&y).issues);
+    }
+    // A node whose role is node still needs one.
+    let lone = mutate(
+        &yaml,
+        "role: coordinator\n    port: self-boot\n    tag: hub2",
+        "role: node\n    port: self-boot\n    tag: hub2",
+    );
+    assert_error(&lone, "V-05", "node 'hub2' needs a link, has none");
+}

@@ -146,7 +146,7 @@ pub struct End {
     /// (V-01): one of its board's I2C pairs (V-07).
     pub node_pins: Option<NodePins>,
     /// This node's UART pins as GPIO numbers (`{ tx: 26, rx: 27 }`); a UART link names them on at
-    /// least one end (V-01).
+    /// least one end, and a link of any other kind on none (V-01).
     pub pins: Option<UartPins>,
     /// This node's GPIO driving the other node's reset, for `control.kind: full`.
     pub nrst: Option<u8>,

@@ -408,19 +408,21 @@ exactly is shown as unknown. No numeric MCU table exists.
 
 ## 5. Compiled topology
 
-### 5.1 Body (`topology-bin` 1)
+### 5.1 Body (`topology-bin` 2)
 
-Head, 16 bytes: magic `DGTP`, layout u16 LE (1), node count (1 to `MAX_NODES`), link
+Head, 16 bytes: magic `DGTP`, layout u16 LE (2), node count (1 to `MAX_NODES`), link
 count (≤ `MAX_LINKS`), constraint count (≤ `MAX_CONSTRAINTS`), 7 zero bytes. Then:
 
 - nodes, 40 bytes each: index, role, port kind, max attempts, listen
   window ms u16 LE, map id, order rank, recovery tiers [3], 5 zero bytes,
   MCU identity u64 LE at offset 16, target tag [16] at offset 24;
-- links, 16 bytes each, in the image tools' link layout;
+- links, 20 bytes each, in the image tools' link layout: no direction, two
+  ends, each with its node, port index and address;
 - constraints, 16 bytes each, in the manifest's constraint layout.
 
-Canonical: node `index` equals its position, links sorted by `to`,
-reserved bytes zero; a decoder re-encodes and compares. The host's
+Canonical: node `index` equals its position, a link's ends in node order,
+links sorted by their ends' nodes, reserved bytes zero; layout 1 (16-byte
+links) is not read; a decoder re-encodes and compares. The host's
 `host.topology.pushed` and the hub's `relay.children_set` carry the body's
 SHA-256.
 

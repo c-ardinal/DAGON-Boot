@@ -133,6 +133,44 @@ hzs = [100_000, 400_000]
 [links]
 up = ["i2c"]
 
+# The interfaces a topology link end names (STM32F401 datasheet: USB OTG FS,
+# I2C1/2/3, USART1/2/6).
+
+[[link_port]]
+index = 0
+name = "usb-otg-fs"
+kind = "usb-cdc"
+
+[[link_port]]
+index = 1
+name = "i2c1"
+kind = "i2c"
+
+[[link_port]]
+index = 2
+name = "i2c2"
+kind = "i2c"
+
+[[link_port]]
+index = 3
+name = "i2c3"
+kind = "i2c"
+
+[[link_port]]
+index = 4
+name = "usart1"
+kind = "uart"
+
+[[link_port]]
+index = 5
+name = "usart2"
+kind = "uart"
+
+[[link_port]]
+index = 6
+name = "usart6"
+kind = "uart"
+
 # Both periods cover two of the slowest erase (a 128 KiB sector), as the
 # definition check requires: the watchdog is fed between flash operations.
 [watchdog]

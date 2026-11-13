@@ -4,6 +4,8 @@ use dagon_topology::{check_str, defs::Registry, Severity};
 
 const DEMO: &str = include_str!("../../../topology/sample.yaml");
 
+const HUB_WATCH: &str = "      - { node: hub, port: pio-uart, pins: { tx: 26, rx: 27 } }";
+
 fn mutate(from: &str, to: &str) -> String {
     assert!(DEMO.contains(from), "sample has no {from:?}");
     DEMO.replacen(from, to, 1)
@@ -42,12 +44,15 @@ fn unparseable_document_is_v01() {
 
 #[test]
 fn v01_schema_version() {
-    assert_fires(&mutate("dagon: 1", "dagon: 2"), "V-01");
+    assert_fires(&mutate("dagon: 2", "dagon: 1"), "V-01");
+    assert_fires(&mutate("dagon: 2", "dagon: 3"), "V-01");
 }
 
 #[test]
 fn v01_missing_i2c_address() {
-    assert_fires(&mutate("    addr: 0x42\n", ""), "V-01");
+    assert_fires(&mutate(", addr: 0x42", ""), "V-01");
+    // An end that gives an address gives its pins.
+    assert_fires(&mutate(", node_pins: { sda: PB4, scl: PA8 }", ""), "V-01");
 }
 
 #[test]
@@ -63,15 +68,21 @@ fn v03_one_coordinator() {
 #[test]
 fn v04_links_name_known_nodes() {
     assert_fires(
-        &mutate("from: hub\n    to: watch", "from: ghost\n    to: watch"),
+        &mutate(
+            "{ node: hub, port: pio-uart",
+            "{ node: ghost, port: pio-uart",
+        ),
         "V-04",
     );
 }
 
 #[test]
 fn v23_grandchild_is_described_but_not_updatable() {
-    // seg → watch: a grandchild. A valid 構成 shape, not one updating reaches yet.
-    let yaml = mutate("from: hub\n    to: watch", "from: seg\n    to: watch");
+    // seg - watch: a grandchild. A valid 構成 shape, not one updating reaches yet.
+    let yaml = mutate(
+        HUB_WATCH,
+        "      - { node: seg, port: usart1, pins: { tx: 9, rx: 10 } }",
+    );
     assert!(info_rules(&yaml).contains("V-23"));
     let rules = error_rules(&yaml);
     assert!(rules.is_empty(), "{rules:?}");
@@ -94,7 +105,11 @@ fn v23_several_coordinators_over_can() {
             "  - id: hub2\n    mcu: rp2040\n    role: coordinator\n    port: self-boot\n    tag: hub2\n\nbuses:",
             1,
         )
-        .replacen("links:\n", "links:\n  - from: hub\n    to: hub2\n    kind: can\n", 1)
+        .replacen(
+            "links:\n",
+            "links:\n  - kind: usb-cdc\n    ends:\n      - { node: hub2, port: usb }\n      - { node: hub, port: usb }\n",
+            1,
+        )
         .replacen("order: [seg, watch, hub]", "order: [seg, watch, hub2, hub]", 1);
     let report = check_str(&yaml);
     let v23: Vec<_> = report
@@ -105,7 +120,7 @@ fn v23_several_coordinators_over_can() {
         .collect();
     assert!(v23.contains(&"nodes"), "{v23:?}");
     assert!(v23.contains(&"links[0].kind"), "{v23:?}");
-    assert!(v23.contains(&"links[0].to"), "{v23:?}");
+    assert!(v23.contains(&"links[0].ends"), "{v23:?}");
     // The shape itself parses: no V-01, and the coordinator count is not V-03.
     let rules = error_rules(&yaml);
     assert!(rules.is_empty(), "{rules:?}");
@@ -134,7 +149,14 @@ fn p1_coordinator_chosen_by_mcu_is_checked_by_its_gpio_range() {
 
 #[test]
 fn v05_one_link_per_node() {
-    assert_fires(&mutate("to: watch", "to: seg"), "V-05");
+    // watch left without a link, and two links joining hub and seg.
+    assert_fires(
+        &mutate(
+            "{ node: watch, port: uart0 }",
+            "{ node: seg, port: usart1 }",
+        ),
+        "V-05",
+    );
 }
 
 #[test]
@@ -155,9 +177,10 @@ fn v08_pin_used_twice() {
 #[test]
 fn v09_hw_uart0_pins() {
     assert_fires(
-        &mutate(
-            "iface: pio-uart\n    pins: { tx: 26, rx: 27 }",
-            "iface: hw-uart0\n    pins: { tx: 16, rx: 17 }",
+        &mutate("iface: pio-uart", "iface: hw-uart0").replacen(
+            "port: pio-uart, pins: { tx: 26, rx: 27 }",
+            "port: uart0, pins: { tx: 16, rx: 17 }",
+            1,
         ),
         "V-09",
     );
@@ -172,7 +195,7 @@ fn v10_pio_state_machines() {
             "  - id: w{i}\n    mcu: esp32s3\n    role: node\n    port: vendor-stage2\n    tag: w{i}\n"
         ));
         links.push_str(&format!(
-            "  - from: hub\n    to: w{i}\n    kind: uart\n    iface: pio-uart\n    pins: {{ tx: 26, rx: 27 }}\n    control: {{ kind: cooperative, rom_entry: force-download-boot }}\n"
+            "  - kind: uart\n    iface: pio-uart\n    ends:\n      - {{ node: w{i}, port: uart0 }}\n      - {{ node: hub, port: pio-uart, pins: {{ tx: 26, rx: 27 }} }}\n    control: {{ kind: cooperative, rom_entry: force-download-boot }}\n"
         ));
     }
     let yaml = DEMO
@@ -311,8 +334,8 @@ fn v25_coordinator_mcu_needs_a_coordinator_section() {
 fn v21_i2c_target() {
     assert_fires(
         &mutate(
-            "kind: uart\n    iface: pio-uart\n    pins: { tx: 26, rx: 27 }\n    baud: 115200",
-            "kind: i2c\n    bus: i2c-main\n    addr: 0x43\n    node_pins: { sda: GPIO44, scl: GPIO43 }",
+            "kind: uart\n    iface: pio-uart\n    ends:\n      - { node: hub, port: pio-uart, pins: { tx: 26, rx: 27 } }\n      - { node: watch, port: uart0 }\n    baud: 115200",
+            "kind: i2c\n    bus: i2c-main\n    ends:\n      - { node: hub, port: i2c0 }\n      - { node: watch, port: i2c0, addr: 0x43, node_pins: { sda: GPIO44, scl: GPIO43 } }",
         ),
         "V-21",
     );
@@ -320,7 +343,7 @@ fn v21_i2c_target() {
 
 #[test]
 fn v22_missing_reset_pin_is_only_a_warning() {
-    for pin in ["      nrst: 18\n", "      boot: 28\n"] {
+    for pin in [", nrst: 18", ", boot: 28"] {
         let report = check_str(&mutate(pin, ""));
         assert!(report.is_pushable(), "{:?}", report.issues);
         let warnings: Vec<_> = report
@@ -341,7 +364,7 @@ fn json_report_shape() {
         check_str(DEMO).to_json(),
         r#"{"ok":true,"errors":0,"warnings":0,"issues":[]}"#
     );
-    let json = check_str(&mutate("      nrst: 18\n", "")).to_json();
+    let json = check_str(&mutate(", nrst: 18", "")).to_json();
     assert!(json.starts_with(r#"{"ok":true,"errors":0,"warnings":1,"issues":[{"rule":"V-22","severity":"warning","path":"links[0].control","#));
 }
 
@@ -442,16 +465,11 @@ fn v24_names_a_hop_its_firmware_cannot_do_yet_without_blocking() {
     // A link the 親機 or the 子機 cannot do: V-24 names both ends, V-23 says
     // it cannot be updated.
     // The link's kind (the first `kind: i2c` is the bus's).
-    let ble = mutate(
-        "    kind: i2c
-    bus: ",
-        "    kind: ble
-    bus: ",
-    );
+    let ble = mutate("  - kind: i2c\n    bus: ", "  - kind: ble\n    bus: ");
     let w = warnings(&ble);
     assert!(
         w.iter()
-            .any(|x| x.0 == "V-24" && x.2.contains("hub -> seg") && x.2.contains("ble")),
+            .any(|x| x.0 == "V-24" && x.2.contains("'hub' and 'seg'") && x.2.contains("ble")),
         "{w:?}"
     );
     assert!(info_rules(&ble).contains("V-23"));

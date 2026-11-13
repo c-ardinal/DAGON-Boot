@@ -1,4 +1,4 @@
-//! Topology YAML schema (schema version 1).
+//! Topology YAML schema (schema version 2).
 
 use std::collections::BTreeMap;
 
@@ -108,21 +108,57 @@ pub enum BusKind {
     I2c,
 }
 
+/// A link between two nodes. It has no direction: which node reaches which over
+/// it is decided by where the PC is connected, never by the order of `ends`.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Link {
-    pub from: String,
-    pub to: String,
+    /// The medium: `i2c`, `uart`, `can`, `ethernet`, `usb-cdc`, `ble`, `wifi-tcp`.
     pub kind: LinkKind,
+    /// The two nodes it joins, each with the port it uses there (V-04, V-27).
+    pub ends: [End; 2],
+    /// An I2C link's bus: an `id` of `buses` (V-01).
     pub bus: Option<String>,
-    pub addr: Option<u8>,
-    pub node_pins: Option<NodePins>,
+    /// A UART link's UART: `hw-uart0` or `pio-uart` (V-01).
     pub iface: Option<UartIface>,
-    pub pins: Option<UartPins>,
+    /// A UART link's bit rate; 115200 when left out (V-26).
     pub baud: Option<u32>,
-    /// Required for I2C and UART links (V-01); CAN and Ethernet links may omit it.
+    /// How a node is put into its ROM loader over this link: `kind` (`full`, `cooperative`) and
+    /// `rom_entry` (`force-download-boot`, `m5pm1`, `stm32-i2c-rom`). An I2C or UART link needs
+    /// `rom_entry` when it is cooperative, the default (V-11).
     #[serde(default)]
     pub control: Control,
+}
+
+/// One end of a link: a node and what the link uses on it.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct End {
+    /// A node `id`.
+    pub node: String,
+    /// A `[[link_port]]` name of the node's MCU definition, of the link's kind (V-27).
+    pub port: String,
+    /// The 7-bit address (0x08 to 0x77) the other end reaches this node at, on a kind with
+    /// addresses (I2C); refused on any other kind (V-18). No two ends on one bus share one, and
+    /// none takes the address of a ROM loader reached over that bus (V-18).
+    pub addr: Option<u8>,
+    /// This node's I2C pins by MCU pin name (`{ sda: PB4, scl: PA8 }`), on an end with `addr`
+    /// (V-01): one of its board's I2C pairs (V-07).
+    pub node_pins: Option<NodePins>,
+    /// This node's UART pins as GPIO numbers (`{ tx: 26, rx: 27 }`); a UART link names them on at
+    /// least one end, and a link of any other kind on none (V-01).
+    pub pins: Option<UartPins>,
+    /// This node's GPIO driving the other node's reset, for `control.kind: full`.
+    pub nrst: Option<u8>,
+    /// This node's GPIO driving the other node's boot pin, for `control.kind: full`.
+    pub boot: Option<u8>,
+}
+
+impl End {
+    /// Whether this end names the GPIOs that reset the other node into its ROM loader.
+    pub fn drives_reset(&self) -> bool {
+        self.nrst.is_some() && self.boot.is_some()
+    }
 }
 
 /// The kind of one hop. A 構成 may name any; which ones an MCU's firmware
@@ -165,10 +201,15 @@ impl LinkKind {
     pub fn compiles(self) -> bool {
         matches!(self, LinkKind::I2c | LinkKind::Uart)
     }
+
+    /// Kinds whose nodes are reached at a 7-bit address an end gives (`addr`).
+    pub fn addressed(self) -> bool {
+        matches!(self, LinkKind::I2c)
+    }
 }
 
-/// Node-side I2C pin names (MCU pin names such as `PB4`).
-#[derive(Debug, Clone, Deserialize)]
+/// A node's I2C pin names (MCU pin names such as `PB4`).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct NodePins {
     pub sda: String,
@@ -182,8 +223,8 @@ pub enum UartIface {
     PioUart,
 }
 
-/// Coordinator-side UART GPIOs.
-#[derive(Debug, Clone, Copy, Deserialize)]
+/// A node's UART GPIOs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct UartPins {
     pub tx: u8,
@@ -195,8 +236,6 @@ pub struct UartPins {
 pub struct Control {
     #[serde(default = "cooperative")]
     pub kind: ControlKind,
-    pub nrst: Option<u8>,
-    pub boot: Option<u8>,
     pub rom_entry: Option<RomEntry>,
 }
 
@@ -316,25 +355,56 @@ impl Topology {
         n.uplink.unwrap_or_default()
     }
 
-    /// The link that reaches node `id`, if any.
-    pub fn link_to(&self, id: &str) -> Option<&Link> {
-        self.links.iter().find(|l| l.to == id)
+    /// The links with an end at node `id`, with their positions.
+    pub fn links_at<'a>(&'a self, id: &'a str) -> impl Iterator<Item = (usize, &'a Link)> + 'a {
+        self.links
+            .iter()
+            .enumerate()
+            .filter(move |(_, l)| l.end(id).is_some())
     }
 
-    /// The bit rate node `id`'s firmware runs its UART link at: its uplink's
-    /// when that is UART, else the one of its UART links to 子機 (`None`
-    /// when it has no UART link). Both ends of a link are built with this
-    /// value, so they always agree. Down links at different rates are
-    /// refused: a node's firmware drives one UART link speed.
-    pub fn uart_baud(&self, id: &str) -> Result<Option<u32>, String> {
-        if let Some(l) = self.link_to(id).filter(|l| l.kind == LinkKind::Uart) {
-            return Ok(Some(l.uart_baud()));
-        }
-        let mut rates = self
-            .links
+    /// The link joining `a` and `b`, if one does.
+    pub fn link_between(&self, a: &str, b: &str) -> Option<&Link> {
+        self.links
             .iter()
-            .filter(|l| l.from == id && l.kind == LinkKind::Uart)
-            .map(Link::uart_baud);
+            .find(|l| l.other(a).is_some_and(|e| e.node == b))
+    }
+
+    /// The link a 子機 `id` is reached over: the one joining it to a 親機
+    /// (the first listed when several do), else its first link; `None` for a
+    /// 親機 or an unlinked node. Only a 親機 relays, so a 子機's firmware is
+    /// built for this link and any other link at it is one it would relay over.
+    pub fn reached_over(&self, id: &str) -> Option<&Link> {
+        if self.node(id)?.role == Role::Coordinator {
+            return None;
+        }
+        let at = || self.links.iter().filter(|l| l.end(id).is_some());
+        let to_hub = |l: &&Link| {
+            l.other(id)
+                .and_then(|e| self.node(&e.node))
+                .is_some_and(|n| n.role == Role::Coordinator)
+        };
+        at().find(to_hub).or_else(|| at().next())
+    }
+
+    /// The links node `id` would relay over: every link at a 親機, every link
+    /// at a 子機 but [`Topology::reached_over`].
+    pub fn relayed_from<'a>(&'a self, id: &'a str) -> impl Iterator<Item = &'a Link> + 'a {
+        let up = self.reached_over(id);
+        self.links_at(id)
+            .map(|(_, l)| l)
+            .filter(move |l| !up.is_some_and(|u| std::ptr::eq(u, *l)))
+    }
+
+    /// The bit rate node `id`'s firmware runs its UART links at (`None` when
+    /// it has none). Both ends of a link are built with this value, so they
+    /// always agree. UART links at different rates on one node are refused:
+    /// a node's firmware drives one UART link speed.
+    pub fn uart_baud(&self, id: &str) -> Result<Option<u32>, String> {
+        let mut rates = self
+            .links_at(id)
+            .filter(|(_, l)| l.kind == LinkKind::Uart)
+            .map(|(_, l)| l.uart_baud());
         let first = rates.next();
         match rates.find(|b| Some(*b) != first) {
             Some(other) => Err(format!(
@@ -353,5 +423,35 @@ impl Link {
     /// `baud`, or [`DEFAULT_BAUD`] when left out.
     pub fn uart_baud(&self) -> u32 {
         self.baud.unwrap_or(DEFAULT_BAUD)
+    }
+
+    /// The end at node `id`, if the link has one there.
+    pub fn end(&self, id: &str) -> Option<&End> {
+        self.ends.iter().find(|e| e.node == id)
+    }
+
+    /// The end that is not at node `id`, when `id` is one of the ends.
+    pub fn other(&self, id: &str) -> Option<&End> {
+        let [a, b] = &self.ends;
+        if a.node == id {
+            Some(b)
+        } else if b.node == id {
+            Some(a)
+        } else {
+            None
+        }
+    }
+
+    /// The end that names the GPIOs resetting the other node, if one does.
+    pub fn resetting_end(&self) -> Option<&End> {
+        self.ends.iter().find(|e| e.drives_reset())
+    }
+
+    /// `between 'a' and 'b'`: the link by its nodes, for messages.
+    pub fn named(&self) -> String {
+        format!(
+            "between '{}' and '{}'",
+            self.ends[0].node, self.ends[1].node
+        )
     }
 }

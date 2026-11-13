@@ -19,7 +19,7 @@ data; images carry the `TEST_KEY` build flag). Public key:
 | `image_f401_app_a.img` | Signed F401 APP image for slot A: 512-byte header (version 1.1.0 as `0x01010000` LE at 0x018, inline, `seg-f401-7seg`) + 1024-byte body |
 | `manifest.bin` | Signed manifest, 2 entries (F401 APP A and B), no constraints, `topology_sha256` = SHA-256 of `topology_sample.bin` |
 | `release.dgb` | Bundle: manifest, both F401 images (`dest = 2`), topology item (`dest = 3`, `entry_index = 0xFF`, length = topology length, CRC-32 as for every item) holding `topology_sample.bin` |
-| `topology_sample.bin` | Topology canonical binary of the sample (160 B): hub RP2040 coordinator; seg F401 on I2C0 SDA/SCL GPIO16/17 at 400 kHz, address 0x42, NRST GPIO18, BOOT0 GPIO28, STM32 I2C ROM entry; watch ESP32-S3 on PIO UART TX/RX GPIO26/27 at 115200, cooperative; update order seg, watch, hub |
+| `topology_sample.bin` | Topology canonical binary (topology-bin 2) of the sample (168 B): hub RP2040 coordinator; seg F401 linked hub port 1 (i2c0) to seg port 3 (i2c3) at address 0x42, SDA/SCL GPIO16/17 at 400 kHz, NRST GPIO18 and BOOT0 GPIO28 on the hub end, STM32 I2C ROM entry; watch ESP32-S3 linked hub port 5 (pio-uart) to watch port 1 (uart0), TX/RX GPIO26/27 on the hub end at 115200, cooperative; update order seg, watch, hub |
 | `statelog_face.bin` | State log face: header (generation 1), PROVISION A, CONFIRMED A, SLOT_PENDING B, BOOT_ATTEMPT B, ROLLBACK to A (TRIAL_EXHAUSTED), one erased record |
 | `frame_hello_req.bin` | HELLO request (proto_ver 1, max_payload 1088), seq 0x01 |
 | `frame_hello_resp.bin` | HELLO response: OK + 24-byte body (node, kind S, F401, app mode, 1.1.0, trial, max_payload 256) |

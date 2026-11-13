@@ -26,7 +26,7 @@ describe('hand-written YAML comments across a save', () => {
     expect(keepComments('a: 1\n', 'a: 2\n')).toBe('a: 2\n');
   });
 
-  const commented = `# Sample, hand-written note.\n${SAMPLE_YAML.replace('    addr: 0x42', '    # the 7-segment board\n    addr: 0x42').replace('  order: [seg, watch, hub]', '  order: [seg, watch, hub]  # hub last')}`;
+  const commented = `# Sample, hand-written note.\n${SAMPLE_YAML.replace('      - { node: seg,', '      # the 7-segment board\n      - { node: seg,').replace('  order: [seg, watch, hub]', '  order: [seg, watch, hub]  # hub last')}`;
 
   test('sample opened and saved untouched: the text as written, comment and all', () => {
     const d = new Define();
@@ -41,7 +41,7 @@ describe('hand-written YAML comments across a save', () => {
     d.apply(setLink(d.doc, 1, 'baud', 230400));
     const text = d.exportYaml().text;
     expect(text).toMatch(/^# Sample, hand-written note\.\n# Sample: RP2040 hub/);
-    expect(text).toMatch(/ {4}# the 7-segment board\n {4}addr: 0x42/);
+    expect(text).toMatch(/ {6}# the 7-segment board\n {6}- \{ node: seg, port: i2c3, addr: 0x42/);
     expect(text).toContain('order: [seg, watch, hub]  # hub last');
     expect(text).toContain('baud: 230400');
     expect(topo_compile(text)).toEqual(topo_compile(toYaml(d.doc.topo)));

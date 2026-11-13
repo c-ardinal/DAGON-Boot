@@ -2,7 +2,7 @@
 // shapes of dagon-topology's schema) plus the page-side display names. Every
 // edit is a pure function returning a new document, so undo keeps snapshots.
 // Validity is never decided here: topo_check (dagon-topology in WASM) does it.
-import { board_template, coordinator_capable, i2c_hzs, rom_i2c_pairs, uart0_choices, link_kinds, max_nodes, rom_i2c_addrs, supported_mcus, topo_cut, topo_parse, uart_bauds } from '../../wasm/pkg/dagon_wasm.js';
+import { board_template, coordinator_capable, default_port, i2c_hzs, rom_i2c_pairs, uart0_choices, link_kinds, max_nodes, rom_i2c_addrs, supported_mcus, topo_cut, topo_parse, uart_bauds } from '../../wasm/pkg/dagon_wasm.js';
 import { defaultBoard, type Board } from '../../wasm/dagon.ts';
 import { INSPECT } from '../copy.ts';
 import type { Config, Link as GLink, Node as GNode, Skip, UplinkHost, Wire } from '../sample.ts';
@@ -35,22 +35,78 @@ export interface TBus {
 
 export interface TControl {
   kind: 'full' | 'cooperative';
-  nrst?: number;
-  boot?: number;
   rom_entry?: string;
 }
 
-export interface TLink {
-  from: string;
-  to: string;
-  kind: LinkKind;
-  bus?: string;
+/** One end of a link: the node, its `[[link_port]]`, and what the link uses on it. */
+export interface TEnd {
+  node: string;
+  port: string;
   addr?: number;
   node_pins?: { sda: string; scl: string };
-  iface?: string;
   pins?: { tx: number; rx: number };
+  nrst?: number;
+  boot?: number;
+}
+
+/** A link between two nodes: it has no direction. */
+export interface TLink {
+  kind: LinkKind;
+  ends: [TEnd, TEnd];
+  bus?: string;
+  iface?: string;
   baud?: number;
   control?: TControl;
+}
+
+/** Links from a 親機 (0) outwards: how many links each node is from one. */
+function hops(t: Topo): Map<string, number> {
+  const out = new Map<string, number>();
+  let at = t.nodes.filter((n) => n.role === 'coordinator').map((n) => n.id);
+  at.forEach((id) => out.set(id, 0));
+  for (let d = 1; at.length; d++) {
+    const next: string[] = [];
+    for (const l of t.links ?? []) {
+      const [a, b] = l.ends.map((e) => e.node);
+      for (const [x, y] of [[a, b], [b, a]]) if (at.includes(x) && !out.has(y)) (out.set(y, d), next.push(y));
+    }
+    at = next;
+  }
+  return out;
+}
+
+/**
+ * The two ends of link `l` as the editor draws them: `up` the end nearer a 親機 (the first listed
+ * on a tie), `down` the end the link is shown under. Display only: the link has no direction and
+ * the check reads its ends unordered.
+ */
+export function sides(t: Topo, l: TLink): { up: TEnd; down: TEnd; upAt: 0 | 1; downAt: 0 | 1 } {
+  const h = hops(t);
+  const d = (e: TEnd) => h.get(e.node) ?? Infinity;
+  const upAt: 0 | 1 = d(l.ends[1]) < d(l.ends[0]) ? 1 : 0;
+  const downAt: 0 | 1 = upAt === 0 ? 1 : 0;
+  return { up: l.ends[upAt], down: l.ends[downAt], upAt, downAt };
+}
+
+/** A link as the editor's fields read it: drawn `from` → `to`, the per-node fields from their end ([`setLink`] writes them back there). */
+export type LinkView = TLink & Omit<TEnd, 'node' | 'port'> & { from: string; to: string };
+
+export function linkView(t: Topo, l: TLink): LinkView {
+  const { up, down } = sides(t, l);
+  return { ...l, from: up.node, to: down.node, addr: down.addr, node_pins: down.node_pins, pins: up.pins, nrst: up.nrst, boot: up.boot };
+}
+
+/** The position of the link shown under node `id`, or -1. */
+export function linkIndexOf(t: Topo, id: string): number {
+  return (t.links ?? []).findIndex((l) => sides(t, l).down.node === id);
+}
+
+/** The selection key of link `l`: the node it is shown under. */
+export const linkKey = (t: Topo, l: TLink): string => `link:${sides(t, l).down.node}`;
+
+/** The end of a new link at node `n`, at the port its definitions name for `kind`. */
+function endAt(n: TNode, kind: LinkKind, iface?: string): TEnd {
+  return { node: n.id, port: default_port(n.mcu, n.board, kind, iface) ?? '' };
 }
 
 /** I2C and UART: 親機 to 子機, updatable. CAN and Ethernet: between 親機 and deeper, described only. */
@@ -71,13 +127,13 @@ export function i2cHzs(nodes: (TNode | undefined)[]): number[] {
 
 /** The nodes on bus `id`: each end of every I2C link over it. */
 export function busNodes(t: Topo, id: string): TNode[] {
-  const ids = new Set((t.links ?? []).filter((l) => l.kind === 'i2c' && l.bus === id).flatMap((l) => [l.from, l.to]));
+  const ids = new Set((t.links ?? []).filter((l) => l.kind === 'i2c' && l.bus === id).flatMap((l) => l.ends.map((e) => e.node)));
   return t.nodes.filter((n) => ids.has(n.id));
 }
 
 /** The UART speeds both ends' MCU definitions name (`[link_uart] bauds`): the only ones a link may be set to. */
-export function uartBauds(from: TNode | undefined, to: TNode | undefined): number[] {
-  return Array.from(uart_bauds(from?.mcu ?? '', to?.mcu ?? ''));
+export function uartBauds(a: TNode | undefined, b: TNode | undefined): number[] {
+  return Array.from(uart_bauds(a?.mcu ?? '', b?.mcu ?? ''));
 }
 
 /** The pins a node's own end of a link may use, as the check (V-07) allows: its board's header, or, named by MCU alone, that MCU's GPIO range. */
@@ -171,6 +227,9 @@ export interface BoardTemplate {
   coordinator: { i2c: { controller: string; sda: number; scl: number }; pioUart: { tx: number; rx: number } } | null;
 }
 
+/** The topology YAML number a new 構成 is written with (dagon-topology's SCHEMA_VERSION; model.test.ts checks it against the WASM's). */
+export const SCHEMA_VERSION = 2;
+
 /** Nodes the editor places and draws: the format's limit. */
 export const maxNodes = (): number => max_nodes();
 const I2C_FIRST = 0x08;
@@ -217,7 +276,7 @@ export function docWithDefaults(doc: Doc): Doc {
 }
 
 export function emptyDoc(name = 'my-project'): Doc {
-  return { topo: withDefaults({ dagon: 1, name, nodes: [] } as unknown as Topo), names: {} };
+  return { topo: withDefaults({ dagon: SCHEMA_VERSION, name, nodes: [] } as unknown as Topo), names: {} };
 }
 
 /** A YAML file as a document; throws when it is not YAML at all. */
@@ -314,9 +373,9 @@ export function setBoard(doc: Doc, id: string, fields: BoardFields): Doc {
   return { ...doc, boards: { ...doc.boards, [id]: { ...doc.boards?.[id], ...fields } } };
 }
 
-/** I2C addresses no other link on `bus` uses, without the defined ROM loaders'. */
+/** I2C addresses no end of another link on `bus` uses, without the defined ROM loaders'. */
 export function freeAddrs(t: Topo, except?: number): number[] {
-  const used = new Set((t.links ?? []).filter((l, i) => l.kind === 'i2c' && i !== except).map((l) => l.addr));
+  const used = new Set((t.links ?? []).filter((l, i) => l.kind === 'i2c' && i !== except).flatMap((l) => l.ends.map((e) => e.addr)));
   const rom = rom_i2c_addrs();
   const out: number[] = [];
   for (let a = I2C_FIRST; a <= I2C_LAST; a++) if (!rom.includes(a) && !used.has(a)) out.push(a);
@@ -325,14 +384,15 @@ export function freeAddrs(t: Topo, except?: number): number[] {
 
 /**
  * "つなぐ先": links node `id` to `parent` (the hub when omitted). From the
- * hub to a 子機 the board's default link (I2C or UART); between 親機 a CAN
- * link, and deeper a UART link, both described only.
+ * hub to a 子機 the board's default link (I2C or UART); between 親機 a link
+ * of a kind both MCUs define a port for, and deeper a UART link, both
+ * described only. Each end starts at the port its definitions name.
  */
 export function connect(doc: Doc, id: string, parent?: string): Doc {
   const t = doc.topo;
   const h = parent ? t.nodes.find((x) => x.id === parent) : hub(t);
   const n = t.nodes.find((x) => x.id === id);
-  if (!h || !n || n === h || (t.links ?? []).some((l) => l.to === id)) return doc;
+  if (!h || !n || n === h || linkIndexOf(t, id) >= 0) return doc;
   // A node chosen by MCU links like its MCU's default board, if any (its pins are the developer's).
   const stand = n.board ?? defaultBoard(n.mcu);
   const tpl = stand ? template(stand) : null;
@@ -340,8 +400,13 @@ export function connect(doc: Doc, id: string, parent?: string): Doc {
   if (h.role !== 'coordinator' || n.role === 'coordinator') {
     // Below a 子機 the board's own way into its loader, as under the 親機 (V-11 asks for it on every UART link).
     const control: TControl = { kind: d.control, ...(d.romEntry ? { rom_entry: d.romEntry } : {}) };
+    // Between 親機: CAN where both MCUs define a port for it, else the first kind both define one for.
+    const both = (k: LinkKind) => [h, n].every((x) => default_port(x.mcu, x.board, k, undefined) != null);
+    const kind = (['can', ...LINK_KINDS.filter((k) => k !== 'i2c' && k !== 'uart')] as LinkKind[]).find(both) ?? 'can';
     const link: TLink =
-      n.role === 'coordinator' ? { from: h.id, to: id, kind: 'can' } : { from: h.id, to: id, kind: 'uart', iface: 'hw-uart0', ...firstUart0(t, h), ...firstBaud(h, n), control };
+      n.role === 'coordinator'
+        ? { kind, ends: [endAt(h, kind), endAt(n, kind)] }
+        : { kind: 'uart', iface: 'hw-uart0', ends: [{ ...endAt(h, 'uart', 'hw-uart0'), ...firstUart0(t, h) }, endAt(n, 'uart', 'hw-uart0')], ...firstBaud(h, n), control };
     return { ...doc, topo: { ...t, links: [...(t.links ?? []), link] } };
   }
   let buses = t.buses ?? [];
@@ -352,21 +417,17 @@ export function connect(doc: Doc, id: string, parent?: string): Doc {
     const addr = d.addr !== null && free.includes(d.addr) ? d.addr : free[0];
     const pins = tpl?.i2cPairs[0];
     link = {
-      from: h.id,
-      to: id,
       kind: 'i2c',
       bus: buses[0].id,
-      addr,
-      ...(pins ? { node_pins: { sda: pins.sda, scl: pins.scl } } : {}),
+      ends: [endAt(h, 'i2c'), { ...endAt(n, 'i2c'), addr, ...(pins ? { node_pins: { sda: pins.sda, scl: pins.scl } } : {}) }],
       control: { kind: d.control, ...(d.romEntry ? { rom_entry: d.romEntry } : {}) },
     };
   } else {
+    const iface = d.iface ?? 'pio-uart';
     link = {
-      from: h.id,
-      to: id,
       kind: 'uart',
-      iface: d.iface ?? 'pio-uart',
-      pins: hubUart(h),
+      iface,
+      ends: [{ ...endAt(h, 'uart', iface), pins: hubUart(h) }, endAt(n, 'uart', iface)],
       ...(d.baud !== null && uartBauds(h, n).includes(d.baud) ? { baud: d.baud } : firstBaud(h, n)),
       control: { kind: d.control, ...(d.romEntry ? { rom_entry: d.romEntry } : {}) },
     };
@@ -385,7 +446,7 @@ export function removeNode(doc: Doc, id: string): Doc {
   let next: Doc = doc;
   for (let i = (t.links ?? []).length - 1; i >= 0; i--) {
     const l = (t.links ?? [])[i];
-    if (l.from === id || l.to === id) next = removeLink(next, i);
+    if (l.ends.some((e) => e.node === id)) next = removeLink(next, i);
   }
   const recovery = { ...next.topo.recovery };
   delete recovery[id];
@@ -404,7 +465,7 @@ export function setNode(doc: Doc, id: string, field: keyof TNode, value: unknown
   if (field !== 'id' || typeof value !== 'string' || value === id) return { ...doc, topo: reorder({ ...t, nodes }) };
   const to = value;
   const swap = (x: string) => (x === id ? to : x);
-  const links = (t.links ?? []).map((l) => ({ ...l, from: swap(l.from), to: swap(l.to) }));
+  const links = (t.links ?? []).map((l) => ({ ...l, ends: l.ends.map((e) => ({ ...e, node: swap(e.node) })) as TLink['ends'] }));
   const recovery = Object.fromEntries(Object.entries(t.recovery ?? {}).map(([k, v]) => [swap(k), v]));
   const names = Object.fromEntries(Object.entries(doc.names).map(([k, v]) => [swap(k), v]));
   const boards = Object.fromEntries(Object.entries(doc.boards ?? {}).map(([k, v]) => [swap(k), v]));
@@ -418,33 +479,50 @@ export function setName(doc: Doc, id: string, name: string): Doc {
   return { ...doc, names };
 }
 
-/** Changes the field at `path` (`addr`, `control.nrst`, `pins.tx`, ...) of link `index`; undefined removes it. */
+/**
+ * Changes the field at `path` of link `index`; undefined removes it. The editor's per-node fields
+ * land on their end: `addr` and `node_pins` on the end the link is shown under, `pins.tx`,
+ * `pins.rx`, `control.nrst` and `control.boot` (its `nrst`, `boot`) on the other.
+ */
 export function setLink(doc: Doc, index: number, path: string, value: unknown): Doc {
-  const links = (doc.topo.links ?? []).map((l, i) => (i === index ? (withPath(l, path.split('.'), value) as TLink) : l));
-  return { ...doc, topo: { ...doc.topo, links } };
+  const t = doc.topo;
+  const at = (l: TLink): string[] => {
+    const [head, ...rest] = path.split('.');
+    const s = sides(t, l);
+    if (head === 'addr' || head === 'node_pins') return ['ends', String(s.downAt), head, ...rest];
+    if (head === 'pins') return ['ends', String(s.upAt), head, ...rest];
+    if (head === 'control' && (rest[0] === 'nrst' || rest[0] === 'boot')) return ['ends', String(s.upAt), rest[0]];
+    return [head, ...rest];
+  };
+  const links = (t.links ?? []).map((l, i) => (i === index ? (withPath(l, at(l), value) as TLink) : l));
+  return { ...doc, topo: { ...t, links } };
 }
 
 /** Switches link `index` to `kind` with that kind's defaults. */
 export function setLinkKind(doc: Doc, index: number, kind: LinkKind): Doc {
   const l = (doc.topo.links ?? [])[index];
   if (!l || l.kind === kind) return doc;
+  const node = (id: string) => doc.topo.nodes.find((x) => x.id === id);
+  const { up, down } = sides(doc.topo, l);
   if (kind !== 'i2c' && kind !== 'uart') {
-    const links = (doc.topo.links ?? []).map((x, i) => (i === index ? { from: x.from, to: x.to, kind } : x));
+    const end = (e: TEnd): TEnd => { const n = node(e.node); return n ? endAt(n, kind) : { node: e.node, port: '' }; };
+    const links = (doc.topo.links ?? []).map((x, i) => (i === index ? { kind, ends: [end(up), end(down)] as TLink['ends'] } : x));
     const buses = (doc.topo.buses ?? []).filter((b) => links.some((y) => y.bus === b.id));
     return { ...doc, topo: { ...doc.topo, links, buses } };
   }
   const without = removeLink(doc, index);
-  const n = doc.topo.nodes.find((x) => x.id === l.to);
+  const n = node(down.node);
   const saved = n?.board;
   // connect() takes the board's default kind; for the other kind give it a board-less default.
   const tpl = saved ? template(saved) : null;
   const t = without.topo;
-  const h = t.nodes.find((x) => x.id === l.from) ?? hub(t)!;
-  if (tpl?.link?.kind === kind && h.role === 'coordinator') return connect(without, l.to, h.id);
+  const h = t.nodes.find((x) => x.id === up.node) ?? hub(t)!;
+  if (tpl?.link?.kind === kind && h.role === 'coordinator') return connect(without, down.node, h.id);
+  const lower = n ? endAt(n, kind, kind === 'uart' ? 'pio-uart' : undefined) : { node: down.node, port: '' };
   const link: TLink =
     kind === 'uart'
-      ? { from: h.id, to: l.to, kind, iface: 'pio-uart', pins: hubUart(h), ...firstBaud(h, n ?? h), control: { kind: 'cooperative' } }
-      : { from: h.id, to: l.to, kind, bus: t.buses?.[0]?.id ?? 'i2c-main', addr: freeAddrs(t)[0], control: { kind: 'full' } };
+      ? { kind, iface: 'pio-uart', ends: [{ ...endAt(h, kind, 'pio-uart'), pins: hubUart(h) }, lower], ...firstBaud(h, n ?? h), control: { kind: 'cooperative' } }
+      : { kind, bus: t.buses?.[0]?.id ?? 'i2c-main', ends: [endAt(h, kind), { ...lower, addr: freeAddrs(t)[0] }], control: { kind: 'full' } };
   const buses = kind === 'i2c' && !t.buses?.length ? [hubBus(h, n ?? h)] : t.buses;
   return { ...without, topo: { ...t, buses, links: [...(t.links ?? []), link] } };
 }
@@ -463,6 +541,7 @@ function withField<T extends object>(o: T, field: keyof T, value: unknown): T {
 
 function withPath(o: object, path: string[], value: unknown): object {
   const [head, ...rest] = path;
+  if (Array.isArray(o)) return o.map((x, i) => (String(i) === head ? (rest.length ? withPath(x, rest, value) : value) : x));
   const cur = o as Record<string, unknown>;
   if (!rest.length) return withField(cur, head, value);
   return { ...cur, [head]: withPath((cur[head] as object) ?? {}, rest, value) };
@@ -482,6 +561,14 @@ function scalar(key: string, v: unknown): string {
 
 const isScalar = (v: unknown) => v === null || typeof v !== 'object';
 
+/** `{ k: v, ... }` on one line, nested maps the same way. */
+function flow(o: Record<string, unknown>): string {
+  const parts = Object.entries(o)
+    .filter(([, v]) => v !== undefined && v !== null)
+    .map(([k, v]) => `${k}: ${isScalar(v) ? scalar(k, v) : flow(v as Record<string, unknown>)}`);
+  return `{ ${parts.join(', ')} }`;
+}
+
 function block(o: Record<string, unknown>, pad: string): string[] {
   const out: string[] = [];
   for (const [k, v] of Object.entries(o)) {
@@ -489,6 +576,8 @@ function block(o: Record<string, unknown>, pad: string): string[] {
     if (isScalar(v)) out.push(`${pad}${k}: ${scalar(k, v)}`);
     else if (Array.isArray(v)) {
       if (v.every(isScalar)) out.push(`${pad}${k}: [${v.map((x) => scalar(k, x)).join(', ')}]`);
+      // A link's two ends: one line each.
+      else if (k === 'ends') out.push(`${pad}${k}:`, ...v.map((e) => `${pad}  - ${flow(e as Record<string, unknown>)}`));
       else {
         out.push(`${pad}${k}:`);
         for (const item of v) {
@@ -535,7 +624,8 @@ export function toConfig(doc: Doc, boards: Board[]): Config {
   const bus = (id?: string) => (t.buses ?? []).find((b) => b.id === id);
   // Depth by parent links from a 親機 nobody links to (0), at any depth; a 親機 linked from
   // another node sits below it, and a 子機 with no parent in the 子機 row.
-  const parent = (id: string) => links.find((l) => l.to === id)?.from;
+  const shown = links.map((l) => sides(t, l));
+  const parent = (id: string) => shown.find((s) => s.down.node === id)?.up.node;
   const depth = (id: string, seen = new Set<string>()): number => {
     const n = t.nodes.find((x) => x.id === id);
     const p = parent(id);
@@ -552,8 +642,10 @@ export function toConfig(doc: Doc, boards: Board[]): Config {
     const b = boards.find((x) => x.id === n.board);
     // A node chosen by MCU (no board): the MCU's name and not its id.
     const mcuName = b?.mcuName ?? mcuTable.find((m) => m.id === n.mcu)?.name ?? n.mcu;
-    const l = links.find((x) => x.to === n.id);
-    const via = !l ? '' : l.kind === 'i2c' ? `I2C ${hex(l.addr)}` : l.kind === 'uart' ? `UART ${l.baud ?? ''}`.trim() : KIND_LABEL[l.kind];
+    const k = shown.findIndex((s) => s.down.node === n.id);
+    const l = k >= 0 ? links[k] : undefined;
+    const s = k >= 0 ? shown[k] : undefined;
+    const via = !l ? '' : l.kind === 'i2c' ? `I2C ${hex(s?.down.addr)}` : l.kind === 'uart' ? `UART ${l.baud ?? ''}`.trim() : KIND_LABEL[l.kind];
     return {
       id: n.id,
       no: i + 1,
@@ -562,32 +654,33 @@ export function toConfig(doc: Doc, boards: Board[]): Config {
       product: b?.product ?? INSPECT.boardOwn,
       mcu: mcuName,
       via,
-      reset: gpio(l?.control?.nrst),
-      boot: gpio(l?.control?.boot),
-      target: n.role === 'coordinator' ? { kind: 'hub', addr: 0 } : l?.kind === 'i2c' ? { kind: 'i2c', addr: l.addr ?? 0 } : { kind: 'uart', addr: 0 },
+      reset: gpio(s?.up.nrst),
+      boot: gpio(s?.up.boot),
+      target: n.role === 'coordinator' ? { kind: 'hub', addr: 0 } : l?.kind === 'i2c' ? { kind: 'i2c', addr: s?.down.addr ?? 0 } : { kind: 'uart', addr: 0 },
       depth: depth(n.id),
       ...(n.role === 'coordinator' && n.uplink && !l ? { uplink: { kind: n.uplink.kind, host: n.uplink.host ?? 'pc-cli' } } : {}),
       ...(skipped[n.id] ? { notYet: skipped[n.id] } : {}),
     };
   });
-  const glinks: GLink[] = links.map((l) => {
+  const glinks: GLink[] = links.map((l, k) => {
+    const { up, down } = shown[k];
     const wires: Wire[] =
       l.kind !== 'i2c' && l.kind !== 'uart'
         ? []
         : l.kind === 'i2c'
         ? [
-            { signal: 'SDA', hubPin: gpio(bus(l.bus)?.sda) ?? '', nodePin: l.node_pins?.sda ?? '', shared: true },
-            { signal: 'SCL', hubPin: gpio(bus(l.bus)?.scl) ?? '', nodePin: l.node_pins?.scl ?? '', shared: true },
+            { signal: 'SDA', hubPin: gpio(bus(l.bus)?.sda) ?? '', nodePin: down.node_pins?.sda ?? '', shared: true },
+            { signal: 'SCL', hubPin: gpio(bus(l.bus)?.scl) ?? '', nodePin: down.node_pins?.scl ?? '', shared: true },
             { signal: 'GND', hubPin: 'GND', nodePin: 'GND', shared: true },
-            ...(l.control?.nrst !== undefined ? [{ signal: 'NRST', hubPin: gpio(l.control.nrst)!, nodePin: 'NRST', shared: false }] : []),
-            ...(l.control?.boot !== undefined ? [{ signal: 'BOOT0', hubPin: gpio(l.control.boot)!, nodePin: 'BOOT0', shared: false }] : []),
+            ...(up.nrst !== undefined ? [{ signal: 'NRST', hubPin: gpio(up.nrst)!, nodePin: 'NRST', shared: false }] : []),
+            ...(up.boot !== undefined ? [{ signal: 'BOOT0', hubPin: gpio(up.boot)!, nodePin: 'BOOT0', shared: false }] : []),
           ]
         : [
-            { signal: 'TX → RX', hubPin: gpio(l.pins?.tx) ?? '', nodePin: '', shared: false },
-            { signal: 'RX ← TX', hubPin: gpio(l.pins?.rx) ?? '', nodePin: '', shared: false },
+            { signal: 'TX → RX', hubPin: gpio(up.pins?.tx) ?? '', nodePin: '', shared: false },
+            { signal: 'RX ← TX', hubPin: gpio(up.pins?.rx) ?? '', nodePin: '', shared: false },
             { signal: 'GND', hubPin: 'GND', nodePin: 'GND', shared: true },
           ];
-    return { from: l.from, to: l.to, kind: KIND_LABEL[l.kind], addr: hex(l.addr), wires };
+    return { from: up.node, to: down.node, kind: KIND_LABEL[l.kind], addr: hex(down.addr), wires };
   });
   return {
     name: t.name,

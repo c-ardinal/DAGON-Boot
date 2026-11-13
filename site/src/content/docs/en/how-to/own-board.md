@@ -34,7 +34,7 @@ Name that board id in the node's `board:` in `topology.yaml`:
 
 `dagon gen` makes this node from its MCU package and writes the board's `flash_bytes` into `wiring.rs`.
 
-For an I2C child, the link names the pins on the node (`node_pins`).
+The link's end at the child names a `[[link_port]]` of its MCU (`port`); for an I2C child that end also gives its address (`addr`) and pins (`node_pins`) ([Topology links](/en/reference/topology/)).
 
 The check and `dagon gen` tell you what is still missing.
 

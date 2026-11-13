@@ -144,8 +144,18 @@ fn topology() -> Vec<u8> {
     ];
     let links = [
         TopoLink {
-            from: 0,
-            to: 1,
+            ends: [
+                TopoEnd {
+                    node: 0,
+                    port: 1,
+                    addr: tp::NONE,
+                },
+                TopoEnd {
+                    node: 1,
+                    port: 3,
+                    addr: 0x42,
+                },
+            ],
             iface: iface::I2C_BUS,
             control: control::FULL,
             tx_pin: 16,
@@ -154,12 +164,22 @@ fn topology() -> Vec<u8> {
             boot_pin: 28,
             baud: 400_000,
             rom_entry: rom_entry::STM32_I2C_ROM,
-            i2c_addr: 0x42,
             bus_id: 0,
+            gpio_end: 0,
         },
         TopoLink {
-            from: 0,
-            to: 2,
+            ends: [
+                TopoEnd {
+                    node: 0,
+                    port: 5,
+                    addr: tp::NONE,
+                },
+                TopoEnd {
+                    node: 2,
+                    port: 1,
+                    addr: tp::NONE,
+                },
+            ],
             iface: iface::PIO_UART,
             control: control::COOPERATIVE,
             tx_pin: 26,
@@ -168,8 +188,8 @@ fn topology() -> Vec<u8> {
             boot_pin: tp::NONE,
             baud: 115_200,
             rom_entry: rom_entry::FORCE_DOWNLOAD_BOOT,
-            i2c_addr: tp::NONE,
             bus_id: tp::NONE,
+            gpio_end: 0,
         },
     ];
     let mut out = vec![0u8; tp::MAX_SIZE];
@@ -508,14 +528,15 @@ fn topology_sample_vector() {
         (t.node_count(), t.link_count(), t.constraint_count()),
         (3, 2, 0)
     );
-    assert_eq!(t.link(0).i2c_addr, 0x42);
+    assert_eq!(t.link(0).other(0).map(|e| e.addr), Some(0x42));
+    assert_eq!(t.link(0).other(1).map(|e| e.addr), Some(tp::NONE));
     assert_eq!(t.node(2).target_tag, target_tag("watch-s3"));
     expect_at(
         &file,
         &[
             (0x00, b"DGTP"),
-            (0x04, &[1, 0, 3, 2]), // tp_version, node_count, link_count
-            (0x08, &le32(0xA0)),   // body_size = whole binary
+            (0x04, &[2, 0, 3, 2]), // tp_version, node_count, link_count
+            (0x08, &le32(0xA8)),   // body_size = whole binary
             (0x0C, &[0; 20]),      // unused key_id, constraint_count 0, reserved
             // nodes: index, role, mcu_id, port_kind, max_attempts,
             // listen_window_ms, map_id, recovery_tiers[3], order_rank, reserved[3], tag
@@ -534,23 +555,25 @@ fn topology_sample_vector() {
                 &[2, 1, 0x03, 0x00, 2, 1, 0, 0, 0, 1, 2, 4, 1, 0, 0, 0],
             ),
             (0x70, b"watch-s3\0\0\0\0\0\0\0\0"),
-            // links: from, to, iface, control, tx/SDA, rx/SCL, nrst, boot,
-            // baud u32, rom_entry, i2c_addr, bus_id, reserved
+            // links: two ends (node, port, addr), iface, control, tx/SDA,
+            // rx/SCL, nrst, boot, baud u32, rom_entry, bus_id, gpio_end, reserved
             (
                 0x80,
                 &[
-                    0, 1, 3, 1, 16, 17, 18, 28, 0x80, 0x1A, 0x06, 0x00, 3, 0x42, 0, 0,
+                    0, 1, 0xFF, 1, 3, 0x42, 3, 1, 16, 17, 18, 28, 0x80, 0x1A, 0x06, 0x00, 3, 0, 0,
+                    0,
                 ],
             ),
             (
-                0x90,
+                0x94,
                 &[
-                    0, 2, 2, 2, 26, 27, 0xFF, 0xFF, 0x00, 0xC2, 0x01, 0x00, 1, 0xFF, 0xFF, 0,
+                    0, 5, 0xFF, 2, 1, 0xFF, 2, 2, 26, 27, 0xFF, 0xFF, 0x00, 0xC2, 0x01, 0x00, 1,
+                    0xFF, 0, 0,
                 ],
             ),
         ],
     );
-    assert_eq!(file.len(), 0xA0);
+    assert_eq!(file.len(), 0xA8);
 
     // Non-canonical inputs are rejected both ways.
     let mut bad = file.clone();
@@ -568,5 +591,28 @@ fn topology_sample_vector() {
     assert_eq!(
         tp::encode(&[n0, n1, t.node(2)], &[t.link(1), t.link(0)], &[], &mut out),
         Err(FormatError::BadField)
+    );
+    // A link's ends are in node order, and two links never join the same two nodes.
+    let mut turned = t.link(0);
+    turned.ends.reverse();
+    assert_eq!(
+        tp::encode(&[n0, n1, t.node(2)], &[turned, t.link(1)], &[], &mut out),
+        Err(FormatError::BadField)
+    );
+    assert_eq!(
+        tp::encode(&[n0, n1, t.node(2)], &[t.link(0), t.link(0)], &[], &mut out),
+        Err(FormatError::BadField)
+    );
+    let mut bad = file.clone();
+    bad[0x80 + 19] = 1; // reserved link byte
+    assert_eq!(TopologyView::parse(&bad).err(), Some(FormatError::BadField));
+    let mut bad = file.clone();
+    bad[0x80 + 18] = 2; // gpio_end: 0, 1 or none
+    assert_eq!(TopologyView::parse(&bad).err(), Some(FormatError::BadField));
+    let mut old = file.clone();
+    old[4] = 1; // topology-bin 1: refused, never read as 2
+    assert_eq!(
+        TopologyView::parse(&old).err(),
+        Some(FormatError::UnsupportedVersion)
     );
 }

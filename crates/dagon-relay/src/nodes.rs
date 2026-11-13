@@ -5,7 +5,7 @@
 //! topology says nothing else about where this node sits.
 
 use dagon_format::header::target_tag;
-use dagon_format::topology::{TopologyView, HEAD_SIZE, MAX_NODES, MAX_SIZE};
+use dagon_format::topology::{TopologyView, HEAD_SIZE, MAX_NODES, MAX_SIZE, NONE};
 use dagon_port::Flash;
 use heapless::Vec;
 
@@ -104,18 +104,17 @@ where
     let t = TopologyView::parse(&raw[..len]).ok()?;
     let mut nodes = LinkedNodes::new();
     for l in (0..t.link_count()).map(|i| t.link(i)) {
-        let other = match (l.from == this, l.to == this) {
-            (true, false) => l.to,
-            (false, true) => l.from,
-            _ => continue,
+        let Some(&far) = l.other(this) else {
+            continue;
         };
+        let other = far.node;
         let Some(k) = links.clone().find(|k| (k.carries)(&l)) else {
             continue;
         };
         let addr = match k.addressing {
-            // The topology gives the address of the link's `to` node; a
-            // bus target cannot address the node driving its bus.
-            Addressing::SevenBit if l.from == this => l.i2c_addr,
+            // The topology gives each end's address; an end with none (the
+            // node driving the bus) is not reached at one.
+            Addressing::SevenBit if far.addr != NONE => far.addr,
             Addressing::SevenBit => continue,
             Addressing::Fixed(a) => a,
         };
@@ -150,7 +149,7 @@ mod tests {
     extern crate std;
 
     use super::*;
-    use dagon_format::topology::{encode, TopoLink, TopoNode};
+    use dagon_format::topology::{encode, TopoEnd, TopoLink, TopoNode};
     use dagon_port::{FlashError, FlashRegion};
     use std::vec::Vec;
 
@@ -227,13 +226,20 @@ mod tests {
             .collect();
         let links: Vec<TopoLink> = links
             .iter()
-            .map(|&(from, to, iface, bus_id)| TopoLink {
-                from,
-                to,
-                iface,
-                bus_id,
-                i2c_addr: 0x40 + to,
-                ..TopoLink::default()
+            .map(|&(from, to, iface, bus_id)| {
+                let end = |node, addr| TopoEnd {
+                    node,
+                    port: 0,
+                    addr,
+                };
+                let mut ends = [end(from, NONE), end(to, 0x40 + to)];
+                ends.sort_by_key(|e| e.node);
+                TopoLink {
+                    ends,
+                    iface,
+                    bus_id,
+                    ..TopoLink::default()
+                }
             })
             .collect();
         let mut flash = std::vec![0xFF; AT as usize + MAX_SIZE];

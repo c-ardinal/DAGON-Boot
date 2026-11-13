@@ -669,7 +669,7 @@ impl Flash for Stored {
 /// node 0 (address 0x40), 1 the bus link to node 3 (0x43).
 fn same_tag_topology() -> Stored {
     use dagon_format::header::target_tag;
-    use dagon_format::topology::{encode, iface, TopoLink, TopoNode, MAX_SIZE};
+    use dagon_format::topology::{encode, iface, TopoEnd, TopoLink, TopoNode, MAX_SIZE, NONE};
     let tags = [
         "seg-f401-7seg",
         "relay-rp2040",
@@ -685,12 +685,20 @@ fn same_tag_topology() -> Stored {
             ..TopoNode::default()
         })
         .collect();
-    let link = |from, to| TopoLink {
-        from,
-        to,
-        iface: iface::I2C_BUS,
-        i2c_addr: 0x40 + to,
-        ..TopoLink::default()
+    // `from` drives the bus; `to` is reached at 0x40 + to.
+    let link = |from: u8, to: u8| {
+        let end = |node, addr| TopoEnd {
+            node,
+            port: 0,
+            addr,
+        };
+        let mut ends = [end(from, NONE), end(to, 0x40 + to)];
+        ends.sort_by_key(|e| e.node);
+        TopoLink {
+            ends,
+            iface: iface::I2C_BUS,
+            ..TopoLink::default()
+        }
     };
     let mut flash = vec![0xFF; MAX_SIZE];
     encode(&nodes, &[link(2, 0), link(1, 3)], &[], &mut flash).unwrap();

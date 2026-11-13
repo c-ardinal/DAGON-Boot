@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import { RULE_FIX } from '../copy.ts';
 import { Define } from './define.svelte.ts';
-import { connect, emptyDoc, fromYaml, placeMcu, setLink, setLinkKind, setNode } from './model.ts';
+import { connect, emptyDoc, fromYaml, linkView, placeMcu, setLink, setLinkKind, setNode } from './model.ts';
 import { setName } from './model.ts';
 import { SAMPLE_YAML } from '../sample.ts';
 import { problemChip } from './problems.ts';
@@ -12,7 +12,7 @@ describe('define session', () => {
     const d = new Define();
     d.placeAt({ board: 'waveshare-rp2040-touch-lcd-1.28' }, 'Waveshare RP2040-Touch-LCD-1.28', null);
     d.placeAt({ board: 'nucleo-f401re' }, 'NUCLEO-F401RE', 'hub');
-    expect(d.doc.topo.links?.map((l) => [l.from, l.to])).toEqual([['hub', 'nucleo']]);
+    expect(d.doc.topo.links?.map((l) => linkView(d.doc.topo, l)).map((l) => [l.from, l.to])).toEqual([['hub', 'nucleo']]);
     d.undo();
     expect(d.doc.topo.nodes.map((n) => n.id)).toEqual(['hub']);
     d.placeAt({ mcu: 'stm32f401re' }, 'ボード', null);
@@ -31,10 +31,10 @@ describe('define session', () => {
     expect([d.askRemove, d.doc.topo.nodes.length, d.canUndo]).toEqual([null, nodes, false]);
     d.requestRemove('link:watch');
     d.answerRemove(true);
-    expect(d.doc.topo.links?.some((l) => l.to === 'watch')).toBe(false);
+    expect(d.doc.topo.links?.some((l) => l.ends.some((e) => e.node === 'watch'))).toBe(false);
     expect(d.doc.topo.nodes.length).toBe(nodes);
     d.undo();
-    expect(d.doc.topo.links?.some((l) => l.to === 'watch')).toBe(true);
+    expect(d.doc.topo.links?.some((l) => l.ends.some((e) => e.node === 'watch'))).toBe(true);
     // A stopped edit asks nothing.
     d.guard = () => true;
     d.requestRemove('node:seg');
@@ -106,7 +106,7 @@ describe('define session', () => {
     const id = d.doc.topo.nodes[d.doc.topo.nodes.length - 1].id;
     expect(d.linkRefusal('seg', id)).toBeNull();
     d.link(id, 'seg');
-    expect(d.doc.topo.links?.some((l) => l.from === 'seg' && l.to === id)).toBe(true);
+    expect(d.doc.topo.links?.map((l) => linkView(d.doc.topo, l)).some((l) => l.from === 'seg' && l.to === id)).toBe(true);
     expect(d.linkRefusal(id, 'watch')).toBe(LINK_WHY.taken);
     expect(d.linkRefusal(id, 'seg')).toBe(LINK_WHY.taken);
     expect(d.linkRefusal(id, 'hub')).toBe(LINK_WHY.loop);

@@ -19,7 +19,7 @@ pub use bundle::{BundleItem, BundleView};
 pub use header::ImageHeader;
 pub use manifest::{Constraint, ManifestEntry, ManifestFields, ManifestView};
 pub use statelog::{FaceHeader, Record};
-pub use topology::{TopoLink, TopoNode, TopologyView};
+pub use topology::{TopoEnd, TopoLink, TopoNode, TopologyView};
 pub use version::Version;
 
 /// Errors from parsing or verifying a structure.

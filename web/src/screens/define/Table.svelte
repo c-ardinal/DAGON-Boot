@@ -1,7 +1,7 @@
 <script lang="ts">
   import { INSPECT, TABLE, WIRING } from '../../app/copy.ts';
   import type { Define } from '../../app/define/define.svelte.ts';
-  import { connect } from '../../app/define/model.ts';
+  import { connect, linkIndexOf } from '../../app/define/model.ts';
 
   interface Props {
     d: Define;
@@ -13,7 +13,7 @@
 
   let { d, onaddnode, tab = $bindable(0) }: Props = $props();
   const c = $derived(d.config);
-  const unlinked = $derived(d.doc.topo.nodes.find((n) => n.role === 'node' && !(d.doc.topo.links ?? []).some((l) => l.to === n.id)));
+  const unlinked = $derived(d.doc.topo.nodes.find((n) => n.role === 'node' && linkIndexOf(d.doc.topo, n.id) < 0));
   const nameOf = (id: string) => c.nodes.find((n) => n.id === id)?.name ?? id;
 
   function keys(e: KeyboardEvent) {

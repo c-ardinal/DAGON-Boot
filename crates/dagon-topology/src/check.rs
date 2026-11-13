@@ -1,17 +1,20 @@
 //! Validation rules for `dagon topo check`.
 //!
-//! Errors V-01..V-21 (no V-19), V-25 and V-26; warnings V-22 and V-24 (V-24 is
-//! an error for an uplink on a 子機); information V-23 (a valid part that
-//! updating skips). Errors block `topo push`; the others do not.
+//! Errors V-01..V-21 (no V-19), V-25, V-26 and V-27; warnings V-22 and V-24
+//! (V-24 is an error for an uplink on a 子機); information V-23 (a valid part
+//! that updating skips). Errors block `topo push`; the others do not.
+//!
+//! A link has two ends and no direction: every rule reads it the same
+//! whichever end is listed first.
 
 use crate::links::{self, Dir};
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::defs::{BoardDef, Coordinator, McuDef, PortKind, Registry};
 use crate::report::{Issue, Report, Severity};
-use crate::schema::{ControlKind, Link, LinkKind, Node, Role, Tier, Topology, UartIface};
+use crate::schema::{ControlKind, End, Link, LinkKind, Node, Role, Tier, Topology, UartIface};
 
-pub const SCHEMA_VERSION: u32 = 1;
+pub const SCHEMA_VERSION: u32 = 2;
 /// Nodes a 構成 may describe (and the editor draw).
 use dagon_format::topology::MAX_NODES;
 const MAX_ID_LEN: usize = 15;
@@ -83,20 +86,21 @@ pub fn check_with(reg: &Registry, t: &Topology) -> Report {
     c.v24();
     c.v25();
     c.v26();
+    c.v27();
     Report { issues: c.issues }
 }
 
-/// True when a full-control link lacks NRST or BOOT wiring (V-22): the node
-/// is then treated as having no `rom-forced` tier.
-pub fn rom_forced_unavailable(link: &Link) -> bool {
-    link.control.kind == ControlKind::Full
-        && (link.control.nrst.is_none() || link.control.boot.is_none())
+/// True when node `id` is an end of a full-control link whose other end
+/// names no NRST and BOOT GPIOs (V-22): the node is then treated as having
+/// no `rom-forced` tier.
+pub fn rom_forced_unavailable(link: &Link, id: &str) -> bool {
+    link.control.kind == ControlKind::Full && !link.other(id).is_some_and(End::drives_reset)
 }
 
 /// Recovery tiers for `id` as they will be used, i.e. without `rom-forced`
 /// when V-22 applies.
 pub fn effective_tiers(t: &Topology, id: &str) -> Vec<Tier> {
-    let dropped = t.link_to(id).is_some_and(rom_forced_unavailable);
+    let dropped = t.links_at(id).any(|(_, l)| rom_forced_unavailable(l, id));
     t.recovery
         .get(id)
         .map(|tiers| {
@@ -155,6 +159,59 @@ pub fn uart0_choices(reg: &Registry, mcu: &str, board: Option<&str>) -> (Vec<u8>
     (ok(&c.uart0_tx), ok(&c.uart0_rx))
 }
 
+/// The `[[link_port]]` a new end of a `kind` link on a node of `mcu` (and
+/// `board`, else the MCU's default board) starts at, from its definitions: the
+/// port of the board's own DAGON bus of that kind, else of the 親機 I2C pins
+/// the board names, else the port named like the link's UART `iface` (`hw-`
+/// and the port, or the port itself), else the MCU's first port of the kind.
+/// The Console offers this one; the check (V-27) judges whatever is written.
+pub fn default_port<'r>(
+    reg: &'r Registry,
+    mcu: &str,
+    board: Option<&str>,
+    kind: LinkKind,
+    iface: Option<UartIface>,
+) -> Option<&'r str> {
+    use crate::defs::board_boot::BusKind;
+    let m = reg.mcu(mcu)?;
+    let of_kind = |name: &str| {
+        m.port(name)
+            .filter(|p| p.kind == kind)
+            .map(|p| p.name.as_str())
+    };
+    let b = board
+        .and_then(|id| reg.board(id))
+        .or_else(|| reg.default_board(mcu));
+    let bus_kind = match kind {
+        LinkKind::I2c => Some(BusKind::I2c),
+        LinkKind::Uart => Some(BusKind::Uart),
+        LinkKind::Can => Some(BusKind::Can),
+        _ => None,
+    };
+    let own_bus = b.into_iter().flat_map(|b| &b.buses).find_map(|x| {
+        (x.dagon && Some(x.kind) == bus_kind)
+            .then(|| of_kind(&x.controller))
+            .flatten()
+    });
+    let hub_i2c = b
+        .and_then(|b| b.coordinator.as_ref())
+        .filter(|_| kind == LinkKind::I2c)
+        .and_then(|c| of_kind(&c.i2c.controller));
+    let iface = iface.and_then(|i| {
+        let name = match i {
+            UartIface::HwUart0 => "hw-uart0",
+            UartIface::PioUart => "pio-uart",
+        };
+        of_kind(name).or_else(|| name.strip_prefix("hw-").and_then(of_kind))
+    });
+    own_bus.or(hub_i2c).or(iface).or_else(|| {
+        m.ports
+            .iter()
+            .find(|p| p.kind == kind)
+            .map(|p| p.name.as_str())
+    })
+}
+
 /// Board for a node's capabilities (I2C target, ROM loader pins): the named
 /// one, else its MCU's default board (`Registry::default_board`).
 fn board_for<'r>(reg: &'r Registry, n: &Node) -> Option<&'r BoardDef> {
@@ -172,6 +229,16 @@ struct Ctx<'a> {
 
 fn link_path(i: usize) -> String {
     format!("links[{i}]")
+}
+
+fn end_path(i: usize, k: usize) -> String {
+    format!("links[{i}].ends[{k}]")
+}
+
+/// `'a' and 'b'`, in name order: a pair of nodes said the same whichever end comes first.
+fn pair(a: &str, b: &str) -> String {
+    let (a, b) = if a <= b { (a, b) } else { (b, a) };
+    format!("'{a}' and '{b}'")
 }
 
 impl<'a> Ctx<'a> {
@@ -224,25 +291,31 @@ impl<'a> Ctx<'a> {
             }
         }
         for (i, l) in self.links() {
-            let (Some(from), Some(to)) = (self.t.node(&l.from), self.t.node(&l.to)) else {
+            let [Some(a), Some(b)] = l.ends.each_ref().map(|e| self.t.node(&e.node)) else {
                 continue;
             };
-            let missing: Vec<&str> = [(from, Dir::Down), (to, Dir::Up)]
-                .into_iter()
-                .filter(|(n, d)| {
-                    links::known_in(self.reg, &n.mcu)
-                        && !links::available_in(self.reg, &n.mcu, *d).contains(&l.kind)
-                })
-                .map(|(n, _)| n.mcu.as_str())
-                .collect();
+            // The firmware's kinds are by direction; the link has none, so it
+            // is available when one end runs it down and the other up.
+            let missing = |down: &'a Node, up: &'a Node| -> Vec<&'a str> {
+                [(down, Dir::Down), (up, Dir::Up)]
+                    .into_iter()
+                    .filter(|(n, d)| {
+                        links::known_in(self.reg, &n.mcu)
+                            && !links::available_in(self.reg, &n.mcu, *d).contains(&l.kind)
+                    })
+                    .map(|(n, _)| n.mcu.as_str())
+                    .collect()
+            };
+            let (ab, ba) = (missing(a, b), missing(b, a));
+            let mut missing = if ba.len() < ab.len() { ba } else { ab };
+            missing.sort_unstable();
             if !missing.is_empty() {
                 self.warn(
                     "V-24",
                     format!("{}.kind", link_path(i)),
                     format!(
-                        "link {} -> {} over {}: not available yet on {}",
-                        l.from,
-                        l.to,
+                        "link between {} over {}: not available yet on {}",
+                        pair(&a.id, &b.id),
                         l.kind.name(),
                         missing.join(", ")
                     ),
@@ -287,14 +360,27 @@ impl<'a> Ctx<'a> {
         self.t.links.iter().enumerate()
     }
 
-    /// Links from the 親機 to its 子機 over I2C or UART: the ones the hub's
-    /// own pins, controllers and PIO serve. Other links (between 親機,
-    /// deeper, CAN, Ethernet) are reported by V-23 instead.
-    fn hub_links(&self) -> impl Iterator<Item = (usize, &'a Link)> + 'a {
-        let hub = self.coordinator().map(|c| c.id.clone());
-        self.t.links.iter().enumerate().filter(move |(_, l)| {
-            Some(&l.from) == hub.as_ref() && matches!(l.kind, LinkKind::I2c | LinkKind::Uart)
+    /// Links with the first 親機 at one end, over I2C or UART, with the
+    /// position and the end at the 親機: the ones its own pins, controllers
+    /// and PIO serve, whichever end it is listed as. Other links (between
+    /// 親機, deeper, CAN, Ethernet) are reported by V-23 instead.
+    fn hub_links(&self) -> impl Iterator<Item = (usize, &'a Link, usize, &'a End)> + 'a {
+        let hub = self.coordinator().map(|c| c.id.as_str());
+        self.t.links.iter().enumerate().filter_map(move |(i, l)| {
+            let k = l.ends.iter().position(|e| Some(e.node.as_str()) == hub)?;
+            matches!(l.kind, LinkKind::I2c | LinkKind::Uart).then(|| (i, l, k, &l.ends[k]))
         })
+    }
+
+    /// Whether end `k` of link `i` is the first 親機's end of one of its [`Self::hub_links`].
+    fn is_hub_end(&self, i: usize, k: usize) -> bool {
+        self.hub_links().any(|(j, _, e, _)| (j, e) == (i, k))
+    }
+
+    /// Every end of every link: link position, the link, end position, the end.
+    fn ends(&self) -> impl Iterator<Item = (usize, &'a Link, usize, &'a End)> + 'a {
+        self.links()
+            .flat_map(|(i, l)| l.ends.iter().enumerate().map(move |(k, e)| (i, l, k, e)))
     }
 
     /// Schema version and the fields the schema requires only in some cases.
@@ -342,6 +428,16 @@ impl<'a> Ctx<'a> {
         }
         for (i, l) in self.links() {
             let p = link_path(i);
+            // An end's `pins` are UART pins: the compiled topology holds them on a UART link only.
+            if l.kind != LinkKind::Uart {
+                for (k, _) in l.ends.iter().enumerate().filter(|(_, e)| e.pins.is_some()) {
+                    self.err(
+                        "V-01",
+                        format!("{}.pins", end_path(i, k)),
+                        format!("'pins' are UART pins; this {} link has none", l.kind.name()),
+                    );
+                }
+            }
             match l.kind {
                 LinkKind::I2c => {
                     match &l.bus {
@@ -351,26 +447,32 @@ impl<'a> Ctx<'a> {
                         }
                         Some(_) => {}
                     }
-                    if l.addr.is_none() {
-                        self.err("V-01", format!("{p}.addr"), "i2c link needs 'addr'");
-                    }
-                    if l.node_pins.is_none() {
+                    if l.ends.iter().all(|e| e.addr.is_none()) {
                         self.err(
                             "V-01",
-                            format!("{p}.node_pins"),
-                            "i2c link needs 'node_pins' (sda, scl)",
+                            format!("{p}.ends"),
+                            "i2c link needs 'addr' on the end the other end reaches",
                         );
+                    }
+                    for (k, e) in l.ends.iter().enumerate() {
+                        if e.addr.is_some() && e.node_pins.is_none() {
+                            self.err(
+                                "V-01",
+                                format!("{}.node_pins", end_path(i, k)),
+                                "an i2c end with 'addr' needs 'node_pins' (sda, scl)",
+                            );
+                        }
                     }
                 }
                 LinkKind::Uart => {
                     if l.iface.is_none() {
                         self.err("V-01", format!("{p}.iface"), "uart link needs 'iface'");
                     }
-                    if l.pins.is_none() {
+                    if l.ends.iter().all(|e| e.pins.is_none()) {
                         self.err(
                             "V-01",
-                            format!("{p}.pins"),
-                            "uart link needs 'pins' (tx, rx)",
+                            format!("{p}.ends"),
+                            "uart link needs 'pins' (tx, rx) on an end",
                         );
                     }
                 }
@@ -432,12 +534,13 @@ impl<'a> Ctx<'a> {
     }
 
     fn v04(&mut self) {
-        for (i, l) in self.links() {
-            let p = link_path(i);
-            for (end, id) in [("from", &l.from), ("to", &l.to)] {
-                if self.t.node(id).is_none() {
-                    self.err("V-04", format!("{p}.{end}"), format!("unknown node '{id}'"));
-                }
+        for (i, _, k, e) in self.ends() {
+            if self.t.node(&e.node).is_none() {
+                self.err(
+                    "V-04",
+                    format!("{}.node", end_path(i, k)),
+                    format!("unknown node '{}'", e.node),
+                );
             }
         }
     }
@@ -475,47 +578,45 @@ impl<'a> Ctx<'a> {
                 ),
             );
         }
+        let first = hubs.first().copied();
         for (i, l) in self.links() {
             let p = link_path(i);
+            let [a, b] = l.ends.each_ref().map(|e| e.node.as_str());
             if !l.kind.compiles() {
                 self.info(
                     "V-23",
                     format!("{p}.kind"),
                     format!(
-                        "{} link to '{}': not updatable yet, updating skips it",
+                        "{} link between {}: not updatable yet, updating skips it",
                         l.kind.name(),
-                        l.to
+                        pair(a, b)
                     ),
                 );
             }
-            match self.t.node(&l.from) {
-                Some(n) if n.role != Role::Coordinator => self.info(
-                    "V-23",
-                    format!("{p}.from"),
-                    format!(
-                        "'{}' is below the 子機 '{}': not updatable yet, updating skips it",
-                        l.to, l.from
-                    ),
-                ),
-                Some(n) if hubs.first() != Some(&n.id.as_str()) => self.info(
-                    "V-23",
-                    format!("{p}.from"),
-                    format!(
-                        "'{}' is under the second 親機 '{}': not updatable yet, updating skips it",
-                        l.to, l.from
-                    ),
-                ),
-                _ => {}
-            }
-            if let Some(n) = self.t.node(&l.to).filter(|n| n.role == Role::Coordinator) {
-                self.info(
-                    "V-23",
-                    format!("{p}.to"),
-                    format!(
-                        "'{}' is a 親機 linked from another node: not updatable yet, updating skips it",
-                        n.id
-                    ),
-                );
+            let role = |id: &str| self.t.node(id).map(|n| n.role);
+            let hubs_at: Vec<&str> = [a, b]
+                .into_iter()
+                .filter(|id| role(id) == Some(Role::Coordinator))
+                .collect();
+            let message = match (first.filter(|f| [a, b].contains(f)), hubs_at.as_slice()) {
+                // Unknown nodes are V-04's.
+                _ if role(a).is_none() || role(b).is_none() => None,
+                (Some(f), [_, _]) => Some(format!(
+                    "'{}' is a 親機 linked to the 親機 '{f}': not updatable yet, updating skips it",
+                    if a == f { b } else { a }
+                )),
+                (Some(_), _) => None,
+                (None, []) => Some(format!(
+                    "the link between the 子機 {} is below a 子機: not updatable yet, updating skips it",
+                    pair(a, b)
+                )),
+                (None, [h, ..]) => Some(format!(
+                    "the link between {} is under the second 親機 '{h}': not updatable yet, updating skips it",
+                    pair(a, b)
+                )),
+            };
+            if let Some(m) = message {
+                self.info("V-23", format!("{p}.ends"), m);
             }
         }
     }
@@ -556,12 +657,34 @@ impl<'a> Ctx<'a> {
             .enumerate()
             .filter(|(_, n)| n.role == Role::Node)
         {
-            let count = self.t.links.iter().filter(|l| l.to == n.id).count();
-            if count != 1 {
+            if self.t.links_at(&n.id).next().is_none() {
                 self.err(
                     "V-05",
                     format!("nodes[{i}]"),
-                    format!("node '{}' needs exactly one link, has {count}", n.id),
+                    format!("node '{}' needs a link, has none", n.id),
+                );
+            }
+        }
+        let links = &self.t.links;
+        for (i, l) in links.iter().enumerate() {
+            let [a, b] = l.ends.each_ref().map(|e| e.node.as_str());
+            if a == b {
+                self.err(
+                    "V-05",
+                    format!("{}.ends", link_path(i)),
+                    format!("a link joins two nodes; both ends are '{a}'"),
+                );
+            } else if let Some(j) = links[..i]
+                .iter()
+                .position(|o| o.other(a).is_some_and(|e| e.node == b))
+            {
+                self.err(
+                    "V-05",
+                    format!("{}.ends", link_path(i)),
+                    format!(
+                        "links[{j}] and links[{i}] both join {}: one link per pair of nodes",
+                        pair(a, b)
+                    ),
                 );
             }
         }
@@ -612,45 +735,24 @@ impl<'a> Ctx<'a> {
             pins.push((format!("buses[{i}].sda"), b.sda));
             pins.push((format!("buses[{i}].scl"), b.scl));
         }
-        for (i, l) in self.hub_links() {
-            let p = link_path(i);
-            if let Some(u) = l.pins {
-                pins.push((format!("{p}.pins.tx"), u.tx));
-                pins.push((format!("{p}.pins.rx"), u.rx));
-            }
-            if let Some(g) = l.control.nrst {
-                pins.push((format!("{p}.control.nrst"), g));
-            }
-            if let Some(g) = l.control.boot {
-                pins.push((format!("{p}.control.boot"), g));
-            }
+        for (i, _, k, e) in self.hub_links() {
+            pins.extend(own_gpios(&end_path(i, k), e, true));
         }
         pins
     }
 
-    /// Every pin on every link end is one its own definition defines: a `from`
-    /// node's `pins` and `control` pins on its board's header (or its MCU's GPIO
-    /// range when it names only an MCU), a `to` node's `node_pins` as one of its
-    /// board's I2C pairs. Links from the 親機 are covered by `v07_v08`.
+    /// Every pin on every link end is one its own node's definition defines:
+    /// its `pins`, `nrst` and `boot` on its board's header (or its MCU's GPIO
+    /// range when it names only an MCU), its `node_pins` as one of its board's
+    /// I2C pairs. The first 親機's ends of its links are covered by `v07_v08`.
     fn v07_every_end(&mut self) {
-        let hub = self.coordinator().map(|c| c.id.clone());
-        for (i, l) in self.links() {
-            let p = link_path(i);
-            if Some(&l.from) != hub.as_ref() {
-                let mut pins: Vec<(String, u8)> = Vec::new();
+        for (i, l, k, e) in self.ends() {
+            let ep = end_path(i, k);
+            if !self.is_hub_end(i, k) {
                 // A hw-uart0 link runs on the MCU's own UART0 pair, judged below (V-09), not on the header.
-                if let (Some(u), false) = (l.pins, l.iface == Some(UartIface::HwUart0)) {
-                    pins.push((format!("{p}.pins.tx"), u.tx));
-                    pins.push((format!("{p}.pins.rx"), u.rx));
-                }
-                if let Some(g) = l.control.nrst {
-                    pins.push((format!("{p}.control.nrst"), g));
-                }
-                if let Some(g) = l.control.boot {
-                    pins.push((format!("{p}.control.boot"), g));
-                }
-                let from_mcu = self.t.node(&l.from).and_then(|n| self.reg.mcu(&n.mcu));
-                if let Some(n) = self.t.node(&l.from) {
+                let pins = own_gpios(&ep, e, l.iface != Some(UartIface::HwUart0));
+                let node = self.t.node(&e.node);
+                if let Some(n) = node {
                     for (path, gpio) in pins {
                         if let Some(msg) = pin_fault(self.reg, &n.mcu, n.board.as_deref(), gpio) {
                             self.err("V-07", path, msg);
@@ -658,17 +760,18 @@ impl<'a> Ctx<'a> {
                     }
                 }
                 if l.iface == Some(UartIface::HwUart0) {
-                    if let (Some(c), Some(u)) =
-                        (from_mcu.and_then(|m| m.coordinator.as_ref()), l.pins)
-                    {
+                    let uart0 = node
+                        .and_then(|n| self.reg.mcu(&n.mcu))
+                        .and_then(|m| m.coordinator.as_ref());
+                    if let (Some(c), Some(u)) = (uart0, e.pins) {
                         if !c.uart0_tx.contains(&u.tx) || !c.uart0_rx.contains(&u.rx) {
                             let msg = format!("GPIO{}/{} is not a UART0 TX/RX pair", u.tx, u.rx);
-                            self.err("V-09", format!("{p}.pins"), msg);
+                            self.err("V-09", format!("{ep}.pins"), msg);
                         }
                     }
                 }
             }
-            if let (Some(np), Some(b)) = (l.node_pins.as_ref(), self.node_board(&l.to)) {
+            if let (Some(np), Some(b)) = (e.node_pins.as_ref(), self.node_board(&e.node)) {
                 if !b
                     .i2c_pairs
                     .iter()
@@ -683,7 +786,7 @@ impl<'a> Ctx<'a> {
                         "{}/{} is not an I2C pair of {}: {pairs:?}",
                         np.sda, np.scl, b.product
                     );
-                    self.err("V-07", format!("{p}.node_pins"), msg);
+                    self.err("V-07", format!("{ep}.node_pins"), msg);
                 }
             }
         }
@@ -733,11 +836,11 @@ impl<'a> Ctx<'a> {
     fn v09(&mut self) {
         let bus_pins: BTreeSet<u8> = self.t.buses.iter().flat_map(|b| [b.sda, b.scl]).collect();
         let hub = self.coordinator_data();
-        for (i, l) in self.hub_links() {
-            let (Some(UartIface::HwUart0), Some(u)) = (l.iface, l.pins) else {
+        for (i, l, k, e) in self.hub_links() {
+            let (Some(UartIface::HwUart0), Some(u)) = (l.iface, e.pins) else {
                 continue;
             };
-            let p = link_path(i);
+            let p = end_path(i, k);
             let not_uart0 =
                 |c: &Coordinator| !c.uart0_tx.contains(&u.tx) || !c.uart0_rx.contains(&u.rx);
             if hub.is_some_and(not_uart0) {
@@ -760,7 +863,7 @@ impl<'a> Ctx<'a> {
     fn v10(&mut self) {
         let pio_links = self
             .hub_links()
-            .filter(|(_, l)| l.iface == Some(UartIface::PioUart))
+            .filter(|(_, l, _, _)| l.iface == Some(UartIface::PioUart))
             .count();
         let Some(hub) = self.coordinator_data() else {
             return;
@@ -799,11 +902,12 @@ impl<'a> Ctx<'a> {
                 self.err("V-12", path, format!("recovery for unknown node '{id}'"));
                 continue;
             };
-            let control = t.link_to(id).map(|l| l.control.kind);
+            let controls: Vec<ControlKind> = t.links_at(id).map(|(_, l)| l.control.kind).collect();
+            let control = |c: ControlKind| controls.contains(&c);
             for tier in effective_tiers(t, id) {
                 match tier {
                     Tier::Local | Tier::Redistribute => {}
-                    Tier::RomForced if control != Some(ControlKind::Full) => {
+                    Tier::RomForced if !control(ControlKind::Full) => {
                         self.err(
                             "V-12",
                             path.clone(),
@@ -811,7 +915,7 @@ impl<'a> Ctx<'a> {
                         );
                     }
                     Tier::RomCoop
-                        if control != Some(ControlKind::Cooperative)
+                        if !control(ControlKind::Cooperative)
                             || PortKind::from_name(&node.port) != Some(PortKind::VendorStage2) =>
                     {
                         self.err(
@@ -826,12 +930,15 @@ impl<'a> Ctx<'a> {
         }
     }
 
+    /// A node reached through its ROM loader (`rom-forced`) is on an I2C link
+    /// whose end at it is on a ROM loader pin pair.
     fn v13(&mut self) {
-        for (i, l) in self.links() {
-            if !effective_tiers(self.t, &l.to).contains(&Tier::RomForced) {
+        let t = self.t;
+        for n in &t.nodes {
+            if !effective_tiers(t, &n.id).contains(&Tier::RomForced) {
                 continue;
             }
-            let Some(board) = self.node_board(&l.to) else {
+            let Some(board) = self.node_board(&n.id) else {
                 continue;
             };
             // The ROM pairs are the board MCU's (the board brings them out).
@@ -840,18 +947,27 @@ impl<'a> Ctx<'a> {
                 .mcu(&board.mcu)
                 .and_then(|m| m.rom_i2c.as_ref())
                 .map_or(&[][..], |r| &r.pairs[..]);
-            let on_rom_pins = l.kind == LinkKind::I2c
-                && l.node_pins
-                    .as_ref()
-                    .is_some_and(|np| rom_pairs.iter().any(|r| r.sda == np.sda && r.scl == np.scl));
-            if !on_rom_pins {
+            let on_rom_pins = |l: &Link| {
+                l.kind == LinkKind::I2c
+                    && l.end(&n.id)
+                        .and_then(|e| e.node_pins.as_ref())
+                        .is_some_and(|np| {
+                            rom_pairs.iter().any(|r| r.sda == np.sda && r.scl == np.scl)
+                        })
+            };
+            let at: Vec<(usize, &Link)> = t.links_at(&n.id).collect();
+            let Some(&(i, first)) = at.first() else {
+                continue;
+            };
+            if !at.iter().any(|(_, l)| on_rom_pins(l)) {
+                let k = first.ends.iter().position(|e| e.node == n.id).unwrap_or(0);
                 let pairs: Vec<_> = rom_pairs
                     .iter()
                     .map(|r| format!("{}/{}", r.sda, r.scl))
                     .collect();
                 self.err(
                     "V-13",
-                    format!("{}.node_pins", link_path(i)),
+                    format!("{}.node_pins", end_path(i, k)),
                     format!("rom-forced needs an I2C link on a ROM bootloader pin pair (sda/scl) of {}: {pairs:?}", board.product),
                 );
             }
@@ -961,8 +1077,31 @@ impl<'a> Ctx<'a> {
         }
     }
 
+    /// An `addr` is on an end of a kind with addresses and is a 7-bit address;
+    /// no two ends on one bus share one, and none takes the address a ROM
+    /// loader reached over that bus answers on.
     fn v18(&mut self) {
         let t = self.t;
+        for (i, l, k, e) in self.ends() {
+            let Some(addr) = e.addr else { continue };
+            let path = format!("{}.addr", end_path(i, k));
+            if !l.kind.addressed() {
+                self.err(
+                    "V-18",
+                    path,
+                    format!(
+                        "a {} link has no addresses; 'addr' is for i2c",
+                        l.kind.name()
+                    ),
+                );
+            } else if !(I2C_ADDR_MIN..=I2C_ADDR_MAX).contains(&addr) {
+                self.err(
+                    "V-18",
+                    path,
+                    format!("address {addr:#04x} is outside 0x08-0x77"),
+                );
+            }
+        }
         for bus in &t.buses {
             let on_bus: Vec<(usize, &Link)> = self
                 .links()
@@ -971,19 +1110,18 @@ impl<'a> Ctx<'a> {
             // Addresses the ROM loaders of nodes reached through them answer on.
             let reserved: BTreeMap<u8, &str> = on_bus
                 .iter()
-                .filter_map(|(_, l)| self.forced_rom(&l.to).map(|r| (r.addr, r.name.as_str())))
+                .flat_map(|(_, l)| &l.ends)
+                .filter_map(|e| self.forced_rom(&e.node).map(|r| (r.addr, r.name.as_str())))
                 .collect();
             let mut seen = BTreeSet::new();
-            for (i, l) in on_bus {
-                let Some(addr) = l.addr else { continue };
-                let path = format!("{}.addr", link_path(i));
-                if !(I2C_ADDR_MIN..=I2C_ADDR_MAX).contains(&addr) {
-                    self.err(
-                        "V-18",
-                        path.clone(),
-                        format!("address {addr:#04x} is outside 0x08-0x77"),
-                    );
-                }
+            let addressed = on_bus.iter().flat_map(|&(i, l)| {
+                l.ends
+                    .iter()
+                    .enumerate()
+                    .filter_map(move |(k, e)| e.addr.map(|a| (end_path(i, k), a)))
+            });
+            for (ep, addr) in addressed.collect::<Vec<_>>() {
+                let path = format!("{ep}.addr");
                 if !seen.insert(addr) {
                     self.err(
                         "V-18",
@@ -1015,18 +1153,19 @@ impl<'a> Ctx<'a> {
                 .collect();
             let rom_cap = on_bus
                 .iter()
-                .filter_map(|l| self.forced_rom(&l.to))
+                .flat_map(|l| &l.ends)
+                .filter_map(|e| self.forced_rom(&e.node))
                 .min_by_key(|r| r.max_hz);
             let speed = b.i2c_hz();
             let path = format!("buses[{i}].speed_hz");
             // The speeds every node's firmware runs the bus at; a node whose firmware runs no I2C link here is V-23's.
             let mut named: Option<Vec<u32>> = None;
             for l in &on_bus {
-                for (id, dir) in [(&l.from, Dir::Down), (&l.to, Dir::Up)] {
+                for id in l.ends.iter().map(|e| &e.node) {
                     let Some(m) = self.t.node(id).and_then(|n| self.reg.mcu(&n.mcu)) else {
                         continue;
                     };
-                    if !links::available_in(self.reg, &m.id, dir).contains(&LinkKind::I2c) {
+                    if !links::runs_in(self.reg, &m.id, LinkKind::I2c) {
                         continue;
                     }
                     let Some(u) = &m.link_i2c else {
@@ -1079,13 +1218,13 @@ impl<'a> Ctx<'a> {
                 continue;
             }
             let baud = l.uart_baud();
-            for (id, dir) in [(&l.from, Dir::Down), (&l.to, Dir::Up)] {
+            for id in l.ends.iter().map(|e| &e.node) {
                 let Some(m) = self.t.node(id).and_then(|n| self.reg.mcu(&n.mcu)) else {
                     continue;
                 };
-                // An end whose firmware runs no UART link here runs no
-                // speed: V-24 reports the link instead.
-                if !links::available_in(self.reg, &m.id, dir).contains(&LinkKind::Uart) {
+                // An end whose firmware runs no UART link runs no speed:
+                // V-24 reports the link instead.
+                if !links::runs_in(self.reg, &m.id, LinkKind::Uart) {
                     continue;
                 }
                 let u = m.link_uart.as_ref();
@@ -1117,7 +1256,12 @@ impl<'a> Ctx<'a> {
             if l.kind != LinkKind::I2c {
                 continue;
             }
-            if let Some(b) = self.node_board(&l.to).filter(|b| !b.i2c_target) {
+            // An end the other reaches at an address is an I2C target.
+            let targets = l.ends.iter().filter(|e| e.addr.is_some());
+            let boards: Vec<&BoardDef> = targets
+                .filter_map(|e| self.node_board(&e.node).filter(|b| !b.i2c_target))
+                .collect();
+            for b in boards {
                 let mcu_name = self.reg.mcu(&b.mcu).map_or(b.mcu.as_str(), |m| &m.name);
                 self.err(
                     "V-21",
@@ -1133,17 +1277,64 @@ impl<'a> Ctx<'a> {
 
     fn v22(&mut self) {
         for (i, l) in self.links() {
-            if rom_forced_unavailable(l) {
+            if l.control.kind == ControlKind::Full && l.resetting_end().is_none() {
+                let [a, b] = l.ends.each_ref().map(|e| e.node.as_str());
                 self.issues.push(Issue {
                     rule: "V-22",
                     severity: Severity::Warning,
                     path: format!("{}.control", link_path(i)),
                     message: format!(
-                        "reset or boot pin for '{}' is not set; recovery for it runs without rom-forced",
-                        l.to
+                        "no end of the link between {} sets both nrst and boot; recovery over it runs without rom-forced",
+                        pair(a, b)
                     ),
                 });
             }
         }
     }
+
+    /// Each end's port is a `[[link_port]]` of its node's MCU definition, of the
+    /// link's kind. Unknown nodes and MCUs are V-04's and V-06's.
+    fn v27(&mut self) {
+        for (i, l, k, e) in self.ends() {
+            let Some(m) = self.t.node(&e.node).and_then(|n| self.reg.mcu(&n.mcu)) else {
+                continue;
+            };
+            let path = format!("{}.port", end_path(i, k));
+            match m.port(&e.port) {
+                None => {
+                    let known: Vec<&str> = m.ports.iter().map(|p| p.name.as_str()).collect();
+                    self.err(
+                        "V-27",
+                        path,
+                        format!("{} has no port '{}'; its ports: {known:?}", m.id, e.port),
+                    );
+                }
+                Some(p) if p.kind != l.kind => self.err(
+                    "V-27",
+                    path,
+                    format!(
+                        "port '{}' of {} is {}, not {}",
+                        e.port,
+                        m.id,
+                        p.kind.name(),
+                        l.kind.name()
+                    ),
+                ),
+                Some(_) => {}
+            }
+        }
+    }
+}
+
+/// The GPIOs an end names on its own node, with their paths: `pins` (when
+/// `with_pins`), `nrst`, `boot`.
+fn own_gpios(ep: &str, e: &End, with_pins: bool) -> Vec<(String, u8)> {
+    let mut out = Vec::new();
+    if let (Some(u), true) = (e.pins, with_pins) {
+        out.push((format!("{ep}.pins.tx"), u.tx));
+        out.push((format!("{ep}.pins.rx"), u.rx));
+    }
+    out.extend(e.nrst.map(|g| (format!("{ep}.nrst"), g)));
+    out.extend(e.boot.map(|g| (format!("{ep}.boot"), g)));
+    out
 }

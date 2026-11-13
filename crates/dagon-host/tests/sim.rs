@@ -910,8 +910,8 @@ fn yaml_at_the_limit() -> String {
              listen_window_ms: 50\n    tag: n{i}-f401\n"
         );
         links += &format!(
-            "  - from: hub\n    to: n{i}\n    kind: i2c\n    bus: i2c-main\n    addr: {}\n    \
-             node_pins: {{ sda: PB4, scl: PA8 }}\n    \
+            "  - kind: i2c\n    bus: i2c-main\n    ends:\n      - {{ node: hub, port: i2c0 }}\n      \
+             - {{ node: n{i}, port: i2c3, addr: {}, node_pins: {{ sda: PB4, scl: PA8 }} }}\n    \
              control: {{ kind: cooperative, rom_entry: stm32-i2c-rom }}\n",
             0x10 + i
         );
@@ -919,7 +919,7 @@ fn yaml_at_the_limit() -> String {
         order += &format!("n{i}, ");
     }
     format!(
-        "dagon: 1\nname: limit\nnodes:\n  - id: hub\n    mcu: rp2040\n    \
+        "dagon: 2\nname: limit\nnodes:\n  - id: hub\n    mcu: rp2040\n    \
          board: waveshare-rp2040-touch-lcd-1.28\n    role: coordinator\n    port: self-boot\n    \
          flash_map: rp2040-4m\n    max_attempts: 3\n    listen_window_ms: 0\n    tag: {hub}\n\
          {nodes}buses:\n  - id: i2c-main\n    kind: i2c\n    controller: i2c0\n    sda: 16\n    \

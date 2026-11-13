@@ -122,6 +122,10 @@ fn version_text_names_the_cli_version_and_every_format() {
     for (c, n) in formats() {
         assert!(v.contains(&format!("{c} {n}")), "{v}");
     }
+    // Links with two ends and per-end ports and addresses.
+    for f in ["topology-bin 2", "topology-yaml 2", "definitions 2"] {
+        assert!(v.contains(f), "{v}");
+    }
     assert!(known_text().contains("boot-rp2040 0.1.0"));
 }
 

@@ -27,6 +27,7 @@ use std::path::{Path, PathBuf};
 
 use dagon_topology::defs::{BoardDef, Origin, Registry};
 use dagon_topology::schema::{LinkKind, Node, Role, Topology, DEFAULT_I2C_HZ};
+use dagon_topology::SCHEMA_VERSION;
 use serde::Deserialize;
 
 use crate::cli::{GenArgs, NewArgs};
@@ -55,8 +56,9 @@ pub struct Written {
 }
 
 fn hub_link(t: &Topology, child: &str) -> Option<String> {
-    let l = t.links.iter().find(|l| l.to == child)?;
-    let ctl = &l.control;
+    let l = t.reached_over(child)?;
+    // The 親機's end names its own pins; the child's end its address.
+    let (hub, at) = (l.other(child)?, l.end(child)?);
     let opt = |v: Option<u8>| v.map_or("None".into(), |p| format!("Some({p})"));
     Some(match l.kind {
         LinkKind::I2c => {
@@ -69,13 +71,13 @@ fn hub_link(t: &Topology, child: &str) -> Option<String> {
                 bus.sda,
                 bus.scl,
                 bus.i2c_hz(),
-                l.addr.unwrap_or(0),
-                opt(ctl.nrst),
-                opt(ctl.boot)
+                at.addr.unwrap_or(0),
+                opt(hub.nrst),
+                opt(hub.boot)
             )
         }
         _ => {
-            let p = l.pins.as_ref()?;
+            let p = hub.pins.as_ref()?;
             format!(
                 "HubLink::Uart {{ tx: {}, rx: {}, baud: {} }}",
                 p.tx,
@@ -101,18 +103,19 @@ pub fn wiring_rs(
     let link = if hub {
         "Link::Hub".to_string()
     } else {
-        match t.links.iter().find(|l| l.to == n.id) {
+        match t.reached_over(&n.id) {
             Some(l) if l.kind == LinkKind::I2c => {
                 let speed = l
                     .bus
                     .as_ref()
                     .and_then(|b| t.buses.iter().find(|x| &x.id == b))
                     .map_or(DEFAULT_I2C_HZ, |b| b.i2c_hz());
-                let pins = l.node_pins.as_ref();
+                let at = l.end(&n.id);
+                let pins = at.and_then(|e| e.node_pins.as_ref());
                 let s = |v: Option<&String>| v.map_or("None".into(), |p| format!("Some({p:?})"));
                 format!(
                     "Link::I2c {{ addr: {:#04x}, speed_hz: {speed}, sda: {}, scl: {} }}",
-                    l.addr.unwrap_or(0),
+                    at.and_then(|e| e.addr).unwrap_or(0),
                     s(pins.map(|p| &p.sda)),
                     s(pins.map(|p| &p.scl))
                 )
@@ -403,18 +406,18 @@ pub fn hop_placeholders(
         Role::Coordinator => (Topology::uplink(n).kind, format!("uplink of {}", n.id)),
         Role::Node => {
             let l = t
-                .link_to(&n.id)
-                .ok_or_else(|| format!("no link reaches {} from its 親機", n.id))?;
-            (l.kind, format!("link {} -> {}", l.from, l.to))
+                .reached_over(&n.id)
+                .ok_or_else(|| format!("no link reaches {}", n.id))?;
+            (l.kind, format!("link {}", l.named()))
         }
     };
     if !can(up, Dir::Up) {
         return Err(refuse(hop, up));
     }
     let mut down: Vec<LinkKind> = Vec::new();
-    for l in t.links.iter().filter(|l| l.from == n.id) {
+    for l in t.relayed_from(&n.id) {
         if !can(l.kind, Dir::Down) {
-            return Err(refuse(format!("link {} -> {}", l.from, l.to), l.kind));
+            return Err(refuse(format!("link {}", l.named()), l.kind));
         }
         if !down.contains(&l.kind) {
             down.push(l.kind);
@@ -458,12 +461,15 @@ pub fn wiring_placeholders(
         .mcu(&n.mcu)
         .and_then(|m| m.rom_i2c.as_ref())
         .map_or(&[][..], |r| &r.pairs[..]);
-    let (ctl, sda, scl) = match t.link_to(&n.id).filter(|l| l.kind == LinkKind::I2c) {
+    let (ctl, sda, scl) = match t.reached_over(&n.id).filter(|l| l.kind == LinkKind::I2c) {
         Some(l) => {
-            let at = format!("link {} -> {}", l.from, l.to);
-            let p = l.node_pins.as_ref().ok_or_else(|| {
-                format!("{at}: name the node's pins (node_pins) for its MCU template")
-            })?;
+            let at = format!("link {}", l.named());
+            let p = l
+                .end(&n.id)
+                .and_then(|e| e.node_pins.as_ref())
+                .ok_or_else(|| {
+                    format!("{at}: name the node's pins (node_pins) for its MCU template")
+                })?;
             let q = pairs
                 .iter()
                 .find(|q| q.sda == p.sda && q.scl == p.scl)
@@ -500,12 +506,9 @@ pub fn wiring_placeholders(
     put("link_i2c", ctl.to_uppercase());
     put("link_sda", sda);
     put("link_scl", scl);
-    let downs: Vec<_> = t.links.iter().filter(|l| l.from == n.id).collect();
+    let downs: Vec<_> = t.relayed_from(&n.id).collect();
     let names = |ls: &[&&dagon_topology::schema::Link]| {
-        ls.iter()
-            .map(|l| format!("{} -> {}", l.from, l.to))
-            .collect::<Vec<_>>()
-            .join(", ")
+        ls.iter().map(|l| l.named()).collect::<Vec<_>>().join(", ")
     };
     let i2c: Vec<_> = downs.iter().filter(|l| l.kind == LinkKind::I2c).collect();
     let mut buses: Vec<&str> = i2c.iter().filter_map(|l| l.bus.as_deref()).collect();
@@ -553,10 +556,11 @@ pub fn wiring_placeholders(
     }
     let uart = uarts.first();
     let pins = match uart {
-        Some(l) => Some(l.pins.as_ref().ok_or_else(|| {
+        Some(l) => Some(l.end(&n.id).and_then(|e| e.pins.as_ref()).ok_or_else(|| {
             format!(
-                "link {} -> {}: name its UART pins for the MCU template",
-                l.from, l.to
+                "link {}: name {}'s UART pins on its end for the MCU template",
+                l.named(),
+                n.id
             )
         })?),
         None => None,
@@ -1062,7 +1066,7 @@ pub fn gen_project(config: &Path, only: &[String], force: bool) -> Result<Vec<St
 /// A 構成 with no nodes yet, for a project started from scratch.
 pub fn empty_topology(name: &str) -> String {
     format!(
-        "dagon: 1
+        "dagon: {SCHEMA_VERSION}
 name: {name:?}
 nodes: []
 update:

@@ -174,6 +174,12 @@ pub const MCU: &[Requirement<McuCheck>] = &[
         check: link_i2c,
     },
     Requirement {
+        engine: "topology check V-27, compiled topology (a link end's port index)",
+        fields: &["link_port[].index"],
+        rule: "index and name each used once; name a-z, 0-9 and '-'",
+        check: link_ports,
+    },
+    Requirement {
         engine: "topology check V-18/V-20, host ROM path",
         fields: &["rom_i2c.addr", "rom_i2c.max_hz", "rom_i2c.erase_sectors[]"],
         rule: "addr in 0x08..=0x77; max_hz >= 1; erase_sectors unique; each pin pair (sda, scl) once, so a pair names one controller",
@@ -677,6 +683,26 @@ fn link_i2c(m: &McuDef) -> Result<(), String> {
         m.link_i2c.as_ref().is_some_and(|u| u.hzs.is_empty()),
         || "link_i2c.hzs must name at least one bus speed".into(),
     )
+}
+
+fn link_ports(m: &McuDef) -> Result<(), String> {
+    for (i, p) in m.ports.iter().enumerate() {
+        let well_formed = !p.name.is_empty()
+            && p.name
+                .bytes()
+                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-');
+        fail(!well_formed, || {
+            format!("port name '{}' must be a-z, 0-9 and '-'", p.name)
+        })?;
+        let earlier = &m.ports[..i];
+        fail(earlier.iter().any(|o| o.name == p.name), || {
+            format!("port name '{}' is used twice", p.name)
+        })?;
+        fail(earlier.iter().any(|o| o.index == p.index), || {
+            format!("port index {} is used twice", p.index)
+        })?;
+    }
+    Ok(())
 }
 
 fn hub_pins(b: &BoardDef, m: &McuDef) -> Result<(), String> {

@@ -18,6 +18,8 @@ mod tests;
 #[cfg(test)]
 mod tests_isolation;
 #[cfg(test)]
+mod tests_ports;
+#[cfg(test)]
 mod tests_requirements;
 #[cfg(test)]
 mod tests_writers;
@@ -401,6 +403,15 @@ pub struct RomI2c {
     pub pairs: Vec<I2cPair>,
 }
 
+/// One link interface of an MCU (`[[link_port]]`).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PortDef {
+    pub index: u8,
+    pub name: String,
+    pub kind: LinkKind,
+}
+
 /// Link kinds by direction: `up` towards the PC or the 親機, `down` to 子機.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -519,6 +530,12 @@ pub struct McuDef {
     /// Link kinds the MCU package's firmware implements (its `LINK_KINDS`).
     #[serde(default)]
     pub links: Links,
+    /// The MCU's link interfaces a topology link end names: `index` (0 to 255), `name` (`a-z`,
+    /// `0-9`, `-`) and `kind` (a link kind: `i2c`, `uart`, `can`, `ethernet`, `usb-cdc`, `ble`,
+    /// `wifi-tcp`); `index` and `name` each unique. A link end's `port` is one of these names, of
+    /// the link's kind (topology check V-27), and the compiled topology carries its `index`.
+    #[serde(default, rename = "link_port")]
+    pub ports: Vec<PortDef>,
     /// How the user connects it for a write: `label`, `hint`.
     pub connection: Connection,
     /// Tool check: `what`, `probe` (command), `expect` (`"runs"`, `{ line = "..." }`, `{ prefix =
@@ -609,6 +626,11 @@ pub struct McuDef {
 impl McuDef {
     pub fn default_flash_map(&self) -> &FlashMapDef {
         &self.flash_maps[0]
+    }
+
+    /// The `[[link_port]]` named `name`.
+    pub fn port(&self, name: &str) -> Option<&PortDef> {
+        self.ports.iter().find(|p| p.name == name)
     }
 
     /// Whether flash map and slot addresses are CPU addresses (every flash

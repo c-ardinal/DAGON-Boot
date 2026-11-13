@@ -1,6 +1,6 @@
 # Simulator pair: the simulated RP2040 hub and an F401 on I2C. Used by
 # `dagon sim run` and the dagon-host tests.
-dagon: 1
+dagon: 2
 name: sim-pair
 nodes:
   - id: hub
@@ -30,16 +30,13 @@ buses:
     speed_hz: 400000
     pullups: external
 links:
-  - from: hub
-    to: seg
-    kind: i2c
+  - kind: i2c
     bus: i2c-main
-    addr: 0x42
-    node_pins: { sda: PB4, scl: PA8 }
+    ends:
+      - { node: hub, port: i2c0, nrst: 18, boot: 28 }
+      - { node: seg, port: i2c3, addr: 0x42, node_pins: { sda: PB4, scl: PA8 } }
     control:
       kind: full
-      nrst: 18
-      boot: 28
       rom_entry: stm32-i2c-rom
 recovery:
   hub: [local]

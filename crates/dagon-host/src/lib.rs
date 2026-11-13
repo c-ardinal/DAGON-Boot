@@ -85,11 +85,13 @@ impl Target {
         if n && topo.node(node as usize).role == topology::role::COORDINATOR {
             return Some(Target::Hub);
         }
+        // The compiled topology holds only the hub's own links: the one with
+        // an end at `node`, whichever end, and the address at that end.
         let l = (0..topo.link_count())
             .map(|i| topo.link(i))
-            .find(|l| l.to == node)?;
+            .find(|l| l.end(node).is_some())?;
         match l.iface {
-            topology::iface::I2C_BUS => Some(Target::I2c(l.i2c_addr)),
+            topology::iface::I2C_BUS => Some(Target::I2c(l.end(node)?.addr)),
             topology::iface::PIO_UART => Some(Target::Uart),
             _ => None,
         }

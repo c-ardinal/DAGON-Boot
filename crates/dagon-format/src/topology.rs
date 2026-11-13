@@ -2,10 +2,12 @@
 //! roles, links, addresses, pins), without canvas positions or node names.
 //! Unsigned; a release binds it through the manifest `topology_sha256`.
 //!
-//! Layout: 32-byte head, `node_count` 32-byte nodes, `link_count` 16-byte
+//! Layout: 32-byte head, `node_count` 32-byte nodes, `link_count` 20-byte
 //! links, `constraint_count` 16-byte constraints (manifest constraint layout).
-//! Canonical form: node `index` equals its position, links sorted by `to`
-//! (one link per non-coordinator node), every reserved byte zero, so equal
+//! A link has two ends and no direction; its GPIOs say which end's node they
+//! are on. Canonical form: node `index` equals
+//! its position, a link's ends in node order, links sorted by their ends' nodes
+//! (no two links join the same two nodes), every reserved byte zero, so equal
 //! topologies give equal bytes and equal SHA-256.
 
 use crate::le::{arr, put_u16, put_u32, u16_at, u32_at};
@@ -13,13 +15,13 @@ use crate::manifest::{Constraint, CONSTRAINT_SIZE, MAX_CONSTRAINTS};
 use crate::FormatError;
 
 pub const MAGIC: [u8; 4] = *b"DGTP";
-pub const TP_VERSION: u16 = 1;
+pub const TP_VERSION: u16 = 2;
 pub const HEAD_SIZE: usize = 0x20;
 pub const NODE_SIZE: usize = 32;
-pub const LINK_SIZE: usize = 16;
+pub const LINK_SIZE: usize = 20;
 /// The one node limit: the topology check, the Console and every write use it.
 pub const MAX_NODES: usize = 32;
-/// One link per node but the coordinator.
+/// One link per node but one: a set of links that joins every node.
 pub const MAX_LINKS: usize = MAX_NODES - 1;
 // A count is one stored byte, and a constraint's node mask has 32 bits.
 const _: () = assert!(MAX_NODES <= 32 && MAX_LINKS <= u8::MAX as usize);
@@ -120,11 +122,23 @@ impl TopoNode {
     }
 }
 
-/// A link from the coordinator to one node. Pins are hub-side GPIO numbers.
+/// One end of a link: the node, the index of its MCU definition's `[[link_port]]`
+/// the link runs on, and the 7-bit address the other end reaches it at
+/// ([`NONE`] on a kind without addresses, or when it is not reached by one).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct TopoEnd {
+    pub node: u8,
+    pub port: u8,
+    pub addr: u8,
+}
+
+/// A link between two nodes, with no direction. Pins are GPIO numbers: a
+/// UART's TX/RX and the NRST/BOOT lines on the node of end `gpio_end`, an I2C
+/// link's SDA/SCL the bus's.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct TopoLink {
-    pub from: u8,
-    pub to: u8,
+    /// In node order.
+    pub ends: [TopoEnd; 2],
     pub iface: u8,
     pub control: u8,
     /// UART TX, or I2C SDA.
@@ -136,35 +150,62 @@ pub struct TopoLink {
     /// UART baud, or I2C bus speed in Hz.
     pub baud: u32,
     pub rom_entry: u8,
-    /// 7-bit I2C address; [`NONE`] for UART.
-    pub i2c_addr: u8,
     /// Same value for links sharing a bus; [`NONE`] for UART.
     pub bus_id: u8,
+    /// 0 or 1: the end whose node the UART pins and NRST/BOOT GPIOs are on;
+    /// [`NONE`] when the link names none.
+    pub gpio_end: u8,
 }
 
 impl TopoLink {
+    /// The end at `node`, if the link has one there.
+    pub fn end(&self, node: u8) -> Option<&TopoEnd> {
+        self.ends.iter().find(|e| e.node == node)
+    }
+
+    /// The end that is not at `node`, when `node` is one of the ends.
+    pub fn other(&self, node: u8) -> Option<&TopoEnd> {
+        let [a, b] = &self.ends;
+        if a.node == node {
+            Some(b)
+        } else if b.node == node {
+            Some(a)
+        } else {
+            None
+        }
+    }
+
     pub fn parse(b: &[u8]) -> Self {
+        let end = |i: usize| TopoEnd {
+            node: b[i],
+            port: b[i + 1],
+            addr: b[i + 2],
+        };
         TopoLink {
-            from: b[0],
-            to: b[1],
-            iface: b[2],
-            control: b[3],
-            tx_pin: b[4],
-            rx_pin: b[5],
-            nrst_pin: b[6],
-            boot_pin: b[7],
-            baud: u32_at(b, 8),
-            rom_entry: b[12],
-            i2c_addr: b[13],
-            bus_id: b[14],
+            ends: [end(0), end(3)],
+            iface: b[6],
+            control: b[7],
+            tx_pin: b[8],
+            rx_pin: b[9],
+            nrst_pin: b[10],
+            boot_pin: b[11],
+            baud: u32_at(b, 12),
+            rom_entry: b[16],
+            bus_id: b[17],
+            gpio_end: b[18],
         }
     }
 
     pub fn to_bytes(&self) -> [u8; LINK_SIZE] {
         let mut b = [0u8; LINK_SIZE];
-        b[..8].copy_from_slice(&[
-            self.from,
-            self.to,
+        let [e0, e1] = self.ends;
+        b[..12].copy_from_slice(&[
+            e0.node,
+            e0.port,
+            e0.addr,
+            e1.node,
+            e1.port,
+            e1.addr,
             self.iface,
             self.control,
             self.tx_pin,
@@ -172,11 +213,16 @@ impl TopoLink {
             self.nrst_pin,
             self.boot_pin,
         ]);
-        put_u32(&mut b, 8, self.baud);
-        b[12] = self.rom_entry;
-        b[13] = self.i2c_addr;
-        b[14] = self.bus_id;
+        put_u32(&mut b, 12, self.baud);
+        b[16] = self.rom_entry;
+        b[17] = self.bus_id;
+        b[18] = self.gpio_end;
         b
+    }
+
+    /// The ends' nodes, the order canonical links are sorted in.
+    fn key(&self) -> (u8, u8) {
+        (self.ends[0].node, self.ends[1].node)
     }
 }
 
@@ -192,7 +238,10 @@ fn check_counts(nodes: usize, links: usize, constraints: usize) -> Result<(), Fo
 
 fn canonical(nodes: &[TopoNode], links: &[TopoLink]) -> bool {
     nodes.iter().enumerate().all(|(i, x)| x.index as usize == i)
-        && links.windows(2).all(|w| w[0].to < w[1].to)
+        && links
+            .iter()
+            .all(|l| l.ends[0].node < l.ends[1].node && matches!(l.gpio_end, 0 | 1 | NONE))
+        && links.windows(2).all(|w| w[0].key() < w[1].key())
 }
 
 /// Writes the canonical binary into `out` and returns its length. Rejects

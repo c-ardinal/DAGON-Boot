@@ -44,8 +44,8 @@ pub use state::State;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Addressing {
-    /// A 7-bit bus address; the topology gives it in the link's
-    /// `i2c_addr`.
+    /// A 7-bit bus address; the topology gives it on the reached end of
+    /// the link (`addr`).
     SevenBit,
     /// One fixed address: the medium has no addresses.
     Fixed(u8),

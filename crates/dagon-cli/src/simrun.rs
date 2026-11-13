@@ -487,7 +487,7 @@ mod tests {
             )
             .replace(
                 "recovery:\n",
-                "  - from: hub\n    to: seg2\n    kind: i2c\n    bus: i2c-main\n    addr: 0x43\n    node_pins: { sda: PB4, scl: PA8 }\n    control:\n      kind: full\n      nrst: 26\n      boot: 27\n      rom_entry: stm32-i2c-rom\nrecovery:\n",
+                "  - kind: i2c\n    bus: i2c-main\n    ends:\n      - { node: hub, port: i2c0, nrst: 26, boot: 27 }\n      - { node: seg2, port: i2c3, addr: 0x43, node_pins: { sda: PB4, scl: PA8 } }\n    control:\n      kind: full\n      rom_entry: stm32-i2c-rom\nrecovery:\n",
             )
             .replace("  seg: [local, redistribute, rom-forced]\n", "  seg: [local, redistribute, rom-forced]\n  seg2: [local, redistribute, rom-forced]\n")
             .replace("order: [seg, hub]", "order: [seg, seg2, hub]");

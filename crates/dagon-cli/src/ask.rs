@@ -108,7 +108,7 @@ impl Kind {
 pub(crate) struct Question {
     pub text: String,
     pub kind: Kind,
-    /// null, {"node": id} or {"link": {"from": id, "to": id}}.
+    /// null, {"node": id} or {"link": {"ends": [id, id]}} (a link has no direction).
     pub selection: Value,
     /// [{"role": "user"|"dagon", "text": ...}], oldest first.
     pub history: Vec<Value>,
@@ -159,7 +159,7 @@ fn id_field(v: &Value) -> Option<String> {
 }
 
 fn selection(v: &Value) -> Result<Value, String> {
-    let bad = || "selection must be {node: id} or {link: {from: id, to: id}}".to_string();
+    let bad = || "selection must be {node: id} or {link: {ends: [id, id]}}".to_string();
     if v.is_null() {
         return Ok(Value::Null);
     }
@@ -168,9 +168,13 @@ fn selection(v: &Value) -> Result<Value, String> {
         return Ok(json!({ "node": id_field(n).ok_or_else(bad)? }));
     }
     let l = o.get("link").ok_or_else(bad)?;
-    let from = id_field(&l["from"]).ok_or_else(bad)?;
-    let to = id_field(&l["to"]).ok_or_else(bad)?;
-    Ok(json!({ "link": { "from": from, "to": to } }))
+    let ends = l["ends"]
+        .as_array()
+        .filter(|e| e.len() == 2)
+        .ok_or_else(bad)?;
+    let a = id_field(&ends[0]).ok_or_else(bad)?;
+    let b = id_field(&ends[1]).ok_or_else(bad)?;
+    Ok(json!({ "link": { "ends": [a, b] } }))
 }
 
 fn history(v: &Value) -> Result<Vec<Value>, String> {
@@ -568,9 +572,9 @@ mod tests {
         assert_eq!(ok.selection, json!({ "node": "seg" }));
         assert_eq!(question(json!({ "question": "x" })).kind, Kind::Free);
         let link = question(
-            json!({ "question": "x", "selection": { "link": { "from": "hub", "to": "seg" } } }),
+            json!({ "question": "x", "selection": { "link": { "ends": ["hub", "seg"] } } }),
         );
-        assert_eq!(link.selection["link"]["to"], "seg");
+        assert_eq!(link.selection["link"]["ends"][1], "seg");
         assert!(parse(&json!({ "question": "あ".repeat(MAX_QUESTION) })).is_ok());
         let turn = json!({ "role": "dagon", "text": "はい" });
         assert!(
@@ -583,7 +587,8 @@ mod tests {
             json!({ "question": "x", "kind": "other" }),
             json!({ "question": "x", "selection": { "node": "C:/x" } }),
             json!({ "question": "x", "selection": { "node": "a", "link": {} } }),
-            json!({ "question": "x", "selection": { "link": { "from": "a" } } }),
+            json!({ "question": "x", "selection": { "link": { "ends": ["a"] } } }),
+            json!({ "question": "x", "selection": { "link": { "from": "a", "to": "b" } } }),
             json!({ "question": "x", "history": vec![turn; MAX_HISTORY + 1] }),
             json!({ "question": "x", "history": [{ "role": "system", "text": "t" }] }),
             json!({ "question": "x", "history": [{ "role": "user", "text": { "html": 1 } }] }),
@@ -597,7 +602,7 @@ mod tests {
         let secret = "sk-ant-FAKE-4242";
         let yaml = YAML
             .replace("name: sim-pair", "name: \"C:/Users/me/project\"")
-            .replace("dagon: 1", &format!("# token {secret}\ndagon: 1"))
+            .replace("dagon: 2", &format!("# token {secret}\ndagon: 2"))
             .replace("tag: seg-f401-7seg", "tag: \"see C:/Users/me/notes\"");
         let q = question(
             json!({ "question": "これは何が問題？", "kind": "problem", "selection": { "node": "seg" } }),

@@ -377,6 +377,7 @@ fn fake_sample(addr: &str) -> crate::Topology {
         .replace("board: nucleo-f401re", "board: fake-board")
         .replace("flash_map: f401-default", "flash_map: fake-1m")
         .replace("{ sda: PB4, scl: PA8 }", "{ sda: GPIO2, scl: GPIO3 }")
+        .replace("port: i2c3", "port: i2c0")
         .replace("addr: 0x42", &format!("addr: {addr}"));
     crate::parse_str(&yaml).unwrap()
 }
@@ -391,7 +392,8 @@ fn fake_registry_with(name: &str, max_hz: u32, extra: &str) -> Registry {
     let dir = scratch(name);
     let rom = format!(
         "\n[rom_i2c]\nname = \"Fake ROM loader\"\naddr = 0x3A\nmax_hz = {max_hz}\n\
-         pairs = [{{ controller = \"i2c0\", sda = \"GPIO2\", scl = \"GPIO3\" }}]\n"
+         pairs = [{{ controller = \"i2c0\", sda = \"GPIO2\", scl = \"GPIO3\" }}]\n\
+         \n[[link_port]]\nindex = 0\nname = \"i2c0\"\nkind = \"i2c\"\n"
     );
     write(
         &dir.join("m/dagon-mcu.toml"),
@@ -523,6 +525,11 @@ name = \"<b>Loader</b> at C:/Users/me\"
 addr = 0x3A
 max_hz = 400_000
                pairs = [{ controller = \"i2c0\", sda = \"GPIO2\", scl = \"GPIO3\" }]
+
+[[link_port]]
+index = 0
+name = \"i2c0\"
+kind = \"i2c\"
 ";
     let mcu = format!("{FAKE_MCU}{rom}")
         .replace("name = \"FAKE-M0\"", "name = \"FAKE <script>\"")

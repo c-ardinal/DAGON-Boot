@@ -73,6 +73,11 @@ addr = 0x3A
 max_hz = 400_000
 pairs = [{ controller = "i2c0", sda = "GPIO2", scl = "GPIO3" }]
 
+[[link_port]]
+index = 0
+name = "i2c0"
+kind = "i2c"
+
 [connection]
 label = "SWD"
 hint = "SWD probe"
@@ -103,7 +108,8 @@ fn fake_project(dir: &Path) -> PathBuf {
         .replace("mcu: stm32f401re", "mcu: fake-m0")
         .replace("board: nucleo-f401re", "board: fake-board")
         .replace("flash_map: f401-default", "flash_map: fake-1m")
-        .replace("{ sda: PB4, scl: PA8 }", "{ sda: GPIO2, scl: GPIO3 }");
+        .replace("{ sda: PB4, scl: PA8 }", "{ sda: GPIO2, scl: GPIO3 }")
+        .replace("{ node: seg, port: i2c3", "{ node: seg, port: i2c0");
     write(&dir.join("t.yaml"), yaml.as_bytes());
     write(&dir.join("m/dagon-mcu.toml"), FAKE_MCU.as_bytes());
     // The MCU package's boot core part: a stub crate, built where the

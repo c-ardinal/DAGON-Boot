@@ -1027,7 +1027,7 @@ fn rom_map<'m>(topo: &TopologyView<'_>, node: u8, roms: &'m [RomMap]) -> Option<
         return None;
     }
     let rom = (0..topo.link_count()).map(|i| topo.link(i)).any(|l| {
-        l.to == node
+        l.end(node).is_some()
             && l.iface == topology::iface::I2C_BUS
             && l.rom_entry == topology::rom_entry::STM32_I2C_ROM
     });

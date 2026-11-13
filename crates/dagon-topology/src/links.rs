@@ -30,6 +30,14 @@ pub fn available_in<'r>(reg: &'r Registry, mcu: &str, dir: Dir) -> &'r [LinkKind
     })
 }
 
+/// Whether `mcu`'s firmware runs `kind` in either direction: an end of a
+/// link, which has no direction, is judged by this.
+pub fn runs_in(reg: &Registry, mcu: &str, kind: LinkKind) -> bool {
+    [Dir::Up, Dir::Down]
+        .into_iter()
+        .any(|d| available_in(reg, mcu, d).contains(&kind))
+}
+
 /// Whether `mcu` knows of any link at all (else other rules report it).
 pub fn known(mcu: &str) -> bool {
     known_in(Registry::builtin(), mcu)

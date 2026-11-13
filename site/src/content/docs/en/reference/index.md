@@ -27,4 +27,6 @@ Written by hand, with their lists generated or checked by tests:
 - [Extension manifest](/en/reference/extension-manifest/) and
   [MCU and board definitions](/en/reference/definitions/), their key tables
   generated from the types DAGON reads the files into.
+- [Topology links](/en/reference/topology/): links joining two nodes by their
+  two ends, the key tables generated from the types DAGON reads a topology into.
 - [Licenses](/en/reference/licenses/).

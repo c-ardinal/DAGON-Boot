@@ -1,9 +1,9 @@
 import { RULE_FIX } from '../copy.ts';
 import { describe, expect, test } from 'vitest';
 import { supportedBoards, topo_check, topo_compile } from '../../wasm/dagon.ts';
-import { rom_i2c_addrs } from '../../wasm/pkg/dagon_wasm.js';
+import { rom_i2c_addrs, schema_version } from '../../wasm/pkg/dagon_wasm.js';
 import { SAMPLE_CONFIG, SAMPLE_YAML } from '../sample.ts';
-import { boardMissing, canPlace, maxNodes, connect, emptyDoc, freeAddrs, fromYaml, hopAvailable, linkKinds, place, placeMcu, removeNode, setBoard, setLink, setLinkKind, setNode, setUplink, toConfig, toYaml } from './model.ts';
+import { boardMissing, canPlace, maxNodes, connect, emptyDoc, freeAddrs, fromYaml, hopAvailable, linkKinds, linkView, SCHEMA_VERSION, place, placeMcu, removeNode, setBoard, setLink, setLinkKind, setNode, setUplink, toConfig, toYaml } from './model.ts';
 import { problemChip } from './problems.ts';
 import { problems } from './problems.ts';
 
@@ -13,6 +13,16 @@ describe('define document', () => {
   test('the Console draws up to the format\'s node limit, and its sentence names it', () => {
     expect(maxNodes()).toBe(32);
     expect(RULE_FIX['V-02']({ to: '', board: '', id: '', many: true, max: maxNodes() })).toContain('32');
+  });
+
+  test('a new 構成 is written with the topology YAML number dagon-topology reads', () => {
+    expect(SCHEMA_VERSION).toBe(schema_version());
+    expect(emptyDoc().topo.dagon).toBe(schema_version());
+  });
+
+  test('each link end is written on one line, the way the sample writes it', () => {
+    const out = toYaml(fromYaml(SAMPLE_YAML).topo);
+    expect(out).toContain('      - { node: seg, port: i2c3, addr: 0x42, node_pins: { sda: PB4, scl: PA8 } }');
   });
 
   test('sample reads and writes back to the same canonical topology', () => {
@@ -60,7 +70,7 @@ describe('define document', () => {
     doc = connect(connect(doc, 'nucleo'), 'm5stopwatch');
     // The values the page held before it read them from the definition.
     expect(doc.topo.buses).toEqual([{ id: 'i2c-main', kind: 'i2c', controller: 'i2c0', sda: 16, scl: 17, speed_hz: 100_000, pullups: 'external' }]);
-    expect(doc.topo.links!.find((l) => l.kind === 'uart')!.pins).toEqual({ tx: 26, rx: 27 });
+    expect(linkView(doc.topo, doc.topo.links!.find((l) => l.kind === 'uart')!).pins).toEqual({ tx: 26, rx: 27 });
     const yaml = toYaml(doc.topo);
     expect(yaml.indexOf('controller')).toBeLessThan(yaml.indexOf('sda: 16'));
   });
@@ -68,7 +78,7 @@ describe('define document', () => {
   test('renaming a node carries the id into links, recovery, order and names', () => {
     let doc = fromYaml(SAMPLE_YAML, { seg: '7セグ' });
     doc = setNode(doc, 'seg', 'id', 'seven');
-    expect(doc.topo.links!.some((l) => l.to === 'seven')).toBe(true);
+    expect(doc.topo.links!.some((l) => l.ends.some((e) => e.node === 'seven'))).toBe(true);
     expect(doc.topo.recovery!.seven).toBeDefined();
     expect(doc.topo.update.order).toEqual(['seven', 'watch', 'hub']);
     expect(doc.names).toEqual({ seven: '7セグ' });
@@ -88,7 +98,7 @@ describe('define document', () => {
   test('removing a node removes its links, recovery and order entries', () => {
     const doc = removeNode(fromYaml(SAMPLE_YAML), 'watch');
     expect(doc.topo.nodes.map((n) => n.id)).toEqual(['hub', 'seg']);
-    expect(doc.topo.links!.map((l) => l.to)).toEqual(['seg']);
+    expect(doc.topo.links!.map((l) => linkView(doc.topo, l).to)).toEqual(['seg']);
     expect(doc.topo.update.order).toEqual(['seg', 'hub']);
     expect(check(toYaml(doc.topo)).ok).toBe(true);
   });
@@ -116,7 +126,8 @@ describe('define document', () => {
     const hub2 = doc.topo.nodes[doc.topo.nodes.length - 1].id;
     doc = setNode(doc, hub2, 'role', 'coordinator');
     doc = connect(doc, hub2, 'hub');
-    expect(doc.topo.links![doc.topo.links!.length - 1]).toMatchObject({ from: 'hub', to: hub2, kind: 'can' });
+    // Two RP2040s: no CAN port on either, so the first kind both define a port for.
+    expect(linkView(doc.topo, doc.topo.links![doc.topo.links!.length - 1])).toMatchObject({ from: 'hub', to: hub2, kind: 'usb-cdc' });
     const v23 = problems(doc).filter((p) => p.rule === 'V-23');
     expect(v23.length).toBeGreaterThan(0);
     // Information, never an error: nothing tells the 構成 is wrong.
@@ -138,7 +149,7 @@ describe('define document', () => {
     deep = place(deep, 'm5stopwatch').doc;
     deep = connect(deep, 'm5stopwatch', 'seg');
     // No [coordinator] on the F401: the first UART0 pins the 親機's definitions allow together (its MCU's pairs on its board's header).
-    expect(deep.topo.links!.find((l) => l.from === 'seg')).toMatchObject({ iface: 'hw-uart0', pins: { tx: 16, rx: 17 } });
+    expect(deep.topo.links!.map((l) => linkView(deep.topo, l)).find((l) => l.from === 'seg')).toMatchObject({ iface: 'hw-uart0', pins: { tx: 16, rx: 17 } });
     const cfg = toConfig(deep, supportedBoards());
     expect(cfg.nodes.map((n) => [n.id, n.depth, n.notYet])).toEqual([['hub', 0, undefined], ['seg', 1, undefined], ['m5stopwatch', 2, 'deep']]);
     // Any depth: a node below the 孫機 is placed and connected too.

@@ -74,7 +74,7 @@ fn kinds(m: &McuDef) -> Vec<ImageKind> {
 }
 
 #[test]
-fn the_built_in_definitions_state_todays_writers() {
+fn the_built_in_definitions_state_their_writers() {
     use ImageKind::{Agent, App, Bootcore};
     let want: BTreeMap<&str, Vec<(ImageKind, Vec<ImageKind>)>> = [
         ("rp2040", vec![(App, vec![App]), (Bootcore, vec![App])]),
@@ -292,7 +292,11 @@ fn a_single_slot_whose_only_writer_is_itself_is_refused() {
         "[writers]\napp = [\"app\"]\nbootcore = [\"bootcore\"]\n",
     ));
     assert!(
-        e.contains("bootcore has one slot, and no other image on this MCU can write it"),
+        e.ends_with(concat!(
+            "bootcore has one slot, and no other image on this MCU can write it: ",
+            "an image cannot rewrite the slot it runs from ",
+            "(writers.bootcore = [\"bootcore\"]) [image writers (agent and boot stages)]"
+        )),
         "{e}"
     );
     let e = mcu_err(&fake_with("[writers]\napp = [\"app\"]\nbootcore = []\n"));

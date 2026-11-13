@@ -11,7 +11,7 @@ mod reach;
 mod report;
 pub mod schema;
 
-pub use reach::{cut_with, updatable, Cut, Skip};
+pub use reach::{cut_with, reach_root, updatable, Cut, Skip};
 
 pub use check::{
     check_str_with, check_with, default_port, effective_tiers, pin_fault, rom_forced_unavailable,

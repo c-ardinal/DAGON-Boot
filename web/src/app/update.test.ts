@@ -120,19 +120,19 @@ describe('update from the page with dagon-host apply against the mock hub', () =
     op.takeFile('sample-1.1.0.dgb', RELEASE);
     expect([op.state, op.file?.verdict]).toEqual(['fileReady', 'pass']);
     d.undo();
-    expect(d.doc.topo.links?.[0].addr).toBe(0x43);
+    expect(d.doc.topo.links?.[0].ends[1].addr).toBe(0x43);
   }, 20_000);
 
   test('a second 親機, a 孫機 and a loop of 子機 are skipped with why: the reachable part updates as before', async () => {
     const { t, op } = await sentTo();
     const d = new Define();
-    // hub2 and a loop x <-> y sit between hub and seg in nodes[], so a node's topology index is not its 構成 position.
+    // hub2 and x - y (linked to no 親機) sit between hub and seg in nodes[], so a node's topology index is not its 構成 position.
     const extra = (id: string, role: string) => `  - id: ${id}\n    mcu: rp2040\n    role: ${role}\n    port: self-boot\n    tag: ${id}\n`;
     d.load(
       fromYaml(
         SAMPLE_YAML.replace('  - id: seg\n', `${extra('hub2', 'coordinator')}${extra('x', 'node')}${extra('y', 'node')}  - id: seg\n`)
           .replace('\nbuses:', `${extra('deep', 'node')}\nbuses:`)
-          .replace('links:\n', 'links:\n  - from: hub\n    to: hub2\n    kind: can\n  - from: seg\n    to: deep\n    kind: uart\n    iface: hw-uart0\n    pins: { tx: 0, rx: 1 }\n    control:\n      kind: cooperative\n      rom_entry: force-download-boot\n  - from: x\n    to: y\n    kind: uart\n    iface: hw-uart0\n    pins: { tx: 0, rx: 1 }\n    control:\n      kind: cooperative\n      rom_entry: force-download-boot\n  - from: y\n    to: x\n    kind: uart\n    iface: hw-uart0\n    pins: { tx: 0, rx: 1 }\n    control:\n      kind: cooperative\n      rom_entry: force-download-boot\n')
+          .replace('links:\n', 'links:\n  - kind: usb-cdc\n    ends:\n      - { node: hub2, port: usb }\n      - { node: hub, port: usb }\n  - kind: uart\n    iface: hw-uart0\n    ends:\n      - { node: deep, port: uart1 }\n      - { node: seg, port: usart1, pins: { tx: 0, rx: 1 } }\n    control:\n      kind: cooperative\n      rom_entry: force-download-boot\n  - kind: uart\n    iface: hw-uart0\n    ends:\n      - { node: x, port: uart0, pins: { tx: 0, rx: 1 } }\n      - { node: y, port: uart0 }\n    control:\n      kind: cooperative\n      rom_entry: force-download-boot\n')
           .replace('order: [seg, watch, hub]', 'order: [seg, watch, deep, x, y, hub2, hub]'),
       ),
     );

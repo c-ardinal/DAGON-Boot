@@ -28,7 +28,7 @@
   import Detail from './screens/Detail.svelte';
   import { Define, type Operable } from './app/define/define.svelte.ts';
   import { topoDiff } from './app/define/diff.ts';
-  import { fromYaml, type Topo } from './app/define/model.ts';
+  import { fromYaml, linkKey, linkView, type Topo } from './app/define/model.ts';
   import { problemChip } from './app/define/problems.ts';
   import { SAMPLE_CONFIG, SAMPLE_YAML } from './app/sample.ts';
   import { Start, type StartChoice } from './app/start.svelte.ts';
@@ -409,7 +409,7 @@
     if (k.startsWith('node:')) return { node: k.slice(5) };
     const to = k.slice(5);
     const from = d.config.links.find((l) => l.to === to)?.from;
-    return from ? { link: { from, to } } : undefined;
+    return from ? { link: { ends: [from, to] } } : undefined;
   }
   function askDagon(text: string, kind: AskKind, at: Element) {
     if (stopped('ask', at)) return;
@@ -1614,7 +1614,8 @@
   {#if ask || d.askRemove}
     {@const key = d.askRemove ?? ''}
     {@const isNode = key.startsWith('node:')}
-    {@const l = isNode ? null : d.doc.topo.links?.find((x) => `link:${x.to}` === key)}
+    {@const found = isNode ? undefined : d.doc.topo.links?.find((x) => linkKey(d.doc.topo, x) === key)}
+    {@const l = found ? linkView(d.doc.topo, found) : null}
     {@const nameOf = (id: string) => d.doc.names[id] ?? id}
     {@const c = ask ?? { title: isNode ? CONFIRM.node(nameOf(key.slice(5))) : CONFIRM.link(nameOf(l?.from ?? ''), nameOf(l?.to ?? '')), sentence: isNode ? CONFIRM.nodeSentence : CONFIRM.linkSentence, label: CONFIRM.remove, run: () => d.answerRemove(true) }}
     {@const no = () => (ask ? (ask = null) : d.answerRemove(false))}

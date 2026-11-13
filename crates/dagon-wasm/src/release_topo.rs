@@ -2,7 +2,8 @@
 //! topology the page can edit ("ファイルの構成を取り込む").
 //! The canonical binary carries no ids, names, boards or node pins, so those
 //! come from the 構成 on the page wherever a node's tag matches; the rest is
-//! the binary's. Compiling the result gives the release's topology bytes again.
+//! the binary's, each link end's port named from its MCU definition. Compiling
+//! the result gives the release's topology bytes again.
 
 use dagon_format::topology::{self as tp, TopologyView};
 use dagon_format::BundleView;
@@ -94,25 +95,62 @@ fn node_value(x: &tp::TopoNode, id: &str, tag: &str, page: Option<&Node>) -> Res
     Ok(map(m))
 }
 
+/// The name of `[[link_port]]` `index` of MCU `mcu`.
+fn port_of(mcu: &str, index: u8) -> Option<String> {
+    crate::defs::with_registry(|reg| {
+        reg.mcu(mcu)?
+            .ports
+            .iter()
+            .find(|p| p.index == index)
+            .map(|p| p.name.clone())
+    })
+}
+
+/// One end `k` of `l`: its node and port, its address, the page's node pins
+/// for it, and the link's GPIOs when they are on its node.
+fn end_value(
+    l: &tp::TopoLink,
+    k: usize,
+    nodes: &[(String, String)],
+    page: Option<&Link>,
+) -> Result<Value, String> {
+    let e = l.ends[k];
+    let (id, mcu) = nodes
+        .get(e.node as usize)
+        .ok_or("link to an unknown node")?;
+    let port = port_of(mcu, e.port).ok_or_else(|| format!("{mcu} has no port {}", e.port))?;
+    let mut m = vec![("node", s(id)), ("port", s(&port))];
+    if e.addr != tp::NONE {
+        m.push(("addr", n(e.addr)));
+    }
+    if let Some(p) = page.and_then(|p| p.end(id)?.node_pins.as_ref()) {
+        m.push(("node_pins", map([("sda", s(&p.sda)), ("scl", s(&p.scl))])));
+    }
+    if usize::from(l.gpio_end) == k {
+        if l.iface != tp::iface::I2C_BUS {
+            m.push(("pins", map([("tx", n(l.tx_pin)), ("rx", n(l.rx_pin))])));
+        }
+        if l.nrst_pin != tp::NONE {
+            m.push(("nrst", n(l.nrst_pin)));
+        }
+        if l.boot_pin != tp::NONE {
+            m.push(("boot", n(l.boot_pin)));
+        }
+    }
+    Ok(map(m))
+}
+
 fn link_value(
     l: &tp::TopoLink,
-    ids: &[String],
+    nodes: &[(String, String)],
     bus_ids: &[String],
     page: Option<&Link>,
 ) -> Result<Value, String> {
-    let id = |i: u8| {
-        ids.get(i as usize)
-            .cloned()
-            .ok_or("link to an unknown node")
-    };
-    let mut m = vec![("from", s(&id(l.from)?)), ("to", s(&id(l.to)?))];
+    let mut m = Vec::new();
     match l.iface {
         tp::iface::I2C_BUS => {
             let bus = bus_ids.get(l.bus_id as usize).ok_or("unknown bus")?;
-            m.extend([("kind", s("i2c")), ("bus", s(bus)), ("addr", n(l.i2c_addr))]);
-            if let Some(p) = page.and_then(|p| p.node_pins.as_ref()) {
-                m.push(("node_pins", map([("sda", s(&p.sda)), ("scl", s(&p.scl))])));
-            }
+            m.extend([("kind", s("i2c")), ("bus", s(bus))]);
         }
         tp::iface::HW_UART0 | tp::iface::PIO_UART => {
             let iface = if l.iface == tp::iface::HW_UART0 {
@@ -123,24 +161,21 @@ fn link_value(
             m.extend([
                 ("kind", s("uart")),
                 ("iface", s(iface)),
-                ("pins", map([("tx", n(l.tx_pin)), ("rx", n(l.rx_pin))])),
                 ("baud", n(l.baud)),
             ]);
         }
         other => return Err(format!("unknown iface {other}")),
     }
+    let ends = (0..2)
+        .map(|k| end_value(l, k, nodes, page))
+        .collect::<Result<Vec<_>, _>>()?;
+    m.push(("ends", Value::Sequence(ends)));
     let kind = if l.control == tp::control::FULL {
         "full"
     } else {
         "cooperative"
     };
     let mut c = vec![("kind", s(kind))];
-    if l.nrst_pin != tp::NONE {
-        c.push(("nrst", n(l.nrst_pin)));
-    }
-    if l.boot_pin != tp::NONE {
-        c.push(("boot", n(l.boot_pin)));
-    }
     if let Some(r) = rom_entry_name(l.rom_entry) {
         c.push(("rom_entry", s(r)));
     }
@@ -199,6 +234,7 @@ pub fn release_topology_value(bundle: &[u8], current: &str) -> Result<Option<Val
     let cur = cur.as_ref();
     let raw: Vec<tp::TopoNode> = (0..v.node_count()).map(|i| v.node(i)).collect();
     let mut ids = Vec::with_capacity(raw.len());
+    let mut mcus = Vec::with_capacity(raw.len());
     let mut nodes = Vec::with_capacity(raw.len());
     let mut recovery = Mapping::new();
     for x in &raw {
@@ -213,21 +249,25 @@ pub fn release_topology_value(bundle: &[u8], current: &str) -> Result<Option<Val
             .map(s)
             .collect();
         recovery.insert(s(&id), Value::Sequence(tiers));
+        mcus.push(mcu_name(x.mcu_id).unwrap_or_default());
         ids.push(id);
     }
+    let named: Vec<(String, String)> = ids.iter().cloned().zip(mcus).collect();
     let (bus_ids, bus_values) = buses(&v, cur);
     let links = (0..v.link_count())
         .map(|i| {
             let l = v.link(i);
-            let to = ids.get(l.to as usize);
-            let page = cur.and_then(|t| t.links.iter().find(|p| Some(&p.to) == to));
-            link_value(&l, &ids, &bus_ids, page)
+            let [a, b] = l.ends.map(|e| ids.get(e.node as usize));
+            let page = cur
+                .zip(a.zip(b))
+                .and_then(|(t, (a, b))| t.link_between(a, b));
+            link_value(&l, &named, &bus_ids, page)
         })
         .collect::<Result<Vec<_>, _>>()?;
     let mut order: Vec<(u8, &String)> = raw.iter().map(|x| x.order_rank).zip(&ids).collect();
     order.sort_by_key(|(rank, _)| *rank);
     let mut top = vec![
-        ("dagon", n(1u8)),
+        ("dagon", n(dagon_topology::SCHEMA_VERSION)),
         ("name", s(cur.map_or("release", |t| t.name.as_str()))),
         ("nodes", Value::Sequence(nodes)),
     ];

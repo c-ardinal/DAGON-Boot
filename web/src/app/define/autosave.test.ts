@@ -96,7 +96,7 @@ describe('autosave of the 構成 (UC-D04)', () => {
     await settle();
     expect(puts).toHaveLength(1);
     expect(puts[0]).toContain('addr: 0x43');
-    expect([d.unsaved, d.saveFailure, d.doc.topo.links![0].addr]).toEqual([true, 'invalid', 0x43]);
+    expect([d.unsaved, d.saveFailure, d.doc.topo.links![0].ends[1].addr]).toEqual([true, 'invalid', 0x43]);
 
     edit(d, 0x44);
     a.edited();

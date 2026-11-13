@@ -22,7 +22,11 @@
     uartBauds,
     i2cHzs,
     busNodes,
+    linkIndexOf,
+    linkKey,
+    linkView,
     type LinkKind,
+    type LinkView,
     type TLink,
     type UplinkHost,
   } from '../../app/define/model.ts';
@@ -38,8 +42,8 @@
   const t = $derived(d.doc.topo);
   const nodeId = $derived(d.selected?.startsWith('node:') ? d.selected.slice(5) : null);
   const node = $derived(t.nodes.find((n) => n.id === nodeId));
-  const linkIndex = $derived(d.selected?.startsWith('link:') ? (t.links ?? []).findIndex((l) => `link:${l.to}` === d.selected) : -1);
-  const link = $derived(linkIndex >= 0 ? (t.links ?? [])[linkIndex] : undefined);
+  const linkIndex = $derived(d.selected?.startsWith('link:') ? (t.links ?? []).findIndex((l) => linkKey(t, l) === d.selected) : -1);
+  const link = $derived(linkIndex >= 0 ? linkView(t, (t.links ?? [])[linkIndex]) : undefined);
   const busIndex = $derived(d.selected?.startsWith('bus:') ? Number(d.selected.slice(4)) : -1);
   const bus = $derived(busIndex >= 0 ? t.buses?.[busIndex] : undefined);
   const hub = $derived(t.nodes.find((n) => n.role === 'coordinator'));
@@ -48,7 +52,7 @@
   /** The 親機's own pins: what a bus or a link from it may be set to (the check refuses any other). */
   const hubPins = $derived(definedPins(hub));
   const MAX_ATTEMPTS = [1, 2, 3, 4, 5];
-  const nodeLink = $derived(node ? (t.links ?? []).findIndex((l) => l.to === node.id) : -1);
+  const nodeLink = $derived(node ? linkIndexOf(t, node.id) : -1);
   const name = (id: string) => d.doc.names[id] ?? id;
   const byId = (id: string) => t.nodes.find((n) => n.id === id);
   /** Kinds a 親機's uplink may be (not I2C or CAN towards a PC). */
@@ -65,9 +69,9 @@
 
   /** Who else uses hub GPIO `n` (S20's in-use note). */
   function usedBy(n: number, self: string): string | null {
-    for (const l of t.links ?? []) {
-      if (`${l.to}.nrst` !== self && l.control?.nrst === n) return `${name(l.to)}の${INSPECT.reset}`;
-      if (`${l.to}.boot` !== self && l.control?.boot === n) return `${name(l.to)}の${INSPECT.boot}`;
+    for (const l of (t.links ?? []).map((x) => linkView(t, x))) {
+      if (`${l.to}.nrst` !== self && l.nrst === n) return `${name(l.to)}の${INSPECT.reset}`;
+      if (`${l.to}.boot` !== self && l.boot === n) return `${name(l.to)}の${INSPECT.boot}`;
       if (l.pins && `${l.to}.tx` !== self && `${l.to}.rx` !== self && (l.pins.tx === n || l.pins.rx === n)) return name(l.to);
     }
     for (const b of t.buses ?? []) if (self !== 'bus' && (b.sda === n || b.scl === n)) return INSPECT.bus;
@@ -138,10 +142,10 @@
       <label
         >{INSPECT.connectTo}<select
           data-field="connect"
-          value={nodeLink >= 0 ? (t.links ?? [])[nodeLink].from : ''}
+          value={nodeLink >= 0 ? linkView(t, (t.links ?? [])[nodeLink]).from : ''}
           onchange={(e) => {
             const parent = e.currentTarget.value;
-            const current = nodeLink >= 0 ? (t.links ?? [])[nodeLink].from : '';
+            const current = nodeLink >= 0 ? linkView(t, (t.links ?? [])[nodeLink]).from : '';
             // The same parent again changes nothing: the link keeps its settings.
             if (parent === current) return;
             // なし removes the link: that is a deletion, so it asks first like every other; until the answer the control shows the true value.
@@ -187,7 +191,7 @@
         >
       {/if}
       {#if nodeLink >= 0}
-        {@render controlPins((t.links ?? [])[nodeLink], nodeLink)}
+        {@render controlPins(linkView(t, (t.links ?? [])[nodeLink]), nodeLink)}
       {/if}
     </div>
     <details>
@@ -282,11 +286,11 @@
   {/if}
 </section>
 
-{#snippet controlPins(l: TLink, i: number)}
+{#snippet controlPins(l: LinkView, i: number)}
   {#if l.control?.kind === 'full'}
     {@const owner = definedPins(byId(l.from))}
-    {@render pinSelect('control.nrst', INSPECT.reset, l.control.nrst, `${l.to}.nrst`, owner, (n) => d.apply(setLink(d.doc, i, 'control.nrst', n)))}
-    {@render pinSelect('control.boot', INSPECT.boot, l.control.boot, `${l.to}.boot`, owner, (n) => d.apply(setLink(d.doc, i, 'control.boot', n)))}
+    {@render pinSelect('control.nrst', INSPECT.reset, l.nrst, `${l.to}.nrst`, owner, (n) => d.apply(setLink(d.doc, i, 'control.nrst', n)))}
+    {@render pinSelect('control.boot', INSPECT.boot, l.boot, `${l.to}.boot`, owner, (n) => d.apply(setLink(d.doc, i, 'control.boot', n)))}
   {/if}
 {/snippet}
 

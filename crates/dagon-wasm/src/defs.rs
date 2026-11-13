@@ -86,14 +86,14 @@ pub fn coordinator_uart0(mcu: &str) -> JsValue {
     })
 }
 
-/// The UART speeds a link from `from` to `to` may run at: those both MCU
+/// The UART speeds a link between MCUs `a` and `b` may run at: those both MCU
 /// definitions' `[link_uart] bauds` name; an end whose definition names
 /// none leaves nothing, as the check (V-26) refuses every speed on it. The Console offers only
 /// these, as the topology check (V-26) accepts only these.
 #[wasm_bindgen]
-pub fn uart_bauds(from: &str, to: &str) -> Vec<u32> {
+pub fn uart_bauds(a: &str, b: &str) -> Vec<u32> {
     with_registry(|reg| {
-        let lists: Vec<&[u32]> = [from, to]
+        let lists: Vec<&[u32]> = [a, b]
             .into_iter()
             .map(|id| {
                 reg.mcu(id)
@@ -134,6 +134,28 @@ pub fn i2c_hzs(mcus: Vec<String>) -> Vec<u32> {
             .copied()
             .filter(|b| rest.iter().all(|l| l.contains(b)))
             .collect()
+    })
+}
+
+/// The `[[link_port]]` name a new end of a `kind` link (`i2c`, `uart`, ...) on a node of `mcu`
+/// (and `board`, or none) starts at, `iface` the UART link's (`hw-uart0`, `pio-uart`); null when
+/// the MCU has no port of that kind (dagon_topology::default_port).
+#[wasm_bindgen]
+pub fn default_port(
+    mcu: &str,
+    board: Option<String>,
+    kind: &str,
+    iface: Option<String>,
+) -> Option<String> {
+    use dagon_topology::schema::{LinkKind, UartIface};
+    let kind = *LinkKind::ALL.iter().find(|k| k.name() == kind)?;
+    let iface = match iface.as_deref() {
+        Some("hw-uart0") => Some(UartIface::HwUart0),
+        Some("pio-uart") => Some(UartIface::PioUart),
+        _ => None,
+    };
+    with_registry(|reg| {
+        dagon_topology::default_port(reg, mcu, board.as_deref(), kind, iface).map(str::to_string)
     })
 }
 

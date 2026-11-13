@@ -177,7 +177,7 @@ fn gen_writes_each_nodes_index_in_the_compiled_topology() {
     // The compiled topology's links name the nodes by these indexes: the
     // I2C link to seg and the UART link to watch.
     let ends: Vec<(u8, u8)> = (0..view.link_count())
-        .map(|k| (view.link(k).to, view.link(k).iface))
+        .flat_map(|k| view.link(k).ends.map(|e| (e.node, view.link(k).iface)))
         .collect();
     assert!(ends.contains(&(seg, dagon_format::topology::iface::I2C_BUS)));
     assert!(ends.contains(&(watch, dagon_format::topology::iface::PIO_UART)));
@@ -1000,7 +1000,10 @@ fn mcu_templates_wire_the_links_the_topology_names() {
     assert!(hub.contains("#[cfg(all())]"), "{hub}");
     let seg = render_for("seg", &tpl("stm32f401re"));
     assert!(!seg.contains("{{"), "{seg}");
-    let pins = t.link_to("seg").and_then(|l| l.node_pins.clone()).unwrap();
+    let pins = t
+        .reached_over("seg")
+        .and_then(|l| l.end("seg")?.node_pins.clone())
+        .unwrap();
     assert!(seg.contains(&format!("sda: p.{}", pins.sda)), "{seg}");
     // Its DMA streams come from the MCU definition's request mapping
     // (I2C3: tx stream 4, rx stream 1), not from the template.
@@ -1043,23 +1046,29 @@ fn mcu_templates_wire_the_links_the_topology_names() {
         .find(|l| l.kind == LinkKind::Uart)
         .unwrap()
         .clone();
-    let mut i2c2 = i2c.clone();
-    i2c2.to = "second".into();
+    // The same links to other nodes, listed with the 親機's end second.
+    let to = |mut l: dagon_topology::schema::Link, node: &str| {
+        l.ends.reverse();
+        l.ends[0].node = node.into();
+        l
+    };
+    let mut i2c2 = to(i2c.clone(), "second");
     i2c2.bus = Some("bus-2".into());
-    let mut uart2 = uart.clone();
-    uart2.to = "third".into();
+    let uart2 = to(uart.clone(), "third");
     many.links.extend([i2c2, uart2.clone()]);
     let hub = many.node("hub").unwrap().clone();
     let e = wiring_placeholders(reg, &many, &hub).unwrap_err();
     assert!(
-        e.contains("one I2C bus") && e.contains("bus-2") && e.contains("hub -> second"),
+        e.contains("one I2C bus")
+            && e.contains("bus-2")
+            && e.contains("between 'second' and 'hub'"),
         "{e}"
     );
-    many.links.retain(|l| l.to != "second");
+    many.links.retain(|l| l.end("second").is_none());
     let n = &hub;
     let e = wiring_placeholders(reg, &many, n).unwrap_err();
     assert!(
-        e.contains("one UART link") && e.contains("hub -> third"),
+        e.contains("one UART link") && e.contains("between 'third' and 'hub'"),
         "{e}"
     );
     // A template that does not use the wiring is rendered all the same.
@@ -1184,8 +1193,8 @@ fn templates_get_the_hops_and_gen_refuses_one_not_available_yet() {
     );
     // A link a 子機 cannot do: named by its two ends.
     let wifi = dagon_topology::parse_str(&SAMPLE.replacen(
-        "    kind: i2c\n    bus: ",
-        "    kind: wifi-tcp\n    bus: ",
+        "  - kind: i2c\n    bus: ",
+        "  - kind: wifi-tcp\n    bus: ",
         1,
     ))
     .unwrap();
@@ -1199,7 +1208,7 @@ fn templates_get_the_hops_and_gen_refuses_one_not_available_yet() {
     )
     .unwrap_err();
     assert!(
-        e.contains("link hub -> seg over wifi-tcp: not available yet"),
+        e.contains("link between 'hub' and 'seg' over wifi-tcp: not available yet"),
         "{e}"
     );
 }

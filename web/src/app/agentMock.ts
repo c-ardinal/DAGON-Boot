@@ -54,7 +54,7 @@ export function agentMock(q: URLSearchParams, yaml: () => string, wait = (ms: nu
       if (!consent) return json({ error: 'not linked', code: 'AGENT_NOT_LINKED' }, 409);
       await wait(1200);
       const kind = String((body as { kind?: string }).kind ?? 'free');
-      const proposal = kind === 'propose' ? { yaml_diff: '   - from: hub\n     to: watch\n     kind: uart\n-    baud: 115200\n+    baud: 230400', topology: yaml().replace('baud: 115200', 'baud: 230400') } : null;
+      const proposal = kind === 'propose' ? { yaml_diff: '   - kind: uart\n     iface: pio-uart\n-    baud: 115200\n+    baud: 230400', topology: yaml().replace('baud: 115200', 'baud: 230400') } : null;
       return json({ answer: ANSWERS[kind] ?? 'その質問には、構成の事実からは答えられません。', proposal });
     }
     return json({ error: 'not found' }, 404);

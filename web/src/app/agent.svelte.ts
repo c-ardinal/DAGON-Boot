@@ -47,7 +47,8 @@ export interface AgentStatus {
 }
 
 export type AskKind = 'problem' | 'next' | 'propose' | 'failure' | 'free';
-export type Selection = { node: string } | { link: { from: string; to: string } };
+/** A node, or a link by its two ends (a link has no direction). */
+export type Selection = { node: string } | { link: { ends: [string, string] } };
 
 /** The record of a write that went back to the previous version, as POST /v1/agent/ask takes it. */
 export interface RollbackRecord {

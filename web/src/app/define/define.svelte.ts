@@ -3,7 +3,7 @@
 import { supportedBoards } from '../../wasm/dagon.ts';
 import { ANNOUNCE, LINK_WHY } from '../copy.ts';
 import { SAMPLE_CONFIG, SAMPLE_YAML, type Config } from '../sample.ts';
-import { connect, docWithDefaults, emptyDoc, fromYaml, place, placeMcu, removeLink, withDefaults, removeNode, toConfig, toYaml, type Doc, type Topo } from './model.ts';
+import { connect, docWithDefaults, emptyDoc, fromYaml, linkIndexOf, linkKey, place, placeMcu, removeLink, sides, withDefaults, removeNode, toConfig, toYaml, type Doc, type Topo } from './model.ts';
 import type { SaveResult } from './cli.svelte.ts';
 import { keepComments } from './comments.ts';
 import { problems, type Problem } from './problems.ts';
@@ -174,14 +174,20 @@ export class Define {
 
   /** Why `id` cannot go under `parent` by a port drag, or null when it can. */
   linkRefusal(parent: string, id: string): string | null {
-    const links = this.doc.topo.links ?? [];
-    const up = links.find((l) => l.to === id)?.from;
+    const t = this.doc.topo;
+    const links = t.links ?? [];
+    // The node a link is shown under, by the editor's sides of each link.
+    const above = (x: string | undefined) => {
+      const i = x === undefined ? -1 : linkIndexOf(t, x);
+      return i < 0 ? undefined : sides(t, links[i]).up.node;
+    };
+    const up = above(id);
     if (up !== undefined) {
       const p = this.doc.topo.nodes.find((n) => n.id === up);
       return p?.role === 'coordinator' ? LINK_WHY.taken : LINK_WHY.under(this.doc.names[up] ?? up);
     }
     // Under its own descendant: the link would close a loop.
-    for (let at: string | undefined = parent, i = 0; at !== undefined && i < 64; at = links.find((l) => l.to === at)?.from, i++) {
+    for (let at: string | undefined = parent, i = 0; at !== undefined && i < 64; at = above(at), i++) {
       if (at === id) return LINK_WHY.loop;
     }
     return null;
@@ -222,7 +228,8 @@ export class Define {
       if (!this.apply(removeNode(this.doc, id))) return;
       this.status = ANNOUNCE.A03(name);
     } else if (s.startsWith('link:')) {
-      const i = (this.doc.topo.links ?? []).findIndex((l) => l.to === s.slice(5));
+      const t = this.doc.topo;
+      const i = (t.links ?? []).findIndex((l) => linkKey(t, l) === s);
       if (i < 0 || !this.apply(removeLink(this.doc, i))) return;
     }
     if (this.selected === s) this.selected = null;
@@ -310,7 +317,7 @@ export class Define {
     const s = this.selected;
     if (!s) return;
     const t = this.doc.topo;
-    const there = s.startsWith('node:') ? t.nodes.some((n) => `node:${n.id}` === s) : s.startsWith('link:') ? (t.links ?? []).some((l) => `link:${l.to}` === s) : true;
+    const there = s.startsWith('node:') ? t.nodes.some((n) => `node:${n.id}` === s) : s.startsWith('link:') ? (t.links ?? []).some((l) => linkKey(t, l) === s) : true;
     if (!there) this.selected = null;
   }
 }

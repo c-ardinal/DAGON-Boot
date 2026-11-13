@@ -24,8 +24,10 @@ given).
   `role` (`coordinator` for the 親機, `node` for a 子機), `port`
   (`self-boot`; `vendor-stage2` for `esp32s3`), a `tag`, and a link from
   the 親機. Copy the shape of an existing node in the file.
-- For an I2C 子機: the address and `node_pins` (SDA and SCL on the node's
-  MCU). For a UART 子機: the baud rate and the 親機's pins.
+- On the link, each end's `port`: a `[[link_port]]` name of that node's MCU.
+  For an I2C 子機: its end's address and `node_pins` (SDA and SCL on the
+  node's MCU). For a UART 子機: the baud rate and the 親機's pins on the
+  親機's end.
 
 ## Steps
 

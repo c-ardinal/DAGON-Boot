@@ -62,6 +62,12 @@ pub fn release_topology(bundle: &[u8], current: &str) -> Result<JsValue, JsError
         .map_err(|e| JsError::new(&e))
 }
 
+/// The topology YAML number a new 構成 is written with (its `dagon:` key).
+#[wasm_bindgen]
+pub fn schema_version() -> u32 {
+    dagon_topology::SCHEMA_VERSION
+}
+
 /// The part updating reaches (dagon_topology::cut_with): `{reach: [id],
 /// skipped: {id: why}}`. `reach` is in the compiled topology's node order
 /// (the indices dagon-host uses); every other node is in `skipped` with

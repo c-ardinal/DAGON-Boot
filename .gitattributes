@@ -2,3 +2,6 @@
 # generated projects, so what it generates cannot depend on the Git settings
 # of the machine that built it.
 * text=auto eol=lf
+# The page's built script is the bundler's output: whitespace at a line's end
+# is part of a string in it, not an error to fix.
+crates/dagon-cli/page/assets/*.js -whitespace

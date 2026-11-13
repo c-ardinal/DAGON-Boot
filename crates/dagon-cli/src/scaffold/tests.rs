@@ -11,7 +11,7 @@ fn dev() -> crate::dagonsrc::NewSource {
     crate::dagonsrc::NewSource::Clone(crate::config::plain_path(here))
 }
 
-fn tmp(name: &str) -> PathBuf {
+pub(super) fn tmp(name: &str) -> PathBuf {
     let d = std::env::temp_dir().join(format!("dagon-scaffold-{name}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&d);
     std::fs::create_dir_all(&d).unwrap();
@@ -763,18 +763,24 @@ fn new_gen_build_f401_node() {
 /// for every boot core slot its MCU declares and signed for that slot as a
 /// release signs it: the signer refuses an ELF whose lowest load address
 /// is not the slot's payload address (real firmware builds; CI runs them
-/// in the boot-crates job).
-fn gen_boot_core_slots_sign(node: &str) {
+/// in the boot-crates job). With `one_core`, its MCU definition keeps boot
+/// core slot a only: slot a alone is built and signed, and slot b is not
+/// signed.
+fn gen_boot_core_slots_sign(node: &str, one_core: bool) {
     use dagon_format::header::{image_kind, slot_binding, ImageHeader, HEADER_SIZE};
-    let d = tmp(&format!("e2e-boot-{node}"));
+    let d = tmp(&format!("e2e-boot-{node}-{one_core}"));
     let dir = d.join("proj");
     new_project(&dir, "proj", SAMPLE, &d.join("keys"), &dev()).unwrap();
     let config = dir.join(crate::config::CONFIG_FILE);
     gen_project(&config, &[node.to_string()], false).unwrap();
     let cfg = Config::load(Some(&config.to_string_lossy())).unwrap();
-    let reg = crate::defs::registry(&cfg).unwrap();
     let t = dagon_topology::parse_str(SAMPLE).unwrap();
     let n = t.node(node).unwrap();
+    let reg = if one_core {
+        super::tests_slots::with_single(&n.mcu, &["bootcore"]).unwrap()
+    } else {
+        crate::defs::registry(&cfg).unwrap()
+    };
     let key = ed25519_compact::KeyPair::from_seed(ed25519_compact::Seed::new([9; 32]));
     let mut log = Vec::new();
     let built = crate::flash::build_core_slots(
@@ -795,7 +801,22 @@ fn gen_boot_core_slots_sign(node: &str) {
         bits: None,
     };
     let slots: Vec<char> = built.iter().map(|(s, _)| *s).collect();
-    assert_eq!(slots, ['a', 'b'], "{node}");
+    let want: &[char] = if one_core { &['a'] } else { &['a', 'b'] };
+    assert_eq!(slots, want, "{node}");
+    if one_core {
+        let e = crate::commands::image_for_node(
+            &reg,
+            &t,
+            node,
+            image_kind::BOOTCORE,
+            slot_binding::B,
+            &built[0].1,
+            Some(&opts),
+            &key,
+        )
+        .unwrap_err();
+        assert!(e.contains("has no such slot"), "{e}");
+    }
     for (slot, elf) in &built {
         let binding = if *slot == 'b' {
             slot_binding::B
@@ -827,13 +848,25 @@ fn gen_boot_core_slots_sign(node: &str) {
 #[test]
 #[ignore = "builds firmware for the STM32F401"]
 fn gen_boot_core_slots_sign_f401() {
-    gen_boot_core_slots_sign("seg");
+    gen_boot_core_slots_sign("seg", false);
+}
+
+#[test]
+#[ignore = "builds firmware for the STM32F401"]
+fn gen_boot_core_slots_sign_f401_one_core() {
+    gen_boot_core_slots_sign("seg", true);
 }
 
 #[test]
 #[ignore = "builds firmware for the RP2040"]
 fn gen_boot_core_slots_sign_rp2040() {
-    gen_boot_core_slots_sign("hub");
+    gen_boot_core_slots_sign("hub", false);
+}
+
+#[test]
+#[ignore = "builds firmware for the RP2040"]
+fn gen_boot_core_slots_sign_rp2040_one_core() {
+    gen_boot_core_slots_sign("hub", true);
 }
 
 #[test]

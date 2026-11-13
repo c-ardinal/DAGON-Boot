@@ -34,7 +34,7 @@ i2c = [{ controller = "i2c3", sda = "PB4", scl = "PA8" }]
 
 `dagon gen`は、このノードをマイコンのcrateから作り、`wiring.rs`にボードの`flash_bytes`を書きます。
 
-I2Cの子機では、リンクにノード側のピン（`node_pins`）を書きます。
+リンクの子機の端には、その子機のマイコンの`[[link_port]]`の名前（`port`）を書きます。I2Cの子機では、その端にアドレス（`addr`）とピン（`node_pins`）も書きます（[構成のリンク](/reference/topology/)）。
 
 足りないものは、検査と`dagon gen`が知らせます。
 

@@ -22,4 +22,5 @@ sidebar:
 
 - [エージェントとのつなぎ方: serve API](/reference/agent-api/): DAGONのエージェントとのつなぎ方、質問、キー
 - [拡張のマニフェスト](/reference/extension-manifest/)と[マイコンとボードの定義](/reference/definitions/): キーの表は、DAGONがファイルを読み込む型から生成しています
+- [構成のリンク](/reference/topology/): 2つの端でノードをつなぐリンク。キーの表は、DAGONが構成を読み込む型から生成しています
 - [ライセンス](/reference/licenses/)

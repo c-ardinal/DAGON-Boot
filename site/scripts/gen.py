@@ -238,6 +238,14 @@ TYPES = {
     "bool": ("真偽値", "boolean"),
     "Capabilities": ("`[capabilities]`テーブル", "`[capabilities]` table"),
     "Limits": ("`[limits]`テーブル", "`[limits]` table"),
+    # The topology's link and end keys.
+    "u8": ("整数", "integer"),
+    "LinkKind": ("文字列", "string"),
+    "UartIface": ("文字列", "string"),
+    "[End; 2]": ("2つの端の配列", "array of two ends"),
+    "Control": ("テーブル", "table"),
+    "NodePins": ("テーブル", "table"),
+    "UartPins": ("テーブル", "table"),
 }
 
 
@@ -639,6 +647,7 @@ def extension_keys(lang):
 
 
 DEFS = ROOT / "crates" / "dagon-topology" / "src" / "defs"
+SCHEMA = ROOT / "crates" / "dagon-topology" / "src" / "schema.rs"
 
 
 @functools.cache
@@ -688,6 +697,8 @@ REGIONS = [
     ("reference/definitions.md", "dagon-topology's McuDef", lambda lang: def_rows(lang, DEFS / "mod.rs", "McuDef")),
     ("reference/definitions.md", "dagon-topology's Isolation", lambda lang: def_rows(lang, DEFS / "isolation.rs", "Isolation", "isolation")),
     ("reference/definitions.md", "dagon-topology's BoardDef", lambda lang: def_rows(lang, DEFS / "mod.rs", "BoardDef")),
+    ("reference/topology.md", "dagon-topology's Link", lambda lang: field_table(rust_struct(SCHEMA, "Link"), lang) + "\n"),
+    ("reference/topology.md", "dagon-topology's End", lambda lang: field_table(rust_struct(SCHEMA, "End"), lang) + "\n"),
     ("explanation/index.md", "site/scripts/architecture.py", lambda lang: f"<div>{architecture.node_svg(lang)}</div>\n\n{architecture.component_table(lang)}"),
 ]
 

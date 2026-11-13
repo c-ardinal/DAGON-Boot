@@ -647,7 +647,9 @@ def defs_source():
 
 
 def is_table(name):
-    """Whether type `name` is written as a TOML table: a struct, or an enum tagged by a key."""
+    """Whether type `name` is written as a TOML table: a struct, a map, or an enum tagged by a key."""
+    if name.startswith("BTreeMap<"):
+        return True
     src = defs_source()
     if re.search(rf"pub struct {name}\b", src):
         return True

@@ -22,7 +22,7 @@ pub use ops::{
 };
 pub use percent::{transfer_percent, trial_percent};
 #[cfg(feature = "defs")]
-pub use timings::{mcu_timings, node_timings};
+pub use timings::{mcu_timings, node_timings, relay_links};
 pub use timings::{HostTimings, NodeTimingError};
 
 use alloc::boxed::Box;
@@ -31,7 +31,8 @@ use alloc::vec::Vec;
 use dagon_format::topology::{self, TopologyView};
 use dagon_format::{FormatError, Version};
 use dagon_port::timeout::{EraseLayout, EraseRegion, NodeTimings, SlotLayout, REQUEST_MS};
-use dagon_proto::payload::{link, HelloReq, HelloResp, Relay};
+use dagon_port::{Addressing, LinkKind, RelayLinkDef};
+use dagon_proto::payload::{HelloReq, HelloResp, Relay};
 use dagon_proto::{find_sof, flags, max_payload, split_status, Cmd, Frame, FrameError, Status};
 
 /// What becomes of the link to the hub while the hub reboots.
@@ -97,21 +98,21 @@ impl Target {
         }
     }
 
-    fn relay(self) -> Option<(u8, u8)> {
-        match self {
-            Target::Hub => None,
-            Target::I2c(a) => Some((link::I2C0, a)),
-            Target::Uart => Some((link::PIO_UART, link::UART_ADDR)),
-        }
-    }
-
-    /// Largest payload of the hub's link to this node; None for the hub.
-    fn node_link_max(self) -> Option<usize> {
-        match self {
-            Target::Hub => None,
-            Target::I2c(_) => Some(max_payload::I2C),
-            Target::Uart => Some(max_payload::UART),
-        }
+    /// The hub's relay link to this node among `links` (the hub MCU's
+    /// definition's), and the address RELAY names it by: the first link of
+    /// its kind. `None` for the hub, or when `links` hold no such link.
+    fn relay(self, links: &[RelayLinkDef]) -> Option<(RelayLinkDef, u8)> {
+        let (kind, addr) = match self {
+            Target::Hub => return None,
+            Target::I2c(a) => (LinkKind::I2c, Some(a)),
+            Target::Uart => (LinkKind::Uart, None),
+        };
+        links.iter().find_map(|l| match (l.addressing, addr) {
+            _ if l.kind != kind => None,
+            (Addressing::SevenBit, Some(a)) => Some((*l, a)),
+            (Addressing::Fixed(f), None) => Some((*l, f)),
+            _ => None,
+        })
     }
 }
 
@@ -147,6 +148,9 @@ pub enum Error<E> {
     Unreachable {
         node: u8,
     },
+    /// The hub relays over no link that reaches this target
+    /// ([`Host::relay_links`]); nothing was sent.
+    NoRelayLink(Target),
     /// The node does not answer and its ROM path was not confirmed; nothing
     /// was touched.
     RomNotConfirmed {
@@ -222,6 +226,10 @@ pub struct Host<T: Transport, C: HostClock> {
     /// its progress number. A node with no entry gets
     /// [`NodeTimings::FALLBACK`].
     pub timings: Vec<(u8, HostTimings)>,
+    /// The links the hub relays over, from its MCU definition
+    /// ([`relay_links`] under the `defs` feature): a node is reached over
+    /// the one of its link's kind. Empty: only the hub itself is reached.
+    pub relay_links: Vec<RelayLinkDef>,
     /// Lines about steps that are retried (a CONFIRM sent again), for the
     /// caller's log; `None`: not shown.
     pub note: Option<Note>,
@@ -241,6 +249,7 @@ impl<T: Transport, C: HostClock> Host<T, C> {
             core_write: false,
             write: percent::WriteTrack::default(),
             timings: Vec::new(),
+            relay_links: Vec::new(),
             note: None,
         }
     }
@@ -306,10 +315,16 @@ impl<T: Transport, C: HostClock> Host<T, C> {
     /// node also its link's and what fits inside a RELAY on the uplink.
     pub(crate) fn link_max(&self, to: Target) -> usize {
         let up = self.transport.max_payload();
-        match to.node_link_max() {
+        match self.node_link_max(to) {
             None => up,
             Some(node) => node.min(up.saturating_sub(Relay::HEAD_LEN + dagon_proto::frame_len(0))),
         }
+    }
+
+    /// Largest payload of the hub's link to `to`; None for the hub (or no link).
+    fn node_link_max(&self, to: Target) -> Option<usize> {
+        to.relay(&self.relay_links)
+            .map(|(l, _)| usize::from(l.max_payload))
     }
 
     /// Version this session last applied to `to`.
@@ -477,8 +492,13 @@ impl<T: Transport, C: HostClock> Host<T, C> {
         timeout_ms: u32,
         retries: usize,
     ) -> Result<Vec<u8>, T::Error> {
+        let route = match to {
+            Target::Hub => None,
+            _ => Some(to.relay(&self.relay_links).ok_or(Error::NoRelayLink(to))?),
+        };
+        let max = route.map_or(max_payload::USB, |(l, _)| usize::from(l.max_payload));
         let seq = self.next_seq();
-        let relay = to.relay().map(|r| (r, self.next_seq()));
+        let relay = route.map(|(l, addr)| ((l.id, addr), self.next_seq()));
         let mut attempt = 0;
         loop {
             let fl = if attempt == 0 { 0 } else { flags::RETRY };
@@ -500,7 +520,7 @@ impl<T: Transport, C: HostClock> Host<T, C> {
                     let frame = encode(fl, outer, Cmd::Relay as u8, &p);
                     self.exchange(outer, Cmd::Relay, &frame, timeout_ms + REQUEST_MS)
                         .await
-                        .and_then(|resp| relayed(&resp, to, seq, cmd))
+                        .and_then(|resp| relayed(&resp, max, seq, cmd))
                 }
             };
             let again = matches!(r, Err(Error::Timeout | Error::Relay(Status::Timeout)));
@@ -583,12 +603,12 @@ fn encode(fl: u8, seq: u8, cmd: u8, payload: &[u8]) -> Vec<u8> {
 }
 
 /// The node's response payload inside a RELAY response.
-fn relayed<E>(resp: &[u8], to: Target, seq: u8, cmd: Cmd) -> Result<Vec<u8>, E> {
+/// `max`: the largest payload of the node's link.
+fn relayed<E>(resp: &[u8], max: usize, seq: u8, cmd: Cmd) -> Result<Vec<u8>, E> {
     let (status, body) = split_status(resp).ok_or(Error::BadResponse)?;
     if status != Status::Ok {
         return Err(Error::Relay(status));
     }
-    let max = to.node_link_max().unwrap_or(max_payload::USB);
     let (f, _) = Frame::decode(body, max).map_err(|_| Error::BadResponse)?;
     if f.flags & flags::RESP == 0 || f.seq != seq || f.cmd != cmd as u8 {
         return Err(Error::BadResponse);

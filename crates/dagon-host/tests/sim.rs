@@ -252,12 +252,39 @@ impl HostClock for Sim {
     }
 }
 
-/// A host with each node's timings from the builtin definitions.
+/// A host with each node's timings and the hub's relay links from the
+/// builtin definitions.
 fn host(s: &Sim) -> Host<Sim, Sim> {
     let mut h = Host::new(s.clone(), s.clone());
     let topo = dagon_topology::parse_str(&yaml()).unwrap();
-    h.timings = dagon_host::node_timings(dagon_topology::defs::Registry::builtin(), &topo).unwrap();
+    let reg = dagon_topology::defs::Registry::builtin();
+    h.timings = dagon_host::node_timings(reg, &topo).unwrap();
+    h.relay_links = dagon_host::relay_links(reg, &topo);
     h
+}
+
+/// A node is reached over the hub's relay link of its kind, by the id the
+/// host is given; with none given, nothing is sent.
+#[test]
+fn nodes_are_reached_over_the_relay_links_the_host_is_given() {
+    let s = sim();
+    let mut h = host(&s);
+    assert!(block_on(h.hello(SEG_AT)).is_ok());
+
+    let mut none = host(&s);
+    none.relay_links.clear();
+    let before = s.hub.borrow().now_ms();
+    let r = block_on(none.hello(SEG_AT));
+    assert!(matches!(r, Err(Error::NoRelayLink(SEG_AT))), "{r:?}");
+    assert_eq!(s.hub.borrow().now_ms(), before, "nothing was sent");
+
+    // Another id than the hub's definition gives: the hub refuses it.
+    let mut other = host(&s);
+    for l in &mut other.relay_links {
+        l.id = l.id.wrapping_add(100);
+    }
+    let r = block_on(other.hello(SEG_AT));
+    assert!(matches!(r, Err(Error::Relay(Status::Arg))), "{r:?}");
 }
 
 /// The shortest `[watchdog] trial_ms` of the builtin MCU definitions.

@@ -206,7 +206,7 @@ Built for one node of a project, after `dagon gen`:
 
 ```sh
 export DAGON_PUBKEY=/path/outside/the/repo/dagon-signing.pub
-(cd targets/mcu/stm32f401re/stage0 && cargo build --release)
+(cd targets/mcu/stm32f401re/stage0 && DAGON_BOOT_CRATE=<project>/boot/<node> cargo build --release)
 (cd <project>/boot/<node> && cargo build --release)
 ```
 

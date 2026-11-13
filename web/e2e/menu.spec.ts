@@ -25,8 +25,6 @@ const connect = async (page: Page) => {
   await page.locator('.st-alive').first().waitFor({ timeout: 30_000 });
 };
 
-const sentence = (page: Page) => page.locator('#band .sentence').innerText();
-
 /** Drags card `n` out of the tree. */
 async function dragCard(page: Page, n = 1) {
   const c = (await page.locator('.node').nth(n).boundingBox())!;
@@ -134,12 +132,11 @@ const ITEMS: Record<string, { query?: string; check: (p: Page) => Promise<void> 
       await settled(p);
       await connect(p);
       await offWithReason(p, 'つなぐ', '前のバージョンに戻す');
+      // The sample's nodes start with one version each: nothing to go back to, and the item says so.
       await p.locator('.node').nth(1).dispatchEvent('click');
-      const before = await sentence(p);
-      await press(p, 'つなぐ', '前のバージョンに戻す');
-      // Going back asks first, like every change that cannot be undone.
-      await p.locator('dialog[open]').getByRole('button', { name: '戻す' }).click();
-      await expect.poll(() => sentence(p), { timeout: 15_000 }).not.toBe(before);
+      await expect(await row(p, 'つなぐ', '前のバージョンに戻す')).toHaveAttribute('title', '戻せる前のバージョンはありません。');
+      await p.keyboard.press('Escape');
+      await offWithReason(p, 'つなぐ', '前のバージョンに戻す');
     },
   },
   'DAGON/DAGON と連携する': {

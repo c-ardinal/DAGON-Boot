@@ -350,7 +350,10 @@ fn a_relaying_node_may_have_one_slot() {
     }
     let sample = include_str!("../../../../topology/sample.yaml");
     let t = crate::parse_str(sample).unwrap();
-    assert!(t.links.iter().any(|l| l.from == "hub"), "a node relays");
+    assert!(
+        t.links.iter().any(|l| l.end("hub").is_some()),
+        "a node relays"
+    );
     let r = crate::check_with(&reg, &t);
     assert!(r.errors().next().is_none(), "{:?}", r.issues);
 }

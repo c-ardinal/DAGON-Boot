@@ -33,6 +33,7 @@ slot-b = ["dagon-mcu-rp2040/slot-b"]
 dagon-mcu-rp2040 = { path = "..", default-features = false, features = ["hal", "image-bootcore"] }
 dagon-boot = { path = "../../../../crates/dagon-boot" }
 dagon-core = { path = "../../../../crates/dagon-core" }
+dagon-ed25519 = { path = "../../../../crates/dagon-ed25519", features = ["compact"] }
 dagon-events = { path = "../../../../crates/dagon-events" }
 dagon-format = { path = "../../../../crates/dagon-format" }
 dagon-port = { path = "../../../../crates/dagon-port" }

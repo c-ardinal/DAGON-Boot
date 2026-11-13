@@ -30,6 +30,7 @@
 use dagon_boot::BootRun;
 use dagon_core::boot::{BootConfig, Decision};
 use dagon_core::bootcore::CLEARED;
+use dagon_ed25519::Ed25519Compact;
 use dagon_events::{compose_boot, BootExtension, Extension};
 use dagon_format::header::{self, mcu_id, HEADER_SIZE};
 use dagon_mcu_rp2040::arm::{jump, led, step, trial};
@@ -115,7 +116,7 @@ fn app_verifies(flash: &mut RpFlash, slot: u8) -> bool {
         .slots
         .get(usize::from(slot))
         .is_some_and(|&base| flash.read(base, &mut raw).is_ok())
-        && header::verify_header(&raw, &PUBKEY).is_ok()
+        && header::verify_header(&raw, &VERIFIER).is_ok()
 }
 
 /// Microseconds since reset: the TIMER, which counts the watchdog's 1 MHz
@@ -132,8 +133,10 @@ fn now_us() -> u64 {
     }
 }
 
+/// This core's signature verifier, under the key built into it.
+const VERIFIER: Ed25519Compact = Ed25519Compact::new(PUBKEY);
+
 const CONFIG: BootConfig = BootConfig {
-    pubkey: PUBKEY,
     mcu_id: mcu_id::RP2040,
     target_tag: checked_tag(TARGET_TAG),
     max_attempts: TRIAL_ATTEMPTS,
@@ -160,6 +163,7 @@ pub fn run<E: Extension>(chain: E, limits: &'static [BootExtension]) -> ! {
         &APP_LOG_LAYOUT,
         &APP_SLOTS,
         &CONFIG,
+        &VERIFIER,
         WDT_MS,
     );
     let decision = boot.decision();

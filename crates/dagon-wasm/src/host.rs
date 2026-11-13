@@ -141,19 +141,31 @@ impl WasmHost {
     /// Each node of the topology `yaml` gets its own limits from its MCU's
     /// definition in use (`dagon_host::node_timings`): the wait for the
     /// request it erases on, and its trial, which also weighs in its one
-    /// progress number; and the hub relays over the links its MCU's
-    /// definition lists (`dagon_host::relay_links`). Throws with the reason
-    /// when the topology does not parse or a definition breaks a timing rule.
+    /// progress number; and each linked node is reached by the topology
+    /// link joining it to the connected node and that node's MCU's relay
+    /// table (`dagon_host::configured_routes`). Throws with the reason when
+    /// the topology does not parse or a definition breaks a timing rule.
     #[wasm_bindgen(js_name = setTimings)]
     pub fn set_timings(&self, yaml: &str) -> Result<(), JsValue> {
         let topo = dagon_topology::parse_str(yaml).map_err(|e| JsError::new(&e.to_string()))?;
         let (timings, links) = crate::defs::with_registry(|reg| {
-            dagon_host::node_timings(reg, &topo).map(|t| (t, dagon_host::relay_links(reg, &topo)))
+            dagon_host::node_timings(reg, &topo)
+                .map(|t| (t, dagon_host::configured_routes(reg, &topo)))
         })
         .map_err(|e| JsError::new(&e.to_string()))?;
         let mut h = self.host.try_borrow_mut().map_err(|_| busy())?;
         h.timings = timings;
-        h.relay_links = links;
+        h.routes = links;
+        Ok(())
+    }
+
+    /// No configuration: every node gets the fallback limits, and only the
+    /// node the PC is connected to is reached.
+    #[wasm_bindgen(js_name = clearTimings)]
+    pub fn clear_timings(&self) -> Result<(), JsValue> {
+        let mut h = self.host.try_borrow_mut().map_err(|_| busy())?;
+        h.timings = Vec::new();
+        h.routes = dagon_host::Routes::default();
         Ok(())
     }
 

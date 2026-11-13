@@ -4,7 +4,7 @@
 
 use std::path::PathBuf;
 
-use dagon_host::{connected_node, relay_routes, RouteError, Target};
+use dagon_host::{relay_routes, RouteError, Target};
 use dagon_port::Addressing;
 use dagon_topology::defs::{Registry, Source};
 use dagon_topology::Topology;
@@ -33,21 +33,25 @@ fn yaml(links: &str) -> String {
     format!("{NODES}links:\n{links}recovery: {{}}\nupdate: {{ order: [] }}\n")
 }
 
-/// The built-in definitions with the RP2040 also relaying over i2c1 (id 3).
-fn two_i2c_ports() -> Registry {
+/// The built-in definitions with `overrides` (a project's dagon.toml body).
+fn with(name: &str, overrides: &str) -> Registry {
     let dir: PathBuf =
-        std::env::temp_dir().join(format!("dagon-host-routes-{}", std::process::id()));
+        std::env::temp_dir().join(format!("dagon-host-routes-{name}-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let toml = dir.join("dagon.toml");
-    std::fs::write(
-        &toml,
-        "format = 1\n[[mcu_override.rp2040.relay_link]]\nport = \"i2c1\"\nid = 3\n\
-         addressing = \"seven-bit\"\nmax_payload = 256\n",
-    )
-    .unwrap();
+    std::fs::write(&toml, format!("format = 1\n{overrides}")).unwrap();
     let r = Registry::load(&[Source::Project(&toml)]).unwrap();
     std::fs::remove_dir_all(dir).unwrap();
     r
+}
+
+/// The built-in definitions with the RP2040 also relaying over i2c1 (id 3).
+fn two_i2c_ports() -> Registry {
+    with(
+        "two",
+        "[[mcu_override.rp2040.relay_link]]\nport = \"i2c1\"\nid = 3\n\
+         addressing = \"seven-bit\"\nmax_payload = 256\n",
+    )
 }
 
 fn port(reg: &Registry, name: &str) -> u8 {
@@ -169,20 +173,29 @@ fn no_configuration_reaches_only_the_connected_node() {
     assert_eq!(r, Err(RouteError::Unknown(Target::I2c(0x42))));
 }
 
+/// The host routes from whatever node it is given, whatever its role: from
+/// seg (a 子機 in this configuration) whose MCU relays over i2c1, far is
+/// reached over seg's entry, and hub over none.
 #[test]
-fn the_connected_node_is_the_one_the_reachable_part_starts_from() {
-    assert_eq!(connected_node(&topo(&[SEG])).unwrap(), "hub");
-    // A second 親機 is outside the reachable part (skipped as such).
-    let two = dagon_topology::parse_str(&yaml(SEG).replace(
-        "role: node, port: self-boot, tag: seg }",
-        "role: coordinator, port: self-boot, tag: seg }",
-    ))
-    .unwrap();
-    assert_eq!(connected_node(&two).unwrap(), "hub");
-    let none =
-        dagon_topology::parse_str(&yaml(SEG).replace("role: coordinator", "role: node")).unwrap();
+fn routes_start_at_the_node_given_whatever_its_role() {
+    let reg = with(
+        "seg",
+        "[[mcu_override.stm32f401re.relay_link]]\nport = \"i2c1\"\nid = 5\n\
+         addressing = \"seven-bit\"\nmax_payload = 255\n",
+    );
+    let routes = relay_routes(&reg, &topo(&[SEG, FAR]), "seg");
+    let far = routes.to(Target::I2c(0x44)).unwrap();
     assert_eq!(
-        connected_node(&none),
-        Err(RouteError::Connected { nodes: vec![] })
+        (far.link.id, far.addr, far.link.max_payload),
+        (5, 0x44, 255)
+    );
+    // The same configuration from hub: far is not joined to it.
+    let r = relay_routes(&reg, &topo(&[SEG, FAR]), "hub").to(Target::I2c(0x44));
+    assert_eq!(
+        r,
+        Err(RouteError::NoLink {
+            local: "hub".into(),
+            node: "far".into()
+        })
     );
 }

@@ -259,7 +259,7 @@ fn host(s: &Sim) -> Host<Sim, Sim> {
     let topo = dagon_topology::parse_str(&yaml()).unwrap();
     let reg = dagon_topology::defs::Registry::builtin();
     h.timings = dagon_host::node_timings(reg, &topo).unwrap();
-    h.routes = dagon_host::configured_routes(reg, &topo);
+    h.routes = dagon_host::relay_routes(reg, &topo, "hub");
     h
 }
 
@@ -285,7 +285,8 @@ fn nodes_are_reached_over_the_routes_the_host_is_given() {
     // The seg's link from a port the hub's MCU relays over no link on.
     let mut no_entry = host(&s);
     let t = dagon_topology::parse_str(&yaml().replace("port: i2c0,", "port: i2c1,")).unwrap();
-    no_entry.routes = dagon_host::configured_routes(dagon_topology::defs::Registry::builtin(), &t);
+    no_entry.routes =
+        dagon_host::relay_routes(dagon_topology::defs::Registry::builtin(), &t, "hub");
     let r = block_on(no_entry.hello(SEG_AT));
     let Err(Error::Route(why)) = r else {
         panic!("{r:?}")
@@ -1054,7 +1055,7 @@ fn one_write_reaches_every_node_of_a_topology_at_the_limit() {
     .unwrap()
     .bundle;
     let mut h = host(&s);
-    h.routes = dagon_host::configured_routes(dagon_topology::defs::Registry::builtin(), &t);
+    h.routes = dagon_host::relay_routes(dagon_topology::defs::Registry::builtin(), &t, "hub");
     let out = block_on(h.apply(&bundle, &topo, &key().pk, None, &mut |_| {})).unwrap();
     assert_eq!(out.len(), children + 1);
     for r in &out {
@@ -1284,7 +1285,7 @@ fn an_absent_node_is_tried_four_times() {
     let mut h = opened(&s);
     // The configuration has the seg at 0x43, where nothing answers.
     let t = dagon_topology::parse_str(&yaml().replace("addr: 0x42", "addr: 0x43")).unwrap();
-    h.routes = dagon_host::configured_routes(dagon_topology::defs::Registry::builtin(), &t);
+    h.routes = dagon_host::relay_routes(dagon_topology::defs::Registry::builtin(), &t, "hub");
     let r = block_on(h.hello(Target::I2c(0x43)));
     assert!(matches!(r, Err(Error::Relay(dagon_proto::Status::Timeout))));
     let seen = s.faults.borrow().seen.clone();

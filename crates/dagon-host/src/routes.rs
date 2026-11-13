@@ -142,38 +142,6 @@ impl Routes {
     }
 }
 
-/// The node the PC is connected to: the 親機 the configuration's reachable
-/// part starts from ([`dagon_topology::updatable`], the part `dagon` and the
-/// page reach the other nodes through); a part with none or several is an
-/// error naming them.
-#[cfg(feature = "defs")]
-pub fn connected_node(topo: &dagon_topology::Topology) -> Result<String, RouteError> {
-    let (part, _) = dagon_topology::updatable(topo);
-    let nodes: Vec<String> = part
-        .nodes
-        .iter()
-        .filter(|n| n.role == dagon_topology::schema::Role::Coordinator)
-        .map(|n| n.id.clone())
-        .collect();
-    match nodes.as_slice() {
-        [one] => Ok(one.clone()),
-        _ => Err(RouteError::Connected { nodes }),
-    }
-}
-
-/// The routes of configuration `topo`: from its connected node
-/// ([`connected_node`]), or failing with why it names none.
-#[cfg(feature = "defs")]
-pub fn configured_routes(
-    reg: &dagon_topology::defs::Registry,
-    topo: &dagon_topology::Topology,
-) -> Routes {
-    match connected_node(topo) {
-        Ok(local) => relay_routes(reg, topo, &local),
-        Err(why) => Routes::failed(why),
-    }
-}
-
 /// The routes from node `local` of `topo`: for each other node, the one
 /// topology link joining the two (either orientation), the port of
 /// `local`'s end of it, and the `[[relay_link]]` entry of `local`'s MCU in

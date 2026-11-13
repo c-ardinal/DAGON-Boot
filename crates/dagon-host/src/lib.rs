@@ -23,7 +23,7 @@ pub use ops::{
 };
 pub use percent::{transfer_percent, trial_percent};
 #[cfg(feature = "defs")]
-pub use routes::{configured_routes, connected_node, relay_routes};
+pub use routes::relay_routes;
 pub use routes::{Route, RouteError, Routes};
 #[cfg(feature = "defs")]
 pub use timings::{mcu_timings, node_timings};

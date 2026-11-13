@@ -10,6 +10,7 @@
 use dagon_agent::{SlotStore, Transition};
 use dagon_core::bootcore::{self, MustReset, Settled, CLEARED};
 use dagon_core::log::{trial_room, Log, SlotRef};
+use dagon_ed25519::Ed25519Small;
 use dagon_format::header::*;
 use dagon_format::statelog::{kind, FaceHeader};
 use dagon_format::{key_id, sha256, Version};
@@ -255,7 +256,7 @@ fn boot(f: &mut Cut, cell: &mut [u32; 2]) -> u8 {
                 &mut f.clone(),
                 CORE_SLOTS[usize::from(s)],
                 s,
-                (r, None),
+                (r, None::<&Ed25519Small>),
                 MCU_ID,
             )
         })

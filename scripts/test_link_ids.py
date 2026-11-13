@@ -1,6 +1,11 @@
 """A relay link id has one source: the MCU definition's `[[relay_link]]`,
 read by the definitions loader and generated into firmware constants.
 
+No durable document (Markdown under the repository, build output and
+dependencies left out) and no Rust comment restates a port's link id
+(`link 1 = I2C0`, `2 = PIO UART`, `i2c0 is link 1`); the definition is the
+one copy. Raw golden wire bytes are not a restatement.
+
 Production Rust under crates/ and targets/ (tests and `#[cfg(test)]`
 modules left out):
 
@@ -29,7 +34,7 @@ import functools
 import re
 import unittest
 
-from rust_source import rust_texts
+from rust_source import ROOT, rust_texts
 from test_relay import code_of, is_test_path, production
 
 DIRS = ("crates/", "targets/")
@@ -60,6 +65,40 @@ TEST_LITERAL = (
     (re.compile(rf"\bSome\s*\(\s*\(\s*{ID}\d*\s*,\s*[\w:]*ADDR\w*\s*\)\s*\)"), "a RELAY target with a literal link id"),
     (re.compile(r"\bconst\s+(?:I2C0|PIO_UART|RELAY_LINK_\w+|\w*LINK_ID\w*)\s*:\s*u8\s*=\s*\d"), "a copied production link id"),
 )
+
+
+# A port's link id said in words: "link 1 = I2C0", "link id 2: pio-uart",
+# "2 = PIO UART", "i2c0 is link 1", "I2C0 = 1".
+PORT = r"(?:i2c\d|i2c|pio[ _-]?uart|uart\d|usart\d|usb)"
+RESTATED = re.compile(
+    rf"\blink(?:\s+id)?\s*{ID}\d*\s*(?:=|:|is\b)\s*\S"
+    rf"|(?<![\w/]){ID}\d*\s*=\s*{PORT}\b"
+    rf"|\b{PORT}\s*(?:=|is)\s*(?:link\s*(?:id\s*)?)?{ID}\d*\b",
+    re.IGNORECASE,
+)
+DOC_SKIP = ("target", "node_modules", "dist", ".git")
+
+
+def doc_texts():
+    """Path -> text of every Markdown file of the repository, build output
+    and dependencies left out."""
+    texts = {}
+    for p in ROOT.rglob("*.md"):
+        rel = p.relative_to(ROOT)
+        if not any(part in DOC_SKIP for part in rel.parts):
+            texts[rel.as_posix()] = p.read_text(encoding="utf-8")
+    return texts
+
+
+def comment_text(text):
+    """The `//` comments of Rust `text` (where a document's words live in code)."""
+    return "\n".join(m.group(1) for m in re.finditer(r"//+!?(.*)", text))
+
+
+def restated(texts, of=lambda t: t):
+    """`path: restates a port's link id: ...` for each text that does."""
+    return [f"{path}: restates a port's link id: {m.group(0)}"
+            for path, text in sorted(texts.items()) if (m := RESTATED.search(of(text)))]
 
 
 def is_test_file(path):
@@ -97,6 +136,11 @@ def problems(texts):
     return [p for path, text in sorted(texts.items()) for p in file_problems(path, text)]
 
 
+def doc_problems(docs, rust):
+    """Durable documents and Rust comments that restate a port's link id."""
+    return restated(docs) + restated(rust, comment_text)
+
+
 class LinkIds(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -110,6 +154,32 @@ class LinkIds(unittest.TestCase):
 
     def test_the_tree_holds(self):
         self.assertEqual(problems(self.texts), [])
+
+    def test_no_document_or_comment_restates_a_port_link_id(self):
+        self.assertEqual(doc_problems(doc_texts(), self.texts), [])
+
+    def test_a_restated_link_id_in_a_document_or_comment_fails(self):
+        for text in (
+            "- Frames on USB: RELAY (link 1 = I2C0, 2 = PIO UART) is forwarded\n",
+            "RELAY link id 2: pio-uart\n",
+            "i2c0 is link 1 on the RP2040\n",
+            "Link 3 = USART2.\n",
+        ):
+            with self.subTest(text=text):
+                self.assertTrue(doc_problems({"targets/x/README.md": text}, {}))
+                self.assertTrue(doc_problems({}, {"crates/x/src/lib.rs": f"// {text}"}))
+
+    def test_words_about_links_and_golden_bytes_pass(self):
+        for text in (
+            "The relay link id (1 to 254) comes from `[[relay_link]]`.\n",
+            "seg on I2C0 0x42 and watch on the PIO UART\n",
+            "rear MUX_IO_1/2 = UART0 TX G43 / RX G44\n",
+            "len 4 + 18; the link id of the RP2040's i2c0 entry\n",
+        ):
+            with self.subTest(text=text):
+                self.assertEqual(doc_problems({"targets/x/README.md": text}, {}), [])
+        code = "const BYTES: [u8; 7] = [0x50, 22, 0, 1, 0x42, 0x2C, 0x01];\n"
+        self.assertEqual(doc_problems({}, {"crates/dagon-proto/tests/golden_frames.rs": code}), [])
 
     def test_a_global_link_constant_fails_anywhere(self):
         for path, code in (

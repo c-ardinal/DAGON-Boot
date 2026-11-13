@@ -163,7 +163,8 @@ export interface Host {
   /** Writes topology node `node`; the ROM path only with `romConfirmed`. Rejects with a Refusal or dagon-host's reason. */
   recover(node: number, release: Uint8Array, topology: Uint8Array, bootcore: Uint8Array | null, stage0: Uint8Array | null, romConfirmed: boolean, onEvent: (e: UpdateEvent) => void): Promise<RecoverResult>;
   /** Back to the version in the other slot; resolves to it. */
-  rollback(kind: TargetKind, addr: number, node: number, onEvent: (e: UpdateEvent) => void): Promise<number>;
+  /** Back to the version in another of the node's app `slots` (STATUS entries from its MCU definition). */
+  rollback(kind: TargetKind, addr: number, node: number, slots: number[], onEvent: (e: UpdateEvent) => void): Promise<number>;
   /** Releases the WASM side; calls still running finish on their own. */
   free(): void;
 }
@@ -183,7 +184,7 @@ export function newHost(link: HostLink): Host {
     confirm: (k, a, f) => h.confirm(k, a, f),
     writePath: (n, t) => h.write_path(n, t),
     recover: (n, r, t, b, s, c, on) => h.recover(n, r, t, b ?? undefined, s ?? undefined, c, on),
-    rollback: (k, a, n, on) => h.rollback(k, a, n, on),
+    rollback: (k, a, n, s, on) => h.rollback(k, a, n, Uint8Array.from(s), on),
     free: () => h.free(),
   };
 }

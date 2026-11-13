@@ -32,6 +32,7 @@ import { ConnectError, wasmReady } from './connect.ts';
 import { ANNOUNCE, FILE, WRITE } from './copy.ts';
 import { HUB_LOCKED, NODE_WRITE, WATCHED, next, type ConnectFailure, type Ctx, type Ev, type L } from './machine.ts';
 import { SAMPLE_CONFIG, targetKey, type Config, type Node } from './sample.ts';
+import { imageRows } from './slots.ts';
 
 /** What the page knows about one node from the hub. */
 export interface Live {
@@ -1086,7 +1087,7 @@ export class Operate {
     if (!n) return;
     const index = reach.indexOf(n);
     await this.runRecovery(n, 'rollback', async (h, on) => {
-      const v = await h.rollback(n.target.kind, n.target.addr, index, on);
+      const v = await h.rollback(n.target.kind, n.target.addr, index, imageRows(n.mcuId), on);
       return { path: 'retransfer', version: v, rom: null };
     });
   }

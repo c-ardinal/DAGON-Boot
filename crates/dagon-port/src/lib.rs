@@ -19,7 +19,10 @@
 #![no_std]
 #![allow(async_fn_in_trait)]
 
+mod relay_link;
 pub mod timeout;
+
+pub use relay_link::{Addressing, RelayLinkDef};
 
 use dagon_proto::payload::{HelloReq, HelloResp};
 use dagon_proto::{split_status, Cmd, Frame, Status, PROTO_VERSION};

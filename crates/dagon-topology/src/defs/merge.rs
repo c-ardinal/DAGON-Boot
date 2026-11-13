@@ -102,6 +102,10 @@ pub const ROWS: &[Row] = &[
     row(Mcu, "rom_i2c.pairs", Keyed(&["sda", "scl"])),
     // A topology link end names a port by `name`.
     row(Mcu, "link_port", Keyed(&["name"])),
+    // One relay link per port; the id may change.
+    row(Mcu, "relay_link", Keyed(&["port"])),
+    // "seven-bit" or { fixed = N }.
+    row(Mcu, "relay_link.addressing", Whole),
     // In boot order.
     ordered(Mcu, "boot.record.rings", Keyed(&["writer"])),
     row(Mcu, "boot.record.fuse.cells", Keyed(&["image"])),

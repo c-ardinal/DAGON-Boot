@@ -1,7 +1,7 @@
 //! The node limit, in the formats that carry it.
 
 use dagon_format::manifest::{self, Constraint, MAX_CONSTRAINTS, MAX_ENTRIES};
-use dagon_format::topology::{self as tp, TopoLink, TopoNode, TopologyView};
+use dagon_format::topology::{self as tp, TopoEnd, TopoLink, TopoNode, TopologyView};
 use dagon_format::{bundle, FormatError};
 
 fn nodes(n: usize) -> Vec<TopoNode> {
@@ -17,10 +17,20 @@ fn nodes(n: usize) -> Vec<TopoNode> {
 fn links(n: usize) -> Vec<TopoLink> {
     (1..n)
         .map(|i| TopoLink {
-            from: 0,
-            to: i as u8,
+            ends: [
+                TopoEnd {
+                    node: 0,
+                    port: 0,
+                    addr: tp::NONE,
+                },
+                TopoEnd {
+                    node: i as u8,
+                    port: 0,
+                    addr: 0x10 + i as u8,
+                },
+            ],
             iface: tp::iface::I2C_BUS,
-            i2c_addr: 0x10 + i as u8,
+            gpio_end: tp::NONE,
             ..TopoLink::default()
         })
         .collect()
@@ -41,7 +51,10 @@ fn a_topology_at_the_limit_encodes_and_decodes() {
         (tp::MAX_NODES, tp::MAX_LINKS)
     );
     assert_eq!(v.node(tp::MAX_NODES - 1).index as usize, tp::MAX_NODES - 1);
-    assert_eq!(v.link(tp::MAX_LINKS - 1).to as usize, tp::MAX_NODES - 1);
+    assert_eq!(
+        v.link(tp::MAX_LINKS - 1).ends[1].node as usize,
+        tp::MAX_NODES - 1
+    );
 }
 
 #[test]

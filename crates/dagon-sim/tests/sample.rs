@@ -105,7 +105,9 @@ fn three_nodes_on_1_0_0() {
 #[test]
 fn release_verifies_and_updates_the_watch() {
     let bundle = BundleView::parse(sample::RELEASE_1_1_0).unwrap();
-    bundle.verify(&sample::PUBKEY).unwrap();
+    bundle
+        .verify(&dagon_ed25519::Ed25519Compact::new(sample::PUBKEY))
+        .unwrap();
     let watch_img = (0..bundle.item_count())
         .map(|i| bundle.item_bytes(i))
         .find(|b| {

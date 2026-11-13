@@ -12,6 +12,7 @@ use crate::flash::SimFlash;
 use dagon_agent::{SlotStore, StoreError, Transition};
 use dagon_core::bootcore::{choose, read_state, settle_log, Cell, MustReset, Settled, CLEARED};
 use dagon_core::log::{trial_room, Log, LogLayout, LogState, SlotRef};
+use dagon_ed25519::Ed25519Compact;
 use dagon_format::header::{
     self, build_flags, capabilities, image_kind, placement, port_kind, slot_binding, ImageHeader,
     HEADER_SIZE,
@@ -497,7 +498,7 @@ impl SimStore {
 
     fn verified(&mut self, slot: u8) -> Option<[u8; HEADER_SIZE]> {
         let hdr = self.header_at(slot)?;
-        let h = header::verify_header(&hdr, &self.pubkey).ok()?;
+        let h = header::verify_header(&hdr, &Ed25519Compact::new(self.pubkey)).ok()?;
         let mut body = vec![0u8; h.payload_size as usize];
         self.read(target::APP, slot, 0, &mut body).ok()?;
         (sha256(&body) == h.payload_sha256).then_some(hdr)

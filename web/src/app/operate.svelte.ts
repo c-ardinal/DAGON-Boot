@@ -242,6 +242,8 @@ export class Operate {
   state = $state<L>('idle');
   failure = $state<ConnectFailure | undefined>();
   config = $state<Config | null>(null);
+  /** The configuration dagon-host was last told (`tellOnce`); null after a new host. */
+  private told: string | null = null;
   live = $state<Record<string, Live>>({});
   /** Nodes found by the last scan (hub included). */
   found = $state(0);
@@ -464,6 +466,7 @@ export class Operate {
       this.transport = t;
       this.link = hostLink(t, this.deps.clock);
       this.host = newHost(this.link);
+      this.told = null;
       const h = await this.call((x) => x.hello('hub', 0));
       const why = this.notThisHub(h, false);
       if (why) throw why;
@@ -522,6 +525,7 @@ export class Operate {
     this.transport = t;
     this.link = hostLink(t, this.deps.clock);
     this.host = newHost(this.link);
+    this.told = null;
     this.go('chosen');
     try {
       this.hubHello = await this.call((h) => h.hello('hub', 0));
@@ -814,9 +818,21 @@ export class Operate {
     }
   }
 
-  /** Tells dagon-host each node's own limits from its MCU definition (erase wait, trial for the node's one %). */
+  /** Tells dagon-host each node's own limits and the links the hub relays over, from the MCU definitions (erase wait, trial for the node's one %). */
   private tellTrials(h: Host): void {
     if (this.config) h.setTimings(this.config.yaml);
+  }
+
+  /** Before any call: the configuration's definitions, once per configuration (a node is reached over the hub's links from them). */
+  private tellOnce(h: Host): void {
+    const yaml = this.config?.yaml;
+    if (yaml === undefined || this.told === yaml) return;
+    try {
+      h.setTimings(yaml);
+      this.told = yaml;
+    } catch {
+      // A configuration that does not parse: the call reaches the hub only, and apply reports why.
+    }
   }
 
   /** The hub reboots onto `version`: dagon-host reopens it for 45 s (hubRestarting), keeping only that hub. */
@@ -1228,7 +1244,7 @@ export class Operate {
   private call<T>(f: (h: Host) => Promise<T>): Promise<T> {
     const host = this.host;
     if (!host) return Promise.reject(new Error('not connected'));
-    const run = this.chain.then(() => f(host));
+    const run = this.chain.then(() => (this.tellOnce(host), f(host)));
     this.chain = run.catch(() => undefined);
     return run;
   }

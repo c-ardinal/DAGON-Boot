@@ -141,15 +141,19 @@ impl WasmHost {
     /// Each node of the topology `yaml` gets its own limits from its MCU's
     /// definition in use (`dagon_host::node_timings`): the wait for the
     /// request it erases on, and its trial, which also weighs in its one
-    /// progress number. Throws with the reason when the topology does not
-    /// parse or a definition breaks a timing rule.
+    /// progress number; and the hub relays over the links its MCU's
+    /// definition lists (`dagon_host::relay_links`). Throws with the reason
+    /// when the topology does not parse or a definition breaks a timing rule.
     #[wasm_bindgen(js_name = setTimings)]
     pub fn set_timings(&self, yaml: &str) -> Result<(), JsValue> {
         let topo = dagon_topology::parse_str(yaml).map_err(|e| JsError::new(&e.to_string()))?;
-        let timings = crate::defs::with_registry(|reg| dagon_host::node_timings(reg, &topo))
-            .map_err(|e| JsError::new(&e.to_string()))?;
+        let (timings, links) = crate::defs::with_registry(|reg| {
+            dagon_host::node_timings(reg, &topo).map(|t| (t, dagon_host::relay_links(reg, &topo)))
+        })
+        .map_err(|e| JsError::new(&e.to_string()))?;
         let mut h = self.host.try_borrow_mut().map_err(|_| busy())?;
         h.timings = timings;
+        h.relay_links = links;
         Ok(())
     }
 

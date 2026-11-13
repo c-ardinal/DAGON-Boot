@@ -47,6 +47,7 @@ writes, as `compat.toml` holds them. The rules for changing them are in
 | `board-nucleo-f401re` | 0.1.0 | `dagon-board-nucleo-f401re` | `definitions` 2 |
 | `board-m5stopwatch` | 0.1.0 | `dagon-board-m5stopwatch` | `definitions` 2 |
 | `format` | 0.1.0 | `dagon-format` | `image-header` 1, `state-log` 1, `manifest` 1, `bundle` 1, `topology-bin` 1 |
+| `ed25519` | 0.1.0 | `dagon-ed25519` |  |
 | `proto` | 0.1.0 | `dagon-proto` | `wire` 1 |
 | `core` | 0.1.0 | `dagon-core` | `image-header` 1, `state-log` 1 |
 | `boot` | 0.1.0 | `dagon-boot` | `state-log` 1, `event` 1 |

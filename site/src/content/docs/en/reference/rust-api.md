@@ -19,9 +19,10 @@ published with these pages; each name below opens its crate.
 | [`dagon-cli`](/api/dagon/) | DAGON Boot command line tool |
 | [`dagon-conform`](/api/dagon_conform/) | DAGON conformance tests: the 12 normal-path checks a port must pass. |
 | [`dagon-core`](/api/dagon_core/) | Board-independent DAGON logic over the port contract: the state log (fold, load, append, compaction), the kind S boot decision (verify, trial, rollback), the boot core A/B rules of a stage0 MCU and build-time key helpers. |
+| [`dagon-ed25519`](/api/dagon_ed25519/) | Ed25519 signature verification (RFC 8032) for DAGON's signed structures, as `SigVerifier` implementations. Verify only: nothing here signs or holds a secret. |
 | [`dagon-events`](/api/dagon_events/) | DAGON lifecycle events: state machines whose transitions emit events, extensions, ports and the published event state |
 | [`dagon-extension`](/api/dagon_extension/) | DAGON extension manifests (dagon-extension.toml), their validation against the port and event catalogs and the node's definitions, the protection-kind map generators, and the files dagon gen writes from them |
-| [`dagon-format`](/api/dagon_format/) | Byte layouts shared by every DAGON component: image header, manifest, release bundle (`.dgb`), state log, topology canonical binary, plus CRC-32, SHA-256 and Ed25519 verification. All multi-byte fields are little-endian. |
+| [`dagon-format`](/api/dagon_format/) | Byte layouts shared by every DAGON component: image header, manifest, release bundle (`.dgb`), state log, topology canonical binary, plus CRC-32, SHA-256 and the signature verifier interface (`SigVerifier`). All multi-byte fields are little-endian. |
 | [`dagon-host`](/api/dagon_host/) | Host-side procedures shared by the CLI and the browser: discover, status, topology push, apply, rollback, confirm, recover. |
 | [`dagon-port`](/api/dagon_port/) | Port contract: what a board provides to DAGON. |
 | [`dagon-proto`](/api/dagon_proto/) | DAGON link v1: frame format (shared by USB CDC, UART and I2C), the command set, status codes, request/response payloads and the I2C mailbox state. |

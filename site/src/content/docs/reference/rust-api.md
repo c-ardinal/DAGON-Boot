@@ -20,9 +20,10 @@ rustdocの本文は元のソースのままで、英語です。
 | [`dagon-cli`](/api/dagon/) | DAGON Bootのコマンドラインツール |
 | [`dagon-conform`](/api/dagon_conform/) | DAGONの適合試験: ポートが通らなければならない、正常な経路の12の検査。 |
 | [`dagon-core`](/api/dagon_core/) | ポートの取り決めの上で動く、ボードに依存しないDAGONのロジック: 状態ログ（畳み込み、読み込み、追記、コンパクション）、kind Sのブートの判断（検証、試行、ロールバック）、stage0のあるマイコンのブートローダのA/Bのルール、ビルド時の鍵の補助。 |
+| [`dagon-ed25519`](/api/dagon_ed25519/) | DAGONの署名付きの構造を検証するEd25519（RFC 8032）の署名の検証。`SigVerifier`の実装です。検証だけを行い、署名はせず、秘密の値も持ちません。 |
 | [`dagon-events`](/api/dagon_events/) | DAGONのライフサイクルイベント: 遷移がイベントを出す状態機械、拡張、ポート、公開するイベントの状態 |
 | [`dagon-extension`](/api/dagon_extension/) | DAGONの拡張のマニフェスト（dagon-extension.toml）、ポートとイベントのカタログとノードの定義に照らした検証、保護の種類ごとのマップの生成器、そこからdagon genが書き出すファイル |
-| [`dagon-format`](/api/dagon_format/) | DAGONのすべての部品が共有するバイトのレイアウト: イメージのヘッダ、マニフェスト、リリースのバンドル（`.dgb`）、状態ログ、構成の正規のバイナリ、そしてCRC-32、SHA-256、Ed25519の検証。複数バイトの欄はすべてリトルエンディアンです。 |
+| [`dagon-format`](/api/dagon_format/) | DAGONのすべての部品が共有するバイトのレイアウト: イメージのヘッダ、マニフェスト、リリースのバンドル（`.dgb`）、状態ログ、構成の正規のバイナリ、そしてCRC-32、SHA-256、署名を検証する部品の取り決め（`SigVerifier`）。複数バイトの欄はすべてリトルエンディアンです。 |
 | [`dagon-host`](/api/dagon_host/) | CLIとブラウザが共有するホスト側の手順: 検出、状態、構成の送信、適用、ロールバック、確定、復旧。 |
 | [`dagon-port`](/api/dagon_port/) | ポートの取り決め: ボードがDAGONに用意するもの。 |
 | [`dagon-proto`](/api/dagon_proto/) | DAGONのリンクv1: フレームの形式（USB CDC、UART、I2Cで共通）、コマンドの集合、ステータスコード、リクエストとレスポンスのペイロード、I2Cのメールボックスの状態。 |

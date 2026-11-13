@@ -458,12 +458,39 @@ dependencies = [
 ]
 
 [[package]]
+name = "curve25519-dalek"
+version = "5.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b5eed333089e2e1c1ac8c6c0398e5e2497b4c9926ca6d0365ed1e099afa5bc23"
+dependencies = [
+ "cfg-if",
+ "cpufeatures",
+ "curve25519-dalek-derive",
+ "digest",
+ "fiat-crypto",
+ "rustc_version",
+ "subtle",
+]
+
+[[package]]
+name = "curve25519-dalek-derive"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f46882e17999c6cc590af592290432be3bce0428cb0d5f8b6715e4dc7b383eb3"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+]
+
+[[package]]
 name = "dagon-agent"
 version = "0.1.0"
 dependencies = [
  "critical-section",
  "dagon-agent",
  "dagon-core",
+ "dagon-ed25519",
  "dagon-events",
  "dagon-format",
  "dagon-port",
@@ -477,6 +504,7 @@ version = "0.1.0"
 dependencies = [
  "critical-section",
  "dagon-core",
+ "dagon-ed25519",
  "dagon-events",
  "dagon-format",
  "dagon-port",
@@ -505,6 +533,7 @@ dependencies = [
  "command-group",
  "dagon-catalog",
  "dagon-conform",
+ "dagon-ed25519",
  "dagon-extension",
  "dagon-format",
  "dagon-host",
@@ -536,6 +565,7 @@ version = "0.1.0"
 dependencies = [
  "dagon-agent",
  "dagon-core",
+ "dagon-ed25519",
  "dagon-events",
  "dagon-format",
  "dagon-port",
@@ -547,10 +577,24 @@ dependencies = [
 name = "dagon-core"
 version = "0.1.0"
 dependencies = [
+ "dagon-ed25519",
  "dagon-format",
  "dagon-port",
  "dagon-proto",
  "ed25519-compact",
+]
+
+[[package]]
+name = "dagon-ed25519"
+version = "0.1.0"
+dependencies = [
+ "curve25519-dalek",
+ "dagon-ed25519",
+ "dagon-format",
+ "ed25519-compact",
+ "ed25519-dalek",
+ "serde_json",
+ "sha2",
 ]
 
 [[package]]
@@ -580,6 +624,7 @@ dependencies = [
 name = "dagon-format"
 version = "0.1.0"
 dependencies = [
+ "dagon-ed25519",
  "ed25519-compact",
  "sha2",
 ]
@@ -589,6 +634,7 @@ name = "dagon-host"
 version = "0.1.0"
 dependencies = [
  "dagon-agent",
+ "dagon-ed25519",
  "dagon-format",
  "dagon-host",
  "dagon-port",
@@ -650,6 +696,7 @@ dependencies = [
 name = "dagon-sign"
 version = "0.1.0"
 dependencies = [
+ "dagon-ed25519",
  "dagon-format",
  "dagon-topology",
  "ed25519-compact",
@@ -662,6 +709,7 @@ version = "0.1.0"
 dependencies = [
  "dagon-agent",
  "dagon-core",
+ "dagon-ed25519",
  "dagon-events",
  "dagon-format",
  "dagon-port",
@@ -692,6 +740,7 @@ dependencies = [
 name = "dagon-wasm"
 version = "0.0.0"
 dependencies = [
+ "dagon-ed25519",
  "dagon-format",
  "dagon-host",
  "dagon-port",
@@ -719,12 +768,33 @@ dependencies = [
 ]
 
 [[package]]
+name = "ed25519"
+version = "3.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "29fcf32e6c73d1079f83ab4d782de2d81620346a5f38c6237a86a22f8368980a"
+dependencies = [
+ "signature",
+]
+
+[[package]]
 name = "ed25519-compact"
 version = "2.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1454db4f2edb7f0e8fe0c5b375b0c978fc63244cc9f010d160e417eb10139aa8"
 dependencies = [
  "getrandom 0.4.3",
+]
+
+[[package]]
+name = "ed25519-dalek"
+version = "3.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6ebaa1a2bf1290ab3bfe5a7b771d050ebffab2711c19a81691c683a5144a25de"
+dependencies = [
+ "curve25519-dalek",
+ "ed25519",
+ "sha2",
+ "subtle",
 ]
 
 [[package]]
@@ -836,6 +906,12 @@ name = "fastrand"
 version = "2.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "da7c62ceae207dd37ea5b845da6a0696c799f85e97da1ab5b7910be3c1c80223"
+
+[[package]]
+name = "fiat-crypto"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "64cd1e32ddd350061ae6edb1b082d7c54915b5c672c389143b9a63403a109f24"
 
 [[package]]
 name = "find-msvc-tools"
@@ -1352,6 +1428,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "rustc_version"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cfcb3a22ef46e85b45de6ee7e79d063319ebb6594faafcf1c225ea92ab6e9b92"
+dependencies = [
+ "semver",
+]
+
+[[package]]
 name = "rustix"
 version = "1.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1458,6 +1543,12 @@ dependencies = [
  "core-foundation-sys",
  "libc",
 ]
+
+[[package]]
+name = "semver"
+version = "1.0.28"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8a7852d02fc848982e0c167ef163aaff9cd91dc640ba85e263cb1ce46fae51cd"
 
 [[package]]
 name = "serde"
@@ -1577,6 +1668,12 @@ dependencies = [
  "errno",
  "libc",
 ]
+
+[[package]]
+name = "signature"
+version = "3.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "28d567dcbaf0049cb8ac2608a76cd95ff9e4412e1899d389ee400918ca7537f5"
 
 [[package]]
 name = "slab"

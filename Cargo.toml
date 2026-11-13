@@ -15,3 +15,11 @@ lto = "fat"
 codegen-units = 1
 panic = "abort"
 debug = true
+
+# The Ed25519 vector and differential tests run tens of thousands of
+# verifications; overflow checks stay on.
+[profile.dev.package.dagon-ed25519]
+opt-level = 3
+
+[profile.dev.package.curve25519-dalek]
+opt-level = 3

@@ -52,7 +52,7 @@ links:
 | `port` | string | yes | A `[[link_port]]` name of the node's MCU definition, of the link's kind (V-27). |
 | `addr` | integer | no | The 7-bit address (0x08 to 0x77) the other end reaches this node at, on a kind with addresses (I2C); refused on any other kind (V-18). No two ends on one bus share one, and none takes the address of a ROM loader reached over that bus (V-18). |
 | `node_pins` | table | no | This node's I2C pins by MCU pin name (`{ sda: PB4, scl: PA8 }`), on an end with `addr` (V-01): one of its board's I2C pairs (V-07). |
-| `pins` | table | no | This node's UART pins as GPIO numbers (`{ tx: 26, rx: 27 }`); a UART link names them on at least one end (V-01). |
+| `pins` | table | no | This node's UART pins as GPIO numbers (`{ tx: 26, rx: 27 }`); a UART link names them on at least one end, and a link of any other kind on none (V-01). |
 | `nrst` | integer | no | This node's GPIO driving the other node's reset, for `control.kind: full`. |
 | `boot` | integer | no | This node's GPIO driving the other node's boot pin, for `control.kind: full`. |
 <!-- end of generated table -->

@@ -183,6 +183,6 @@
 "A `[[link_port]]` name of the node's MCU definition, of the link's kind (V-27)." = "そのノードのマイコンの定義の`[[link_port]]`の名前。リンクの種類のものです（V-27）。"
 "The 7-bit address (0x08 to 0x77) the other end reaches this node at, on a kind with addresses (I2C); refused on any other kind (V-18). No two ends on one bus share one, and none takes the address of a ROM loader reached over that bus (V-18)." = "もう一方の端がこのノードへ届く7ビットのアドレス（0x08から0x77）。アドレスのある種類（I2C）だけで、ほかの種類では受け付けません（V-18）。1つのバスで2つの端が同じアドレスを使うことはできず、そのバスで届くROMのローダーのアドレスも使えません（V-18）。"
 "This node's I2C pins by MCU pin name (`{ sda: PB4, scl: PA8 }`), on an end with `addr` (V-01): one of its board's I2C pairs (V-07)." = "このノードのI2Cのピン。マイコンのピン名で書きます（`{ sda: PB4, scl: PA8 }`）。`addr`のある端に書きます（V-01）。ボードのI2Cの組のどれかです（V-07）。"
-"This node's UART pins as GPIO numbers (`{ tx: 26, rx: 27 }`); a UART link names them on at least one end (V-01)." = "このノードのUARTのピン。GPIOの番号で書きます（`{ tx: 26, rx: 27 }`）。UARTのリンクは、少なくとも一方の端に書きます（V-01）。"
+"This node's UART pins as GPIO numbers (`{ tx: 26, rx: 27 }`); a UART link names them on at least one end, and a link of any other kind on none (V-01)." = "このノードのUARTのピン。GPIOの番号で書きます（`{ tx: 26, rx: 27 }`）。UARTのリンクは少なくとも一方の端に書き、ほかの種類のリンクにはどの端にも書きません（V-01）。"
 "This node's GPIO driving the other node's reset, for `control.kind: full`." = "もう一方のノードのリセットを動かす、このノードのGPIO。`control.kind: full`のときに使います。"
 "This node's GPIO driving the other node's boot pin, for `control.kind: full`." = "もう一方のノードの起動ピンを動かす、このノードのGPIO。`control.kind: full`のときに使います。"

@@ -93,6 +93,44 @@ bauds = [115_200, 230_400, 460_800, 921_600]
 [links]
 up = ["uart", "usb-cdc"]
 
+# The interfaces a topology link end names (ESP32-S3 technical reference:
+# USB Serial/JTAG, UART0/1/2, I2C0/1, TWAI).
+
+[[link_port]]
+index = 0
+name = "usb-serial-jtag"
+kind = "usb-cdc"
+
+[[link_port]]
+index = 1
+name = "uart0"
+kind = "uart"
+
+[[link_port]]
+index = 2
+name = "uart1"
+kind = "uart"
+
+[[link_port]]
+index = 3
+name = "uart2"
+kind = "uart"
+
+[[link_port]]
+index = 4
+name = "i2c0"
+kind = "i2c"
+
+[[link_port]]
+index = 5
+name = "i2c1"
+kind = "i2c"
+
+[[link_port]]
+index = 6
+name = "twai"
+kind = "can"
+
 [watchdog]
 kind = "rtc-wdt"
 trial_ms = 4_000

@@ -10,7 +10,7 @@
 
 use std::collections::VecDeque;
 
-use dagon_proto::payload::{link, Relay};
+use dagon_proto::payload::Relay;
 use dagon_proto::{max_payload, Cmd, HEADER_LEN};
 use dagon_topology::schema::LinkKind;
 
@@ -105,7 +105,9 @@ pub fn exchange_ms(frame: &[u8], medium: Medium) -> f64 {
     let Ok(r) = Relay::parse(payload) else {
         return latency + usb;
     };
-    let rate = if r.link == link::PIO_UART {
+    let links = crate::store::relay_links(crate::store::Layout::RP2040_HUB.mcu);
+    let kind = links.iter().find(|l| l.id == r.link).map(|l| l.kind);
+    let rate = if kind == Some(dagon_port::LinkKind::Uart) {
         UART_BYTES_PER_MS
     } else {
         I2C_BYTES_PER_MS
@@ -216,14 +218,17 @@ mod tests {
     fn links_take_their_real_time() {
         let data = frame(Cmd::XferData as u8, &[0; 1000]);
         let hub = exchange_ms(&data, Medium::UsbCdc);
-        let i2c = exchange_ms(&relay(link::I2C0, &data), Medium::UsbCdc);
-        let uart = exchange_ms(&relay(link::PIO_UART, &data), Medium::UsbCdc);
+        let i2c_link = crate::store::relay_link_id(crate::store::Layout::RP2040_HUB.mcu, "i2c0");
+        let uart_link =
+            crate::store::relay_link_id(crate::store::Layout::RP2040_HUB.mcu, "pio-uart");
+        let i2c = exchange_ms(&relay(i2c_link, &data), Medium::UsbCdc);
+        let uart = exchange_ms(&relay(uart_link, &data), Medium::UsbCdc);
         assert!(hub < 5.0 && hub < i2c && i2c < uart, "{hub} {i2c} {uart}");
         // 1 KB over I2C and back: about 80 ms; the UART about 180 ms. Both
         // stay inside the 300 ms a node has to answer.
         assert!((70.0..100.0).contains(&i2c) && uart < 300.0, "{i2c} {uart}");
         let begin = frame(Cmd::XferBegin as u8, &[0; 8]);
-        assert!(exchange_ms(&relay(link::I2C0, &begin), Medium::UsbCdc) >= ERASE_MS);
+        assert!(exchange_ms(&relay(i2c_link, &begin), Medium::UsbCdc) >= ERASE_MS);
     }
 
     #[test]

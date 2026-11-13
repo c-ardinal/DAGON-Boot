@@ -378,6 +378,43 @@ fn link_ports_merge_by_name() {
     assert!(e.contains("mcu_override.stm32f401re"), "{e}");
 }
 
+/// `[[relay_link]]` merges by `port`: an entry changes its id or addressing,
+/// one is removed, a new port is added; the loader's rules hold on the result.
+#[test]
+fn relay_links_merge_by_port() {
+    let r = load(
+        "relay-links",
+        "[[mcu_override.rp2040.relay_link]]\nport = \"pio-uart\"\nid = 7\naddressing = { fixed = 0x10 }\n\n\
+         [[mcu_override.rp2040.relay_link]]\nport = \"i2c0\"\ndagon-remove = true\n\n\
+         [[mcu_override.rp2040.relay_link]]\nport = \"i2c1\"\nid = 3\naddressing = \"seven-bit\"\nmax_payload = 128\n",
+    )
+    .unwrap();
+    let got: Vec<_> = r
+        .mcu("rp2040")
+        .unwrap()
+        .relay_link_defs()
+        .iter()
+        .map(|l| (l.id, l.port, l.addressing, l.max_payload))
+        .collect();
+    let rp = builtin_mcu("rp2040");
+    let at = |name: &str| rp.port(name).unwrap().index;
+    assert_eq!(
+        got,
+        [
+            (7, at("pio-uart"), dagon_port::Addressing::Fixed(0x10), 1024),
+            (3, at("i2c1"), dagon_port::Addressing::SevenBit, 128),
+        ]
+    );
+    // A merged entry still keeps the rules: its id once.
+    let e = load(
+        "relay-link-id",
+        "[[mcu_override.rp2040.relay_link]]\nport = \"pio-uart\"\nid = 1\n",
+    )
+    .unwrap_err()
+    .to_string();
+    assert!(e.contains("relay_link id 1 is used twice"), "{e}");
+}
+
 #[test]
 fn a_tagged_table_is_replaced_whole_when_given() {
     let r = load(

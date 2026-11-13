@@ -171,6 +171,7 @@ pub fn definition_rs(text: &str) -> String {
     out += &format!("pub const MASKED_MAX_US_KNOWN: bool = {masked_known};\n");
 
     out += &erase_layout_rs(&t);
+    out += &relay_links_rs(&t);
 
     let scratch = t
         .get("conformance")
@@ -184,6 +185,71 @@ pub fn definition_rs(text: &str) -> String {
         None => "pub const CONFORM_SCRATCH: Option<(u32, u32)> = None;\n".into(),
     };
     out
+}
+
+fn array<'a>(t: &'a toml::Table, key: &str) -> &'a [toml::Value] {
+    t.get(key)
+        .and_then(|v| v.as_array())
+        .map_or(&[][..], |v| v.as_slice())
+}
+
+fn text<'a>(v: &'a toml::Value, key: &str, what: &str) -> &'a str {
+    v.get(key)
+        .and_then(|v| v.as_str())
+        .unwrap_or_else(|| panic!("dagon-mcu.toml: {what} {key} is missing"))
+}
+
+/// `[[relay_link]]` as `RELAY_LINKS`, the same values the definitions
+/// loader (dagon-topology) reads for the PC, each with its `[[link_port]]`'s
+/// index and kind; and each link's id by its port (`RELAY_LINK_<PORT>`), for
+/// the code that drives that port's link. The loader checks the entries;
+/// this only writes them out.
+fn relay_links_rs(t: &toml::Table) -> String {
+    let ports = array(t, "link_port");
+    let links = array(t, "relay_link");
+    let mut out = String::new();
+    out += "/// The links a node of this MCU relays over (`[[relay_link]]`).\n";
+    out += &format!(
+        "pub const RELAY_LINKS: [dagon_port::RelayLinkDef; {}] = [\n",
+        links.len()
+    );
+    let mut ids = String::new();
+    for l in links {
+        let name = text(l, "port", "[[relay_link]]");
+        let port = ports
+            .iter()
+            .find(|p| p.get("name").and_then(|n| n.as_str()) == Some(name))
+            .unwrap_or_else(|| {
+                panic!("dagon-mcu.toml: relay_link port '{name}' is no [[link_port]]")
+            });
+        let index = int(port.get("index").expect("[[link_port]] index"), "index");
+        // The kind's name in the 構成 (`usb-cdc`) as its variant (`UsbCdc`).
+        let kind: String = text(port, "kind", "[[link_port]]")
+            .split('-')
+            .map(|w| w[..1].to_uppercase() + &w[1..])
+            .collect();
+        let addressing = match l.get("addressing") {
+            Some(v) if v.as_str() == Some("seven-bit") => "SevenBit".to_string(),
+            Some(v) => match v.get("fixed") {
+                Some(a) => format!("Fixed({})", int(a, "addressing.fixed")),
+                None => {
+                    panic!("dagon-mcu.toml: relay_link addressing is seven-bit or {{ fixed = N }}")
+                }
+            },
+            None => panic!("dagon-mcu.toml: relay_link addressing is missing"),
+        };
+        let id = int(l.get("id").expect("[[relay_link]] id"), "id");
+        out += &format!(
+            "    dagon_port::RelayLinkDef {{ id: {id}, port: {index}, kind: dagon_port::LinkKind::{kind}, \
+             addressing: dagon_port::Addressing::{addressing}, max_payload: {} }},\n",
+            int(l.get("max_payload").expect("[[relay_link]] max_payload"), "max_payload")
+        );
+        let constant = name.to_uppercase().replace('-', "_");
+        ids += &format!("/// The id of the relay link on port `{name}`.\n");
+        ids += &format!("pub const RELAY_LINK_{constant}: u8 = {id};\n");
+    }
+    out += "];\n";
+    out + &ids
 }
 
 /// `[execution] erase_regions` (the MCU's default regions) and
@@ -348,6 +414,41 @@ mod tests {
             "{rs}"
         );
         assert!(rs.contains("Some((0x100, 0x10))"), "{rs}");
+    }
+
+    /// `[[relay_link]]` becomes `RELAY_LINKS`, each entry with its port's
+    /// index and kind, and one id constant per port.
+    #[test]
+    fn relay_links_come_from_the_definition() {
+        let def = format!(
+            "{DEF}\n[[link_port]]\nindex = 3\nname = \"i2c0\"\nkind = \"i2c\"\n\
+             [[link_port]]\nindex = 5\nname = \"pio-uart\"\nkind = \"uart\"\n\
+             [[link_port]]\nindex = 6\nname = \"usb\"\nkind = \"usb-cdc\"\n\
+             [[relay_link]]\nid = 9\nport = \"pio-uart\"\naddressing = {{ fixed = 0xFF }}\nmax_payload = 1024\n\
+             [[relay_link]]\nid = 4\nport = \"i2c0\"\naddressing = \"seven-bit\"\nmax_payload = 256\n"
+        );
+        let rs = definition_rs(&def);
+        assert!(
+            rs.contains(
+                "pub const RELAY_LINKS: [dagon_port::RelayLinkDef; 2] = [\n    \
+                 dagon_port::RelayLinkDef { id: 9, port: 5, kind: dagon_port::LinkKind::Uart, \
+                 addressing: dagon_port::Addressing::Fixed(255), max_payload: 1024 },\n    \
+                 dagon_port::RelayLinkDef { id: 4, port: 3, kind: dagon_port::LinkKind::I2c, \
+                 addressing: dagon_port::Addressing::SevenBit, max_payload: 256 },\n];\n"
+            ),
+            "{rs}"
+        );
+        assert!(
+            rs.contains("pub const RELAY_LINK_PIO_UART: u8 = 9;\n"),
+            "{rs}"
+        );
+        assert!(rs.contains("pub const RELAY_LINK_I2C0: u8 = 4;\n"), "{rs}");
+        // An MCU that relays over nothing has an empty table.
+        let rs = definition_rs(DEF);
+        assert!(
+            rs.contains("pub const RELAY_LINKS: [dagon_port::RelayLinkDef; 0] = [\n];\n"),
+            "{rs}"
+        );
     }
 
     /// Facts not yet established stay marked so in the constants.

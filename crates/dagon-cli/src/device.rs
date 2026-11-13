@@ -5,7 +5,9 @@ use std::path::{Path, PathBuf};
 
 use dagon_format::header::port_kind;
 use dagon_format::Version;
-use dagon_host::{Event, Host, HostClock, NodeState, Outcome, Target, Transport, WritePath};
+use dagon_host::{
+    Event, Host, HostClock, NodeState, Outcome, Routes, Target, Transport, WritePath,
+};
 use dagon_proto::payload::{phase, SlotState, StatusResp, VersionResp, VersionSlots};
 use dagon_proto::Status;
 use dagon_sign::to_hex;
@@ -155,7 +157,9 @@ pub fn status(a: &StatusArgs) -> Res {
     let Some(t) = t else {
         return Ok(());
     };
-    for (id, to, rows) in node_targets(&cfg, &t)? {
+    let (nodes, routes) = node_targets(&cfg, &t)?;
+    host.routes = routes;
+    for (id, to, rows) in nodes {
         let rows = rows.as_ref();
         match to {
             Some(to) => match block_on(host.status(to)) {
@@ -179,12 +183,13 @@ pub fn status(a: &StatusArgs) -> Res {
 /// (`None`: not reachable through it) and the STATUS rows it fills.
 type NodeRoute = (String, Option<Target>, Option<Rows>);
 
-/// The topology's nodes other than the hub.
-fn node_targets(cfg: &Config, t: &Topology) -> Result<Vec<NodeRoute>, String> {
+/// The topology's nodes other than the hub, and how each is reached.
+fn node_targets(cfg: &Config, t: &Topology) -> Result<(Vec<NodeRoute>, Routes), String> {
     let reg = crate::defs::registry(cfg)?;
     let bin = topology_bin(&reg, t)?;
     let view = dagon_format::TopologyView::parse(&bin).map_err(|e| format!("{e:?}"))?;
-    Ok(t.nodes
+    let nodes = t
+        .nodes
         .iter()
         .enumerate()
         .map(|(i, n)| {
@@ -195,16 +200,23 @@ fn node_targets(cfg: &Config, t: &Topology) -> Result<Vec<NodeRoute>, String> {
             )
         })
         .filter(|(_, to, _)| *to != Some(Target::Hub))
-        .collect())
+        .collect();
+    Ok((nodes, routes(&reg, t)))
 }
 
-/// The STATUS rows of the topology's coordinator, the node on the PC's port.
+/// How the host reaches each node of `t`: from the node the PC is connected
+/// to, the 親機 the reachable part starts from.
+pub(crate) fn routes(reg: &Registry, t: &Topology) -> dagon_host::Routes {
+    match dagon_topology::reach_root(t) {
+        Some(local) => dagon_host::relay_routes(reg, t, local),
+        None => dagon_host::Routes::failed(dagon_host::RouteError::Connected { nodes: Vec::new() }),
+    }
+}
+
+/// The STATUS rows of the node on the PC's port.
 fn hub_rows(reg: &Registry, t: &Topology) -> Option<Rows> {
-    let n = t
-        .nodes
-        .iter()
-        .find(|n| n.role == dagon_topology::schema::Role::Coordinator)?;
-    Rows::of(reg, &n.mcu)
+    let id = dagon_topology::reach_root(t)?;
+    Rows::of(reg, &t.node(id)?.mcu)
 }
 
 /// The VERSION line of `dagon status` and `dagon doctor`: stage0, boot
@@ -266,12 +278,15 @@ pub(crate) fn doctor_versions(
     cfg: &Config,
     t: Option<&Topology>,
 ) -> Vec<String> {
-    let nodes = match t.map(|t| node_targets(cfg, t)).transpose() {
+    let (nodes, routes) = match t.map(|t| node_targets(cfg, t)).transpose() {
         Ok(n) => n.unwrap_or_default(),
         Err(e) => return vec![format!("node versions not read: {e}")],
     };
     match serial::host(port) {
-        Ok(mut host) => version_lines(&mut host, &nodes),
+        Ok(mut host) => {
+            host.routes = routes;
+            version_lines(&mut host, &nodes)
+        }
         Err(e) => vec![format!("node versions not read: {e}")],
     }
 }
@@ -310,6 +325,7 @@ pub fn rollback_node<T: Transport, C: HostClock>(
         .position(|n| n.id == node)
         .ok_or_else(|| format!("no updatable node '{node}' in the topology"))?;
     host.timings = node_timings(reg, t)?;
+    host.routes = routes(reg, t);
     let bin = topology_bin(reg, t)?;
     let view = dagon_format::TopologyView::parse(&bin).map_err(|e| format!("{e:?}"))?;
     let to = Target::of_node(&view, i as u8)
@@ -574,6 +590,7 @@ where
     T::Error: std::fmt::Debug,
 {
     host.timings = node_timings(reg, t)?;
+    host.routes = routes(reg, t);
     let bin = topology_bin(reg, t)?;
     let ids: Vec<String> = t.nodes.iter().map(|n| n.id.clone()).collect();
     let name = |n: u8| ids.get(n as usize).map_or("?", String::as_str);

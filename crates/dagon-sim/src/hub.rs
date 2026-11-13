@@ -10,9 +10,9 @@ use crate::link::SimLink;
 use crate::node::SimNode;
 use crate::rom::ROM_ADDR;
 use dagon_format::Version;
-use dagon_port::{BusError, Nrst};
+use dagon_port::{BusError, LinkKind, Nrst, RelayLinkDef};
 use dagon_proto::mailbox::{State, STATE_LEN};
-use dagon_proto::payload::{boot0, link, nrst, I2cRaw, Relay, Show, SubCtl};
+use dagon_proto::payload::{boot0, nrst, I2cRaw, Relay, Show, SubCtl};
 use dagon_proto::{find_sof, flags, frame_len, max_payload, Cmd, Frame, FrameError, Status};
 
 /// Cost of one PC <-> hub request on the simulated clock.
@@ -252,6 +252,8 @@ pub struct SimHub {
     pub screen: Option<Screen>,
     usb_in: FrameCutter,
     usb_out: Vec<u8>,
+    /// The links RELAY reaches nodes over: the hub MCU's definition's.
+    links: Vec<RelayLinkDef>,
 }
 
 type Answer = (Status, Vec<u8>);
@@ -264,6 +266,7 @@ impl SimHub {
             screen: None,
             usb_in: FrameCutter::default(),
             usb_out: Vec::new(),
+            links: crate::store::relay_links(crate::store::Layout::RP2040_HUB.mcu),
         }
     }
 
@@ -337,13 +340,14 @@ impl SimHub {
             Err(s) => return (s, Vec::new()),
         };
         let t = r.timeout_ms as u64;
-        let resp = match (r.link, r.addr) {
-            (link::I2C0, a) if a < 0x80 && r.inner.len() <= frame_len(max_payload::I2C) => {
-                self.bus.i2c_exchange(a, r.inner, t)
-            }
-            (link::PIO_UART, link::UART_ADDR) if r.inner.len() <= frame_len(max_payload::UART) => {
-                self.bus.uart_exchange(r.inner, t)
-            }
+        let link = self.links.iter().find(|l| l.id == r.link);
+        // The bus holds one I2C bus and one UART node.
+        let resp = match link
+            .filter(|l| l.fits(r.addr, r.inner.len()))
+            .map(|l| l.kind)
+        {
+            Some(LinkKind::I2c) => self.bus.i2c_exchange(r.addr, r.inner, t),
+            Some(LinkKind::Uart) => self.bus.uart_exchange(r.inner, t),
             _ => return (Status::Arg, Vec::new()),
         };
         match resp {

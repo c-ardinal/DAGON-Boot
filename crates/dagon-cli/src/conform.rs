@@ -9,7 +9,7 @@ use dagon_conform::pc::{Channel, Images, NoAnswer, Runner, Signer, Timings};
 use dagon_conform::report::{CtResult, Progress, Report};
 use dagon_conform::{Label, CTS};
 use dagon_format::header::SIGN_DOMAIN;
-use dagon_host::{Error, Host, HostClock, HostTimings, Target, Transport};
+use dagon_host::{Error, Host, HostClock, HostTimings, Routes, Target, Transport};
 use dagon_port::timeout::NodeTimings;
 use dagon_port::LinkKind;
 use dagon_sim::block_on;
@@ -233,6 +233,7 @@ pub(crate) fn node_timings(
 pub(crate) fn conform_files(
     node: &str,
     to: Target,
+    routes: Routes,
     timings: &HostTimings,
     images_dir: &std::path::Path,
     out: &crate::genfs::Out,
@@ -243,6 +244,7 @@ pub(crate) fn conform_files(
     let images = conform_images(images_dir)?;
     let mut sign = |m: &[u8]| *key.sk.sign([SIGN_DOMAIN, m].concat(), None);
     let mut host = serial::host(port)?;
+    host.routes = routes;
     let report = run(
         &mut host,
         to,
@@ -274,13 +276,22 @@ pub fn command(a: &ConformArgs) -> Result<(), String> {
     let topology = cfg
         .topology_path(a.topology.as_deref())
         .and_then(|p| read_topology(&cfg, &p));
-    let (to, timings) = match (usb, topology) {
+    let (to, routes, timings) = match (usb, topology) {
         (false, t) => {
             let t = t?;
-            (node_target(&reg, &t, node)?, node_timings(&reg, &t, node)?)
+            let to = node_target(&reg, &t, node)?;
+            (
+                to,
+                crate::device::routes(&reg, &t),
+                node_timings(&reg, &t, node)?,
+            )
         }
-        (true, Ok(t)) => (Target::Hub, node_timings(&reg, &t, node)?),
-        (true, Err(_)) => (Target::Hub, NodeTimings::FALLBACK),
+        (true, Ok(t)) => (
+            Target::Hub,
+            Routes::default(),
+            node_timings(&reg, &t, node)?,
+        ),
+        (true, Err(_)) => (Target::Hub, Routes::default(), NodeTimings::FALLBACK),
     };
     let dir = a
         .images
@@ -299,6 +310,7 @@ pub fn command(a: &ConformArgs) -> Result<(), String> {
     let report = conform_files(
         node,
         to,
+        routes,
         &timings,
         &dir,
         &out,

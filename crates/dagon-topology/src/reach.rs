@@ -99,17 +99,22 @@ fn checked(reg: &Registry, t: &Topology, sub: Topology, skipped: Vec<(String, Sk
     }
 }
 
+/// The 親機 the updatable part starts from: the node the PC reaches the
+/// others through (the first 親機 listed).
+pub fn reach_root(t: &Topology) -> Option<&str> {
+    t.nodes
+        .iter()
+        .find(|n| n.role == Role::Coordinator)
+        .map(|n| n.id.as_str())
+}
+
 /// The updatable part of `t` and the nodes it leaves out, in `nodes` order.
 /// The first 親機 is always in it; its direct I2C/UART 子機 follow in
 /// `nodes` order. The part keeps `nodes` order, so
 /// a 構成 updating reaches whole compiles to the same bytes as before.
 /// Every node not in the part is skipped with a reason.
 pub fn updatable(t: &Topology) -> (Topology, Vec<(String, Skip)>) {
-    let first = t
-        .nodes
-        .iter()
-        .find(|n| n.role == Role::Coordinator)
-        .map(|n| n.id.as_str());
+    let first = reach_root(t);
     // The 親機 is reserved first, so 子機 listed before it never push it out.
     let mut keep: BTreeSet<&str> = first.into_iter().collect();
     let mut skipped = Vec::new();

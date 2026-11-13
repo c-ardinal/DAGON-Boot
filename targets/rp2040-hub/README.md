@@ -67,6 +67,7 @@ the `RPI-RP2` drive.
   copy, else seg on I2C0 0x42 and watch on the PIO UART), each with its
   version; ring colour green = confirmed, blue = on trial, red = no answer,
   grey = not polled yet.
-- Frames on USB: RELAY (link 1 = I2C0, 2 = PIO UART) is forwarded; HELLO,
+- Frames on USB: RELAY over the links the RP2040 definition lists in
+  `[[relay_link]]` (`targets/mcu/rp2040/dagon-mcu.toml`) is forwarded; HELLO,
   STATUS, XFER_*, SET_PENDING, REBOOT and CONFIRM are answered by the hub's
   own agent. Other commands answer E_UNSUPPORTED.

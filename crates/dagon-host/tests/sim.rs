@@ -252,12 +252,50 @@ impl HostClock for Sim {
     }
 }
 
-/// A host with each node's timings from the builtin definitions.
+/// A host with each node's timings and the hub's relay links from the
+/// builtin definitions.
 fn host(s: &Sim) -> Host<Sim, Sim> {
     let mut h = Host::new(s.clone(), s.clone());
     let topo = dagon_topology::parse_str(&yaml()).unwrap();
-    h.timings = dagon_host::node_timings(dagon_topology::defs::Registry::builtin(), &topo).unwrap();
+    let reg = dagon_topology::defs::Registry::builtin();
+    h.timings = dagon_host::node_timings(reg, &topo).unwrap();
+    h.routes = dagon_host::relay_routes(reg, &topo, "hub");
     h
+}
+
+/// A node is reached over the route the host is given; with none, or one
+/// that fails, nothing is sent.
+#[test]
+fn nodes_are_reached_over_the_routes_the_host_is_given() {
+    let s = sim();
+    let mut h = host(&s);
+    assert!(block_on(h.hello(SEG_AT)).is_ok());
+
+    let mut none = host(&s);
+    none.routes = dagon_host::Routes::default();
+    let before = s.hub.borrow().now_ms();
+    let r = block_on(none.hello(SEG_AT));
+    assert!(
+        matches!(
+            r,
+            Err(Error::Route(dagon_host::RouteError::Unknown(SEG_AT)))
+        ),
+        "{r:?}"
+    );
+    // The seg's link from a port the hub's MCU relays over no link on.
+    let mut no_entry = host(&s);
+    let t = dagon_topology::parse_str(&yaml().replace("port: i2c0,", "port: i2c1,")).unwrap();
+    no_entry.routes =
+        dagon_host::relay_routes(dagon_topology::defs::Registry::builtin(), &t, "hub");
+    let r = block_on(no_entry.hello(SEG_AT));
+    let Err(Error::Route(why)) = r else {
+        panic!("{r:?}")
+    };
+    assert!(
+        why.to_string().contains("'hub'") && why.to_string().contains("'seg'"),
+        "{why}"
+    );
+    assert_eq!(s.hub.borrow().now_ms(), before, "nothing was sent");
 }
 
 /// The shortest `[watchdog] trial_ms` of the builtin MCU definitions.
@@ -1016,7 +1054,9 @@ fn one_write_reaches_every_node_of_a_topology_at_the_limit() {
     )
     .unwrap()
     .bundle;
-    let out = block_on(host(&s).apply(&bundle, &topo, &key().pk, None, &mut |_| {})).unwrap();
+    let mut h = host(&s);
+    h.routes = dagon_host::relay_routes(dagon_topology::defs::Registry::builtin(), &t, "hub");
+    let out = block_on(h.apply(&bundle, &topo, &key().pk, None, &mut |_| {})).unwrap();
     assert_eq!(out.len(), children + 1);
     for r in &out {
         assert!(
@@ -1027,7 +1067,7 @@ fn one_write_reaches_every_node_of_a_topology_at_the_limit() {
         );
     }
     for i in 0..children {
-        let st = block_on(host(&s).status(Target::I2c(0x10 + i as u8))).unwrap();
+        let st = block_on(h.status(Target::I2c(0x10 + i as u8))).unwrap();
         assert_eq!(
             (st.hello.active_version, st.hello.trial),
             (new, false),
@@ -1243,6 +1283,9 @@ fn a_transient_nack_is_resent_and_then_answered() {
 fn an_absent_node_is_tried_four_times() {
     let s = sim();
     let mut h = opened(&s);
+    // The configuration has the seg at 0x43, where nothing answers.
+    let t = dagon_topology::parse_str(&yaml().replace("addr: 0x42", "addr: 0x43")).unwrap();
+    h.routes = dagon_host::relay_routes(dagon_topology::defs::Registry::builtin(), &t, "hub");
     let r = block_on(h.hello(Target::I2c(0x43)));
     assert!(matches!(r, Err(Error::Relay(dagon_proto::Status::Timeout))));
     let seen = s.faults.borrow().seen.clone();

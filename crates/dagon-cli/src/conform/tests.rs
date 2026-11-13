@@ -27,6 +27,12 @@ const SEED: [u8; 32] = [
 ];
 const TRIAL_WDT_MS: u64 = 4_000;
 
+/// The routes of the simulated pair (`topology/sim-pair.yaml`) from its hub.
+fn sim_routes() -> dagon_host::Routes {
+    let t = dagon_topology::parse_str(include_str!("../../../../topology/sim-pair.yaml")).unwrap();
+    crate::device::routes(dagon_topology::defs::Registry::builtin(), &t)
+}
+
 fn key() -> KeyPair {
     KeyPair::from_seed(Seed::new(SEED))
 }
@@ -278,6 +284,7 @@ fn twelve_of_twelve_through_the_hub() {
         pending: Vec::new(),
     };
     let mut host = Host::new(sim.clone(), sim);
+    host.routes = sim_routes();
     let to = Target::I2c(dagon_sim::NODE_I2C_ADDR);
     let report = run(
         &mut host,
@@ -317,6 +324,7 @@ fn twelve_of_twelve_on_usb_as_uart() {
         pending: Vec::new(),
     };
     let mut host = Host::new(sim.clone(), sim);
+    host.routes = sim_routes();
     let report = run(
         &mut host,
         Target::Hub,
@@ -338,6 +346,7 @@ fn unreachable_node_gives_a_full_not_run_file() {
         pending: Vec::new(),
     };
     let mut host = Host::new(sim.clone(), sim);
+    host.routes = sim_routes();
     let to = Target::I2c(dagon_sim::NODE_I2C_ADDR);
     let report = run(
         &mut host,

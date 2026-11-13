@@ -354,9 +354,10 @@ impl SubI2c {
     ) -> I2cLink<RpI2c<'static, I2C0>> {
         let mut cfg = i2c::Config::default();
         cfg.frequency = I2C_HZ;
-        I2cLink::new(RpI2c(I2c::new_async(
-            self.bus, self.scl, self.sda, irqs, cfg,
-        )))
+        I2cLink::new(
+            RpI2c(I2c::new_async(self.bus, self.scl, self.sda, irqs, cfg)),
+            dagon_mcu_rp2040::RELAY_LINK_I2C0,
+        )
     }
 }
 

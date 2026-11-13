@@ -346,7 +346,10 @@ mod tests {
 
     fn host(hub: SimHub, uplink: Medium) -> Host<Link, Link> {
         let link = Link::new(hub, uplink);
-        Host::new(link.clone(), link)
+        let mut h = Host::new(link.clone(), link);
+        let t = dagon_topology::parse_str(&yaml(uplink)).unwrap();
+        h.routes = crate::device::routes(dagon_topology::defs::Registry::builtin(), &t);
+        h
     }
 
     /// Release demo-1.1.0 applied to every node.

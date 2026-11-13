@@ -63,8 +63,19 @@ impl Pc {
     }
 }
 
-const SEG: Option<(u8, u8)> = Some((payload::link::I2C0, NODE_I2C_ADDR));
-const WATCH: Option<(u8, u8)> = Some((payload::link::PIO_UART, payload::link::UART_ADDR));
+/// The nodes behind the sample hub, as (link, addr): the link ids the hub
+/// MCU's definition gives its I2C0 and PIO UART.
+fn seg() -> Option<(u8, u8)> {
+    Some((link_on("i2c0"), NODE_I2C_ADDR))
+}
+
+fn watch() -> Option<(u8, u8)> {
+    Some((link_on("pio-uart"), payload::link::UART_ADDR))
+}
+
+fn link_on(port: &str) -> u8 {
+    store::relay_link_id(store::Layout::RP2040_HUB.mcu, port)
+}
 
 fn hello() -> Vec<u8> {
     let mut b = [0u8; 6];
@@ -85,8 +96,8 @@ fn three_nodes_on_1_0_0() {
     let v = Version::new(1, 0, 0);
     for (to, mcu, role) in [
         (None, mcu_id::RP2040, role::HUB),
-        (SEG, mcu_id::STM32F401XE, role::NODE),
-        (WATCH, mcu_id::ESP32S3, role::NODE),
+        (seg(), mcu_id::STM32F401XE, role::NODE),
+        (watch(), mcu_id::ESP32S3, role::NODE),
     ] {
         let h = HelloResp::parse(&pc.call(to, Cmd::Hello, &hello())).unwrap();
         assert_eq!(
@@ -97,7 +108,7 @@ fn three_nodes_on_1_0_0() {
         assert_eq!((st.active, st.confirmed), (0, 0));
         assert_eq!(st.slots[0].state, SlotState::Confirmed);
     }
-    let st = StatusResp::parse(&pc.call(WATCH, Cmd::Status, &[])).unwrap();
+    let st = StatusResp::parse(&pc.call(watch(), Cmd::Status, &[])).unwrap();
     assert_eq!(st.slots[2].state, SlotState::Written, "factory slot");
     assert_eq!(st.slots[2].version, v);
 }
@@ -130,7 +141,7 @@ fn release_verifies_and_updates_the_watch() {
         hdr_len: IMAGE_HDR_LEN,
     };
     let n = begin.encode(&mut b).unwrap();
-    pc.call(WATCH, Cmd::XferBegin, &b[..n]);
+    pc.call(watch(), Cmd::XferBegin, &b[..n]);
     let (hdr, body) = watch_img.split_at(HEADER_SIZE);
     for (cmd, part) in [(Cmd::XferHdr, hdr), (Cmd::XferData, body)] {
         for (i, c) in part.chunks(1000).enumerate() {
@@ -141,15 +152,15 @@ fn release_verifies_and_updates_the_watch() {
             }
             .encode(&mut p)
             .unwrap();
-            pc.call(WATCH, cmd, &p[..n]);
+            pc.call(watch(), cmd, &p[..n]);
         }
     }
-    assert_eq!(pc.call(WATCH, Cmd::XferEnd, &[]), sha256(body));
-    pc.call(WATCH, Cmd::SetPending, &[target::APP, 1]);
-    pc.call(WATCH, Cmd::Reboot, &[reboot_mode::NORMAL]);
-    let h = HelloResp::parse(&pc.call(WATCH, Cmd::Hello, &hello())).unwrap();
+    assert_eq!(pc.call(watch(), Cmd::XferEnd, &[]), sha256(body));
+    pc.call(watch(), Cmd::SetPending, &[target::APP, 1]);
+    pc.call(watch(), Cmd::Reboot, &[reboot_mode::NORMAL]);
+    let h = HelloResp::parse(&pc.call(watch(), Cmd::Hello, &hello())).unwrap();
     assert_eq!((h.active_version, h.trial), (Version::new(1, 1, 0), true));
-    pc.call(WATCH, Cmd::Confirm, &[target::APP]);
-    let st = StatusResp::parse(&pc.call(WATCH, Cmd::Status, &[])).unwrap();
+    pc.call(watch(), Cmd::Confirm, &[target::APP]);
+    let st = StatusResp::parse(&pc.call(watch(), Cmd::Status, &[])).unwrap();
     assert_eq!((st.active, st.confirmed), (1, 1));
 }

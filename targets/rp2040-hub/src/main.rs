@@ -26,7 +26,8 @@ use dagon_mcu_rp2040::links::Kind;
 use dagon_mcu_rp2040::node::{always, App};
 use dagon_mcu_rp2040::relay::{self, Setup};
 use dagon_mcu_rp2040::watchdog::{now_ms, Guard, Trial};
-use dagon_proto::payload::link;
+use dagon_mcu_rp2040::{RELAY_LINK_I2C0, RELAY_LINK_PIO_UART};
+use dagon_proto::payload::link::UART_ADDR;
 use dagon_relay::nodes::{named, LinkedNode};
 use dagon_relay::Config;
 use embassy_executor::Executor;
@@ -47,8 +48,8 @@ static EXECUTOR_LOW: StaticCell<Executor> = StaticCell::new();
 /// The sample's wiring, shown and polled until a topology display copy
 /// is stored.
 static SAMPLE_WIRING: [LinkedNode; 2] = [
-    named(1, "seg", link::I2C0, 0x42),
-    named(2, "watch", link::PIO_UART, link::UART_ADDR),
+    named(1, "seg", RELAY_LINK_I2C0, 0x42),
+    named(2, "watch", RELAY_LINK_PIO_UART, UART_ADDR),
 ];
 
 #[cortex_m_rt::entry]

@@ -242,6 +242,8 @@ export class Operate {
   state = $state<L>('idle');
   failure = $state<ConnectFailure | undefined>();
   config = $state<Config | null>(null);
+  /** The configuration whose definitions dagon-host holds (`tellConfig`); null: none (a new host holds none). */
+  private told: string | null = null;
   live = $state<Record<string, Live>>({});
   /** Nodes found by the last scan (hub included). */
   found = $state(0);
@@ -464,6 +466,7 @@ export class Operate {
       this.transport = t;
       this.link = hostLink(t, this.deps.clock);
       this.host = newHost(this.link);
+      this.told = null;
       const h = await this.call((x) => x.hello('hub', 0));
       const why = this.notThisHub(h, false);
       if (why) throw why;
@@ -522,6 +525,7 @@ export class Operate {
     this.transport = t;
     this.link = hostLink(t, this.deps.clock);
     this.host = newHost(this.link);
+    this.told = null;
     this.go('chosen');
     try {
       this.hubHello = await this.call((h) => h.hello('hub', 0));
@@ -755,7 +759,7 @@ export class Operate {
     const nodes = this.targets.map((id) => reach.findIndex((n) => n.id === id));
     let results: NodeResult[];
     try {
-      results = await this.call((h) => (this.tellTrials(h), h.apply(f.bytes, topo_compile(c.yaml), nodes, (e) => void (my === this.session && this.onEvent(e)))));
+      results = await this.call((h) => h.apply(f.bytes, topo_compile(c.yaml), nodes, (e) => void (my === this.session && this.onEvent(e))));
     } catch {
       // The release passed the same check before, so only the link can fail here.
       if (my === this.session) this.lose();
@@ -814,9 +818,18 @@ export class Operate {
     }
   }
 
-  /** Tells dagon-host each node's own limits from its MCU definition (erase wait, trial for the node's one %). */
-  private tellTrials(h: Host): void {
-    if (this.config) h.setTimings(this.config.yaml);
+  /**
+   * Before a call: dagon-host gets the configuration's definitions (each node's limits, how each linked node is reached)
+   * before the first call of a configuration and again when it changes. A configuration whose definitions do not load
+   * throws, so the call fails with that error and sends nothing; without a configuration the host reaches only the
+   * connected node.
+   */
+  private tellConfig(h: Host): void {
+    const yaml = this.config?.yaml ?? null;
+    if (this.told === yaml) return;
+    if (yaml === null) h.clearTimings();
+    else h.setTimings(yaml);
+    this.told = yaml;
   }
 
   /** The hub reboots onto `version`: dagon-host reopens it for 45 s (hubRestarting), keeping only that hub. */
@@ -1138,7 +1151,7 @@ export class Operate {
     };
     let r: RecoverResult;
     try {
-      r = await this.call((h) => (this.tellTrials(h), run(h, on)));
+      r = await this.call((h) => run(h, on));
     } catch (e) {
       if (my !== this.session) return;
       this.reconnectUntil = null;
@@ -1228,7 +1241,10 @@ export class Operate {
   private call<T>(f: (h: Host) => Promise<T>): Promise<T> {
     const host = this.host;
     if (!host) return Promise.reject(new Error('not connected'));
-    const run = this.chain.then(() => f(host));
+    const run = this.chain.then(() => {
+      this.tellConfig(host);
+      return f(host);
+    });
     this.chain = run.catch(() => undefined);
     return run;
   }

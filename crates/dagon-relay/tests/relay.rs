@@ -19,13 +19,14 @@ use dagon_port::{
     hello_request, BusError, Flash, FlashError, FlashRegion, Link, LinkError, LinkKind, NodeLink,
     Nrst, Reconnect, SubControl,
 };
+use dagon_port::{Addressing, RelayLinkDef};
 use dagon_proto::payload::{boot0, nrst, I2cRaw, Relay as RelayReq, Show, StatusResp, SubCtl};
 use dagon_proto::{finish, frame_len, max_payload, split_status, Cmd, Frame, Status};
 use dagon_relay::nodes::{named, Identity};
 use dagon_relay::view::Shade;
 use dagon_relay::{
-    run_link, serve, task, Addressing, Config, LinkRoute, Liveness, OwnAgent, Port, Recovery,
-    Relay, RelayClock, RelayLink, State,
+    run_link, serve, task, Config, LinkRoute, Liveness, OwnAgent, Port, Recovery, Relay,
+    RelayClock, State,
 };
 use dagon_sim::store::SimStore;
 use dagon_sim::{sample_hub, SimBus, NODE_I2C_ADDR};
@@ -40,24 +41,28 @@ const STREAM_ADDR: u8 = 0xFF;
 /// A link the node has but the board does not wire.
 const SPARE: u8 = 0x13;
 
-const LINKS: [RelayLink; 3] = [
-    RelayLink {
+/// This test's own relay link table, one port each.
+const LINKS: [RelayLinkDef; 3] = [
+    RelayLinkDef {
         id: BUS,
-        carries: |_| false,
-        max_payload: max_payload::I2C,
+        port: 0,
+        kind: LinkKind::I2c,
         addressing: Addressing::SevenBit,
+        max_payload: max_payload::I2C as u16,
     },
-    RelayLink {
+    RelayLinkDef {
         id: STREAM,
-        carries: |_| false,
-        max_payload: max_payload::UART,
+        port: 1,
+        kind: LinkKind::Uart,
         addressing: Addressing::Fixed(STREAM_ADDR),
+        max_payload: max_payload::UART as u16,
     },
-    RelayLink {
+    RelayLinkDef {
         id: SPARE,
-        carries: |_| false,
-        max_payload: max_payload::UART,
+        port: 2,
+        kind: LinkKind::Uart,
         addressing: Addressing::Fixed(STREAM_ADDR),
+        max_payload: max_payload::UART as u16,
     },
 ];
 
@@ -404,7 +409,7 @@ impl Pc<'_> {
         let max = LINKS
             .iter()
             .find(|l| l.id == link)
-            .map_or(64, |l| l.max_payload);
+            .map_or(64, |l| usize::from(l.max_payload));
         let mut req = [0u8; 32];
         let n = hello_request(max, 0x40, &mut req).unwrap();
         self.relay(link, addr, 300, &req[..n]).await
@@ -715,12 +720,8 @@ fn serves(index: u8) -> (Vec<dagon_relay::nodes::LinkedNode>, Vec<u8>) {
     let config = Config::default();
     let port = Port::new();
     let links = [LinkRoute {
-        link: RelayLink {
-            id: BUS,
-            carries: |l| l.iface == dagon_format::topology::iface::I2C_BUS,
-            max_payload: max_payload::I2C,
-            addressing: Addressing::SevenBit,
-        },
+        // The topology's links are on port 0 at both ends.
+        link: LINKS[0],
         port: Some(&port),
     }];
     let (requests, replies) = (Frames::new(), Frames::new());

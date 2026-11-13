@@ -101,7 +101,10 @@ pub fn links(io: Io, uplink: Kind, downlinks: &[Kind]) -> (Links, Spare) {
         let (bus, sda, scl) = io.i2c;
         let mut cfg = i2c::Config::default();
         cfg.frequency = I2C_HZ;
-        I2cLink::new(RpI2c(I2c::new_async(bus, scl, sda, I2cIrqs, cfg)))
+        I2cLink::new(
+            RpI2c(I2c::new_async(bus, scl, sda, I2cIrqs, cfg)),
+            dagon_mcu_rp2040::RELAY_LINK_I2C0,
+        )
     });
     #[cfg(not({{if_down_i2c}}))]
     let i2c = None;

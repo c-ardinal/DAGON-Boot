@@ -57,6 +57,25 @@ describe('operating mode against the in-memory hub', () => {
     expect([op.state, op.responding]).toEqual(['ready', 3]);
   }, 20_000);
 
+  test('a configuration whose definitions do not load fails the call with that error and sends nothing', async () => {
+    const { t, op } = session();
+    await op.connect();
+    op.useConfig({ ...SAMPLE_CONFIG, yaml: 'dagon: [2' });
+    let writes = 0;
+    const write = t.write.bind(t);
+    t.write = async (raw: Uint8Array) => {
+      writes += 1;
+      return write(raw);
+    };
+    const call = (op as unknown as { call: (f: (h: { hello: (k: string, a: number) => Promise<unknown> }) => Promise<unknown>) => Promise<unknown> }).call.bind(op);
+    await expect(call((h) => h.hello('i2c', 0x42))).rejects.toThrow(/./);
+    expect(writes).toBe(0);
+    // The configuration back: its definitions are given again and the call goes out.
+    op.useConfig(SAMPLE_CONFIG);
+    await call((h) => h.hello('hub', 0));
+    expect(writes).toBeGreaterThan(0);
+  }, 20_000);
+
   test('selecting a node reads its slots and health', async () => {
     const { op } = session();
     await op.connect();

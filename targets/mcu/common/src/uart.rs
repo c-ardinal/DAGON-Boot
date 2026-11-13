@@ -7,7 +7,7 @@
 //! - only a response (RESP flag) with the request's seq is taken.
 
 use dagon_port::{NodeLink, StreamPort, NO_ADDR};
-use dagon_proto::payload::{link, HelloResp};
+use dagon_proto::payload::HelloResp;
 use dagon_proto::{flags, frame_len, max_payload, Status};
 
 use crate::frames::{FrameReader, GAP_MS};
@@ -28,6 +28,8 @@ pub use dagon_port::{hello_answer, hello_request};
 pub struct UartLink<S, C> {
     port: S,
     now: C,
+    /// Its relay link id, from the MCU package's definition.
+    id: u8,
     reader: FrameReader<{ UART_FRAME * 2 }>,
     timeout_ms: u16,
     deadline: u64,
@@ -36,10 +38,13 @@ pub struct UartLink<S, C> {
 }
 
 impl<S: StreamPort, C: Fn() -> u64> UartLink<S, C> {
-    pub fn new(port: S, now: C) -> Self {
+    /// The link on `port`, relay link `id` (its port's generated
+    /// `RELAY_LINK_<PORT>`), timed by `now`.
+    pub fn new(port: S, now: C, id: u8) -> Self {
         UartLink {
             port,
             now,
+            id,
             reader: FrameReader::new(max_payload::UART),
             timeout_ms: 0,
             deadline: 0,
@@ -83,7 +88,7 @@ impl<S: StreamPort, C: Fn() -> u64> UartLink<S, C> {
 /// The UART has no addresses: `addr` is ignored.
 impl<S: StreamPort, C: Fn() -> u64> NodeLink for UartLink<S, C> {
     fn link_id(&self) -> u8 {
-        link::PIO_UART
+        self.id
     }
 
     fn max_payload(&self) -> usize {
@@ -251,7 +256,8 @@ mod tests {
             written: Vec::new(),
             write_ms: 0,
         };
-        (UartLink::new(port, move || c.get()), clock)
+        // This test's own link id.
+        (UartLink::new(port, move || c.get(), 0x21), clock)
     }
 
     #[test]

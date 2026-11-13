@@ -175,6 +175,22 @@ index = 5
 name = "pio-uart"
 kind = "uart"
 
+# The links a node of this MCU relays over (src/relay.rs serves them): I2C0
+# with the DAGON mailbox, a node at its seven-bit address, and the PIO UART
+# to its one peer at the protocol's UART address. The ids are RELAY's link
+# byte on the wire.
+[[relay_link]]
+id = 1
+port = "i2c0"
+addressing = "seven-bit"
+max_payload = 256
+
+[[relay_link]]
+id = 2
+port = "pio-uart"
+addressing = { fixed = 0xFF }
+max_payload = 1024
+
 [watchdog]
 kind = "rp-watchdog"
 trial_ms = 8_000

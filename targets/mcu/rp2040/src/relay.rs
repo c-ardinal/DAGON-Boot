@@ -15,7 +15,6 @@
 //! executor.
 
 use dagon_port::NodeLink;
-use dagon_proto::payload::link;
 /// The role values a node reports ([`Setup::role`]).
 pub use dagon_proto::payload::role;
 use dagon_proto::payload::StatusResp;
@@ -196,7 +195,9 @@ pub fn start<B: BoardDef, const N: usize>(
         setup.app,
     );
     let watch = RpWatch(guard);
-    let uart = links.uart.map(|s| UartLink::new(s, now_ms as fn() -> u64));
+    let uart = links
+        .uart
+        .map(|s| UartLink::new(s, now_ms as fn() -> u64, crate::RELAY_LINK_PIO_UART));
     let wired = [
         links.i2c.as_ref().map(NodeLink::link_id),
         uart.as_ref().map(NodeLink::link_id),
@@ -222,7 +223,7 @@ pub fn start<B: BoardDef, const N: usize>(
         // The STM32's ROM loader answers on the I2C link.
         recovery: links.lines.map(|lines| Recovery {
             lines,
-            link: link::I2C0,
+            link: crate::RELAY_LINK_I2C0,
         }),
         state: setup.state,
         watch,

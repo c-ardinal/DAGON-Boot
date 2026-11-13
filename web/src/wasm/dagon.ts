@@ -154,8 +154,10 @@ export interface Host {
   pushTopology(bin: Uint8Array): Promise<void>;
   watch(kind: TargetKind, addr: number): Promise<WatchRound>;
   /** `dagon apply`; rejects with a Refusal (or a reason) when nothing was sent. */
-  /** Each node of the topology `yaml` gets its own limits from its MCU's definition (erase wait, trial). Throws when they do not load. */
+  /** The topology `yaml`'s definitions: each node's own limits (erase wait, trial) and how each linked node is reached. Throws when they do not load. */
   setTimings(yaml: string): void;
+  /** No configuration: default limits, and only the connected node is reached. */
+  clearTimings(): void;
   apply(bundle: Uint8Array, topology: Uint8Array, nodes: number[] | null, onEvent: (e: UpdateEvent) => void): Promise<NodeResult[]>;
   confirm(kind: TargetKind, addr: number, force: boolean): Promise<ConfirmResult>;
   /** How a write would reach topology node `node` now; changes nothing. */
@@ -180,6 +182,7 @@ export function newHost(link: HostLink): Host {
     pushTopology: (bin) => h.push_topology(bin),
     watch: (k, a) => h.watch(k, a),
     setTimings: (yaml) => h.setTimings(yaml),
+    clearTimings: () => h.clearTimings(),
     apply: (b, t, n, on) => h.apply(b, t, n ? Uint8Array.from(n) : undefined, on),
     confirm: (k, a, f) => h.confirm(k, a, f),
     writePath: (n, t) => h.write_path(n, t),

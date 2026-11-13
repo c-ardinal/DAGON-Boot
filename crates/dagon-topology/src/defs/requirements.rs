@@ -174,6 +174,12 @@ pub const MCU: &[Requirement<McuCheck>] = &[
         check: link_i2c,
     },
     Requirement {
+        engine: "relay (dagon-relay, the host, the MCU package's generated RELAY_LINKS)",
+        fields: &["relay_link[].id", "relay_link[].addressing.fixed", "relay_link[].max_payload"],
+        rule: "id 1-254, unique; one entry per port, a [[link_port]] name; seven-bit on a kind with addresses, fixed (0-255) on one without; max_payload 1 up to the kind's protocol maximum",
+        check: relay_links,
+    },
+    Requirement {
         engine: "topology check V-27, compiled topology (a link end's port index)",
         fields: &["link_port[].index"],
         rule: "index and name each used once; name a-z, 0-9 and '-'",
@@ -701,6 +707,63 @@ fn link_ports(m: &McuDef) -> Result<(), String> {
         fail(earlier.iter().any(|o| o.index == p.index), || {
             format!("port index {} is used twice", p.index)
         })?;
+    }
+    Ok(())
+}
+
+fn relay_links(m: &McuDef) -> Result<(), String> {
+    use super::AddressingSpec;
+    for (i, r) in m.relay_links.iter().enumerate() {
+        let earlier = &m.relay_links[..i];
+        fail(!(1..=254).contains(&r.id), || {
+            format!("relay_link id {} is outside 1-254", r.id)
+        })?;
+        fail(earlier.iter().any(|o| o.id == r.id), || {
+            format!("relay_link id {} is used twice", r.id)
+        })?;
+        fail(earlier.iter().any(|o| o.port == r.port), || {
+            format!("port '{}' has two relay_link entries", r.port)
+        })?;
+        let Some(port) = m.port(&r.port) else {
+            return Err(format!(
+                "relay_link port '{}' is not a [[link_port]] of this MCU",
+                r.port
+            ));
+        };
+        let (kind, at) = (port.kind, &r.port);
+        match r.addressing {
+            AddressingSpec::SevenBit => fail(!kind.addressed(), || {
+                format!(
+                    "relay_link on '{at}': seven-bit addressing needs a kind with addresses, not {}",
+                    kind.name()
+                )
+            })?,
+            AddressingSpec::Fixed(_) => fail(kind.addressed(), || {
+                format!(
+                    "relay_link on '{at}': a fixed address is for a kind without addresses, not {}",
+                    kind.name()
+                )
+            })?,
+        }
+        let limits = dagon_port::LinkKind::from_name(kind.name())
+            .and_then(dagon_port::timeout::link_limits)
+            .ok_or_else(|| {
+                format!(
+                    "relay_link on '{at}': DAGON relays no frames over {}",
+                    kind.name()
+                )
+            })?;
+        fail(
+            r.max_payload == 0 || usize::from(r.max_payload) > limits.max_payload,
+            || {
+                format!(
+                    "relay_link on '{at}': max_payload {} is outside 1-{} for {}",
+                    r.max_payload,
+                    limits.max_payload,
+                    kind.name()
+                )
+            },
+        )?;
     }
     Ok(())
 }

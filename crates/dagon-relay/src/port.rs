@@ -13,7 +13,7 @@ use embassy_sync::channel::Channel;
 use heapless::Vec;
 
 use crate::view::Seen;
-use crate::{until, Config, Liveness, RelayClock, RelayLink, State};
+use crate::{until, Config, Liveness, RelayClock, RelayLinkDef, State};
 
 /// Largest request or response body carried through a port.
 pub(crate) const DATA_MAX: usize = dagon_proto::max_payload::USB - 1;
@@ -97,7 +97,7 @@ impl Port {
 /// but this board does not wire it.
 #[derive(Clone, Copy)]
 pub struct LinkRoute<'a> {
-    pub link: RelayLink,
+    pub link: RelayLinkDef,
     pub port: Option<&'a Port>,
 }
 

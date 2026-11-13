@@ -129,6 +129,33 @@ pub fn trial_attempts(mcu: &str) -> u8 {
         .unwrap_or_else(|| panic!("MCU definition {mcu} has no [watchdog] trial_attempts"))
 }
 
+/// The built-in definition of a simulated MCU.
+fn simulated_mcu(mcu: &str) -> &'static dagon_topology::defs::McuDef {
+    dagon_topology::defs::Registry::builtin()
+        .mcu(mcu)
+        .unwrap_or_else(|| panic!("no MCU definition {mcu}"))
+}
+
+/// `[[relay_link]]` of MCU definition `mcu`: the links its relay reaches
+/// nodes over.
+pub fn relay_links(mcu: &str) -> Vec<dagon_port::RelayLinkDef> {
+    simulated_mcu(mcu).relay_link_defs()
+}
+
+/// The relay link id MCU definition `mcu` gives its port `port`.
+pub fn relay_link_id(mcu: &str, port: &str) -> u8 {
+    let m = simulated_mcu(mcu);
+    let index = m
+        .port(port)
+        .unwrap_or_else(|| panic!("MCU definition {mcu} has no port {port}"))
+        .index;
+    m.relay_link_defs()
+        .iter()
+        .find(|l| l.port == index)
+        .unwrap_or_else(|| panic!("MCU definition {mcu} relays over no link on {port}"))
+        .id
+}
+
 /// The flash as a driver that programs any length at any address shows it
 /// (the RP2040's does, by pages): writes are padded to whole write units,
 /// the bytes around them rewritten with their current value.

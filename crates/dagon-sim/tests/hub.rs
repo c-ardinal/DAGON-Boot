@@ -11,6 +11,11 @@ use dagon_sim::*;
 use ed25519_compact::{KeyPair, Seed};
 use payload::link;
 
+/// The relay link id the sim hub's MCU definition gives its port `port`.
+fn link_on(port: &str) -> u8 {
+    store::relay_link_id(store::Layout::RP2040_HUB.mcu, port)
+}
+
 /// RFC 8032 section 7.1 TEST 1 key (public test data).
 const SEED: [u8; 32] = [
     0x9d, 0x61, 0xb1, 0x9d, 0xef, 0xfd, 0x5a, 0x60, 0xba, 0x84, 0x4a, 0xf4, 0x92, 0xec, 0x2c, 0xc4,
@@ -103,7 +108,7 @@ impl Pc {
         let inner_seq = self.seq;
         let mut p = vec![0u8; 4 + inner.len()];
         let n = Relay {
-            link: link::I2C0,
+            link: link_on("i2c0"),
             addr,
             timeout_ms: 200,
             inner: &inner,
@@ -498,7 +503,7 @@ fn uart_node_behind_a_lossy_link() {
         let inner = pc.frame(Cmd::Hello, &hello());
         let mut p = vec![0u8; 4 + inner.len()];
         let n = Relay {
-            link: link::PIO_UART,
+            link: link_on("pio-uart"),
             addr: link::UART_ADDR,
             timeout_ms: 500,
             inner: &inner,

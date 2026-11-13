@@ -26,6 +26,8 @@ mod tests_merge_rules;
 #[cfg(test)]
 mod tests_ports;
 #[cfg(test)]
+mod tests_relay_links;
+#[cfg(test)]
 mod tests_requirements;
 #[cfg(test)]
 mod tests_writers;
@@ -418,6 +420,24 @@ pub struct PortDef {
     pub kind: LinkKind,
 }
 
+/// One `[[relay_link]]` as written; [`McuDef::relay_link_defs`] gives the runtime table.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RelayLinkSpec {
+    pub id: u8,
+    pub port: String,
+    pub addressing: AddressingSpec,
+    pub max_payload: u16,
+}
+
+/// `"seven-bit"` or `{ fixed = N }`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub enum AddressingSpec {
+    SevenBit,
+    Fixed(u8),
+}
+
 /// Link kinds by direction: `up` towards the PC or the 親機, `down` to 子機.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -542,6 +562,14 @@ pub struct McuDef {
     /// the link's kind (topology check V-27), and the compiled topology carries its `index`.
     #[serde(default, rename = "link_port")]
     pub ports: Vec<PortDef>,
+    /// The links a node of this MCU relays over, one per `[[link_port]]` at most: `id` (RELAY's
+    /// link id, 1 to 254, unique), `port` (a `[[link_port]]` name), `addressing` (`"seven-bit"`:
+    /// the reached end's address from the topology, on a kind with addresses; `{ fixed = N }`, N
+    /// 0 to 255: the one peer of a kind without addresses) and `max_payload` (1 up to the protocol
+    /// maximum of the port's kind). An MCU package's build generates them as its `RELAY_LINKS`,
+    /// and the PC reads the same entries.
+    #[serde(default, rename = "relay_link")]
+    pub relay_links: Vec<RelayLinkSpec>,
     /// How the user connects it for a write: `label`, `hint`.
     pub connection: Connection,
     /// Tool check: `what`, `probe` (command), `expect` (`"runs"`, `{ line = "..." }`, `{ prefix =
@@ -637,6 +665,28 @@ impl McuDef {
     /// The `[[link_port]]` named `name`.
     pub fn port(&self, name: &str) -> Option<&PortDef> {
         self.ports.iter().find(|p| p.name == name)
+    }
+
+    /// `[[relay_link]]` as the one runtime type, in definition order: the one
+    /// conversion from the definition (a loaded definition has passed its
+    /// checks, so every entry names a port of a kind DAGON relays over).
+    pub fn relay_link_defs(&self) -> Vec<dagon_port::RelayLinkDef> {
+        self.relay_links
+            .iter()
+            .filter_map(|r| {
+                let port = self.port(&r.port)?;
+                Some(dagon_port::RelayLinkDef {
+                    id: r.id,
+                    port: port.index,
+                    kind: dagon_port::LinkKind::from_name(port.kind.name())?,
+                    addressing: match r.addressing {
+                        AddressingSpec::SevenBit => dagon_port::Addressing::SevenBit,
+                        AddressingSpec::Fixed(a) => dagon_port::Addressing::Fixed(a),
+                    },
+                    max_payload: r.max_payload,
+                })
+            })
+            .collect()
     }
 
     /// Whether flash map and slot addresses are CPU addresses (every flash

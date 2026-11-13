@@ -212,11 +212,41 @@ fn xfer_vectors() {
     expect_at(&file, &[(5, &[0x15, 0x00, 0x01, 252, 0, 0, 0, 0, 1, 2])]); // len 256, offset 252
 }
 
+/// The relay link id the built-in RP2040 definition gives its port `port`
+/// (`[[relay_link]]` in `targets/mcu/rp2040/dagon-mcu.toml`).
+fn rp2040_relay_link(port: &str) -> u8 {
+    let path: PathBuf = [
+        env!("CARGO_MANIFEST_DIR"),
+        "..",
+        "..",
+        "targets",
+        "mcu",
+        "rp2040",
+        "dagon-mcu.toml",
+    ]
+    .iter()
+    .collect();
+    let text = std::fs::read_to_string(&path).unwrap();
+    let field = |entry: &str, key: &str| {
+        entry.lines().find_map(|l| {
+            let (k, v) = l.split_once('=')?;
+            (k.trim() == key).then(|| v.trim().trim_matches('"').to_string())
+        })
+    };
+    text.split("[[relay_link]]")
+        .skip(1)
+        .find(|e| field(e, "port").as_deref() == Some(port))
+        .and_then(|e| field(e, "id"))
+        .expect("the RP2040 definition relays over the port")
+        .parse()
+        .unwrap()
+}
+
 #[test]
 fn relay_vector() {
     let inner = hello_req_frame();
     let relay = Relay {
-        link: link::I2C0,
+        link: rp2040_relay_link("i2c0"),
         addr: 0x42,
         timeout_ms: 300,
         inner: &inner,
@@ -228,7 +258,7 @@ fn relay_vector() {
     let r = Relay::parse(decode(&file).payload).unwrap();
     assert_eq!(r, relay);
     assert_eq!(decode(r.inner).cmd, Cmd::Hello as u8);
-    // len 4 + 18; link I2C0, addr 0x42, timeout 300 ms, then the inner frame verbatim
+    // len 4 + 18; link 1 (the RP2040's i2c0), addr 0x42, timeout 300 ms, then the inner frame verbatim
     expect_at(
         &file,
         &[(5, &[0x50, 22, 0, 1, 0x42, 0x2C, 0x01]), (12, &inner)],

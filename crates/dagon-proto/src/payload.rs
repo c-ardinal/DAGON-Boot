@@ -56,10 +56,9 @@ pub mod rom_method {
     pub const PMIC: u8 = 2;
 }
 
-/// RELAY `link`.
+/// RELAY `link`. The link ids are an MCU's: its definition's
+/// `[[relay_link]]` (`dagon_port::RelayLinkDef`).
 pub mod link {
-    pub const I2C0: u8 = 1;
-    pub const PIO_UART: u8 = 2;
     /// `addr` for UART links.
     pub const UART_ADDR: u8 = 0xFF;
 }

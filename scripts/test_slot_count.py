@@ -35,7 +35,7 @@ LABELS = "web/src/app/copy.ts"
 ONE_MINUS = re.compile(r"\b1\s*-\s*\(?[A-Za-z_][\w.]*\b")
 # A literal list of the A and B slots.
 AB_LIST = re.compile(
-    r"\[\s*slot_binding::A\s*,\s*slot_binding::B\s*\]"
+    r"\[\s*(?:slot_binding|slot|Binding|SlotName)::A\s*,\s*(?:slot_binding|slot|Binding|SlotName)::B\s*\]"
     r"|\[\s*0u8\s*,\s*1\s*\]"
     r"|\[\s*'a'\s*,\s*'b'\s*\]"
     r"|\[\s*'A'\s*,\s*'B'\s*\]"
@@ -43,6 +43,14 @@ AB_LIST = re.compile(
     r"|\.\.2\s*\]"
     r"|slice\(\s*0\s*,\s*2\s*\)"
 )
+# A slot count fixed in a constant, and what is sized or counted by one.
+FIXED_COUNT = re.compile(
+    r"const\s+\w*SLOTS\w*\s*:\s*(?:usize|u8)\s*=\s*2\b"
+    r"|\[[^\[\];]*;\s*\w*SLOTS\w*\s*\]"
+    r"|\b0\s*\.\.=?\s*\w*SLOTS\w*\b"
+)
+# The two slot numbers as a literal list, on a line about slots.
+ZERO_ONE = re.compile(r"\[\s*0\s*,\s*1\s*\]")
 # An array of two slots: of slot-like elements, or a `slots` field of two.
 TWO_SLOTS = re.compile(
     r"\[[^\[\];]*(?:Slot|State|Machine|Img|\(u32,\s*u32\))[^\[\];]*;\s*2\s*\]"
@@ -91,7 +99,9 @@ def findings(path, raw, code):
         if (
             AB_LIST.search(line)
             or (about_slots and ONE_MINUS.search(plain))
+            or (about_slots and ZERO_ONE.search(plain))
             or TWO_SLOTS.search(plain)
+            or FIXED_COUNT.search(plain)
         ):
             found.append((f"{path}:{n}", line.strip()))
     return found
@@ -123,12 +133,21 @@ class SlotCount(unittest.TestCase):
             "for s in &st.slots[..2] {",
             "return st.slots.slice(0, 2).map((s, i) => s);",
             "const other = s.slots[1 - s.active];",
+            "const SLOTS: usize = 2;",
+            "let mut tried_slot = [false; SLOTS];",
+            "for s in 0..SLOTS as u8 {",
+            "for s in [slot::A, slot::B] {",
+            "for b in [Binding::A, Binding::B] {",
+            "for slot in [0, 1] {",
         ]:
             self.assertTrue(findings("x", line, line), line)
         for line in [
             "let mut p = [0u8; 2];",
             "pub fn tried(cell: [u32; 2], p: &SlotRef) -> u8 {",
             "let u = 1 - t;",
+            "for i in [0, 1] {",
+            "const ROOM: usize = StatusResp::IMAGE_SLOTS;",
+            "for s in 0..self.app_slots {",
         ]:
             self.assertFalse(findings("x", line, line), line)
 

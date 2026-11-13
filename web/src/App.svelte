@@ -8,7 +8,7 @@
   import { HUB_LOCKED, hubOf, view, type Action } from './app/machine.ts';
   import { Operate, waterOf, writingTo, type Progress, type ReleaseFile } from './app/operate.svelte.ts';
   import { keptChoices, type Kept } from './app/kept.ts';
-  import { previousVersion } from './app/slots.ts';
+  import { imageRows, previousVersion } from './app/slots.ts';
   import { buildFailure, buildingNow, buildStateOf, firstWriteNodes, type BuildingMemo, type BuildState } from './app/jobFlow.ts';
   import { logStages } from './app/stageLog.svelte.ts';
   import Graph, { COMPACT_FROM, newView, ZOOM_LIMITS, type Chip, type View } from './graph/Graph.svelte';
@@ -1211,7 +1211,7 @@
   /** 前のバージョンに戻す, from the menu or the sheet: asks first, like every change that cannot be undone. */
   function askRollback(id: string) {
     const n = op.config?.nodes.find((x) => x.id === id);
-    const v = previousVersion(op.live[id]?.status);
+    const v = previousVersion(op.live[id]?.status, imageRows(n?.mcuId));
     confirmThen(CONFIRM.rollback(n ? `[${n.no}] ${n.name}` : id, v ?? ''), () => void op.rollback(id));
   }
   function openCli() {

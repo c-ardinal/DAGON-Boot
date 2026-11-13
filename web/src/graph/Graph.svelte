@@ -37,6 +37,7 @@
   import { KIND_LABEL, type LinkKind } from '../app/define/model.ts';
   import type { Live } from '../app/operate.svelte.ts';
   import type { Config, Link, Node } from '../app/sample.ts';
+  import { imageRows } from '../app/slots.ts';
   import { versionText } from '../wasm/dagon.ts';
   import { along, CableField, FrameLoop, restPoints, runLengths, strandPath } from './cable.ts';
   import { neighbour, pathD, tieLengths, verticalLink, wireOffsets, type Bezier, type Pt } from './geometry.ts';
@@ -451,11 +452,14 @@
     return h ? versionText(h.activeVersion) : '';
   }
 
-  /** The slot line (A / B with versions, ▸ on the running one), from the node's last STATUS. */
+  /** The slot line (each app slot the node's definition gives, with its version, ▸ on the running one), from the node's last STATUS. */
   function slotsOf(n: Node): { row: string; text: string; on: boolean }[] | null {
     const st = connected ? live[n.id]?.status : null;
     if (!st) return null;
-    return st.slots.slice(0, 2).map((s, i) => ({ row: SLOT.rows[i], text: s.state === 0 ? SLOT.states[0] : versionText(s.version), on: st.active === i }));
+    return imageRows(n.mcuId).map((i) => {
+      const s = st.slots[i];
+      return { row: SLOT.rows[i], text: s.state === 0 ? SLOT.states[0] : versionText(s.version), on: st.active === i };
+    });
   }
 
   /** Each node's state mark: from the page's chip, the water level and the watch. */

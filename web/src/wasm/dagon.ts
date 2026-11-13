@@ -10,6 +10,7 @@ import init, {
   load_definitions,
   mcu_connection,
   mcu_trial_ms,
+  status_rows,
   trial_percent,
   release_agent_digest,
   release_app_digest,
@@ -256,6 +257,12 @@ export function trialPercent(xferMs: number, onTrialMs: number, trialMs: number 
 /** How long a new image of `mcu` may take to start and pass its self-check (`[watchdog] trial_ms`); null without one. */
 export function trialMs(mcu: string): number | null {
   return mcu_trial_ms(mcu) ?? null;
+}
+
+/** The STATUS entries a node of `mcu` fills for `target`, by wire slot (0 A, 1 B, 2 factory), from its definition; null for an unknown MCU. */
+export function statusRows(mcu: string, target: 'app' | 'bootcore' | 'agent'): number[] | null {
+  const r = status_rows(mcu, target);
+  return r ? Array.from(r) : null;
 }
 
 export function mcuConnection(mcu: string): { label: string; hint: string } | null {

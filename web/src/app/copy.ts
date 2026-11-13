@@ -632,10 +632,10 @@ export const NODE_ACTION = {
   romAttempts: 'やり直し',
 } as const;
 
-/** Slot section. Inside it the rows are A / B / 予備. */
+/** Slot section. Its rows are labelled by STATUS entry (A / B / 予備); a node shows the ones its MCU definition gives. */
 export const SLOT = {
   heading: 'スロット',
-  /** The boot loader has its own two slots (dagon_proto VERSION's boot core slots). */
+  /** The boot loader's own slots, labelled by STATUS entry (dagon_proto VERSION's boot core slots). */
   coreHeading: 'ブートローダのスロット',
   rows: ['A', 'B', '予備'],
   coreRows: ['A', 'B'],

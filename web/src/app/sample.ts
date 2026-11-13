@@ -23,6 +23,8 @@ export interface Node {
   role: 'hub' | 'node';
   product: string;
   mcu: string;
+  /** The MCU's id in the definitions (its slots come from there); absent: every STATUS entry is shown. */
+  mcuId?: string;
   /** Link value shown on the node: "I2C 0x42", "UART 115200"; empty for the hub. */
   via: string;
   /** Hub pins driving reset and boot; null when the node switches itself. */
@@ -81,9 +83,9 @@ export const SAMPLE_CONFIG: Config = {
   name: 'sample',
   yaml: SAMPLE_YAML,
   nodes: [
-    { id: 'hub', no: 1, name: 'メイン', role: 'hub', product: 'Waveshare RP2040-Touch-LCD-1.28', mcu: 'RP2040', via: '', reset: null, boot: null, target: { kind: 'hub', addr: 0 } },
-    { id: 'seg', no: 2, name: '7セグ', role: 'node', product: 'NUCLEO-F401RE', mcu: 'STM32F401RE', via: 'I2C 0x42', reset: 'GPIO18', boot: 'GPIO28', target: { kind: 'i2c', addr: 0x42 } },
-    { id: 'watch', no: 3, name: 'ウォッチ', role: 'node', product: 'M5StopWatch', mcu: 'ESP32-S3', via: 'UART 115200', reset: null, boot: null, target: { kind: 'uart', addr: 0 } },
+    { id: 'hub', no: 1, name: 'メイン', role: 'hub', product: 'Waveshare RP2040-Touch-LCD-1.28', mcu: 'RP2040', mcuId: 'rp2040', via: '', reset: null, boot: null, target: { kind: 'hub', addr: 0 } },
+    { id: 'seg', no: 2, name: '7セグ', role: 'node', product: 'NUCLEO-F401RE', mcu: 'STM32F401RE', mcuId: 'stm32f401re', via: 'I2C 0x42', reset: 'GPIO18', boot: 'GPIO28', target: { kind: 'i2c', addr: 0x42 } },
+    { id: 'watch', no: 3, name: 'ウォッチ', role: 'node', product: 'M5StopWatch', mcu: 'ESP32-S3', mcuId: 'esp32s3', via: 'UART 115200', reset: null, boot: null, target: { kind: 'uart', addr: 0 } },
   ],
   links: [
     {

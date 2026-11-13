@@ -653,6 +653,7 @@ export function toConfig(doc: Doc, boards: Board[]): Config {
       role: n.role === 'coordinator' ? 'hub' : 'node',
       product: b?.product ?? INSPECT.boardOwn,
       mcu: mcuName,
+      mcuId: n.mcu,
       via,
       reset: gpio(s?.up.nrst),
       boot: gpio(s?.up.boot),

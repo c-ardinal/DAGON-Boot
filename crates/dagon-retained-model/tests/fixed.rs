@@ -10,7 +10,7 @@ use dagon_retained_model::mem::{Mem, Survives};
 use dagon_retained_model::record::{
     self, Geometry, Ring, Writer, RECORD_MAX, V1 as RecV1, V1_SIZE,
 };
-use dagon_retained_model::topology::{self, BodyCodec, BodyV1, Store};
+use dagon_retained_model::topology::{self, BodyCodec, BodyV2, Store};
 use dagon_retained_model::world_fuse::{self as wf, FuseWorld};
 use dagon_retained_model::world_record::{
     self as wr, Config, End::*, Op, RecordWorld, Stage, Ver::*,
@@ -618,7 +618,7 @@ fn topology_cut_after_every_byte() {
         bank: 1024,
         random_start: false,
     };
-    let body = BodyV1.encode(&wt::topology(2)).unwrap();
+    let body = BodyV2.encode(&wt::topology(2)).unwrap();
     let store = Store {
         base: 16,
         bank: 1024,
@@ -645,7 +645,7 @@ fn topology_cut_after_every_byte() {
 #[test]
 fn topology_too_large_is_refused() {
     let store = Store { base: 0, bank: 128 };
-    let body = BodyV1.encode(&wt::topology(5)).unwrap();
+    let body = BodyV2.encode(&wt::topology(5)).unwrap();
     assert!(body.len() > store.capacity());
     assert_eq!(
         topology::host_plan(&store, &body),

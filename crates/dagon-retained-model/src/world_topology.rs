@@ -10,10 +10,10 @@ use crate::identity::identity;
 use crate::mem::{Cut, Mem};
 use crate::rng::Rng;
 use crate::topology::{
-    self, host_plan, BodyCodec, BodyV1, Node, Refused, Source, Store, Topology, Written,
+    self, host_plan, BodyCodec, BodyV2, Node, Refused, Source, Store, Topology, Written,
 };
 use dagon_format::manifest::Constraint;
-use dagon_format::topology::TopoLink;
+use dagon_format::topology::{TopoEnd, TopoLink, NONE};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Op {
@@ -54,8 +54,18 @@ pub fn topology(seed: u64) -> Topology {
     let links = tos
         .into_iter()
         .map(|to| TopoLink {
-            from: 0,
-            to,
+            ends: [
+                TopoEnd {
+                    node: 0,
+                    port: r.byte(),
+                    addr: NONE,
+                },
+                TopoEnd {
+                    node: to,
+                    port: r.byte(),
+                    addr: r.byte() & 0x7F,
+                },
+            ],
             iface: 1 + r.below(3) as u8,
             control: 1,
             tx_pin: r.byte(),
@@ -64,8 +74,8 @@ pub fn topology(seed: u64) -> Topology {
             boot_pin: r.byte(),
             baud: r.next_u64() as u32,
             rom_entry: r.byte() % 4,
-            i2c_addr: r.byte() & 0x7F,
             bus_id: r.byte(),
+            gpio_end: [0, 1, NONE][r.below(3) as usize],
         })
         .collect();
     let constraints = (0..r.below(17))
@@ -172,7 +182,7 @@ impl Sim {
     }
 
     fn round_trip(&self, t: &Topology, body: &[u8]) -> Result<(), Violation> {
-        let (got, src) = topology::load(&BodyV1, self.mem.bytes(), &self.store);
+        let (got, src) = topology::load(&BodyV2, self.mem.bytes(), &self.store);
         let digest = host_plan(&self.store, body).unwrap();
         if got.as_ref() != Some(t) || src != (Source::Copy { digest }) {
             return Err(self.fail("P13", "pushed topology does not read back"));
@@ -233,7 +243,7 @@ impl World for TopologyWorld {
             match *op {
                 Op::Push { topo, cut } => {
                     let t = topology(topo);
-                    let body = BodyV1
+                    let body = BodyV2
                         .encode(&t)
                         .map_err(|e| sim.fail("P13", format!("{e:?}")))?;
                     sim.push(&body, cut)?;
@@ -244,13 +254,13 @@ impl World for TopologyWorld {
                     }
                 }
                 Op::PushForeign { cut } => {
-                    let mut body = BodyV1.encode(&topology(1)).unwrap();
-                    body[4] = 2;
+                    let mut body = BodyV2.encode(&topology(1)).unwrap();
+                    body[4] = 3;
                     sim.push(&body, cut)?;
-                    let (t, src) = topology::load(&BodyV1, sim.mem.bytes(), &store);
+                    let (t, src) = topology::load(&BodyV2, sim.mem.bytes(), &store);
                     let newest = topology::current(sim.mem.bytes(), &store);
                     if newest.is_some_and(|c| c.body == body)
-                        && (t.is_some() || src != Source::Fallback(Some(Refused::Unsupported(2))))
+                        && (t.is_some() || src != Source::Fallback(Some(Refused::Unsupported(3))))
                     {
                         return Err(sim.fail("P13", "unsupported layout applied"));
                     }

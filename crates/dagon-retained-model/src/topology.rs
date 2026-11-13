@@ -1,7 +1,7 @@
 //! Compiled topology: the body the host sends (node layout with the 64-bit
 //! MCU identity) and the hub's two-bank copy store in NOR flash.
 //!
-//! The body codec is [`BodyCodec`]; [`BodyV1`] is the layout this model
+//! The body codec is [`BodyCodec`]; [`BodyV2`] is the layout this model
 //! proves. The store writes the bank the reader is not using: erase, body,
 //! header, and the header's commit byte last. A bank counts only with its
 //! commit byte, a matching header CRC and a body matching the header's
@@ -58,16 +58,21 @@ pub const NODE_SIZE: usize = 40;
 pub const BODY_MAX: usize =
     BODY_HEAD + NODE_SIZE * MAX_NODES + LINK_SIZE * MAX_LINKS + CONSTRAINT_SIZE * MAX_CONSTRAINTS;
 
-/// Layout 1.
+/// Layout 2.
 ///
 /// Head (16 bytes): magic `DGTP`, layout u16 LE, node count, link count,
 /// constraint count, 7 zero bytes. Then the nodes (40 bytes each: index,
 /// role, port kind, max attempts, listen window u16, map id, order rank,
 /// recovery tiers \[3\], 5 zero bytes, MCU identity u64 at 16, target tag
-/// \[16\] at 24), the links (16 bytes, as the image tools encode them),
-/// the constraints (16 bytes). Canonical: node `index` equals its
-/// position, links sorted by `to`, reserved bytes zero.
-pub struct BodyV1;
+/// \[16\] at 24), the links (20 bytes, as the image tools encode them: two
+/// ends of node, port and address, with no direction), the constraints (16
+/// bytes). Canonical: node `index` equals its position, a link's ends in
+/// node order, links sorted by their ends' nodes, reserved bytes zero.
+/// Layout 1 (16-byte links with a `from` and a `to` node) is not read.
+pub struct BodyV2;
+
+/// The layout number [`BodyV2`] writes and reads.
+const LAYOUT: u16 = 2;
 
 fn node_bytes(n: &Node) -> [u8; NODE_SIZE] {
     let mut b = [0u8; NODE_SIZE];
@@ -96,9 +101,9 @@ fn node_parse(b: &[u8]) -> Node {
     }
 }
 
-impl BodyCodec for BodyV1 {
+impl BodyCodec for BodyV2 {
     fn layout(&self) -> u16 {
-        1
+        LAYOUT
     }
 
     fn encode(&self, t: &Topology) -> Result<Vec<u8>, Refused> {
@@ -109,13 +114,16 @@ impl BodyCodec for BodyV1 {
             .iter()
             .enumerate()
             .all(|(i, x)| x.index as usize == i)
-            && t.links.windows(2).all(|w| w[0].to < w[1].to);
+            && t.links.iter().all(|l| l.ends[0].node < l.ends[1].node)
+            && t.links.windows(2).all(|w| {
+                (w[0].ends[0].node, w[0].ends[1].node) < (w[1].ends[0].node, w[1].ends[1].node)
+            });
         if !counts || !canonical {
             return Err(Refused::Malformed);
         }
         let mut b = vec![0u8; BODY_HEAD];
         b[..4].copy_from_slice(&MAGIC);
-        b[4..6].copy_from_slice(&1u16.to_le_bytes());
+        b[4..6].copy_from_slice(&LAYOUT.to_le_bytes());
         b[6..9].copy_from_slice(&[n as u8, l as u8, c as u8]);
         t.nodes
             .iter()
@@ -134,7 +142,7 @@ impl BodyCodec for BodyV1 {
             return Err(Refused::Malformed);
         }
         let layout = u16::from_le_bytes([b[4], b[5]]);
-        if layout != 1 {
+        if layout != LAYOUT {
             return Err(Refused::Unsupported(layout));
         }
         let (n, l, c) = (b[6] as usize, b[7] as usize, b[8] as usize);

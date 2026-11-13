@@ -331,7 +331,7 @@ impl<S: SlotStore, X: AppChain> Agent<S, X> {
         let core = self
             .images
             .target_status(target::BOOTCORE)
-            .map(|st| VersionSlots::<2>::of(&st));
+            .map(|st| VersionSlots::of(&st));
         let resp = VersionResp {
             wire: Some(dagon_proto::PROTO_VERSION),
             mcu_id: Some(self.cfg.mcu_id),

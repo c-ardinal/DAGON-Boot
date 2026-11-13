@@ -12,6 +12,8 @@ use crate::{core_image, image, SlotStore, StoreError};
 
 /// The recovery agent's slot (STATUS slot 2).
 const FACTORY: u8 = 2;
+/// Room for an image kind's slots: STATUS's A and B entries.
+const ROOM: usize = StatusResp::IMAGE_SLOTS;
 
 /// Proof that the image lifecycle machine is changing a slot: the
 /// [`SlotStore`] mutators take one, and only this crate makes one, inside
@@ -39,7 +41,9 @@ impl Transition {
 #[derive(Clone, Debug)]
 pub struct ImageView {
     status: StatusResp,
-    slots: [image::State; 2],
+    /// The states of the APP slots the store has (the first `count`).
+    slots: [image::State; ROOM],
+    count: u8,
 }
 
 impl ImageView {
@@ -50,7 +54,7 @@ impl ImageView {
 
     /// The running slot, if any.
     pub fn active(&self) -> Option<u8> {
-        (usize::from(self.status.active) < self.slots.len()).then_some(self.status.active)
+        (self.status.active < self.count).then_some(self.status.active)
     }
 
     /// Whether the running slot is on trial (not confirmed yet).
@@ -65,9 +69,12 @@ impl ImageView {
             .map(|s| self.status.slots[usize::from(s)].version)
     }
 
-    /// An APP slot's lifecycle state.
+    /// An APP slot's lifecycle state; `None` for a slot the store does not
+    /// have.
     pub fn state(&self, slot: u8) -> Option<image::State> {
-        self.slots.get(usize::from(slot)).copied()
+        self.slots[..usize::from(self.count)]
+            .get(usize::from(slot))
+            .copied()
     }
 }
 
@@ -76,9 +83,12 @@ pub(crate) struct ImageStore<S> {
     store: S,
     /// Boots the boot core gives a trial (`trial_started`'s `max`).
     max: u8,
-    app: [image::Machine; 2],
-    /// The boot core slots (stay `Empty` on a board that keeps none).
-    cores: [core_image::Machine; 2],
+    /// The APP slots the store has: the first `app_slots` of `app`.
+    app: [image::Machine; ROOM],
+    app_slots: u8,
+    /// The boot core slots the store has (none on a board that keeps none).
+    cores: [core_image::Machine; ROOM],
+    core_slots: u8,
     /// The recovery agent's slot (factory) of a vendor-stage2 board.
     factory: image::Machine,
     topology: image::Machine,
@@ -124,10 +134,13 @@ impl<S: SlotStore> ImageStore<S> {
             max,
             view: ImageView {
                 status: StatusResp::default(),
-                slots: [image::State::Empty; 2],
+                slots: [image::State::Empty; ROOM],
+                count: 0,
             },
-            app: [image::Machine::new(), image::Machine::new()],
-            cores: [core_image::Machine::new(), core_image::Machine::new()],
+            app: core::array::from_fn(|_| image::Machine::new()),
+            app_slots: 0,
+            cores: core::array::from_fn(|_| core_image::Machine::new()),
+            core_slots: 0,
             factory: image::Machine::new(),
             topology: image::Machine::new(),
         };
@@ -140,12 +153,14 @@ impl<S: SlotStore> ImageStore<S> {
         // A store that cannot make room refuses SET_PENDING later (its
         // reservation fails); nothing else depends on it here.
         let _ = self.store.keep_room();
+        self.app_slots = self.slot_count(target::APP);
+        self.core_slots = self.slot_count(target::BOOTCORE);
         let status = self.store.status();
-        let mut app = [image::Machine::new(), image::Machine::new()];
+        let mut app: [image::Machine; ROOM] = core::array::from_fn(|_| image::Machine::new());
         // The transitions that led here were observed when they happened;
         // reaching their state again delivers to no one.
         let mut silent = compose_unpublished(Layer::App, Nop, Nop);
-        for (s, m) in (0u8..).zip(app.iter_mut()) {
+        for (s, m) in (0..self.app_slots).zip(app.iter_mut()) {
             let info = status.slots[usize::from(s)];
             reach(
                 m,
@@ -157,9 +172,10 @@ impl<S: SlotStore> ImageStore<S> {
             );
         }
         self.app = app;
-        let mut cores = [core_image::Machine::new(), core_image::Machine::new()];
+        let mut cores: [core_image::Machine; ROOM] =
+            core::array::from_fn(|_| core_image::Machine::new());
         if let Some(st) = self.store.target_status(target::BOOTCORE) {
-            for (s, m) in (0u8..).zip(cores.iter_mut()) {
+            for (s, m) in (0..self.core_slots).zip(cores.iter_mut()) {
                 reach_core(m, &mut silent, s, &st);
             }
         }
@@ -174,9 +190,19 @@ impl<S: SlotStore> ImageStore<S> {
         self.refresh_view(status);
     }
 
+    /// How many slots of target `t` the store has: slot A, then B, each
+    /// while the store can receive into it.
+    fn slot_count(&self, t: u8) -> u8 {
+        (0..ROOM as u8)
+            .take_while(|&s| self.store.capacity(t, s) > 0)
+            .count() as u8
+    }
+
     /// A boot core slot's lifecycle state.
     pub(crate) fn core_state(&self, slot: u8) -> Option<core_image::State> {
-        self.cores.get(usize::from(slot)).map(|m| m.state())
+        self.cores[..usize::from(self.core_slots)]
+            .get(usize::from(slot))
+            .map(|m| m.state())
     }
 
     /// STATUS of `t`'s slots, `None` when the board keeps none.
@@ -192,7 +218,7 @@ impl<S: SlotStore> ImageStore<S> {
     /// `rolled_back` with `replayed: true`.
     pub(crate) fn replay_boot(&mut self, chain: &mut impl AppChain) {
         if let Some(cs) = self.store.target_status(target::BOOTCORE) {
-            for (s, m) in (0u8..).zip(self.cores.iter()) {
+            for (s, m) in (0..self.core_slots).zip(self.cores.iter()) {
                 if m.state() == core_image::State::Reverted {
                     let p = core_image::CoreRolledBack {
                         from: s,
@@ -204,7 +230,7 @@ impl<S: SlotStore> ImageStore<S> {
             }
         }
         let st = &self.view.status;
-        for (s, m) in (0u8..).zip(self.app.iter()) {
+        for (s, m) in (0..self.app_slots).zip(self.app.iter()) {
             let info = st.slots[usize::from(s)];
             let payload: Option<&dyn Payload> = match m.state() {
                 image::State::Trial => Some(&image::TrialStarted {
@@ -244,7 +270,8 @@ impl<S: SlotStore> ImageStore<S> {
     fn refresh_view(&mut self, status: StatusResp) {
         self.view = ImageView {
             status,
-            slots: [self.app[0].state(), self.app[1].state()],
+            slots: core::array::from_fn(|s| self.app[s].state()),
+            count: self.app_slots,
         };
     }
 
@@ -276,7 +303,9 @@ impl<S: SlotStore> ImageStore<S> {
 
     fn machine(&mut self, t: u8, slot: u8) -> Result<&mut image::Machine, Status> {
         match t {
-            target::APP => self.app.get_mut(usize::from(slot)).ok_or(Status::Arg),
+            target::APP => self.app[..usize::from(self.app_slots)]
+                .get_mut(usize::from(slot))
+                .ok_or(Status::Arg),
             target::AGENT if slot == FACTORY => Ok(&mut self.factory),
             target::TOPOLOGY if slot == 0 => Ok(&mut self.topology),
             _ => Err(Status::Unsupported),
@@ -284,7 +313,9 @@ impl<S: SlotStore> ImageStore<S> {
     }
 
     fn core(&mut self, slot: u8) -> Result<&mut core_image::Machine, Status> {
-        self.cores.get_mut(usize::from(slot)).ok_or(Status::Arg)
+        self.cores[..usize::from(self.core_slots)]
+            .get_mut(usize::from(slot))
+            .ok_or(Status::Arg)
     }
 
     /// The slot is empty (erased for a new body).
@@ -431,12 +462,14 @@ impl<S: SlotStore> ImageStore<S> {
             .map_err(store_status)?;
         done(self.app[i].pending_set(out, slot, version));
         let after = self.status();
-        let other = 1 - i;
-        let o = other as u8;
-        if matches!(
-            self.app[other].state(),
-            image::State::Pending | image::State::Trial
-        ) {
+        for o in (0..self.app_slots).filter(|&o| o != slot) {
+            let other = usize::from(o);
+            if !matches!(
+                self.app[other].state(),
+                image::State::Pending | image::State::Trial
+            ) {
+                continue;
+            }
             match after.slots[other].state {
                 SlotState::Written => done(self.app[other].pending_moved(out, o, slot)),
                 SlotState::Confirmed => {
@@ -488,12 +521,14 @@ impl<S: SlotStore> ImageStore<S> {
             .map_err(store_status)?;
         done(self.app[i].confirmed(out, slot, version));
         let after = self.status();
-        let other = 1 - i;
-        if self.app[other].state() == image::State::Confirmed
-            && after.slots[other].state != SlotState::Confirmed
-        {
-            let v = after.slots[other].version;
-            done(self.app[other].demoted(out, other as u8, v));
+        for o in (0..self.app_slots).filter(|&o| o != slot) {
+            let other = usize::from(o);
+            if self.app[other].state() == image::State::Confirmed
+                && after.slots[other].state != SlotState::Confirmed
+            {
+                let v = after.slots[other].version;
+                done(self.app[other].demoted(out, o, v));
+            }
         }
         self.refresh_view(after);
         Ok(())

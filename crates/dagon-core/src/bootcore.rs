@@ -284,7 +284,9 @@ pub struct NoCore<E> {
 /// Only when no slot checks out is there nothing to start. `check(slot,
 /// record)` is the MCU's image check of the core in `slot`, against the
 /// record when one names it. `slots` is how many boot core slots the MCU
-/// definition gives (slot A, then B); no other slot is checked on its own.
+/// definition gives (slot A, then B; at least one): a record naming any
+/// other slot is left out as if the log did not hold it, and no other slot
+/// is ever checked.
 pub fn choose<B, E>(
     st: &LogState,
     cell: [u32; 2],
@@ -292,6 +294,12 @@ pub fn choose<B, E>(
     slots: u8,
     mut check: impl FnMut(u8, Option<&SlotRef>) -> Result<B, E>,
 ) -> Result<Start<B>, NoCore<E>> {
+    let inside = |r: &SlotRef| r.slot < slots;
+    let st = &LogState {
+        pending: st.pending.filter(inside),
+        confirmed: st.confirmed.filter(inside),
+        ..*st
+    };
     let n = st.pending.map_or(0, |p| tried(cell, &p));
     let mut tried_slot = Tried::default();
     let run = match plan(st, n, max) {

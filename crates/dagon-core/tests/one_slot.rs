@@ -16,7 +16,7 @@ const ONE: SlotLayout = SlotLayout {
 
 fn boot_one(m: &mut Mem) -> Decision {
     let mut log = Log::load(m, &LOG).unwrap();
-    decide(m, &mut log, &ONE, &cfg())
+    decide(m, &mut log, &ONE, &cfg(), &verifier())
 }
 
 /// Slot A confirmed with `image(A, 0)`; its reference.
@@ -128,4 +128,56 @@ fn stage0_checks_only_the_configured_core_slots() {
         (start.slot, start.trial, start.cell),
         (0, true, trial_cell(&p, 1))
     );
+}
+
+/// A log record naming a boot core slot the MCU does not give is never
+/// checked or started: a pending core in slot B is not tried, a confirmed
+/// core in slot B is not run; slot A starts as when the log names none.
+#[test]
+fn stage0_ignores_records_naming_a_slot_it_does_not_have() {
+    let r = |slot, minor| SlotRef {
+        slot,
+        version: Version::new(1, minor, 0),
+        digest16: [minor; 16],
+    };
+    let cases = [
+        LogState {
+            confirmed: Some(r(0, 0)),
+            pending: Some(r(1, 1)),
+            ..LogState::default()
+        },
+        LogState {
+            confirmed: Some(r(1, 0)),
+            ..LogState::default()
+        },
+        LogState {
+            confirmed: Some(r(1, 0)),
+            pending: Some(r(1, 1)),
+            ..LogState::default()
+        },
+    ];
+    for st in cases {
+        let mut seen = Vec::new();
+        let start = choose(&st, CLEARED, 3, 1, |s, rec| {
+            seen.push((s, rec.copied()));
+            Ok::<u8, u8>(s)
+        })
+        .unwrap();
+        assert_eq!((start.slot, start.trial), (0, false), "{st:?}");
+        assert!(
+            seen.iter()
+                .all(|(s, rec)| *s == 0 && rec.is_none_or(|r| r.slot == 0)),
+            "{seen:?}"
+        );
+        assert_eq!(start.cell, CLEARED, "{st:?}");
+    }
+    // With nothing in slot A either, nothing starts and slot B is never looked at.
+    let mut seen = Vec::new();
+    let e = choose(&cases[1], CLEARED, 3, 1, |s, _| {
+        seen.push(s);
+        Err::<(), u8>(s)
+    })
+    .unwrap_err();
+    assert_eq!(seen, [0]);
+    assert!(!e.named, "a record outside the slots names no core");
 }

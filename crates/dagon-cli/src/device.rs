@@ -23,14 +23,48 @@ fn topology_bin(reg: &Registry, t: &Topology) -> Result<Vec<u8>, String> {
     dagon_topology::compile_with(reg, t).map_err(|e| e.to_string())
 }
 
-fn show_state(name: &str, s: &NodeState) {
-    let st = &s.status;
-    let slots: Vec<String> = st
-        .slots
-        .iter()
-        .zip(["A", "B", "F"])
-        .map(|(x, n)| format!("{n}:{:?} {}", x.state, x.version))
+/// The STATUS entries a node fills, from its MCU definition: the app's
+/// (with the agent's factory slot) and the boot core's.
+pub(crate) struct Rows {
+    pub app: Vec<u8>,
+    pub core: Vec<u8>,
+}
+
+impl Rows {
+    /// The rows of MCU `mcu`; `None` when the definitions do not name it
+    /// (every entry is shown then).
+    pub(crate) fn of(reg: &Registry, mcu: &str) -> Option<Rows> {
+        use dagon_topology::defs::TargetName;
+        let m = reg.mcu(mcu)?;
+        Some(Rows {
+            app: m.status_rows(TargetName::App),
+            core: m.status_rows(TargetName::Bootcore),
+        })
+    }
+}
+
+/// A STATUS slot by name: A, B, then F for the factory slot.
+fn slot_name(s: u8) -> String {
+    match s {
+        dagon_format::statelog::slot::FACTORY => "F".into(),
+        s => char::from(b'A' + s).to_string(),
+    }
+}
+
+/// `A:Confirmed 1.0.0, B:Empty 0.0.0` for the entries in `rows` (every
+/// entry without).
+fn slots_of(st: &StatusResp, rows: Option<&Vec<u8>>) -> String {
+    let parts: Vec<String> = (0u8..)
+        .zip(&st.slots)
+        .filter(|(s, _)| rows.is_none_or(|r| r.contains(s)))
+        .map(|(s, x)| format!("{}:{:?} {}", slot_name(s), x.state, x.version))
         .collect();
+    parts.join(", ")
+}
+
+fn show_state(name: &str, s: &NodeState, rows: Option<&Rows>) {
+    let st = &s.status;
+    let slots = slots_of(st, rows.map(|r| &r.app));
     println!(
         "{name}: version {}{}, mcu {:#06x}, wire {}, active {}, confirmed {}, attempts {}, last reason {}, [{}]",
         s.hello.active_version,
@@ -41,7 +75,7 @@ fn show_state(name: &str, s: &NodeState) {
         st.confirmed,
         st.attempts,
         st.last_reason,
-        slots.join(", ")
+        slots
     );
     if let Some(w) = crate::versions::wire_warning(name, s.hello.proto_ver) {
         println!("{w}");
@@ -53,24 +87,25 @@ fn show_state(name: &str, s: &NodeState) {
 pub(crate) fn core_line<E: std::fmt::Debug>(
     name: &str,
     r: Result<StatusResp, dagon_host::Error<E>>,
+    rows: Option<&Rows>,
 ) -> String {
     match r {
         Ok(st) => {
-            let slots: Vec<String> = st.slots[..2]
-                .iter()
-                .zip(["A", "B"])
-                .map(|(x, n)| format!("{n}:{:?} {}", x.state, x.version))
-                .collect();
-            let running = st.slots.get(usize::from(st.active));
+            let image_slots = (0..StatusResp::IMAGE_SLOTS as u8).collect();
+            let rows = rows.map_or(&image_slots, |r| &r.core);
+            let slots = slots_of(&st, Some(rows));
+            let running = rows
+                .contains(&st.active)
+                .then(|| st.slots.get(usize::from(st.active)))
+                .flatten();
             match running {
                 Some(r) => format!(
-                    "{name}: boot core {} (slot {}, digest {}), [{}]",
+                    "{name}: boot core {} (slot {}, digest {}), [{slots}]",
                     r.version,
-                    if st.active == 0 { "A" } else { "B" },
+                    slot_name(st.active),
                     to_hex(&r.digest16[..8]),
-                    slots.join(", ")
                 ),
-                None => format!("{name}: boot core unknown, [{}]", slots.join(", ")),
+                None => format!("{name}: boot core unknown, [{slots}]"),
             }
         }
         Err(dagon_host::Error::Rejected {
@@ -95,27 +130,37 @@ pub fn status(a: &StatusArgs) -> Res {
     println!("{}", crate::versions::known_text());
     let mut host = serial::host(a.port.as_deref())?;
     let hub = block_on(host.status(Target::Hub)).map_err(|e| format!("hub: {e:?}"))?;
-    show_state("hub", &hub);
+    let reg = crate::defs::registry(&cfg)?;
+    let hub_rows = t.as_ref().and_then(|t| hub_rows(&reg, t));
+    let hub_rows = hub_rows.as_ref();
+    show_state("hub", &hub, hub_rows);
     println!(
         "{}",
-        core_line("hub", block_on(host.boot_core_status(Target::Hub)))
+        core_line(
+            "hub",
+            block_on(host.boot_core_status(Target::Hub)),
+            hub_rows
+        )
     );
     let port = Some(hub.hello.port_kind);
     println!(
         "{}",
-        version_line("hub", block_on(host.version(Target::Hub)), port)
+        version_line("hub", block_on(host.version(Target::Hub)), port, hub_rows)
     );
     let Some(t) = t else {
         return Ok(());
     };
-    for (id, to) in node_targets(&cfg, &t)? {
+    for (id, to, rows) in node_targets(&cfg, &t)? {
+        let rows = rows.as_ref();
         match to {
             Some(to) => match block_on(host.status(to)) {
                 Ok(s) => {
-                    show_state(&id, &s);
-                    println!("{}", core_line(&id, block_on(host.boot_core_status(to))));
+                    show_state(&id, &s, rows);
+                    let core = block_on(host.boot_core_status(to));
+                    println!("{}", core_line(&id, core, rows));
                     let port = Some(s.hello.port_kind);
-                    println!("{}", version_line(&id, block_on(host.version(to)), port));
+                    let v = block_on(host.version(to));
+                    println!("{}", version_line(&id, v, port, rows));
                 }
                 Err(e) => println!("{id}: no answer ({e:?})"),
             },
@@ -125,17 +170,36 @@ pub fn status(a: &StatusArgs) -> Res {
     Ok(())
 }
 
-/// The topology's nodes other than the hub, each with its route through
-/// the hub (`None`: not reachable through it).
-fn node_targets(cfg: &Config, t: &Topology) -> Result<Vec<(String, Option<Target>)>, String> {
-    let bin = topology_bin(&crate::defs::registry(cfg)?, t)?;
+/// A topology node other than the hub: its id, its route through the hub
+/// (`None`: not reachable through it) and the STATUS rows it fills.
+type NodeRoute = (String, Option<Target>, Option<Rows>);
+
+/// The topology's nodes other than the hub.
+fn node_targets(cfg: &Config, t: &Topology) -> Result<Vec<NodeRoute>, String> {
+    let reg = crate::defs::registry(cfg)?;
+    let bin = topology_bin(&reg, t)?;
     let view = dagon_format::TopologyView::parse(&bin).map_err(|e| format!("{e:?}"))?;
     Ok(t.nodes
         .iter()
         .enumerate()
-        .map(|(i, n)| (n.id.clone(), Target::of_node(&view, i as u8)))
-        .filter(|(_, to)| *to != Some(Target::Hub))
+        .map(|(i, n)| {
+            (
+                n.id.clone(),
+                Target::of_node(&view, i as u8),
+                Rows::of(&reg, &n.mcu),
+            )
+        })
+        .filter(|(_, to, _)| *to != Some(Target::Hub))
         .collect())
+}
+
+/// The STATUS rows of the topology's coordinator, the node on the PC's port.
+fn hub_rows(reg: &Registry, t: &Topology) -> Option<Rows> {
+    let n = t
+        .nodes
+        .iter()
+        .find(|n| n.role == dagon_topology::schema::Role::Coordinator)?;
+    Rows::of(reg, &n.mcu)
 }
 
 /// The VERSION line of `dagon status` and `dagon doctor`: stage0, boot
@@ -146,6 +210,7 @@ pub(crate) fn version_line<E: std::fmt::Debug>(
     name: &str,
     r: Result<Option<VersionResp>, dagon_host::Error<E>>,
     port: Option<u8>,
+    rows: Option<&Rows>,
 ) -> String {
     let v = match r {
         Ok(Some(v)) => v,
@@ -160,10 +225,10 @@ pub(crate) fn version_line<E: std::fmt::Debug>(
     let stage0 = v.stage0.map_or_else(absent, |x| x.to_string());
     let core = v
         .core_slots
-        .map_or_else(absent, |c| slots_text(&c, &["A", "B"]));
+        .map_or_else(absent, |c| slots_text(&c, rows.map(|r| &r.core)));
     let app = v
         .app_slots
-        .map_or_else(unknown, |a| slots_text(&a, &["A", "B", "F"]));
+        .map_or_else(unknown, |a| slots_text(&a, rows.map(|r| &r.app)));
     let wire = v.wire.map_or_else(unknown, |w| w.to_string());
     let mcu = v.mcu_id.map_or_else(unknown, |m| format!("{m:#06x}"));
     format!(
@@ -172,18 +237,13 @@ pub(crate) fn version_line<E: std::fmt::Debug>(
 }
 
 /// `A:Confirmed 1.0.0 (running), B:Empty`
-fn slots_text<const N: usize>(s: &VersionSlots<N>, names: &[&str]) -> String {
-    let parts: Vec<String> = s
-        .slots
-        .iter()
-        .zip(names)
-        .enumerate()
-        .map(|(i, (x, n))| {
-            let running = if i == usize::from(s.active) {
-                " (running)"
-            } else {
-                ""
-            };
+fn slots_text<const N: usize>(s: &VersionSlots<N>, rows: Option<&Vec<u8>>) -> String {
+    let parts: Vec<String> = (0u8..)
+        .zip(&s.slots)
+        .filter(|(i, _)| rows.is_none_or(|r| r.contains(i)))
+        .map(|(i, x)| {
+            let n = slot_name(i);
+            let running = if i == s.active { " (running)" } else { "" };
             match x.state {
                 SlotState::Empty => format!("{n}:Empty{running}"),
                 st => format!("{n}:{st:?} {}{running}", x.version),
@@ -214,16 +274,16 @@ pub(crate) fn doctor_versions(
 /// The hub's VERSION line, then each node's.
 pub(crate) fn version_lines<T: Transport, C: HostClock>(
     host: &mut Host<T, C>,
-    nodes: &[(String, Option<Target>)],
+    nodes: &[NodeRoute],
 ) -> Vec<String> {
-    let mut one = |name: &str, to: Target| {
+    let mut one = |name: &str, to: Target, rows: Option<&Rows>| {
         let port = block_on(host.hello(to)).ok().map(|h| h.port_kind);
-        version_line(name, block_on(host.version(to)), port)
+        version_line(name, block_on(host.version(to)), port, rows)
     };
-    let mut out = vec![one("hub", Target::Hub)];
-    for (id, to) in nodes {
+    let mut out = vec![one("hub", Target::Hub, None)];
+    for (id, to, rows) in nodes {
         out.push(match to {
-            Some(to) => one(id, *to),
+            Some(to) => one(id, *to, rows.as_ref()),
             None => format!("{id}: not reachable through the hub"),
         });
     }
@@ -566,7 +626,7 @@ mod tests {
             version: Version::new(1, 2, 0),
             digest16: [0xAB; 16],
         };
-        let line = core_line::<()>("hub", Ok(st));
+        let line = core_line::<()>("hub", Ok(st), None);
         assert!(
             line.starts_with("hub: boot core 1.2.0 (slot B, digest abababababababab)"),
             "{line}"
@@ -577,6 +637,7 @@ mod tests {
                 cmd: Cmd::Status,
                 status: Status::Unsupported,
             }),
+            None,
         );
         assert_eq!(
             none,
@@ -610,7 +671,7 @@ mod tests {
         };
         let self_boot = Some(port_kind::SELF_BOOT);
         assert_eq!(
-            version_line::<()>("seg", Ok(Some(v)), self_boot),
+            version_line::<()>("seg", Ok(Some(v)), self_boot, None),
             "seg: versions: stage0 0.1.0; boot core A:Confirmed 1.0.0 (running), B:Empty; \
              app A:Written 1.0.0, B:Confirmed 1.1.0 (running), F:Empty; wire 1; mcu 0x0002"
         );
@@ -620,21 +681,83 @@ mod tests {
             core_slots: None,
             ..v
         };
-        let line = version_line::<()>("seg", Ok(Some(left_out)), self_boot);
+        let line = version_line::<()>("seg", Ok(Some(left_out)), self_boot, None);
         assert!(
             line.contains("stage0 unknown; boot core unknown;"),
             "{line}"
         );
-        let watch = version_line::<()>("watch", Ok(Some(left_out)), Some(port_kind::VENDOR_STAGE2));
+        let watch = version_line::<()>(
+            "watch",
+            Ok(Some(left_out)),
+            Some(port_kind::VENDOR_STAGE2),
+            None,
+        );
         assert!(
             watch.contains("stage0 none (vendor 2nd stage); boot core none (vendor 2nd stage);"),
             "{watch}"
         );
         assert_eq!(
-            version_line::<()>("seg", Ok(None), self_boot),
+            version_line::<()>("seg", Ok(None), self_boot, None),
             "seg: versions unknown (its agent predates VERSION)"
         );
-        let e = version_line::<()>("seg", Err(dagon_host::Error::Timeout), None);
+        let e = version_line::<()>("seg", Err(dagon_host::Error::Timeout), None, None);
         assert_eq!(e, "seg: versions unreadable (Timeout)");
+    }
+
+    /// A node whose definition gives the app and the boot core one slot
+    /// each shows those slots only, never a slot B it does not have.
+    #[test]
+    fn the_status_lines_show_the_slots_the_definition_gives() {
+        let reg = dagon_topology::defs::Registry::builtin();
+        let rows = Rows::of(reg, "stm32f401re").unwrap();
+        let one = Rows {
+            app: vec![0],
+            core: vec![0],
+        };
+        assert_eq!(
+            (rows.app.as_slice(), rows.core.as_slice()),
+            (&[0, 1][..], &[0, 1][..])
+        );
+        let mut st = StatusResp {
+            active: 0,
+            confirmed: 0,
+            ..Default::default()
+        };
+        st.slots[0] = SlotInfo {
+            state: SlotState::Confirmed,
+            version: Version::new(1, 0, 0),
+            digest16: [0xCD; 16],
+        };
+        let line = core_line::<()>("seg", Ok(st), Some(&one));
+        assert_eq!(
+            line,
+            "seg: boot core 1.0.0 (slot A, digest cdcdcdcdcdcdcdcd), [A:Confirmed 1.0.0]"
+        );
+        let sv = SlotVersion {
+            state: SlotState::Confirmed,
+            version: Version::new(1, 0, 0),
+        };
+        let v = VersionResp {
+            wire: Some(1),
+            mcu_id: Some(2),
+            stage0: None,
+            boot_core: None,
+            core_slots: Some(VersionSlots {
+                active: 0,
+                slots: [sv, SlotVersion::default()],
+            }),
+            app_slots: Some(VersionSlots {
+                active: 0,
+                slots: [sv, SlotVersion::default(), SlotVersion::default()],
+            }),
+        };
+        let line = version_line::<()>("seg", Ok(Some(v)), None, Some(&one));
+        assert!(
+            line.contains(
+                "boot core A:Confirmed 1.0.0 (running); app A:Confirmed 1.0.0 (running);"
+            ),
+            "{line}"
+        );
+        assert_eq!(slots_of(&st, Some(&one.app)), "A:Confirmed 1.0.0");
     }
 }

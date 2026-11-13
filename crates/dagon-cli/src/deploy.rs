@@ -206,11 +206,7 @@ pub(crate) fn prepare(
             bits: None,
         };
         for (slot, elf) in slots {
-            let binding = if *slot == 'b' {
-                slot_binding::B
-            } else {
-                slot_binding::A
-            };
+            let binding = crate::commands::binding_of(*slot);
             let img = image_for_node(&reg, t, node, kind, binding, elf, Some(&opts), key)?;
             let rel = crate::genfs::Rel::new(format!(
                 "{DEPLOY_DIR}/{version}/{prefix}{node}-{slot}.img"

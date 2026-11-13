@@ -629,8 +629,8 @@ pub(crate) fn build_core_slots(
     cancel: &AtomicBool,
 ) -> Result<nodebuild::SlotElfs, String> {
     use dagon_format::header::{image_kind, slot_binding};
-    let slots: Vec<(char, Vec<String>)> = [(slot_binding::A, 'a'), (slot_binding::B, 'b')]
-        .into_iter()
+    let slots: Vec<(char, Vec<String>)> = crate::commands::slot_letters()
+        .map(|c| (crate::commands::binding_of(c), c))
         .filter(|(b, _)| {
             dagon_sign::image::slot_with(reg, &n.mcu, image_kind::BOOTCORE, *b).is_some()
         })

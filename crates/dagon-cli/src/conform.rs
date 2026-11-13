@@ -23,13 +23,29 @@ use crate::serial;
 
 pub const RESULT_FILE: &str = "result.json";
 pub const REPORT_FILE: &str = "report.html";
-/// Image files expected in the images directory.
-pub const IMAGE_FILES: [&str; 4] = [
-    "good-a.img",
-    "good-b.img",
-    "no-confirm-a.img",
-    "no-confirm-b.img",
-];
+/// The conformance images in `dir`, one good and one no-confirm per app
+/// slot of the node: `good-a.img` and `no-confirm-a.img`, then the same for
+/// slot b when the node has it (either file there).
+pub(crate) fn conform_images(dir: &std::path::Path) -> Result<ConformImages, String> {
+    let mut images = ConformImages::default();
+    for (i, s) in crate::commands::slot_letters().enumerate() {
+        let good = dir.join(format!("good-{s}.img"));
+        let no_confirm = dir.join(format!("no-confirm-{s}.img"));
+        if i > 0 && !good.exists() && !no_confirm.exists() {
+            break;
+        }
+        images.good.push(read_file(&good)?);
+        images.no_confirm.push(read_file(&no_confirm)?);
+    }
+    Ok(images)
+}
+
+/// The images a run sends, index = slot.
+#[derive(Default)]
+pub struct ConformImages {
+    pub good: Vec<Vec<u8>>,
+    pub no_confirm: Vec<Vec<u8>>,
+}
 
 /// dagon-conform's synchronous channel over a dagon-host session.
 pub struct HostChannel<'h, T: Transport, C: HostClock> {
@@ -68,20 +84,22 @@ impl<T: Transport, C: HostClock> Channel for HostChannel<'_, T, C> {
     }
 }
 
-/// Runs all 12 tests. `images` are good A, good B, no-confirm A, no-confirm
-/// B; `sign` signs re-built headers for the compatibility test; `timings`
-/// are the node's own limits (its MCU definition's).
+/// Runs all 12 tests. `images` are one good and one no-confirm image per
+/// app slot of the node; `sign` signs re-built headers for the compatibility
+/// test; `timings` are the node's own limits (its MCU definition's).
 pub fn run<T: Transport, C: HostClock>(
     host: &mut Host<T, C>,
     to: Target,
     link: LinkKind,
-    images: &[Vec<u8>; 4],
+    images: &ConformImages,
     sign: Signer<'_>,
     timings: Timings<'_>,
 ) -> Report {
+    let good: Vec<&[u8]> = images.good.iter().map(Vec::as_slice).collect();
+    let no_confirm: Vec<&[u8]> = images.no_confirm.iter().map(Vec::as_slice).collect();
     let imgs = Images {
-        good: [&images[0], &images[1]],
-        no_confirm: [&images[2], &images[3]],
+        good: &good,
+        no_confirm: &no_confirm,
     };
     let ch = HostChannel { host, to };
     match Runner::new(ch, link, imgs, sign, timings) {
@@ -222,9 +240,7 @@ pub(crate) fn conform_files(
     key: &ed25519_compact::KeyPair,
     port: Option<&str>,
 ) -> Result<Report, String> {
-    let images = IMAGE_FILES.map(|f| read_file(&images_dir.join(f)));
-    let [a, b, c, d] = images;
-    let images = [a?, b?, c?, d?];
+    let images = conform_images(images_dir)?;
     let mut sign = |m: &[u8]| *key.sk.sign([SIGN_DOMAIN, m].concat(), None);
     let mut host = serial::host(port)?;
     let report = run(

@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-use dagon_format::header::{image_kind, slot_binding, ImageHeader, HEADER_SIZE};
+use dagon_format::header::{image_kind, ImageHeader, HEADER_SIZE};
 use dagon_sign::to_hex;
 use dagon_topology::defs::{page_safe as plain_name, Registry};
 use serde_json::{json, Value};
@@ -800,11 +800,7 @@ fn sign_nodes(
         let mut images = Vec::new();
         for (slot, elf) in elfs {
             stop_if(cancel)?;
-            let binding = if slot == 'a' {
-                slot_binding::A
-            } else {
-                slot_binding::B
-            };
+            let binding = crate::commands::binding_of(slot);
             let img = image_for_node(
                 &reg,
                 t,
@@ -872,11 +868,7 @@ fn sign_cores(
         .into_iter()
         .map(|(slot, elf)| {
             stop_if(cancel)?;
-            let binding = if slot == 'b' {
-                slot_binding::B
-            } else {
-                slot_binding::A
-            };
+            let binding = crate::commands::binding_of(slot);
             image_for_node(
                 reg,
                 t,
@@ -915,7 +907,7 @@ fn sign_swaps(
     let mut files = Vec::new();
     // The app's images, then its boot core's (`bootcore-<node>-<slot>.img`).
     for (prefix, set) in [("", images), ("bootcore-", cores)] {
-        for slot in ['a', 'b'] {
+        for slot in crate::commands::slot_letters() {
             let rel = crate::genfs::Rel::new(format!("{SIGN_DIR}/{prefix}{node}-{slot}.img"))?;
             let Some((_, img)) = set.iter().find(|(s, _)| *s == slot) else {
                 files.push((rel, None));
@@ -1592,6 +1584,7 @@ pub fn static_file(web: &Path, path: &str) -> Option<(Vec<u8>, &'static str)> {
 #[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
+    use dagon_format::header::slot_binding;
 
     #[test]
     fn a_layout_is_of_this_format_with_names_and_finite_places() {

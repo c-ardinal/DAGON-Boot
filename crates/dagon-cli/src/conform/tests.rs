@@ -51,9 +51,36 @@ fn img(slot: u8, v: Version) -> Vec<u8> {
     sign_image(&spec, &body, &key()).unwrap()
 }
 
-fn images() -> [Vec<u8>; 4] {
+fn images() -> ConformImages {
     let (good, bad) = (Version::new(1, 1, 0), Version::new(1, 2, 0));
-    [img(0, good), img(1, good), img(0, bad), img(1, bad)]
+    ConformImages {
+        good: vec![img(0, good), img(1, good)],
+        no_confirm: vec![img(0, bad), img(1, bad)],
+    }
+}
+
+/// The images folder holds slot a's images, and slot b's for a node with
+/// slot B; slot a's are required.
+#[test]
+// Sets up its own scratch folder directly.
+#[allow(clippy::disallowed_methods)]
+fn the_images_folder_holds_one_pair_per_app_slot() {
+    let dir = std::env::temp_dir().join(format!("dagon-conform-images-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    assert!(conform_images(&dir).is_err(), "slot a is required");
+    for f in ["good-a.img", "no-confirm-a.img"] {
+        std::fs::write(dir.join(f), f).unwrap();
+    }
+    let one = conform_images(&dir).unwrap();
+    assert_eq!((one.good.len(), one.no_confirm.len()), (1, 1));
+    std::fs::write(dir.join("good-b.img"), "b").unwrap();
+    assert!(conform_images(&dir).is_err(), "a slot needs both images");
+    std::fs::write(dir.join("no-confirm-b.img"), "b").unwrap();
+    let two = conform_images(&dir).unwrap();
+    assert_eq!((two.good.len(), two.no_confirm.len()), (2, 2));
+    assert_eq!(two.good[1], b"b");
+    std::fs::remove_dir_all(&dir).unwrap();
 }
 
 /// CONF_RUN answered by the node-side handler, as a conformance build does:

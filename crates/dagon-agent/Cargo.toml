@@ -10,6 +10,7 @@ version = "0.1.0"
 store-tests = []
 
 [dependencies]
+dagon-ed25519 = { path = "../dagon-ed25519", features = ["compact"] }
 dagon-events = { path = "../dagon-events" }
 dagon-format = { path = "../dagon-format" }
 dagon-proto = { path = "../dagon-proto" }

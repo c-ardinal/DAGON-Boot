@@ -1142,7 +1142,7 @@ fn release_get(server: &Server, id: &str) -> Res {
     let bytes = std::fs::read(p).map_err(|_| Response::error(404, "no such release"))?;
     verified(server, bytes, |b, k| {
         dagon_format::bundle::BundleView::parse(b)
-            .and_then(|v| v.verify(k))
+            .and_then(|v| v.verify(&dagon_ed25519::Ed25519Compact::new(*k)))
             .is_ok()
     })
 }

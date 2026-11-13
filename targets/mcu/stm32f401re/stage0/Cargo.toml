@@ -17,12 +17,11 @@ lint = { features = [""] }
 dagon-mcu-stm32f401re = { path = "..", default-features = false, features = ["image-stage0"] }
 dagon-mcu-common = { path = "../../common" }
 dagon-core = { path = "../../../../crates/dagon-core" }
+dagon-ed25519 = { path = "../../../../crates/dagon-ed25519" }
 dagon-format = { path = "../../../../crates/dagon-format" }
 cortex-m = { version = "0.7", features = ["critical-section-single-core"] }
 cortex-m-rt = "0.7"
 panic-halt = "1"
-# The smaller verifier code, when the definition has stage0 verify.
-ed25519-compact = { version = "2.6", default-features = false, features = ["opt_size"] }
 
 [profile.release]
 opt-level = "z"

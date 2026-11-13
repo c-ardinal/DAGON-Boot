@@ -3,6 +3,7 @@
 
 use std::fmt;
 
+use dagon_ed25519::Ed25519Compact;
 use dagon_format::header::{
     self, build_flags, capabilities, image_kind, slot_binding, ImageHeader, HEADER_SIZE, SIGNED_LEN,
 };
@@ -223,7 +224,8 @@ pub fn verify_image(image: &[u8], pubkey: &[u8; 32]) -> Result<ImageHeader, Imag
         .get(..HEADER_SIZE)
         .and_then(|h| h.try_into().ok())
         .ok_or(ImageError::Format(dagon_format::FormatError::Truncated))?;
-    let h = header::verify_header(raw, pubkey).map_err(ImageError::Format)?;
+    let h =
+        header::verify_header(raw, &Ed25519Compact::new(*pubkey)).map_err(ImageError::Format)?;
     let payload = &image[HEADER_SIZE..];
     if payload.len() != h.payload_size as usize {
         return Err(ImageError::Format(dagon_format::FormatError::Truncated));

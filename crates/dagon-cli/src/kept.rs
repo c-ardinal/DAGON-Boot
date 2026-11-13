@@ -54,7 +54,7 @@ pub(crate) fn versions_of(
 ) -> Result<BTreeMap<String, Version>, String> {
     crate::versions::check_number("bundle", "the package", bundle)?;
     let b = BundleView::parse(bundle).map_err(|e| format!("not a package: {e:?}"))?;
-    b.verify(pubkey)
+    b.verify(&dagon_ed25519::Ed25519Compact::new(*pubkey))
         .map_err(|e| format!("the package does not verify under the project's key: {e:?}"))?;
     let m = b.manifest();
     let mut out = BTreeMap::new();
@@ -125,7 +125,7 @@ pub(crate) fn read(cfg: &Config, pubkey: &[u8; 32], id: &str) -> Result<Vec<u8>,
     let path = crate::paths::contained(&cfg.base, &cfg.base.join(DIR).join(format!("{id}.dgb")))?;
     let bytes = std::fs::read(&path).map_err(|_| format!("no kept package {id}"))?;
     BundleView::parse(&bytes)
-        .and_then(|b| b.verify(pubkey))
+        .and_then(|b| b.verify(&dagon_ed25519::Ed25519Compact::new(*pubkey)))
         .map_err(|_| format!("{id} does not verify under the project's key"))?;
     Ok(bytes)
 }

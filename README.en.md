@@ -166,9 +166,10 @@ From a clone, it is `cargo install --path crates/dagon-cli`.
 
 ## Dependencies and external data
 
-- Written for this project: `crates/`, `targets/` (except the vendor parts below), `web/`, `site/`, `samples/`, `plugin/`, `topology/`, `scripts/`
+- Written for this project: `crates/` (except the test data below), `targets/` (except the vendor parts below), `web/`, `site/`, `samples/`, `plugin/`, `topology/`, `scripts/`
 - Libraries: Rust and npm libraries, used unmodified (embassy, esp-hal, ed25519-compact, Svelte, Vite, Astro and others).
 - Vendor parts: the ESP-IDF 2nd stage, `rp2040-boot2`, the STM32F401 ROM boot loader
+- Test data: the Project Wycheproof Ed25519 test vectors (Apache License 2.0, <https://github.com/C2SP/wycheproof>) and the RFC 8032 test vectors, unmodified with their provenance in `crates/dagon-ed25519/tests/vectors/`.
 - Fonts and icons: Doto, DotGothic16, Zen Kaku Gothic New, JetBrains Mono (SIL OFL 1.1), Lucide (ISC)
 - Values in the MCU and board definitions: taken from the makers' datasheets and board documents. A value whose source has not been checked is marked `unverified` in the definition.
 

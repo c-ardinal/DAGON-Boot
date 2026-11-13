@@ -216,7 +216,8 @@ fn a_project_defined_mcu_and_board_go_through_every_command() {
     .unwrap();
     let bundle = std::fs::read(&dgb).unwrap();
     let view = BundleView::parse(&bundle).unwrap();
-    view.verify(&key.public_key).unwrap();
+    view.verify(&dagon_ed25519::Ed25519Compact::new(key.public_key))
+        .unwrap();
     assert!(
         view.item_count() >= 2,
         "both signed images and the topology"

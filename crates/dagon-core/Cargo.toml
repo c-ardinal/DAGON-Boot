@@ -10,4 +10,5 @@ dagon-proto = { path = "../dagon-proto" }
 dagon-port = { path = "../dagon-port" }
 
 [dev-dependencies]
+dagon-ed25519 = { path = "../dagon-ed25519", features = ["compact"] }
 ed25519-compact = { version = "2.6", default-features = false }

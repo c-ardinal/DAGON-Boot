@@ -69,4 +69,5 @@ stm32-metapac = { version = "21", default-features = false, features = ["stm32f4
 toml = { version = "0.8", default-features = false, features = ["parse"] }
 dagon-agent = { path = "../../../crates/dagon-agent", features = ["store-tests"] }
 dagon-conform = { path = "../../../crates/dagon-conform" }
+dagon-ed25519 = { path = "../../../crates/dagon-ed25519", features = ["compact"] }
 ed25519-compact = { version = "2.6", default-features = false }

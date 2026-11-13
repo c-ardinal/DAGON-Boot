@@ -129,6 +129,12 @@ paths = ["crates/dagon-format"]
 formats = { image-header = [1], state-log = [1], manifest = [1], bundle = [1], topology-bin = [1] }
 
 [[component]]
+name = "ed25519"
+version = "0.1.0"
+packages = ["dagon-ed25519"]
+paths = ["crates/dagon-ed25519"]
+
+[[component]]
 name = "proto"
 version = "0.1.0"
 packages = ["dagon-proto"]

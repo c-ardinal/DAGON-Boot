@@ -5,6 +5,7 @@
 //! The signing key is the RFC 8032 section 7.1 "TEST 1" key (public test
 //! data, never a release key); images carry the TEST_KEY build flag.
 
+use dagon_ed25519::Ed25519Compact;
 use dagon_format::bundle::{self, dest, BundleItem, BundleView, NO_ENTRY};
 use dagon_format::header::{self, *};
 use dagon_format::manifest::{self, ManifestEntry, ManifestFields, ManifestView};
@@ -17,6 +18,7 @@ const TEST_SEED: [u8; 32] =
     hex32("9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60");
 const TEST_PUBKEY: [u8; 32] =
     hex32("d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a");
+const VERIFIER: Ed25519Compact = Ed25519Compact::new(TEST_PUBKEY);
 
 const fn hex32(s: &str) -> [u8; 32] {
     const fn nib(c: u8) -> u8 {
@@ -267,7 +269,7 @@ fn test_key_is_rfc8032_test1() {
 fn image_header_vector() {
     let file = golden("image_f401_app_a.img", &image(0));
     let raw: [u8; HEADER_SIZE] = file[..HEADER_SIZE].try_into().unwrap();
-    let h = verify_header(&raw, &TEST_PUBKEY).unwrap();
+    let h = verify_header(&raw, &VERIFIER).unwrap();
     assert_eq!(h.to_bytes(), raw, "parse/serialise round trip");
     assert_eq!(h.version, Version::new(1, 1, 0));
     assert_eq!(
@@ -306,23 +308,20 @@ fn image_header_vector() {
         let mut bad = raw;
         bad[bit_at] ^= 1;
         assert_eq!(
-            verify_header(&bad, &TEST_PUBKEY),
+            verify_header(&bad, &VERIFIER),
             Err(FormatError::BadSignature)
         );
     }
     let mut bad = raw;
     bad[0x048] ^= 1;
-    assert_eq!(
-        verify_header(&bad, &TEST_PUBKEY),
-        Err(FormatError::UnknownKey)
-    );
+    assert_eq!(verify_header(&bad, &VERIFIER), Err(FormatError::UnknownKey));
 }
 
 #[test]
 fn manifest_vector() {
     let file = golden("manifest.bin", &manifest_bytes(&[image(0), image(1)]));
     let m = ManifestView::parse(&file).unwrap();
-    m.verify(&TEST_PUBKEY).unwrap();
+    m.verify(&VERIFIER).unwrap();
     assert_eq!(m.entry_count(), 2);
     assert_eq!(m.bytes().len(), manifest::total_size(2, 0));
     let e = m.entry(1);
@@ -361,7 +360,7 @@ fn manifest_vector() {
     let mut bad = file.clone();
     bad[0x08] ^= 1;
     assert_eq!(
-        ManifestView::parse(&bad).unwrap().verify(&TEST_PUBKEY),
+        ManifestView::parse(&bad).unwrap().verify(&VERIFIER),
         Err(FormatError::BadSignature)
     );
 }
@@ -370,7 +369,7 @@ fn manifest_vector() {
 fn release_bundle_vector() {
     let file = golden("release.dgb", &release());
     let b = BundleView::parse(&file).unwrap();
-    b.verify(&TEST_PUBKEY).unwrap();
+    b.verify(&VERIFIER).unwrap();
     assert_eq!(b.item_count(), 3);
     let t = b.topology_item().unwrap();
     let it = b.item(t);
@@ -404,13 +403,13 @@ fn release_bundle_vector() {
     let mut bad = file.clone();
     bad[body_at] ^= 1;
     assert_eq!(
-        BundleView::parse(&bad).unwrap().verify(&TEST_PUBKEY),
+        BundleView::parse(&bad).unwrap().verify(&VERIFIER),
         Err(FormatError::BadCrc)
     );
     let new_crc = crc32(BundleView::parse(&bad).unwrap().item_bytes(0));
     bad[bundle::HEAD_SIZE + 12..][..4].copy_from_slice(&new_crc.to_le_bytes());
     assert_eq!(
-        BundleView::parse(&bad).unwrap().verify(&TEST_PUBKEY),
+        BundleView::parse(&bad).unwrap().verify(&VERIFIER),
         Err(FormatError::DigestMismatch)
     );
 
@@ -421,7 +420,7 @@ fn release_bundle_vector() {
     bad[bundle::HEAD_SIZE + bundle::ITEM_SIZE * t + 12..][..4]
         .copy_from_slice(&new_crc.to_le_bytes());
     assert_eq!(
-        BundleView::parse(&bad).unwrap().verify(&TEST_PUBKEY),
+        BundleView::parse(&bad).unwrap().verify(&VERIFIER),
         Err(FormatError::DigestMismatch)
     );
 }

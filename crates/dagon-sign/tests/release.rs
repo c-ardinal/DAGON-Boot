@@ -116,11 +116,11 @@ fn release_assemble_reproduces_golden_manifest_and_bundle() {
     assert_eq!(r.bundle, golden("release.dgb"));
     ManifestView::parse(&r.manifest)
         .unwrap()
-        .verify(&TEST_PUBLIC_KEY)
+        .verify(&dagon_ed25519::Ed25519Compact::new(TEST_PUBLIC_KEY))
         .unwrap();
     BundleView::parse(&r.bundle)
         .unwrap()
-        .verify(&TEST_PUBLIC_KEY)
+        .verify(&dagon_ed25519::Ed25519Compact::new(TEST_PUBLIC_KEY))
         .unwrap();
 }
 
@@ -160,7 +160,8 @@ fn release_build_with_the_sample() {
     )
     .unwrap();
     let b = BundleView::parse(&r.bundle).unwrap();
-    b.verify(&TEST_PUBLIC_KEY).unwrap();
+    b.verify(&dagon_ed25519::Ed25519Compact::new(TEST_PUBLIC_KEY))
+        .unwrap();
     let m = b.manifest();
     assert_eq!(
         m.fields().topology_sha256,

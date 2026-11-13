@@ -1,7 +1,7 @@
 //! Byte layouts shared by every DAGON component: image header, manifest,
 //! release bundle (`.dgb`), state log, topology canonical binary, plus
-//! CRC-32, SHA-256 and Ed25519 verification. All multi-byte fields are
-//! little-endian.
+//! CRC-32, SHA-256 and the signature verifier interface ([`SigVerifier`]).
+//! All multi-byte fields are little-endian.
 #![no_std]
 #![forbid(unsafe_code)]
 
@@ -98,21 +98,29 @@ pub fn key_id(pubkey: &[u8; 32]) -> [u8; 8] {
     le::arr(&sha256(pubkey), 0)
 }
 
-/// Verifies `signature` = Ed25519(`domain` || `message`) under `pubkey`.
-pub fn verify_signed(
-    pubkey: &[u8; 32],
+/// Checks the signatures of DAGON's signed structures. The algorithm and
+/// the key it checks under belong to the implementation; the image header
+/// format fixes a 64-byte signature and an 8-byte key id.
+pub trait SigVerifier {
+    /// The `key_id` a structure signed under this verifier's key carries.
+    fn key_id(&self) -> [u8; 8];
+
+    /// Whether `sig` signs `domain` followed by every part of `msg`, in order.
+    fn verify(&self, domain: &[u8], msg: &[&[u8]], sig: &[u8; 64]) -> bool;
+}
+
+/// Checks that `signature` signs `domain` || `message` under `verifier`.
+pub fn verify_signed<V: SigVerifier + ?Sized>(
+    verifier: &V,
     domain: &[u8],
     message: &[u8],
     signature: &[u8; 64],
 ) -> Result<(), FormatError> {
-    let pk = ed25519_compact::PublicKey::new(*pubkey);
-    let sig = ed25519_compact::Signature::new(*signature);
-    let mut st = pk
-        .verify_incremental(&sig)
-        .map_err(|_| FormatError::BadSignature)?;
-    st.absorb(domain);
-    st.absorb(message);
-    st.verify().map_err(|_| FormatError::BadSignature)
+    if verifier.verify(domain, &[message], signature) {
+        Ok(())
+    } else {
+        Err(FormatError::BadSignature)
+    }
 }
 
 #[cfg(test)]

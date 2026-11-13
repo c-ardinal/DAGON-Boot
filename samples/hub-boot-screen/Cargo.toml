@@ -27,6 +27,7 @@ embassy-rp = { version = "0.10.0", default-features = false, features = ["rp2040
 critical-section = { version = "1.1", features = ["std"] }
 # Real boot core runs on DAGON's boot test bench (crates/dagon-core/tests/bench).
 dagon-core = { path = "../../crates/dagon-core" }
+dagon-ed25519 = { path = "../../crates/dagon-ed25519", features = ["compact"] }
 dagon-format = { path = "../../crates/dagon-format" }
 dagon-port = { path = "../../crates/dagon-port" }
 ed25519-compact = { version = "2.6", default-features = false }

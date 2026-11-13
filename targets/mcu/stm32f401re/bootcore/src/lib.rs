@@ -31,6 +31,7 @@ use cortex_m::peripheral::{DWT, NVIC, SCB};
 use dagon_boot::BootRun;
 use dagon_core::boot::{BootConfig, Decision};
 use dagon_core::bootcore::{settle_log, Cell, MustReset, Settled, CLEARED};
+use dagon_ed25519::Ed25519Compact;
 use dagon_events::{compose_boot, BootExtension, Clock, Extension};
 use dagon_format::header::{verify_header, HEADER_SIZE};
 use dagon_mcu_stm32f401re::flash::F401Flash;
@@ -70,8 +71,10 @@ mod pins {
     include!(concat!(env!("OUT_DIR"), "/pins.rs"));
 }
 
+/// This core's signature verifier, under the key built into it.
+const VERIFIER: Ed25519Compact = Ed25519Compact::new(PUBKEY);
+
 const CONFIG: BootConfig = BootConfig {
-    pubkey: PUBKEY,
     mcu_id: board::MCU_ID,
     target_tag: checked_tag(TARGET_TAG),
     max_attempts: dagon_mcu_stm32f401re::TRIAL_ATTEMPTS,
@@ -132,6 +135,7 @@ pub fn run<E: Extension>(chain: E, limits: &'static [BootExtension]) -> ! {
         &board::LOG,
         &board::SLOTS,
         &CONFIG,
+        &VERIFIER,
         board::TRIAL_WDT_MS,
     );
     let decision = boot.decision();
@@ -199,7 +203,7 @@ fn app_verifies(flash: &mut F401Flash, slot: u8) -> bool {
         .slots
         .get(usize::from(slot))
         .is_some_and(|&base| flash.read(base, &mut raw).is_ok())
-        && verify_header(&raw, &PUBKEY).is_ok()
+        && verify_header(&raw, &VERIFIER).is_ok()
 }
 
 struct Jump;

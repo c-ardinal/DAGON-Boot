@@ -2,7 +2,7 @@
 //! constraints, 64-byte signature = Ed25519(`DAGON/MAN/1` || everything before it).
 
 use crate::le::{arr, put_u16, put_u32, u16_at, u32_at};
-use crate::{verify_signed, FormatError, Version};
+use crate::{verify_signed, FormatError, SigVerifier, Version};
 
 pub const MAGIC: [u8; 4] = *b"DGMF";
 pub const MF_VERSION: u16 = 1;
@@ -185,13 +185,13 @@ impl<'a> ManifestView<'a> {
         Constraint::parse(&self.raw[off..off + CONSTRAINT_SIZE])
     }
 
-    pub fn verify(&self, pubkey: &[u8; 32]) -> Result<(), FormatError> {
-        if self.raw[0x40..0x48] != crate::key_id(pubkey) {
+    pub fn verify<V: SigVerifier + ?Sized>(&self, verifier: &V) -> Result<(), FormatError> {
+        if self.raw[0x40..0x48] != verifier.key_id() {
             return Err(FormatError::UnknownKey);
         }
         let body = self.raw.len() - SIG_SIZE;
         let sig: [u8; 64] = arr(self.raw, body);
-        verify_signed(pubkey, SIGN_DOMAIN, &self.raw[..body], &sig)
+        verify_signed(verifier, SIGN_DOMAIN, &self.raw[..body], &sig)
     }
 }
 

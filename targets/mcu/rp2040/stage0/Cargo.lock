@@ -122,6 +122,7 @@ name = "dagon-agent"
 version = "0.1.0"
 dependencies = [
  "critical-section",
+ "dagon-ed25519",
  "dagon-events",
  "dagon-format",
  "dagon-port",
@@ -138,6 +139,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "dagon-ed25519"
+version = "0.1.0"
+dependencies = [
+ "dagon-format",
+ "ed25519-compact",
+ "sha2",
+]
+
+[[package]]
 name = "dagon-events"
 version = "0.1.0"
 dependencies = [
@@ -150,7 +160,6 @@ dependencies = [
 name = "dagon-format"
 version = "0.1.0"
 dependencies = [
- "ed25519-compact",
  "sha2",
 ]
 

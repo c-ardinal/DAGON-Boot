@@ -4,6 +4,7 @@
 
 use alloc::vec;
 use alloc::vec::Vec;
+use dagon_ed25519::Ed25519Compact;
 use dagon_format::header::{self, image_kind, HEADER_SIZE};
 use dagon_format::statelog::{self, kind, reason, slot, FaceHeader, Record};
 use dagon_format::{sha256, FormatError, ImageHeader};
@@ -144,7 +145,7 @@ pub fn check_bootcore(
         .get(..HEADER_SIZE)
         .and_then(|h| h.try_into().ok())
         .ok_or(FormatError::Truncated)?;
-    let h = header::verify_header(raw, pubkey)?;
+    let h = header::verify_header(raw, &Ed25519Compact::new(*pubkey))?;
     let body = &img[HEADER_SIZE..];
     let fits = body.len() as u64 <= u64::from(map.bootcore.max_payload);
     if h.image_kind != image_kind::BOOTCORE || h.mcu_id != map.wire_id || !fits {

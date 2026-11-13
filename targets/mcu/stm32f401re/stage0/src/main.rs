@@ -15,11 +15,15 @@
 use cortex_m::peripheral::{NVIC, SCB};
 use cortex_m_rt::entry;
 use dagon_core::bootcore;
+use dagon_ed25519::Ed25519Small;
 use dagon_format::stage0;
 use dagon_mcu_common::mapped::Mapped;
 use dagon_mcu_stm32f401re::layout::{CORE_SLOTS, LOG, MCU_ID, MIN_FLASH_SIZE, STAGE0};
 use dagon_mcu_stm32f401re::{trial, PUBKEY, STAGE0_VERIFIES, TRIAL_ATTEMPTS, TRIAL_WDT_MS};
 use panic_halt as _;
+
+/// Stage0's signature verifier, under the key built into it.
+const VERIFIER: Ed25519Small = Ed25519Small::new(PUBKEY);
 
 /// The version mark the agent's VERSION reads (`dagon_format::stage0`):
 /// this package's Cargo.toml version.
@@ -37,8 +41,8 @@ fn main() -> ! {
         let slot = *CORE_SLOTS
             .get(usize::from(s))
             .ok_or(bootcore::CoreFail::Kind)?;
-        let key = STAGE0_VERIFIES.then_some(&PUBKEY);
-        bootcore::check_inline(&mut flash, slot, s, (r, key), MCU_ID)
+        let verifier = STAGE0_VERIFIES.then_some(&VERIFIER);
+        bootcore::check_inline(&mut flash, slot, s, (r, verifier), MCU_ID)
     });
     match chosen {
         Ok(start) => {

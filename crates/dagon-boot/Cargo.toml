@@ -8,6 +8,7 @@ description = "The boot core's sequence as a state machine: every step from the 
 [dependencies]
 dagon-core = { path = "../dagon-core" }
 dagon-events = { path = "../dagon-events" }
+dagon-format = { path = "../dagon-format" }
 dagon-port = { path = "../dagon-port" }
 
 # Hosted builds (tests) take the standard library's critical section for
@@ -17,5 +18,5 @@ critical-section = { version = "1.1", features = ["std"] }
 
 [dev-dependencies]
 # The boot tests' flash and images (dagon-core/tests/bench).
-dagon-format = { path = "../dagon-format" }
+dagon-ed25519 = { path = "../dagon-ed25519", features = ["compact"] }
 ed25519-compact = { version = "2.6", default-features = false }

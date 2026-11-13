@@ -20,7 +20,7 @@ use dagon_format::header::{header_digest16, image_kind, verify_header, ImageHead
 use dagon_format::statelog::{
     kind, reason, slot, target, FaceHeader, Record, FACE_HEADER_SIZE, RECORD_SIZE,
 };
-use dagon_format::Sha256;
+use dagon_format::{Sha256, SigVerifier};
 use dagon_port::Flash;
 
 /// What stage0 starts.
@@ -200,28 +200,28 @@ pub enum CoreFail {
     LoadAddr,
     /// Body digest differs from the header's.
     Body,
-    /// The header's signature does not verify under stage0's key.
+    /// The header's signature does not verify under stage0's verifier.
     Signature,
 }
 
 /// Stage0's check of the boot core in the slot at `base` (`size` bytes,
 /// header inline at the start) as slot `slot`: its header is the one
 /// `expect` names (when a record names one), its signature verifies under
-/// `key` (when stage0 carries one: the definition's `stage0_verifies`), it
+/// `verifier` (when stage0 carries one: the definition's `stage0_verifies`), it
 /// is a boot core for MCU `mcu_id` bound to this slot, linked for the
 /// slot's body, fitting, and its body hashes to the header's digest.
 /// Returns the body address.
-pub fn check_inline<F: Flash>(
+pub fn check_inline<F: Flash, V: SigVerifier + ?Sized>(
     flash: &mut F,
     (base, size): (u32, u32),
     slot: u8,
-    (expect, key): (Option<&SlotRef>, Option<&[u8; 32]>),
+    (expect, verifier): (Option<&SlotRef>, Option<&V>),
     mcu_id: u16,
 ) -> Result<u32, CoreFail> {
     let mut raw = [0u8; HEADER_SIZE];
     flash.read(base, &mut raw).map_err(|_| CoreFail::Header)?;
-    let h = match key {
-        Some(k) => verify_header(&raw, k).map_err(|_| CoreFail::Signature)?,
+    let h = match verifier {
+        Some(v) => verify_header(&raw, v).map_err(|_| CoreFail::Signature)?,
         None => ImageHeader::parse(&raw).map_err(|_| CoreFail::Header)?,
     };
     if expect.is_some_and(|r| r.digest16 != header_digest16(&raw)) {

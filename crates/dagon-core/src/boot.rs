@@ -9,7 +9,7 @@ use dagon_format::header::{
     header_digest16, image_kind, placement, verify_header, ImageHeader, HEADER_SIZE,
 };
 use dagon_format::statelog::{kind, reason, target};
-use dagon_format::Sha256;
+use dagon_format::{Sha256, SigVerifier};
 use dagon_port::Flash;
 
 /// Where the APP slots live. Each slot starts with its 512-byte header; the
@@ -20,10 +20,10 @@ pub struct SlotLayout {
     pub slot_len: u32,
 }
 
-/// What this boot core accepts.
+/// What this boot core accepts (the signature key lives in the verifier
+/// [`decide`] is given).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct BootConfig {
-    pub pubkey: [u8; 32],
     pub mcu_id: u16,
     pub target_tag: [u8; 16],
     pub max_attempts: u8,
@@ -37,22 +37,24 @@ pub enum Decision {
     NoImage,
 }
 
-/// Decides what to start, appending BOOT_ATTEMPT or ROLLBACK to `log`.
-pub fn decide<F: Flash>(
+/// Decides what to start, appending BOOT_ATTEMPT or ROLLBACK to `log`;
+/// a pending image's signature is checked by `verifier`.
+pub fn decide<F: Flash, V: SigVerifier + ?Sized>(
     flash: &mut F,
     log: &mut Log,
     slots: &SlotLayout,
     cfg: &BootConfig,
+    verifier: &V,
 ) -> Decision {
     if let Some(p) = log.state.pending {
-        if let Some(d) = try_pending(flash, log, slots, cfg, p) {
+        if let Some(d) = try_pending(flash, log, slots, cfg, verifier, p) {
             return d;
         }
     }
     let Some(c) = log.state.confirmed else {
         return Decision::NoImage;
     };
-    match check(flash, slots, cfg, c, false) {
+    match check(flash, slots, cfg, verifier, c, false) {
         Ok(entry) => Decision::Boot {
             slot: c.slot,
             entry,
@@ -63,17 +65,18 @@ pub fn decide<F: Flash>(
 }
 
 /// `None` falls back to the confirmed slot.
-fn try_pending<F: Flash>(
+fn try_pending<F: Flash, V: SigVerifier + ?Sized>(
     flash: &mut F,
     log: &mut Log,
     slots: &SlotLayout,
     cfg: &BootConfig,
+    verifier: &V,
     p: SlotRef,
 ) -> Option<Decision> {
     let why = if log.state.attempts >= cfg.max_attempts {
         reason::TRIAL_EXHAUSTED
     } else {
-        match check(flash, slots, cfg, p, true) {
+        match check(flash, slots, cfg, verifier, p, true) {
             // Counted before the jump, so a crash in the new image still counts.
             // If the log cannot take the record, no trial starts.
             Ok(entry) => {
@@ -100,12 +103,14 @@ fn try_pending<F: Flash>(
 }
 
 /// Checks the slot image `r` refers to; returns the body address or the
-/// state log reason code of the failure. `signature` adds the Ed25519 check
-/// (pending slots); confirmed slots rely on the header digest the log holds.
-fn check<F: Flash>(
+/// state log reason code of the failure. `signature` adds the signature
+/// check by `verifier` (pending slots); confirmed slots rely on the header
+/// digest the log holds.
+fn check<F: Flash, V: SigVerifier + ?Sized>(
     flash: &mut F,
     slots: &SlotLayout,
     cfg: &BootConfig,
+    verifier: &V,
     r: SlotRef,
     signature: bool,
 ) -> Result<u32, u8> {
@@ -121,7 +126,7 @@ fn check<F: Flash>(
         return Err(reason::HASH_MISMATCH);
     }
     let h = if signature {
-        verify_header(&raw, &cfg.pubkey).map_err(|_| reason::SIG_INVALID)?
+        verify_header(&raw, verifier).map_err(|_| reason::SIG_INVALID)?
     } else {
         ImageHeader::parse(&raw).map_err(|_| reason::HASH_MISMATCH)?
     };

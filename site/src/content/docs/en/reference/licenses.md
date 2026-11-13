@@ -26,7 +26,12 @@ Points to note:
 - `webpki-roots` is CDLA-Permissive-2.0 (it carries the Mozilla root
   certificate data, external data used by the TLS client of
   `dagon ai topology`).
-- `subtle`, `rp-pac`, `rp2040-boot2` and `source-map-js` are BSD-3-Clause.
+- `subtle`, `rp-pac`, `rp2040-boot2`, `source-map-js`, `curve25519-dalek` and
+  `ed25519-dalek` are BSD-3-Clause.
+- `ed25519-dalek`, `curve25519-dalek` and their dependencies (`fiat-crypto`,
+  `curve25519-dalek-derive`, `ed25519`, `signature` and others) are
+  development dependencies of `dagon-ed25519`'s tests only; nothing from them
+  ships in a DAGON program.
 - `lightningcss` (MPL-2.0) is a build-time dependency of the web tooling
   only; nothing from it ships in DAGON Console.
 - DAGON Console ships the Svelte client runtime and the two packages it
@@ -39,7 +44,7 @@ Points to note:
   Sans JP (SIL Open Font License 1.1; licence in
   `targets/boards/waveshare-rp2040-touch-lcd-1.28/fonts/`).
 
-Rust crates: 402 packages, 440 name/version pairs. "Used by": `crates/` is the host workspace, `samples/...` the sample apps, other names are firmware packages under `targets/`.
+Rust crates: 408 packages, 448 name/version pairs. "Used by": `crates/` is the host workspace, `samples/...` the sample apps, other names are firmware packages under `targets/`.
 
 | Crate | Versions | Licence | Used by |
 |---|---|---|---|
@@ -115,6 +120,8 @@ Rust crates: 402 packages, 440 name/version pairs. "Used by": `crates/` is the h
 | crunchy | 0.2.4 | MIT | boards/waveshare-rp2040-touch-lcd-1.28, mcu/rp2040, mcu/rp2040/bootcore, rp2040-hub, samples/hub-boot-screen |
 | crypto-common | 0.1.7, 0.2.2 | MIT OR Apache-2.0 | boards/m5stopwatch, boards/nucleo-f401re, boards/waveshare-rp2040-touch-lcd-1.28, boot-extension-template, crates/, mcu/common, mcu/esp32s3, mcu/rp2040, mcu/rp2040/bootcore, mcu/rp2040/stage0, mcu/stm32f401re, mcu/stm32f401re/bootcore, mcu/stm32f401re/stage0, rp2040-hub, rp2040-hub/uf2check, samples/esp32s3-app, samples/f401-app, samples/hub-boot-screen |
 | ctutils | 0.4.8 | Apache-2.0 OR MIT | crates/ |
+| curve25519-dalek | 5.0.0 | BSD-3-Clause | crates/ |
+| curve25519-dalek-derive | 0.1.1 | MIT/Apache-2.0 | crates/ |
 | darling | 0.20.11, 0.21.3, 0.24.1 | MIT | boards/m5stopwatch, boards/nucleo-f401re, boards/waveshare-rp2040-touch-lcd-1.28, mcu/esp32s3, mcu/rp2040, mcu/stm32f401re, rp2040-hub, samples/esp32s3-app, samples/f401-app |
 | darling_core | 0.20.11, 0.21.3, 0.24.1 | MIT | boards/m5stopwatch, boards/nucleo-f401re, boards/waveshare-rp2040-touch-lcd-1.28, mcu/esp32s3, mcu/rp2040, mcu/stm32f401re, rp2040-hub, samples/esp32s3-app, samples/f401-app |
 | darling_macro | 0.20.11, 0.21.3, 0.24.1 | MIT | boards/m5stopwatch, boards/nucleo-f401re, boards/waveshare-rp2040-touch-lcd-1.28, mcu/esp32s3, mcu/rp2040, mcu/stm32f401re, rp2040-hub, samples/esp32s3-app, samples/f401-app |
@@ -126,13 +133,15 @@ Rust crates: 402 packages, 440 name/version pairs. "Used by": `crates/` is the h
 | delegate | 0.13.5 | MIT OR Apache-2.0 | boards/m5stopwatch, mcu/esp32s3, samples/esp32s3-app |
 | digest | 0.10.7, 0.11.3 | MIT OR Apache-2.0 | boards/m5stopwatch, boards/nucleo-f401re, boards/waveshare-rp2040-touch-lcd-1.28, boot-extension-template, crates/, mcu/common, mcu/esp32s3, mcu/rp2040, mcu/rp2040/bootcore, mcu/rp2040/stage0, mcu/stm32f401re, mcu/stm32f401re/bootcore, mcu/stm32f401re/stage0, rp2040-hub, rp2040-hub/uf2check, samples/esp32s3-app, samples/f401-app, samples/hub-boot-screen |
 | document-features | 0.2.12 | MIT OR Apache-2.0 | boards/m5stopwatch, boards/nucleo-f401re, boards/waveshare-rp2040-touch-lcd-1.28, mcu/esp32s3, mcu/rp2040, mcu/rp2040/bootcore, mcu/stm32f401re, mcu/stm32f401re/bootcore, rp2040-hub, samples/esp32s3-app, samples/f401-app, samples/hub-boot-screen |
-| ed25519-compact | 2.6.0 | MIT | boards/m5stopwatch, boards/nucleo-f401re, boards/waveshare-rp2040-touch-lcd-1.28, boot-extension-template, crates/, mcu/common, mcu/esp32s3, mcu/rp2040, mcu/rp2040/bootcore, mcu/rp2040/stage0, mcu/stm32f401re, mcu/stm32f401re/bootcore, mcu/stm32f401re/stage0, rp2040-hub, rp2040-hub/uf2check, samples/esp32s3-app, samples/f401-app, samples/hub-boot-screen |
+| ed25519 | 3.0.0 | Apache-2.0 OR MIT | crates/ |
+| ed25519-compact | 2.6.0 | MIT | boards/m5stopwatch, boards/nucleo-f401re, boards/waveshare-rp2040-touch-lcd-1.28, crates/, mcu/common, mcu/esp32s3, mcu/rp2040, mcu/rp2040/bootcore, mcu/rp2040/stage0, mcu/stm32f401re, mcu/stm32f401re/bootcore, mcu/stm32f401re/stage0, rp2040-hub, rp2040-hub/uf2check, samples/esp32s3-app, samples/f401-app, samples/hub-boot-screen |
+| ed25519-dalek | 3.0.0 | BSD-3-Clause | crates/ |
 | either | 1.19.0 | MIT OR Apache-2.0 | boards/waveshare-rp2040-touch-lcd-1.28, mcu/rp2040, mcu/rp2040/bootcore, rp2040-hub, samples/hub-boot-screen |
 | embassy-embedded-hal | 0.6.0 | MIT OR Apache-2.0 | boards/m5stopwatch, boards/nucleo-f401re, boards/waveshare-rp2040-touch-lcd-1.28, mcu/esp32s3, mcu/rp2040, mcu/rp2040/bootcore, mcu/stm32f401re, mcu/stm32f401re/bootcore, rp2040-hub, samples/esp32s3-app, samples/f401-app, samples/hub-boot-screen |
 | embassy-executor | 0.10.0 | MIT OR Apache-2.0 | boards/m5stopwatch, boards/nucleo-f401re, boards/waveshare-rp2040-touch-lcd-1.28, mcu/esp32s3, mcu/rp2040, mcu/stm32f401re, rp2040-hub, samples/esp32s3-app, samples/f401-app |
 | embassy-executor-macros | 0.8.0 | MIT OR Apache-2.0 | boards/m5stopwatch, boards/nucleo-f401re, boards/waveshare-rp2040-touch-lcd-1.28, mcu/esp32s3, mcu/rp2040, mcu/stm32f401re, rp2040-hub, samples/esp32s3-app, samples/f401-app |
 | embassy-executor-timer-queue | 0.1.0 | MIT OR Apache-2.0 | boards/m5stopwatch, boards/nucleo-f401re, boards/waveshare-rp2040-touch-lcd-1.28, mcu/esp32s3, mcu/rp2040, mcu/stm32f401re, rp2040-hub, samples/esp32s3-app, samples/f401-app |
-| embassy-futures | 0.1.2 | MIT OR Apache-2.0 | boards/m5stopwatch, boards/nucleo-f401re, boards/waveshare-rp2040-touch-lcd-1.28, mcu/esp32s3, mcu/rp2040, mcu/rp2040/bootcore, mcu/stm32f401re, mcu/stm32f401re/bootcore, rp2040-hub, samples/esp32s3-app, samples/f401-app, samples/hub-boot-screen |
+| embassy-futures | 0.1.2 | MIT OR Apache-2.0 | boards/m5stopwatch, boards/nucleo-f401re, boards/waveshare-rp2040-touch-lcd-1.28, crates/, mcu/esp32s3, mcu/rp2040, mcu/rp2040/bootcore, mcu/rp2040/stage0, mcu/stm32f401re, mcu/stm32f401re/bootcore, rp2040-hub, rp2040-hub/uf2check, samples/esp32s3-app, samples/f401-app, samples/hub-boot-screen |
 | embassy-hal-internal | 0.4.0, 0.5.0 | MIT OR Apache-2.0 | boards/m5stopwatch, boards/nucleo-f401re, boards/waveshare-rp2040-touch-lcd-1.28, mcu/esp32s3, mcu/rp2040, mcu/rp2040/bootcore, mcu/stm32f401re, mcu/stm32f401re/bootcore, rp2040-hub, samples/esp32s3-app, samples/f401-app, samples/hub-boot-screen |
 | embassy-net-driver | 0.2.0 | MIT OR Apache-2.0 | boards/nucleo-f401re, boards/waveshare-rp2040-touch-lcd-1.28, mcu/rp2040, mcu/stm32f401re, mcu/stm32f401re/bootcore, rp2040-hub, samples/f401-app |
 | embassy-net-driver-channel | 0.4.0 | MIT OR Apache-2.0 | boards/waveshare-rp2040-touch-lcd-1.28, mcu/rp2040, rp2040-hub |
@@ -189,6 +198,7 @@ Rust crates: 402 packages, 440 name/version pairs. "Used by": `crates/` is the h
 | event-listener | 5.4.2 | Apache-2.0 OR MIT | crates/ |
 | event-listener-strategy | 0.5.4 | Apache-2.0 OR MIT | crates/ |
 | fastrand | 2.5.0 | Apache-2.0 OR MIT | crates/ |
+| fiat-crypto | 0.3.0 | MIT OR Apache-2.0 OR BSD-1-Clause | crates/ |
 | find-msvc-tools | 0.1.15 | MIT OR Apache-2.0 | boards/m5stopwatch, boards/nucleo-f401re, boards/waveshare-rp2040-touch-lcd-1.28, crates/, mcu/esp32s3, mcu/rp2040, mcu/stm32f401re, rp2040-hub, samples/esp32s3-app, samples/f401-app |
 | fixed | 1.29.0, 1.31.0 | MIT/Apache-2.0 | boards/waveshare-rp2040-touch-lcd-1.28, mcu/rp2040, mcu/rp2040/bootcore, rp2040-hub, samples/hub-boot-screen |
 | fixedbitset | 0.5.7 | MIT OR Apache-2.0 | boards/waveshare-rp2040-touch-lcd-1.28, mcu/rp2040, mcu/rp2040/bootcore, rp2040-hub, samples/hub-boot-screen |
@@ -310,7 +320,7 @@ Rust crates: 402 packages, 440 name/version pairs. "Used by": `crates/` is the h
 | rp2040-boot2 | 0.3.0 | BSD-3-Clause | boards/waveshare-rp2040-touch-lcd-1.28, mcu/rp2040, mcu/rp2040/bootcore, mcu/rp2040/stage0, rp2040-hub, samples/hub-boot-screen |
 | rpassword | 7.5.4 | Apache-2.0 | crates/ |
 | rtoolbox | 0.0.6 | Apache-2.0 | crates/ |
-| rustc_version | 0.2.3 | MIT/Apache-2.0 | boards/nucleo-f401re, boards/waveshare-rp2040-touch-lcd-1.28, mcu/rp2040, mcu/rp2040/bootcore, mcu/rp2040/stage0, mcu/stm32f401re, mcu/stm32f401re/bootcore, mcu/stm32f401re/stage0, rp2040-hub, rp2040-hub/uf2check, samples/f401-app, samples/hub-boot-screen |
+| rustc_version | 0.2.3, 0.4.1 | MIT OR Apache-2.0 / MIT/Apache-2.0 | boards/nucleo-f401re, boards/waveshare-rp2040-touch-lcd-1.28, crates/, mcu/rp2040, mcu/rp2040/bootcore, mcu/rp2040/stage0, mcu/stm32f401re, mcu/stm32f401re/bootcore, mcu/stm32f401re/stage0, rp2040-hub, rp2040-hub/uf2check, samples/f401-app, samples/hub-boot-screen |
 | rustix | 1.1.6 | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT | crates/ |
 | rustls | 0.23.46 | Apache-2.0 OR ISC OR MIT | crates/ |
 | rustls-pki-types | 1.15.1 | MIT OR Apache-2.0 | crates/ |
@@ -325,7 +335,7 @@ Rust crates: 402 packages, 440 name/version pairs. "Used by": `crates/` is the h
 | secret-service | 5.2.0 | MIT OR Apache-2.0 | crates/ |
 | security-framework | 3.7.0 | MIT OR Apache-2.0 | crates/ |
 | security-framework-sys | 2.17.0 | MIT OR Apache-2.0 | crates/ |
-| semver | 0.9.0 | MIT/Apache-2.0 | boards/nucleo-f401re, boards/waveshare-rp2040-touch-lcd-1.28, mcu/rp2040, mcu/rp2040/bootcore, mcu/rp2040/stage0, mcu/stm32f401re, mcu/stm32f401re/bootcore, mcu/stm32f401re/stage0, rp2040-hub, rp2040-hub/uf2check, samples/f401-app, samples/hub-boot-screen |
+| semver | 0.9.0, 1.0.28 | MIT OR Apache-2.0 / MIT/Apache-2.0 | boards/nucleo-f401re, boards/waveshare-rp2040-touch-lcd-1.28, crates/, mcu/rp2040, mcu/rp2040/bootcore, mcu/rp2040/stage0, mcu/stm32f401re, mcu/stm32f401re/bootcore, mcu/stm32f401re/stage0, rp2040-hub, rp2040-hub/uf2check, samples/f401-app, samples/hub-boot-screen |
 | semver-parser | 0.7.0 | MIT/Apache-2.0 | boards/nucleo-f401re, boards/waveshare-rp2040-touch-lcd-1.28, mcu/rp2040, mcu/rp2040/bootcore, mcu/rp2040/stage0, mcu/stm32f401re, mcu/stm32f401re/bootcore, mcu/stm32f401re/stage0, rp2040-hub, rp2040-hub/uf2check, samples/f401-app, samples/hub-boot-screen |
 | serde | 1.0.229 | MIT OR Apache-2.0 | boards/m5stopwatch, boards/nucleo-f401re, boards/waveshare-rp2040-touch-lcd-1.28, crates/, mcu/build, mcu/common, mcu/esp32s3, mcu/rp2040, mcu/rp2040/bootcore, mcu/rp2040/stage0, mcu/stm32f401re, mcu/stm32f401re/bootcore, mcu/stm32f401re/stage0, rp2040-hub, rp2040-hub/uf2check, samples/esp32s3-app, samples/f401-app, samples/hub-boot-screen |
 | serde_core | 1.0.229 | MIT OR Apache-2.0 | boards/m5stopwatch, boards/nucleo-f401re, boards/waveshare-rp2040-touch-lcd-1.28, crates/, mcu/build, mcu/common, mcu/esp32s3, mcu/rp2040, mcu/rp2040/bootcore, mcu/rp2040/stage0, mcu/stm32f401re, mcu/stm32f401re/bootcore, mcu/stm32f401re/stage0, rp2040-hub, rp2040-hub/uf2check, samples/esp32s3-app, samples/f401-app, samples/hub-boot-screen |
@@ -342,6 +352,7 @@ Rust crates: 402 packages, 440 name/version pairs. "Used by": `crates/` is the h
 | sharded-slab | 0.1.7 | MIT | boards/m5stopwatch, boards/nucleo-f401re, boards/waveshare-rp2040-touch-lcd-1.28, mcu/esp32s3, mcu/rp2040, mcu/stm32f401re, rp2040-hub, samples/esp32s3-app, samples/f401-app |
 | shlex | 2.0.1 | MIT OR Apache-2.0 | boards/m5stopwatch, boards/nucleo-f401re, boards/waveshare-rp2040-touch-lcd-1.28, crates/, mcu/esp32s3, mcu/rp2040, mcu/stm32f401re, rp2040-hub, samples/esp32s3-app, samples/f401-app |
 | signal-hook-registry | 1.4.8 | MIT OR Apache-2.0 | crates/ |
+| signature | 3.0.0 | Apache-2.0 OR MIT | crates/ |
 | siphasher | 1.0.4 | MIT OR Apache-2.0 | boards/waveshare-rp2040-touch-lcd-1.28, mcu/rp2040, mcu/rp2040/bootcore, rp2040-hub, samples/hub-boot-screen |
 | slab | 0.4.12 | MIT | crates/ |
 | smallvec | 1.16.4 | MIT OR Apache-2.0 | boards/m5stopwatch, boards/nucleo-f401re, boards/waveshare-rp2040-touch-lcd-1.28, mcu/esp32s3, mcu/rp2040, mcu/rp2040/bootcore, mcu/stm32f401re, rp2040-hub, samples/esp32s3-app, samples/f401-app, samples/hub-boot-screen |
@@ -543,8 +554,8 @@ npm packages (`web/package-lock.json`): 89. Only those marked "page" ship in the
 ## Boundary of self-authored code
 
 
-- Written for DAGON Boot: everything under `crates/`, `targets/` (except the
-  vendor parts below), `web/src/`, `web/scripts/`, `site/`, `samples/`, `plugin/`, `topology/` and
+- Written for DAGON Boot: everything under `crates/` (except the test data
+  below), `targets/` (except the vendor parts below), `web/src/`, `web/scripts/`, `site/`, `samples/`, `plugin/`, `topology/` and
   `scripts/`.
 - Used as dependencies, unmodified, through Cargo and npm: the crates and
   packages listed above (for example embassy, esp-hal, ed25519-compact, sha2,
@@ -578,3 +589,13 @@ written for this project.
   `targets/mcu/rp2040/stage0`.
 - The STM32F401 system memory boot loader in ROM (used for recovery through
   its documented I2C protocol).
+- Ed25519 test data in `crates/dagon-ed25519/tests/vectors/` (read by the
+  tests only; nothing from it ships in a program):
+  - Project Wycheproof `testvectors_v1/ed25519_test.json` from
+    <https://github.com/C2SP/wycheproof> at commit
+    `65ca494727a52944c204441c860b039e6786b99b`, under the Apache License 2.0,
+    bundled unmodified with its licence (`LICENSE-WYCHEPROOF`) and
+    provenance (`PROVENANCE.md`).
+  - The Ed25519 test vectors of RFC 8032 section 7.1 (`rfc8032.txt`, the
+    RFC's values with only its line breaks removed; under the IETF Trust's
+    copyright notice and Trust Legal Provisions).

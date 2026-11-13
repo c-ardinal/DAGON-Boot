@@ -166,9 +166,10 @@ cargo install --git https://github.com/c-ardinal/DAGON-Boot --tag cli-v<version>
 
 ## 依存しているものと外部のデータ
 
-- 自作の範囲: `crates/`、`targets/`（下のベンダー部品を除く）、`web/`、`site/`、`samples/`、`plugin/`、`topology/`、`scripts/`
+- 自作の範囲: `crates/`（下のテストデータを除く）、`targets/`（下のベンダー部品を除く）、`web/`、`site/`、`samples/`、`plugin/`、`topology/`、`scripts/`
 - 依存ライブラリ: Rustとnpmのライブラリを改変せずに使っています（embassy、esp-hal、ed25519-compact、Svelte、Vite、Astroなど）。
 - ベンダー部品: ESP-IDFの2nd stage、`rp2040-boot2`、STM32F401のROMブートローダ
+- テストデータ: Project WycheproofのEd25519のテストベクタ（Apache License 2.0、<https://github.com/C2SP/wycheproof>）とRFC 8032のテストベクタ。`crates/dagon-ed25519/tests/vectors/`に出どころを添えて無改変で置いています。
 - 書体とアイコン: Doto、DotGothic16、Zen Kaku Gothic New、JetBrains Mono（SIL OFL 1.1）、Lucide（ISC）
 - マイコンとボードの定義の値: 各社のデータシートとボードの資料から取っています。出典を確かめていない値は、定義の中で`unverified`と示します。
 

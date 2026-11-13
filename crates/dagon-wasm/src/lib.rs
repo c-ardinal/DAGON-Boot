@@ -100,7 +100,7 @@ pub fn verify_release(bundle: &[u8], pubkey: &[u8]) -> Result<(), JsError> {
 fn verify(bundle: &[u8], pubkey: &[u8]) -> Result<(), String> {
     let key: &[u8; 32] = pubkey.try_into().map_err(|_| "BadKeyLength".to_string())?;
     BundleView::parse(bundle)
-        .and_then(|b| b.verify(key))
+        .and_then(|b| b.verify(&dagon_ed25519::Ed25519Compact::new(*key)))
         .map_err(|e| format!("{e:?}"))
 }
 

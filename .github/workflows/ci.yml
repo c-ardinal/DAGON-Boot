@@ -226,6 +226,17 @@ jobs:
         env:
           RUSTFLAGS: --cfg sha2_backend="soft" --cfg sha2_backend_soft="compact"
         run: cargo test -p dagon-format --test sha256_backends --locked
+      # The stage0 verifier with the same SHA-2 rounds, on the host: RFC 8032,
+      # the pinned Wycheproof file and the boundary vectors.
+      - name: Stage0 verifier with the compact SHA-2 rounds
+        env:
+          RUSTFLAGS: --cfg sha2_backend="soft" --cfg sha2_backend_soft="compact"
+        run: cargo test -p dagon-ed25519 --test vectors --locked
+      - name: Stage0 verifier builds for each stage0 target
+        run: |
+          for t in $(python scripts/stage0_size.py --targets); do
+            cargo build -p dagon-ed25519 --target "$t" --locked
+          done
 
   # `dagon new` and `dagon gen`, then each self-boot node's generated boot
   # crate built for both boot core slots and signed for each, as a release

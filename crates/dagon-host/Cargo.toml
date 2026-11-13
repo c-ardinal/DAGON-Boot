@@ -5,6 +5,7 @@ license.workspace = true
 version = "0.1.0"
 
 [dependencies]
+dagon-ed25519 = { path = "../dagon-ed25519", features = ["compact"] }
 dagon-format = { path = "../dagon-format" }
 dagon-port = { path = "../dagon-port" }
 dagon-proto = { path = "../dagon-proto" }

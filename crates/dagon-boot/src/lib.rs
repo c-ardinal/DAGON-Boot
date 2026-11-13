@@ -9,6 +9,7 @@
 use dagon_core::boot::{decide, BootConfig, Decision, SlotLayout};
 use dagon_core::log::{Log, LogLayout};
 use dagon_events::{Refused, Sink};
+use dagon_format::SigVerifier;
 use dagon_port::Flash;
 
 // Links the standard library's critical section on hosted targets.
@@ -72,13 +73,14 @@ fn taken(r: Result<(), Refused>) {
 impl BootRun {
     /// Runs the boot up to the decision. Call it right after the watchdog
     /// was armed with `watchdog_ms` (the trial period), before anything
-    /// else reads flash.
-    pub fn start<F: Flash, S: Sink>(
+    /// else reads flash. `verifier` checks a pending image's signature.
+    pub fn start<F: Flash, S: Sink, V: SigVerifier + ?Sized>(
         chain: &mut S,
         flash: &mut F,
         log: &LogLayout,
         slots: &SlotLayout,
         cfg: &BootConfig,
+        verifier: &V,
         watchdog_ms: u32,
     ) -> BootRun {
         let mut m = sequence::Machine::new();
@@ -89,7 +91,7 @@ impl BootRun {
         taken(m.log_read(chain, loaded.is_ok(), pending, confirmed, state.attempts));
         taken(m.before_decision(chain, pending, confirmed, state.attempts));
         let decision = match loaded {
-            Ok(mut l) => decide(flash, &mut l, slots, cfg),
+            Ok(mut l) => decide(flash, &mut l, slots, cfg, verifier),
             Err(_) => Decision::NoImage,
         };
         match decision {

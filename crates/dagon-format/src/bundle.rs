@@ -5,7 +5,7 @@
 use crate::header::{self, HEADER_SIZE};
 use crate::le::{arr, put_u16, put_u32, u16_at, u32_at};
 use crate::manifest::ManifestView;
-use crate::{crc32, sha256, FormatError};
+use crate::{crc32, sha256, FormatError, SigVerifier};
 
 pub const MAGIC: [u8; 4] = *b"DGBN";
 pub const BN_VERSION: u16 = 1;
@@ -185,9 +185,9 @@ impl<'a> BundleView<'a> {
     /// either the image chain (entry `header_sha256`, header signature, header
     /// fields equal to the entry, payload SHA-256) or, for the topology item,
     /// SHA-256 equal to the manifest `topology_sha256`.
-    pub fn verify(&self, pubkey: &[u8; 32]) -> Result<(), FormatError> {
+    pub fn verify<V: SigVerifier + ?Sized>(&self, verifier: &V) -> Result<(), FormatError> {
         let m = self.manifest();
-        m.verify(pubkey)?;
+        m.verify(verifier)?;
         let mut topologies = 0;
         for i in 0..self.item_count() {
             let it = self.item(i);
@@ -205,7 +205,7 @@ impl<'a> BundleView<'a> {
                         return Err(FormatError::DigestMismatch);
                     }
                 }
-                dest::HUB_DIRECT | dest::SUB_STORE => verify_image_item(&m, &it, bytes, pubkey)?,
+                dest::HUB_DIRECT | dest::SUB_STORE => verify_image_item(&m, &it, bytes, verifier)?,
                 _ => return Err(FormatError::BadField),
             }
         }
@@ -213,11 +213,11 @@ impl<'a> BundleView<'a> {
     }
 }
 
-fn verify_image_item(
+fn verify_image_item<V: SigVerifier + ?Sized>(
     m: &ManifestView<'_>,
     it: &BundleItem,
     bytes: &[u8],
-    pubkey: &[u8; 32],
+    verifier: &V,
 ) -> Result<(), FormatError> {
     if it.entry_index as usize >= m.entry_count() || bytes.len() < HEADER_SIZE {
         return Err(FormatError::BadField);
@@ -227,7 +227,7 @@ fn verify_image_item(
     if header::header_digest(&raw) != e.header_sha256 {
         return Err(FormatError::DigestMismatch);
     }
-    let h = header::verify_header(&raw, pubkey)?;
+    let h = header::verify_header(&raw, verifier)?;
     let fields_match = h.image_kind == e.image_kind
         && h.slot_binding == e.slot_binding
         && h.version == e.version

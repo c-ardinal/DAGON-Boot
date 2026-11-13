@@ -10,6 +10,7 @@ publish = false
 
 [dependencies]
 dagon-core = { path = "../../../crates/dagon-core" }
+dagon-ed25519 = { path = "../../../crates/dagon-ed25519", features = ["compact"] }
 dagon-format = { path = "../../../crates/dagon-format" }
 dagon-port = { path = "../../../crates/dagon-port" }
 dagon-mcu-rp2040 = { path = "../../mcu/rp2040", default-features = false }

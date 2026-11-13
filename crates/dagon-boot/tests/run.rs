@@ -122,7 +122,7 @@ impl Bench {
 }
 
 fn start(m: &mut Mem, chain: &mut impl dagon_events::Sink) -> BootRun {
-    BootRun::start(chain, m, &LOG, &SLOTS, &cfg(), WDT_MS)
+    BootRun::start(chain, m, &LOG, &SLOTS, &cfg(), &verifier(), WDT_MS)
 }
 
 /// A whole boot: up to the decision, then the jump or the halt.
@@ -405,7 +405,7 @@ fn extensions_change_no_decision_and_no_write_in_any_state() {
         // dagon-core alone.
         let mut core = make();
         let want = match Log::load(&mut core, &LOG) {
-            Ok(mut log) => decide(&mut core, &mut log, &SLOTS, &cfg()),
+            Ok(mut log) => decide(&mut core, &mut log, &SLOTS, &cfg(), &verifier()),
             Err(_) => Decision::NoImage,
         };
         // The boot core without extensions.

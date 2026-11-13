@@ -1,5 +1,6 @@
 //! The DAGON wire protocol mapped onto the agent's machines.
 
+use dagon_ed25519::Ed25519Compact;
 use dagon_events::{
     Accept, Catalog, Clock, Composed, Delay, EventRecord, Extension, Health, Published,
     RebootRequest, Refused, Sink, Snapshot, TrialInfo, Unreadable, UpdateOffer,
@@ -678,7 +679,8 @@ fn check_header(
     target: u8,
     slot: u8,
 ) -> Result<ImageHeader, Status> {
-    let h = header::verify_header(hdr, &cfg.pubkey).map_err(format_status)?;
+    let verifier = Ed25519Compact::new(cfg.pubkey);
+    let h = header::verify_header(hdr, &verifier).map_err(format_status)?;
     let compatible = Some(h.image_kind) == kind_of(target)
         && header::capabilities_ok(h.image_kind, h.build_flags, h.capabilities)
         && h.mcu_id == cfg.mcu_id

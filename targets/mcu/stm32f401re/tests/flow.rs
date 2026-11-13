@@ -9,6 +9,7 @@ use std::rc::Rc;
 use dagon_agent::{Agent, Config, SlotStore, Transition};
 use dagon_core::boot::{decide, BootConfig, Decision, SlotLayout};
 use dagon_core::log::{Log, LogLayout, SlotRef};
+use dagon_ed25519::Ed25519Compact;
 use dagon_events::{compose, Bounds, Composed, Layer, Nop, Published, Watchdog};
 use dagon_format::header::*;
 use dagon_format::statelog::{kind, reason, FaceHeader};
@@ -217,7 +218,6 @@ impl Node {
 
     fn boot_shared(flash: Shared) -> (Node, Decision) {
         let cfg = BootConfig {
-            pubkey: *keypair().pk,
             mcu_id: mcu_id::STM32F401XE,
             target_tag: TAG,
             max_attempts: 3,
@@ -225,7 +225,13 @@ impl Node {
         let d = {
             let m = &mut *flash.0.borrow_mut();
             let mut log = Log::load(m, &LOG).unwrap();
-            decide(m, &mut log, &SLOTS, &cfg)
+            decide(
+                m,
+                &mut log,
+                &SLOTS,
+                &cfg,
+                &Ed25519Compact::new(*keypair().pk),
+            )
         };
         let store = KindSStore::load(flash.clone(), &LOG, SLOTS, &ERASE_REGIONS).unwrap();
         let node = Node {

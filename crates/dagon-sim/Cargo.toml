@@ -8,6 +8,7 @@ version = "0.1.0"
 dagon-agent = { path = "../dagon-agent" }
 # The kind S state log's fold and STATUS mapping (one for every store).
 dagon-core = { path = "../dagon-core" }
+dagon-ed25519 = { path = "../dagon-ed25519", features = ["compact"] }
 dagon-events = { path = "../dagon-events" }
 dagon-format = { path = "../dagon-format" }
 dagon-port = { path = "../dagon-port" }

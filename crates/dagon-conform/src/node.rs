@@ -20,6 +20,7 @@
 //! erase of the scratch erase unit.
 
 use crate::{detail, Detail};
+use dagon_ed25519::Ed25519Compact;
 use dagon_format::header::{self, HEADER_SIZE};
 use dagon_format::{sha256, verify_signed, Sha256};
 use dagon_port::{Flash, FlashRegion};
@@ -297,18 +298,20 @@ const FLIP_BITS: [(usize, u8); 10] = [
 ];
 
 fn ct07_ed25519(feed: &mut dyn FnMut()) -> TestResult {
+    // The verifier the agent checks received images with.
+    let verifier = Ed25519Compact::new(RFC8032_PK);
     feed();
-    verify_signed(&RFC8032_PK, b"", b"", &RFC8032_SIG)
+    verify_signed(&verifier, b"", b"", &RFC8032_SIG)
         .map_err(|e| detail!("RFC 8032 TEST 1: {:?}", e))?;
     feed();
-    header::verify_header(SIGNED_HEADER, &RFC8032_PK)
+    header::verify_header(SIGNED_HEADER, &verifier)
         .map_err(|e| detail!("signed header: {:?}", e))?;
     let mut rejected = 0;
     for (byte, bit) in FLIP_BITS {
         feed();
         let mut h = *SIGNED_HEADER;
         h[byte] ^= 1 << bit;
-        if header::verify_header(&h, &RFC8032_PK).is_ok() {
+        if header::verify_header(&h, &verifier).is_ok() {
             return Err(detail!("flip {:#x}.{} accepted", byte, bit));
         }
         rejected += 1;

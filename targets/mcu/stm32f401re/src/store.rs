@@ -33,7 +33,7 @@ struct Tail {
 pub struct KindSStore<F> {
     flash: F,
     log: Log,
-    slots: SlotLayout,
+    slots: SlotLayout<'static>,
     /// Boot core slots A/B (start, length), header inline; `None`: the
     /// MCU keeps none.
     cores: Option<[(u32, u32); 2]>,
@@ -51,7 +51,7 @@ impl<F: Flash> KindSStore<F> {
     pub fn load(
         mut flash: F,
         log: &LogLayout,
-        slots: SlotLayout,
+        slots: SlotLayout<'static>,
         regions: &'static [EraseRegion],
     ) -> Result<Self, LogError> {
         let log = Log::load(&mut flash, log)?;
@@ -162,7 +162,7 @@ impl<F: Flash> SlotStore for KindSStore<F> {
     fn status(&mut self) -> StatusResp {
         let heads = [0u8, 1].map(|s| self.head(target::APP, s));
         let ls = self.log.state;
-        ls.status(heads, ls.active(), self.log.generation)
+        ls.status(&heads, ls.active(), self.log.generation)
     }
 
     fn capacity(&self, t: u8, s: u8) -> u32 {
@@ -319,7 +319,7 @@ impl<F: Flash> SlotStore for KindSStore<F> {
                 let heads = [0u8, 1].map(|s| self.head(target::BOOTCORE, s));
                 let c = self.log.core;
                 let running = c.confirmed.map_or(slot::A, |r| r.slot);
-                Some(c.status(heads, running, self.log.generation))
+                Some(c.status(&heads, running, self.log.generation))
             }
             _ => None,
         }

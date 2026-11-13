@@ -251,15 +251,21 @@ fn boot(f: &mut Cut, cell: &mut [u32; 2]) -> u8 {
             return 0xFF;
         }
         let st = bootcore::read_state(f, &LOG).unwrap_or_default();
-        let start = bootcore::choose(&st, *cell, TRIAL_ATTEMPTS, |s, r| {
-            bootcore::check_inline(
-                &mut f.clone(),
-                CORE_SLOTS[usize::from(s)],
-                s,
-                (r, None::<&Ed25519Small>),
-                MCU_ID,
-            )
-        })
+        let start = bootcore::choose(
+            &st,
+            *cell,
+            TRIAL_ATTEMPTS,
+            CORE_SLOTS.len() as u8,
+            |s, r| {
+                bootcore::check_inline(
+                    &mut f.clone(),
+                    CORE_SLOTS[usize::from(s)],
+                    s,
+                    (r, None::<&Ed25519Small>),
+                    MCU_ID,
+                )
+            },
+        )
         .expect("a boot core starts");
         *cell = start.cell;
         let ok = healthy(f, start.slot);

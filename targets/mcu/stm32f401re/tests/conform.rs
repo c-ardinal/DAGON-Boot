@@ -51,7 +51,7 @@ fn the_scratch_is_the_definitions_and_holds_no_image() {
     assert!(layout::FLASH_REGIONS
         .iter()
         .any(|r| r.start == at && r.len == layout::SCRATCH_SECTOR_LEN));
-    for s in layout::SLOTS.slots {
+    for &s in layout::SLOTS.slots {
         assert!(at + layout::SCRATCH_SECTOR_LEN <= s || at >= s + layout::SLOTS.slot_len);
     }
     for f in layout::LOG.faces {
@@ -79,7 +79,7 @@ fn node_tests_pass_and_only_touch_the_scratch() {
     }
     assert!(feeds > 0);
     assert!(m.erased.iter().all(|&a| a == layout::SCRATCH_SECTOR));
-    for s in layout::SLOTS.slots {
+    for &s in layout::SLOTS.slots {
         let a = (s - BASE) as usize;
         assert!(m.bytes[a..a + 0x2_0000].iter().all(|&b| b == 0x11));
     }

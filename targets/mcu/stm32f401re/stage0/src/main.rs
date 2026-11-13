@@ -37,13 +37,19 @@ fn main() -> ! {
     // MIN_FLASH_SIZE bytes, and nothing writes it while stage0 runs.
     let mut flash = unsafe { Mapped::new(STAGE0 as *const u8, STAGE0, MIN_FLASH_SIZE) };
     let st = bootcore::read_state(&mut flash, &LOG).unwrap_or_default();
-    let chosen = bootcore::choose(&st, trial::read(), TRIAL_ATTEMPTS, |s, r| {
-        let slot = *CORE_SLOTS
-            .get(usize::from(s))
-            .ok_or(bootcore::CoreFail::Kind)?;
-        let verifier = STAGE0_VERIFIES.then_some(&VERIFIER);
-        bootcore::check_inline(&mut flash, slot, s, (r, verifier), MCU_ID)
-    });
+    let chosen = bootcore::choose(
+        &st,
+        trial::read(),
+        TRIAL_ATTEMPTS,
+        CORE_SLOTS.len() as u8,
+        |s, r| {
+            let slot = *CORE_SLOTS
+                .get(usize::from(s))
+                .ok_or(bootcore::CoreFail::Kind)?;
+            let verifier = STAGE0_VERIFIES.then_some(&VERIFIER);
+            bootcore::check_inline(&mut flash, slot, s, (r, verifier), MCU_ID)
+        },
+    );
     match chosen {
         Ok(start) => {
             trial::write(start.cell);

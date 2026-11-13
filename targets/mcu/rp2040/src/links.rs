@@ -10,15 +10,15 @@ pub use dagon_mcu_common::link::{Link, LinkError};
 #[cfg(feature = "usb")]
 pub use crate::usb::CdcLink as UsbCdc;
 /// Down `i2c`: an I2C controller with the DAGON mailbox
-/// (`I2c::new(RpI2c(bus))`).
+/// (`I2c::new(RpI2c(bus), RELAY_LINK_I2C0)`).
 pub type I2c<'d, T> = I2cLink<RpI2c<'d, T>>;
-/// Down `uart`: a PIO UART (`Uart::new(PioStream { tx, rx }, now_ms)`).
+/// Down `uart`: a PIO UART (`Uart::new(PioStream { tx, rx }, now_ms, RELAY_LINK_PIO_UART)`).
 pub type Uart<'d, P, const TX: usize, const RX: usize> =
     crate::uart::UartLink<PioStream<'d, P, TX, RX>, fn() -> u64>;
 
 use dagon_port::{BusError, I2cBus, NodeLink, StreamPort};
 use dagon_proto::mailbox::{self, STATE_LEN};
-use dagon_proto::payload::{link, HelloResp};
+use dagon_proto::payload::HelloResp;
 use dagon_proto::{frame_len, max_payload, Frame, Status};
 use embassy_rp::i2c::Instance as I2cInstance;
 use embassy_rp::i2c::{self, AbortReason, Async};
@@ -105,6 +105,8 @@ fn deadline(timeout_ms: u16) -> Instant {
 /// response is ready, then reads it.
 pub struct I2cLink<I> {
     bus: I,
+    /// Its relay link id (the definition's `RELAY_LINK_<PORT>` of its port).
+    id: u8,
     addr: u8,
     timeout_ms: u16,
     deadline: Instant,
@@ -112,9 +114,12 @@ pub struct I2cLink<I> {
 }
 
 impl<I: I2cBus> I2cLink<I> {
-    pub fn new(bus: I) -> Self {
+    /// The link on `bus`, relay link `id` (its port's generated
+    /// `RELAY_LINK_<PORT>`).
+    pub fn new(bus: I, id: u8) -> Self {
         I2cLink {
             bus,
+            id,
             addr: 0,
             timeout_ms: 0,
             deadline: Instant::from_ticks(0),
@@ -176,7 +181,7 @@ impl<I: I2cBus> I2cLink<I> {
 /// `raw` is the I2C_RAW transfer ([`I2cLink::rom`]).
 impl<I: I2cBus> NodeLink for I2cLink<I> {
     fn link_id(&self) -> u8 {
-        link::I2C0
+        self.id
     }
 
     fn max_payload(&self) -> usize {

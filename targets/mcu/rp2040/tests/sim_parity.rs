@@ -2,8 +2,9 @@
 //! answering: a request the rules reject must get the same status from the
 //! sim; one they accept reaches the bus (and times out there).
 
-use dagon_mcu_rp2040::RELAY_LINKS;
-use dagon_proto::payload::{boot0, link, nrst, I2cRaw, Relay, Show, SubCtl};
+use dagon_mcu_rp2040::{RELAY_LINKS, RELAY_LINK_I2C0 as I2C, RELAY_LINK_PIO_UART as UART};
+use dagon_proto::payload::link::UART_ADDR;
+use dagon_proto::payload::{boot0, nrst, I2cRaw, Relay, Show, SubCtl};
 use dagon_proto::{finish, frame_len, max_payload, split_status, Cmd, Frame, Status};
 use dagon_relay::cmd;
 use dagon_sim::{demo_hub, SimHub};
@@ -30,19 +31,31 @@ fn relay(h: &mut SimHub, l: u8, addr: u8, inner_len: usize) -> Status {
     ask(h, Cmd::Relay, &p[..n])
 }
 
+/// The generated `RELAY_LINKS` are the entries the definitions loader reads
+/// from the same `[[relay_link]]`, and each port's id constant is its entry's.
+#[test]
+fn generated_relay_links_match_the_definition() {
+    assert_eq!(
+        RELAY_LINKS.to_vec(),
+        dagon_sim::store::relay_links("rp2040")
+    );
+    assert_eq!(I2C, dagon_sim::store::relay_link_id("rp2040", "i2c0"));
+    assert_eq!(UART, dagon_sim::store::relay_link_id("rp2040", "pio-uart"));
+}
+
 #[test]
 fn relay_rules_match_the_sim() {
     let mut h = demo_hub([0; 32], 1);
     let i2c_max = frame_len(max_payload::I2C);
     let uart_max = frame_len(max_payload::UART);
     let cases = [
-        (link::I2C0, 0x42, 12),
-        (link::I2C0, 0x10, i2c_max),
-        (link::I2C0, 0x42, i2c_max + 1),
-        (link::I2C0, 0x80, 12),
-        (link::PIO_UART, link::UART_ADDR, uart_max),
-        (link::PIO_UART, link::UART_ADDR, uart_max + 1),
-        (link::PIO_UART, 0x42, 12),
+        (I2C, 0x42, 12),
+        (I2C, 0x10, i2c_max),
+        (I2C, 0x42, i2c_max + 1),
+        (I2C, 0x80, 12),
+        (UART, UART_ADDR, uart_max),
+        (UART, UART_ADDR, uart_max + 1),
+        (UART, 0x42, 12),
         (9, 0x42, 12),
     ];
     for (l, a, len) in cases {
@@ -59,7 +72,7 @@ fn relay_rules_match_the_sim() {
     }
     // Short timeout: an absent I2C node answers within about the timeout.
     let t0 = h.now_ms();
-    assert_eq!(relay(&mut h, link::I2C0, 0x55, 12), Status::Timeout);
+    assert_eq!(relay(&mut h, I2C, 0x55, 12), Status::Timeout);
     assert!(h.now_ms() - t0 <= 20 + 2 + 2, "{} ms", h.now_ms() - t0);
 }
 

@@ -7,7 +7,8 @@ use std::format;
 use std::vec::Vec;
 
 use dagon_format::Version;
-use dagon_proto::payload::{link, phase};
+use dagon_mcu_rp2040::RELAY_LINK_I2C0;
+use dagon_proto::payload::phase;
 use dagon_relay::nodes::named;
 use dagon_relay::view::{Home, Node, Progress, Shade};
 use embedded_graphics::geometry::Dimensions;
@@ -67,7 +68,7 @@ impl DrawTarget for Canvas {
 
 fn node(index: u8, name: &str, shade: Shade) -> Node {
     Node {
-        node: named(index, name, link::I2C0, 0x40 + index),
+        node: named(index, name, RELAY_LINK_I2C0, 0x40 + index),
         version: Some(Version::new(1, 12, 3)),
         shade,
     }

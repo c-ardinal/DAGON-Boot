@@ -26,17 +26,13 @@
 
 pub use dagon_mcu_common::{frames, liveness, mapped, tag, uart};
 
-use dagon_format::topology::iface;
-use dagon_proto::max_payload;
-use dagon_proto::payload::link;
-use dagon_relay::{Addressing, RelayLink};
-
 // The constants this package's MCU definition states (`dagon-mcu.toml`):
 // `TRIAL_ATTEMPTS`, `MASKED_MAX_US` (`None` while unmeasured), `ERASE_REGIONS` (the MCU's
 // default erase regions; a node's own come from its board's generated rows),
 // `SLOT_LAYOUTS`,
 // `ERASE_UNIT_MAX_MS` (the longest single erase), the `_KNOWN` flags (checked against their source),
-// `CONFORM_SCRATCH`. The boot stage and the app layer read these.
+// `CONFORM_SCRATCH`, and `RELAY_LINKS` with one `RELAY_LINK_<PORT>` id per
+// relay port (`[[relay_link]]`). The boot stage and the app layer read these.
 include!(concat!(env!("OUT_DIR"), "/definition.rs"));
 
 /// An erase region, for a board's `BoardDef` (`EraseRegion::table` turns its
@@ -98,24 +94,6 @@ macro_rules! target_tag {
 /// The slot this image is linked for (A, or B with `slot-b`): an app's
 /// APP slot, or the boot core's boot core slot.
 pub const LINKED_SLOT: u8 = if cfg!(feature = "slot-b") { 1 } else { 0 };
-
-/// The links the RP2040's relay reaches nodes over (RELAY `link`), each
-/// with the topology links it carries: I2C0 with the DAGON mailbox (the
-/// one I2C bus), and the PIO UART.
-pub const RELAY_LINKS: [RelayLink; 2] = [
-    RelayLink {
-        id: link::I2C0,
-        carries: |l| l.iface == iface::I2C_BUS,
-        max_payload: max_payload::I2C,
-        addressing: Addressing::SevenBit,
-    },
-    RelayLink {
-        id: link::PIO_UART,
-        carries: |l| l.iface == iface::PIO_UART,
-        max_payload: max_payload::UART,
-        addressing: Addressing::Fixed(link::UART_ADDR),
-    },
-];
 
 /// The topology's MCU id and flash map this package implements.
 pub const TOPOLOGY_MCU: &str = "rp2040";

@@ -278,6 +278,8 @@ fn twelve_of_twelve_through_the_hub() {
         pending: Vec::new(),
     };
     let mut host = Host::new(sim.clone(), sim);
+    // The simulated hub's relay links: its MCU definition's.
+    host.relay_links = dagon_sim::store::relay_links(dagon_sim::Layout::RP2040_HUB.mcu);
     let to = Target::I2c(dagon_sim::NODE_I2C_ADDR);
     let report = run(
         &mut host,
@@ -317,6 +319,8 @@ fn twelve_of_twelve_on_usb_as_uart() {
         pending: Vec::new(),
     };
     let mut host = Host::new(sim.clone(), sim);
+    // The simulated hub's relay links: its MCU definition's.
+    host.relay_links = dagon_sim::store::relay_links(dagon_sim::Layout::RP2040_HUB.mcu);
     let report = run(
         &mut host,
         Target::Hub,
@@ -338,6 +342,8 @@ fn unreachable_node_gives_a_full_not_run_file() {
         pending: Vec::new(),
     };
     let mut host = Host::new(sim.clone(), sim);
+    // The simulated hub's relay links: its MCU definition's.
+    host.relay_links = dagon_sim::store::relay_links(dagon_sim::Layout::RP2040_HUB.mcu);
     let to = Target::I2c(dagon_sim::NODE_I2C_ADDR);
     let report = run(
         &mut host,

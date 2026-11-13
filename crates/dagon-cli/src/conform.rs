@@ -11,7 +11,7 @@ use dagon_conform::{Label, CTS};
 use dagon_format::header::SIGN_DOMAIN;
 use dagon_host::{Error, Host, HostClock, HostTimings, Target, Transport};
 use dagon_port::timeout::NodeTimings;
-use dagon_port::LinkKind;
+use dagon_port::{LinkKind, RelayLinkDef};
 use dagon_sim::block_on;
 
 use crate::cli::ConformArgs;
@@ -233,6 +233,7 @@ pub(crate) fn node_timings(
 pub(crate) fn conform_files(
     node: &str,
     to: Target,
+    relay_links: Vec<RelayLinkDef>,
     timings: &HostTimings,
     images_dir: &std::path::Path,
     out: &crate::genfs::Out,
@@ -243,6 +244,7 @@ pub(crate) fn conform_files(
     let images = conform_images(images_dir)?;
     let mut sign = |m: &[u8]| *key.sk.sign([SIGN_DOMAIN, m].concat(), None);
     let mut host = serial::host(port)?;
+    host.relay_links = relay_links;
     let report = run(
         &mut host,
         to,
@@ -274,13 +276,18 @@ pub fn command(a: &ConformArgs) -> Result<(), String> {
     let topology = cfg
         .topology_path(a.topology.as_deref())
         .and_then(|p| read_topology(&cfg, &p));
-    let (to, timings) = match (usb, topology) {
+    let (to, links, timings) = match (usb, topology) {
         (false, t) => {
             let t = t?;
-            (node_target(&reg, &t, node)?, node_timings(&reg, &t, node)?)
+            let to = node_target(&reg, &t, node)?;
+            (
+                to,
+                dagon_host::relay_links(&reg, &t),
+                node_timings(&reg, &t, node)?,
+            )
         }
-        (true, Ok(t)) => (Target::Hub, node_timings(&reg, &t, node)?),
-        (true, Err(_)) => (Target::Hub, NodeTimings::FALLBACK),
+        (true, Ok(t)) => (Target::Hub, Vec::new(), node_timings(&reg, &t, node)?),
+        (true, Err(_)) => (Target::Hub, Vec::new(), NodeTimings::FALLBACK),
     };
     let dir = a
         .images
@@ -299,6 +306,7 @@ pub fn command(a: &ConformArgs) -> Result<(), String> {
     let report = conform_files(
         node,
         to,
+        links,
         &timings,
         &dir,
         &out,

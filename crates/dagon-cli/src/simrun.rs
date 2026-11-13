@@ -198,8 +198,10 @@ impl World {
     fn host(&self) -> Host<Sim, Sim> {
         let mut h = Host::new(self.sim.clone(), self.sim.clone());
         let t = dagon_topology::parse_str(YAML).expect("sim topology parses");
-        h.timings = dagon_host::node_timings(dagon_topology::defs::Registry::builtin(), &t)
+        let reg = dagon_topology::defs::Registry::builtin();
+        h.timings = dagon_host::node_timings(reg, &t)
             .expect("the built-in definitions pass the timing rules");
+        h.relay_links = dagon_host::relay_links(reg, &t);
         h
     }
 
@@ -495,6 +497,7 @@ mod tests {
         let topology = dagon_topology::compile(&t).unwrap();
         let sent = Rc::new(RefCell::new(Vec::new()));
         let mut host = Host::new(Recording(w.sim.clone(), sent.clone()), w.sim.clone());
+        host.relay_links = dagon_host::relay_links(dagon_topology::defs::Registry::builtin(), &t);
         let mut asked = Vec::new();
         let r = crate::device::write_silent_nodes(
             &mut host,

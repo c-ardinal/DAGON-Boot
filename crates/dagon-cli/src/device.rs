@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use dagon_format::header::port_kind;
 use dagon_format::Version;
 use dagon_host::{Event, Host, HostClock, NodeState, Outcome, Target, Transport, WritePath};
+use dagon_port::RelayLinkDef;
 use dagon_proto::payload::{phase, SlotState, StatusResp, VersionResp, VersionSlots};
 use dagon_proto::Status;
 use dagon_sign::to_hex;
@@ -184,7 +185,8 @@ fn node_targets(cfg: &Config, t: &Topology) -> Result<Vec<NodeRoute>, String> {
     let reg = crate::defs::registry(cfg)?;
     let bin = topology_bin(&reg, t)?;
     let view = dagon_format::TopologyView::parse(&bin).map_err(|e| format!("{e:?}"))?;
-    Ok(t.nodes
+    let nodes = t
+        .nodes
         .iter()
         .enumerate()
         .map(|(i, n)| {
@@ -266,12 +268,15 @@ pub(crate) fn doctor_versions(
     cfg: &Config,
     t: Option<&Topology>,
 ) -> Vec<String> {
-    let nodes = match t.map(|t| node_targets(cfg, t)).transpose() {
+    let (nodes, links) = match t.map(|t| node_targets(cfg, t)).transpose() {
         Ok(n) => n.unwrap_or_default(),
         Err(e) => return vec![format!("node versions not read: {e}")],
     };
     match serial::host(port) {
-        Ok(mut host) => version_lines(&mut host, &nodes),
+        Ok(mut host) => {
+            host.relay_links = links;
+            version_lines(&mut host, &nodes)
+        }
         Err(e) => vec![format!("node versions not read: {e}")],
     }
 }
@@ -310,6 +315,7 @@ pub fn rollback_node<T: Transport, C: HostClock>(
         .position(|n| n.id == node)
         .ok_or_else(|| format!("no updatable node '{node}' in the topology"))?;
     host.timings = node_timings(reg, t)?;
+    host.relay_links = dagon_host::relay_links(reg, t);
     let bin = topology_bin(reg, t)?;
     let view = dagon_format::TopologyView::parse(&bin).map_err(|e| format!("{e:?}"))?;
     let to = Target::of_node(&view, i as u8)
@@ -574,6 +580,7 @@ where
     T::Error: std::fmt::Debug,
 {
     host.timings = node_timings(reg, t)?;
+    host.relay_links = dagon_host::relay_links(reg, t);
     let bin = topology_bin(reg, t)?;
     let ids: Vec<String> = t.nodes.iter().map(|n| n.id.clone()).collect();
     let name = |n: u8| ids.get(n as usize).map_or("?", String::as_str);

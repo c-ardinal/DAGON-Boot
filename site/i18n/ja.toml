@@ -125,6 +125,7 @@
 "What DAGON enforces: `none`, `mpu`, `pms`, `tz`. A kind gives `none` or one level (`mpu` for the MPU and PMP kinds, `pms` for `esp-pms`, `tz` for `armv8m-tz`)." = "DAGONが強制するもの: `none`、`mpu`、`pms`、`tz`。種類は`none`か1つのレベルを与えます（MPUとPMPの種類は`mpu`、`esp-pms`は`pms`、`armv8m-tz`は`tz`）。"
 "What DAGON hands the extension (the `[capabilities]` keys below)." = "DAGONが拡張に渡すもの（下の`[capabilities]`のキー）。"
 "What a board's boot action program may use besides pins: `[\"i2c\"]` allows `bus_write`." = "ボードのブートのアクションプログラムが、ピンのほかに使えるもの: `[\"i2c\"]`で`bus_write`を使えます。"
+"What the MCU's firmware can write: each image kind a `[[slot]]` names, mapped to the kinds that write it (`app = [\"app\"]`, `bootcore = [\"app\"]`), each of them a kind with a slot here. A kind writes another kind's slots from its own; a kind that lists itself writes its own slot it is not running from, which counts only when it has two. A kind has one slot (`a`) or two (`a` and `b`); one slot loads only when a kind other than itself writes it." = "マイコンのファームウェアが何を書き込めるか: `[[slot]]`が名付けるイメージの種類ごとに、それを書き込む種類を並べます（`app = [\"app\"]`、`bootcore = [\"app\"]`）。並べる種類はどれも、ここにスロットを持つ種類です。ある種類は、自分のスロットから動いて、別の種類のスロットに書き込みます。自分を並べた種類は、自分が動いていない自分のスロットに書き込みます。これはその種類のスロットが2つのときだけ数えます。種類ごとのスロットは1つ（`a`）か2つ（`a`と`b`）です。スロットが1つの種類は、自分以外の種類が書き込むときだけ読み込めます。"
 "Whether the board can be an I2C target." = "ボードがI2Cのターゲットになれるか。"
 "Who makes the agent, shown after its name." = "エージェントの作り手。名前の後に表示します。"
 "Withdraws the consent (done also when none was)." = "同意を取り消します（無いときも完了します）。"

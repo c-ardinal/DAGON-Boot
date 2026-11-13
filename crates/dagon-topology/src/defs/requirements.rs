@@ -11,8 +11,8 @@ use dagon_format::header::HEADER_SIZE;
 use dagon_format::statelog::{FACE_HEADER_SIZE, RECORD_SIZE};
 
 use super::{
-    board_boot, dma, execution, isolation, slot_layout, Binding, BoardDef, McuDef, Placement,
-    Writer,
+    board_boot, dma, execution, isolation, slot_layout, Binding, BoardDef, ImageKind, McuDef,
+    Placement, Writer,
 };
 
 /// Slot/header placement: an image header.
@@ -100,8 +100,14 @@ pub const MCU: &[Requirement<McuCheck>] = &[
             "slot[].header_at",
             "slot[].header_offset",
         ],
-        rule: "inline/trailer slots > HEADER, detached >= 1, headers HEADER; one slot per image and binding",
+        rule: "inline/trailer slots > HEADER, detached >= 1, headers HEADER; one slot per image and binding; a b slot only with an a slot of its image",
         check: slots,
+    },
+    Requirement {
+        engine: "image writers (agent and boot stages)",
+        fields: &[],
+        rule: "one entry per image kind with a slot, naming only kinds with a slot; a kind with one slot is written by a kind other than itself",
+        check: writers,
     },
     Requirement {
         engine: "flash placement (all engines' regions)",
@@ -456,6 +462,52 @@ fn slots(m: &McuDef) -> Result<(), String> {
                     || s.binding == Binding::Any)
         });
         fail(clash, || format!("{what} is defined twice"))?;
+        let has_a = |o: &&super::Slot| o.image == s.image && o.binding == Binding::A;
+        fail(
+            s.binding == Binding::B && !m.slots.iter().any(|o| has_a(&o)),
+            || {
+                format!(
+                    "{what} needs slot {:?}/A: one slot is a, two are a and b",
+                    s.image
+                )
+            },
+        )?;
+    }
+    Ok(())
+}
+
+/// `[writers]`: every image kind with a slot states what writes it, every
+/// kind named has a slot, and a kind with one slot is written by another
+/// kind (an image cannot rewrite the slot it runs from).
+fn writers(m: &McuDef) -> Result<(), String> {
+    let count = |k: ImageKind| m.slots.iter().filter(|s| s.image == k).count();
+    for (kind, by) in &m.writers {
+        for k in std::iter::once(kind).chain(by) {
+            fail(count(*k) == 0, || {
+                format!(
+                    "writers.{}: {} has no slot on this MCU",
+                    kind.as_str(),
+                    k.as_str()
+                )
+            })?;
+        }
+    }
+    for s in &m.slots {
+        let k = s.image;
+        let by = m
+            .writers
+            .get(&k)
+            .ok_or_else(|| format!("writers has no entry for {}", k.as_str()))?;
+        fail(count(k) == 1 && by.iter().all(|w| *w == k), || {
+            format!(
+                concat!(
+                    "{0} has one slot, and no other image on this MCU can write it: ",
+                    "an image cannot rewrite the slot it runs from (writers.{0} = {1:?})"
+                ),
+                k.as_str(),
+                by.iter().map(|w| w.as_str()).collect::<Vec<_>>()
+            )
+        })?;
     }
     Ok(())
 }

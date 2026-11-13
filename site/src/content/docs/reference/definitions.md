@@ -25,6 +25,7 @@ description: "dagon-mcu.tomlとdagon-board.toml: DAGONがマイコンやボー�
 | `partitions` | 文字列 | 任意 | 定義のフォルダの中のESP-IDFのパーティションテーブルのCSV（行にはオフセットと大きさの明示が必要です）。 |
 | `[layout]` | テーブル | 任意 | 任意の固定のリージョン: `stage0 = { at, size }`、`bootcore_log` / `app_log = { faces = [a, b], face_size }`。`bootcore_log`が`app_log`と同じときは、ブートローダとAPPの両方の記録を持つ1つのログです。`stage0_verifies = true`: stage0はブートローダの署名も確かめます（省くとダイジェストだけ）。 |
 | `[[slot]]` | テーブルの配列 | 必須 | `image`（`app`、`bootcore`、`agent`、`stage0`）、`binding`（`a`、`b`、`any`）、`header`（`inline`、`trailer`、`detached`）。領域は`at` + `size`か`partition`です。分離したヘッダは`header_at`か`header_partition` + `header_offset`にあります。 |
+| `[writers]` | テーブル | 必須 | マイコンのファームウェアが何を書き込めるか: `[[slot]]`が名付けるイメージの種類ごとに、それを書き込む種類を並べます（`app = ["app"]`、`bootcore = ["app"]`）。並べる種類はどれも、ここにスロットを持つ種類です。ある種類は、自分のスロットから動いて、別の種類のスロットに書き込みます。自分を並べた種類は、自分が動いていない自分のスロットに書き込みます。これはその種類のスロットが2つのときだけ数えます。種類ごとのスロットは1つ（`a`）か2つ（`a`と`b`）です。スロットが1つの種類は、自分以外の種類が書き込むときだけ読み込めます。 |
 | `[writer]` | テーブル | 必須 | 最初の書き込みのツール: `kind`とそのパラメータ（下記）。 |
 | `[[part]]` | テーブルの配列 | 任意 | 最初の書き込みのために、この定義のフォルダからビルドするDAGONの部品: `name`、`sub`（定義のフォルダの中のフォルダ）、`bin`。 |
 | `[coordinator]` | テーブル | 任意 | 親機になれるマイコンだけ: `pio_state_machines`、`pio_uart_state_machines`（リンクごと）、`uart0_tx`、`uart0_rx`。構成がそのマイコンを親機にできるのは、`[coordinator]`が定義されているときだけです（V-25）。 |

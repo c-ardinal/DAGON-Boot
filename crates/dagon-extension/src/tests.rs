@@ -388,6 +388,10 @@ header = "inline"
 at = 0x0802_0000
 size = 0x4_0000
 
+[writers]
+app = ["bootcore"]
+bootcore = ["app"]
+
 [writer]
 kind = "probe-rs"
 chip = "SYNTH"

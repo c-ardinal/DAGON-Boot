@@ -19,7 +19,10 @@ mod tests;
 mod tests_isolation;
 #[cfg(test)]
 mod tests_requirements;
+#[cfg(test)]
+mod tests_writers;
 
+use std::collections::BTreeMap;
 use std::sync::OnceLock;
 
 use dagon_format::header::{image_kind, placement, port_kind, slot_binding};
@@ -75,7 +78,7 @@ impl PortKind {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum ImageKind {
     App,
@@ -85,6 +88,16 @@ pub enum ImageKind {
 }
 
 impl ImageKind {
+    /// The kind as a definition names it (`app`, `bootcore`).
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::App => "app",
+            Self::Bootcore => "bootcore",
+            Self::Agent => "agent",
+            Self::Stage0 => "stage0",
+        }
+    }
+
     /// Image header `image_kind`.
     pub fn wire(self) -> u8 {
         match self {
@@ -470,6 +483,12 @@ pub struct McuDef {
     /// header is at `header_at` or `header_partition` + `header_offset`.
     #[serde(rename = "slot")]
     pub slot_defs: Vec<SlotDef>,
+    /// What the MCU's firmware can write: each image kind a `[[slot]]` names, mapped to the kinds
+    /// that write it (`app = ["app"]`, `bootcore = ["app"]`), each of them a kind with a slot here.
+    /// A kind writes another kind's slots from its own; a kind that lists itself writes its own
+    /// slot it is not running from, which counts only when it has two. A kind has one slot (`a`)
+    /// or two (`a` and `b`); one slot loads only when a kind other than itself writes it.
+    pub writers: BTreeMap<ImageKind, Vec<ImageKind>>,
     /// First-write tool: `kind` and its parameters (below).
     pub writer: Writer,
     /// DAGON parts built from this package for a first write: `name`, `sub` (folder in the

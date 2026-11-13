@@ -1263,3 +1263,6 @@ pub fn init_project(
 // Tests set up and inspect project folders directly.
 #[allow(clippy::disallowed_methods)]
 mod tests;
+#[cfg(test)]
+#[allow(clippy::disallowed_methods)]
+mod tests_slots;

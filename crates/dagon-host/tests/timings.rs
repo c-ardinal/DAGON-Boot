@@ -36,6 +36,9 @@ header = "inline"
 at = 0x0804_0000
 size = 0x2_0000
 
+[writers]
+app = ["app"]
+
 [[slot_layout]]
 target = "app"
 slot = "a"

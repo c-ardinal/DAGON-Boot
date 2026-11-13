@@ -82,11 +82,15 @@ impl Flash for Mem {
 
 pub fn cfg() -> BootConfig {
     BootConfig {
-        pubkey: *KeyPair::from_seed(Seed::new(SEED)).pk,
         mcu_id: mcu_id::STM32F401XE,
         target_tag: TAG,
         max_attempts: 3,
     }
+}
+
+/// The boot core's verifier, under the key the images are signed with.
+pub fn verifier() -> dagon_ed25519::Ed25519Compact {
+    dagon_ed25519::Ed25519Compact::new(*KeyPair::from_seed(Seed::new(SEED)).pk)
 }
 
 /// Signed image for `slot`; returns (header, body).
@@ -185,7 +189,7 @@ pub fn with_pending_b() -> Mem {
 
 pub fn boot(m: &mut Mem) -> Decision {
     let mut log = Log::load(m, &LOG).unwrap();
-    decide(m, &mut log, &SLOTS, &cfg())
+    decide(m, &mut log, &SLOTS, &cfg(), &verifier())
 }
 
 pub fn entry(slot: u8) -> u32 {

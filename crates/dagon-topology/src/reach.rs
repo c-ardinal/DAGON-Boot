@@ -1,11 +1,12 @@
 //! The part of a 構成 updating reaches: the first 親機 and the 子機
-//! linked straight to it over I2C or UART. Everything
-//! else is a valid definition that updating skips (V-23 tells why).
+//! linked straight to it over I2C or UART, whichever end of the link each is
+//! listed as. Everything else is a valid definition that updating skips
+//! (V-23 tells why).
 
 use std::collections::BTreeSet;
 
 use crate::defs::Registry;
-use crate::schema::{Constraint, Role, Topology};
+use crate::schema::{Constraint, Node, Role, Topology};
 use crate::{check_with, Report};
 
 /// Why updating skips a node.
@@ -128,10 +129,14 @@ pub fn updatable(t: &Topology) -> (Topology, Vec<(String, Skip)>) {
     let kept = |id: &String| keep.contains(id.as_str());
     let sub = Topology {
         nodes: t.nodes.iter().filter(|n| kept(&n.id)).cloned().collect(),
+        // Only the first 親機's own links: a link between two reached 子機
+        // is not one updating runs over.
         links: t
             .links
             .iter()
-            .filter(|l| kept(&l.from) && kept(&l.to))
+            .filter(|l| {
+                l.ends.iter().all(|e| kept(&e.node)) && first.is_some_and(|f| l.end(f).is_some())
+            })
             .cloned()
             .collect(),
         recovery: t
@@ -181,32 +186,55 @@ fn skip_of(t: &Topology, first: Option<&str>, id: &str) -> Result<(), Skip> {
             Err(Skip::SecondHub)
         };
     }
-    let up = t.link_to(id).ok_or(Skip::Unreachable)?;
-    // The chain must end at a 親機: unlinked, a loop of 子機, or no 親機 at all is unreachable.
-    let root = root_of(t, id).ok_or(Skip::Unreachable)?;
-    if Some(root) != first {
+    // No 親機 over any chain of links (unlinked, or 子機 only) is unreachable.
+    let (hub, hops) = nearest_hub(t, first, n).ok_or(Skip::Unreachable)?;
+    if Some(hub) != first {
         return Err(Skip::SecondHub);
     }
-    if Some(up.from.as_str()) != first {
+    if hops > 1 {
         return Err(Skip::Deep);
     }
-    if !up.kind.compiles() {
+    let link = t.link_between(id, hub).ok_or(Skip::Unreachable)?;
+    if !link.kind.compiles() {
         return Err(Skip::LinkKind);
     }
     Ok(())
 }
 
-/// The 親機 at the top of `id`'s chain of links, if the chain ends at one.
-fn root_of<'t>(t: &'t Topology, id: &str) -> Option<&'t str> {
-    let mut seen = BTreeSet::new();
-    let mut at = t.node(id)?;
-    while at.role != Role::Coordinator {
-        if !seen.insert(at.id.as_str()) {
-            return None;
+/// The 親機 nearest to `from` over links, whichever end each lists first, and
+/// how many links away; of two at the same distance the first 親機.
+fn nearest_hub<'t>(
+    t: &'t Topology,
+    first: Option<&str>,
+    from: &'t Node,
+) -> Option<(&'t str, usize)> {
+    let mut seen = BTreeSet::from([from.id.as_str()]);
+    let mut frontier = vec![from.id.as_str()];
+    let mut hops = 0;
+    while !frontier.is_empty() {
+        hops += 1;
+        let mut next = Vec::new();
+        for at in frontier {
+            for (_, l) in t.links_at(at) {
+                let Some(n) = l.other(at).and_then(|e| t.node(&e.node)) else {
+                    continue;
+                };
+                if seen.insert(n.id.as_str()) {
+                    next.push(n);
+                }
+            }
         }
-        at = t.node(&t.link_to(&at.id)?.from)?;
+        let hubs: Vec<&str> = next
+            .iter()
+            .filter(|n| n.role == Role::Coordinator)
+            .map(|n| n.id.as_str())
+            .collect();
+        if let Some(&h) = hubs.iter().find(|&&h| Some(h) == first).or(hubs.first()) {
+            return Some((h, hops));
+        }
+        frontier = next.iter().map(|n| n.id.as_str()).collect();
     }
-    Some(at.id.as_str())
+    None
 }
 
 #[cfg(test)]
@@ -230,40 +258,57 @@ mod tests {
         let node = |id: &str, role: &str| {
             format!("  - id: {id}\n    mcu: rp2040\n    role: {role}\n    port: self-boot\n    tag: {id}\n")
         };
-        let link = |from: &str, to: &str, kind: &str| {
-            format!("  - from: {from}\n    to: {to}\n    kind: {kind}\n")
+        // Each link once with the 親機 or the upper node listed first, once the other way.
+        let link = |a: &str, b: &str, kind: &str, flip: bool| {
+            let port = if kind == "uart" { "uart0" } else { "usb" };
+            let (a, b) = if flip { (b, a) } else { (a, b) };
+            format!("  - kind: {kind}\n    ends:\n      - {{ node: {a}, port: {port} }}\n      - {{ node: {b}, port: {port} }}\n")
         };
-        let yaml = format!(
-            "dagon: 1
+        for flip in [false, true] {
+            let yaml = format!(
+                "dagon: 2
 name: t
 nodes:
 {}{}{}{}{}{}links:
 {}{}{}{}update:
   order: [a, b, c, d, h2, h]
 ",
-            node("h", "coordinator"),
-            node("a", "node"),
-            node("b", "node"),
-            node("h2", "coordinator"),
-            node("c", "node"),
-            node("d", "node"),
-            link("h", "a", "uart"),
-            link("h", "b", "can"),
-            link("a", "d", "uart"),
-            link("h2", "c", "uart"),
+                node("h", "coordinator"),
+                node("a", "node"),
+                node("b", "node"),
+                node("h2", "coordinator"),
+                node("c", "node"),
+                node("d", "node"),
+                link("h", "a", "uart", flip),
+                link("h", "b", "usb-cdc", flip),
+                link("a", "d", "uart", flip),
+                link("h2", "c", "uart", flip),
+            );
+            let (sub, skipped) = updatable(&parse_str(&yaml).unwrap());
+            assert_eq!(
+                skipped,
+                [
+                    ("b".into(), Skip::LinkKind),
+                    ("h2".into(), Skip::SecondHub),
+                    ("c".into(), Skip::SecondHub),
+                    ("d".into(), Skip::Deep),
+                ]
+            );
+            assert_eq!(sub.update.order, ["a", "h"]);
+            assert_eq!(sub.links.len(), 1);
+        }
+    }
+
+    #[test]
+    fn a_link_between_two_reached_children_is_not_in_the_part() {
+        let yaml = fan(2, false).replace(
+            "update:",
+            "  - kind: i2c\n    bus: i2c-main\n    ends:\n      - { node: n1, port: i2c3, addr: 0x30, node_pins: { sda: PB4, scl: PA8 } }\n      - { node: n0, port: i2c3 }\n    control:\n      kind: cooperative\n      rom_entry: stm32-i2c-rom\nupdate:",
         );
         let (sub, skipped) = updatable(&parse_str(&yaml).unwrap());
-        assert_eq!(
-            skipped,
-            [
-                ("b".into(), Skip::LinkKind),
-                ("h2".into(), Skip::SecondHub),
-                ("c".into(), Skip::SecondHub),
-                ("d".into(), Skip::Deep),
-            ]
-        );
-        assert_eq!(sub.update.order, ["a", "h"]);
-        assert_eq!(sub.links.len(), 1);
+        assert!(skipped.is_empty(), "{skipped:?}");
+        assert_eq!(sub.links.len(), 2);
+        assert!(sub.links.iter().all(|l| l.end("hub").is_some()));
     }
 
     /// The sample's 親機 and bus with `children` NUCLEO-F401RE 子機 on I2C,
@@ -294,12 +339,11 @@ nodes:
         let links: String = (0..children)
             .map(|i| {
                 format!(
-                    "  - from: hub
-    to: n{i}
-    kind: i2c
+                    "  - kind: i2c
     bus: i2c-main
-    addr: {}
-    node_pins: {{ sda: PB4, scl: PA8 }}
+    ends:
+      - {{ node: hub, port: i2c0 }}
+      - {{ node: n{i}, port: i2c3, addr: {}, node_pins: {{ sda: PB4, scl: PA8 }} }}
     control:
       kind: cooperative
       rom_entry: stm32-i2c-rom
@@ -318,7 +362,7 @@ nodes:
             format!("{hub}{kids}")
         };
         format!(
-            "dagon: 1
+            "dagon: 2
 name: fan
 nodes:
 {nodes}buses:
@@ -405,24 +449,36 @@ links:
 
     #[test]
     fn a_loop_of_children_beside_the_hub_is_unreachable_not_reached() {
-        // a -> b -> a: each has its one link (V-05 passes), and no chain ends at a 親機.
-        let uart = |from: &str, to: &str| {
-            format!("  - from: {from}\n    to: {to}\n    kind: uart\n    iface: hw-uart0\n    pins: {{ tx: 0, rx: 1 }}\n    control:\n      kind: cooperative\n      rom_entry: force-download-boot\n")
+        // a - b - c - a: each has its links (V-05 passes), and no chain reaches a 親機.
+        let uart = |a: &str, b: &str| {
+            format!("  - kind: uart\n    iface: hw-uart0\n    ends:\n      - {{ node: {a}, port: uart0, pins: {{ tx: 0, rx: 1 }} }}\n      - {{ node: {b}, port: uart1 }}\n    control:\n      kind: cooperative\n      rom_entry: force-download-boot\n")
+        };
+        let node = |id: &str| {
+            format!("  - id: {id}\n    mcu: rp2040\n    role: node\n    port: self-boot\n    tag: {id}\n")
         };
         let yaml = fan(1, false)
             .replace(
                 "buses:",
-                "  - id: a\n    mcu: rp2040\n    role: node\n    port: self-boot\n    tag: a\n  - id: b\n    mcu: rp2040\n    role: node\n    port: self-boot\n    tag: b\nbuses:",
+                &format!("{}{}{}buses:", node("a"), node("b"), node("c")),
             )
-            .replace("update:", &format!("{}{}update:", uart("a", "b"), uart("b", "a")))
-            .replace("order: [n0, hub]", "order: [n0, a, b, hub]");
+            .replace(
+                "update:",
+                &format!(
+                    "{}{}{}update:",
+                    uart("a", "b"),
+                    uart("b", "c"),
+                    uart("c", "a")
+                ),
+            )
+            .replace("order: [n0, hub]", "order: [n0, a, b, c, hub]");
         let (_, cut) = checked(&yaml);
         assert_eq!(cut.reach, ["hub", "n0"]);
         assert_eq!(
             cut.skipped,
             [
                 ("a".to_string(), Skip::Unreachable),
-                ("b".to_string(), Skip::Unreachable)
+                ("b".to_string(), Skip::Unreachable),
+                ("c".to_string(), Skip::Unreachable)
             ]
         );
         assert_partition(&parse_str(&yaml).unwrap(), &cut);
@@ -465,6 +521,20 @@ links:
     /// 子機 linked from a random node (loops possible), listed shuffled with
     /// h0 kept the first 親機.
     fn generated(next: &mut impl FnMut(usize) -> usize) -> String {
+        // A link of `kind` (with any lines that follow it) joining two ends
+        // (node, port, more fields), listed in either order.
+        let link =
+            |flip: bool, kind: &str, a: (&str, &str, &str), b: (&str, &str, &str), rest: &str| {
+                let end = |(n, p, x): (&str, &str, &str)| {
+                    format!("      - {{ node: {n}, port: {p}{x} }}\n")
+                };
+                let (a, b) = if flip {
+                    (end(b), end(a))
+                } else {
+                    (end(a), end(b))
+                };
+                format!("  - kind: {kind}\n    ends:\n{a}{b}{rest}")
+            };
         let count = 2 + next(11);
         let hubs = 1 + next(2);
         let name = |i: usize| {
@@ -481,19 +551,51 @@ links:
             if i < hubs {
                 nodes.push(format!("  - id: {id}\n    mcu: rp2040\n    board: waveshare-rp2040-touch-lcd-1.28\n    role: coordinator\n    port: self-boot\n    flash_map: rp2040-4m\n    tag: {id}\n"));
                 if i > 0 && next(2) == 0 {
-                    links.push(format!("  - from: h0\n    to: {id}\n    kind: can\n"));
+                    links.push(link(
+                        next(2) == 0,
+                        "usb-cdc",
+                        ("h0", "usb", ""),
+                        (&id, "usb", ""),
+                        "",
+                    ));
                 }
                 continue;
             }
             nodes.push(format!("  - id: {id}\n    mcu: stm32f401re\n    board: nucleo-f401re\n    role: node\n    port: self-boot\n    flash_map: f401-default\n    tag: {id}\n"));
             let p = next(count);
             let parent = if p == i { "h0".to_string() } else { name(p) };
-            links.push(if parent == "h0" && next(4) > 0 {
-                format!("  - from: h0\n    to: {id}\n    kind: i2c\n    bus: i2c-main\n    addr: {}\n    node_pins: {{ sda: PB4, scl: PA8 }}\n    control:\n      kind: cooperative\n      rom_entry: stm32-i2c-rom\n", 0x10 + i)
-            } else if parent.starts_with('h') && next(3) == 0 {
-                format!("  - from: {parent}\n    to: {id}\n    kind: can\n")
+            let (usb, uart) = if parent.starts_with('h') {
+                ("usb", "uart0")
             } else {
-                format!("  - from: {parent}\n    to: {id}\n    kind: uart\n    iface: hw-uart0\n    pins: {{ tx: 0, rx: 1 }}\n    control:\n      kind: cooperative\n      rom_entry: stm32-i2c-rom\n")
+                ("usb-otg-fs", "usart1")
+            };
+            let flip = next(2) == 0;
+            let control = "    control:\n      kind: cooperative\n      rom_entry: stm32-i2c-rom\n";
+            links.push(if parent == "h0" && next(4) > 0 {
+                let addr = format!(", addr: {}, node_pins: {{ sda: PB4, scl: PA8 }}", 0x10 + i);
+                link(
+                    flip,
+                    "i2c\n    bus: i2c-main",
+                    ("h0", "i2c0", ""),
+                    (&id, "i2c3", &addr),
+                    control,
+                )
+            } else if parent.starts_with('h') && next(3) == 0 {
+                link(
+                    flip,
+                    "usb-cdc",
+                    (&parent, usb, ""),
+                    (&id, "usb-otg-fs", ""),
+                    "",
+                )
+            } else {
+                link(
+                    flip,
+                    "uart\n    iface: hw-uart0",
+                    (&parent, uart, ", pins: { tx: 0, rx: 1 }"),
+                    (&id, "usart1", ""),
+                    control,
+                )
             });
         }
         let mut order: Vec<usize> = (0..count).collect();
@@ -511,7 +613,7 @@ links:
             .chain(["h0".to_string()])
             .collect();
         format!(
-            "dagon: 1\nname: gen\nnodes:\n{listed}buses:\n  - id: i2c-main\n    kind: i2c\n    controller: i2c0\n    sda: 16\n    scl: 17\n    speed_hz: 400000\n    pullups: external\nlinks:\n{}update:\n  order: [{}]\n",
+            "dagon: 2\nname: gen\nnodes:\n{listed}buses:\n  - id: i2c-main\n    kind: i2c\n    controller: i2c0\n    sda: 16\n    scl: 17\n    speed_hz: 400000\n    pullups: external\nlinks:\n{}update:\n  order: [{}]\n",
             links.concat(),
             ids.join(", ")
         )

@@ -34,8 +34,8 @@ image-header = 1    # signed 512-byte image header: offset 0x004 (dagon-format h
 state-log = 1       # boot core and app state log faces: offset 0x004 (dagon-format statelog::FORMAT_VERSION)
 manifest = 1        # release manifest: offset 4 (dagon-format manifest::MF_VERSION)
 bundle = 1          # release file .dgb: offset 4 (dagon-format bundle::BN_VERSION)
-topology-bin = 1    # compiled topology: offset 4 (dagon-format topology::TP_VERSION)
-topology-yaml = 1   # topology source: its `dagon:` key (dagon-topology SCHEMA_VERSION)
+topology-bin = 2    # compiled topology: offset 4 (dagon-format topology::TP_VERSION)
+topology-yaml = 2   # topology source: its `dagon:` key (dagon-topology SCHEMA_VERSION)
 definitions = 2     # dagon-mcu.toml / dagon-board.toml / [board.<id>]: `format` key, left out = 1 (dagon-topology defs::FORMAT)
 serve-api = 1       # dagon serve HTTP API: GET /v1/hello `api` (dagon-cli versions::SERVE_API)
 layout = 1          # the layout file beside the 構成: its `format` (dagon-cli versions::LAYOUT_FORMAT)
@@ -48,7 +48,7 @@ name = "cli"
 version = "0.1.0"
 packages = ["dagon-cli"]
 paths = ["crates/dagon-cli", "crates/dagon-wasm", "web"]
-formats = { wire = [1], image-header = [1], state-log = [1], manifest = [1], bundle = [1], topology-bin = [1], topology-yaml = [1], definitions = [2], serve-api = [1], layout = [1], event = [1], extension-manifest = [1], boot-program = [1] }
+formats = { wire = [1], image-header = [1], state-log = [1], manifest = [1], bundle = [1], topology-bin = [2], topology-yaml = [2], definitions = [2], serve-api = [1], layout = [1], event = [1], extension-manifest = [1], boot-program = [1] }
 
 [[component]]
 name = "boot-rp2040"
@@ -69,7 +69,7 @@ name = "mcu-rp2040"
 version = "0.1.0"
 packages = ["dagon-mcu-rp2040"]
 paths = ["targets/mcu/rp2040"]
-formats = { wire = [1], image-header = [1], state-log = [1], topology-bin = [1], definitions = [2] }
+formats = { wire = [1], image-header = [1], state-log = [1], topology-bin = [2], definitions = [2] }
 
 [[component]]
 name = "mcu-stm32f401re"
@@ -126,7 +126,7 @@ name = "format"
 version = "0.1.0"
 packages = ["dagon-format"]
 paths = ["crates/dagon-format"]
-formats = { image-header = [1], state-log = [1], manifest = [1], bundle = [1], topology-bin = [1] }
+formats = { image-header = [1], state-log = [1], manifest = [1], bundle = [1], topology-bin = [2] }
 
 [[component]]
 name = "ed25519"
@@ -180,14 +180,14 @@ name = "relay"
 version = "0.1.0"
 packages = ["dagon-relay"]
 paths = ["crates/dagon-relay"]
-formats = { wire = [1], topology-bin = [1] }
+formats = { wire = [1], topology-bin = [2] }
 
 [[component]]
 name = "host"
 version = "0.1.0"
 packages = ["dagon-host"]
 paths = ["crates/dagon-host"]
-formats = { wire = [1], image-header = [1], state-log = [1], bundle = [1], topology-bin = [1] }
+formats = { wire = [1], image-header = [1], state-log = [1], bundle = [1], topology-bin = [2] }
 
 [[component]]
 name = "extension"
@@ -201,14 +201,14 @@ name = "topology"
 version = "0.1.0"
 packages = ["dagon-topology"]
 paths = ["crates/dagon-topology"]
-formats = { topology-bin = [1], topology-yaml = [1], definitions = [2], boot-program = [1] }
+formats = { topology-bin = [2], topology-yaml = [2], definitions = [2], boot-program = [1] }
 
 [[component]]
 name = "sign"
 version = "0.1.0"
 packages = ["dagon-sign"]
 paths = ["crates/dagon-sign"]
-formats = { image-header = [1], state-log = [1], manifest = [1], bundle = [1], topology-bin = [1] }
+formats = { image-header = [1], state-log = [1], manifest = [1], bundle = [1], topology-bin = [2] }
 
 [[component]]
 name = "sim"

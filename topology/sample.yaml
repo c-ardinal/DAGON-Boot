@@ -1,5 +1,5 @@
 # Sample: RP2040 hub, NUCLEO-F401RE on I2C, M5StopWatch on UART.
-dagon: 1
+dagon: 2
 name: sample
 
 nodes:
@@ -40,22 +40,19 @@ buses:
     pullups: external
 
 links:
-  - from: hub
-    to: seg
-    kind: i2c
+  - kind: i2c
     bus: i2c-main
-    addr: 0x42
-    node_pins: { sda: PB4, scl: PA8 }
+    ends:
+      - { node: hub, port: i2c0, nrst: 18, boot: 28 }
+      - { node: seg, port: i2c3, addr: 0x42, node_pins: { sda: PB4, scl: PA8 } }
     control:
       kind: full
-      nrst: 18
-      boot: 28
       rom_entry: stm32-i2c-rom
-  - from: hub
-    to: watch
-    kind: uart
+  - kind: uart
     iface: pio-uart
-    pins: { tx: 26, rx: 27 }
+    ends:
+      - { node: hub, port: pio-uart, pins: { tx: 26, rx: 27 } }
+      - { node: watch, port: uart0 }
     baud: 115200
     control:
       kind: cooperative

@@ -1,8 +1,9 @@
 //! `topo compile`: validated YAML model -> topology canonical binary
 //! (layout in `dagon_format::topology`, shared with the hub).
 //!
-//! Mapping: node index = position in `nodes[]`; links sorted by `to`;
-//! `bus_id` = position in `buses[]`; every flash map is its MCU's default
+//! Mapping: node index = position in `nodes[]`; a link's ends in node order,
+//! each with its port's `[[link_port]]` index and its address; links sorted by
+//! their ends' nodes; `bus_id` = position in `buses[]`; every flash map is its MCU's default
 //! (`map_id` 0); omitted `listen_window_ms` = 0, `max_attempts` = 3, bus speed
 //! = 400 kHz, baud = [`crate::schema::DEFAULT_BAUD`]. Node ids, the topology name, positions and
 //! nicknames are not in the binary.
@@ -11,11 +12,13 @@ use std::fmt;
 
 use dagon_format::header::target_tag;
 use dagon_format::manifest::{constraint_kind, Constraint as BinConstraint};
-use dagon_format::topology::{self as tp, TopoLink, TopoNode};
+use dagon_format::topology::{self as tp, TopoEnd, TopoLink, TopoNode};
 use dagon_format::Version;
 
 use crate::defs::{PortKind, Registry};
-use crate::schema::{Constraint, ControlKind, Link, LinkKind, Role, RomEntry, Tier, UartIface};
+use crate::schema::{
+    Constraint, ControlKind, End, Link, LinkKind, Role, RomEntry, Tier, UartIface,
+};
 use crate::{check_with, effective_tiers, Report, Topology};
 
 const DEFAULT_MAX_ATTEMPTS: u8 = 3;
@@ -165,10 +168,43 @@ fn nodes(reg: &Registry, t: &Topology) -> Result<Vec<TopoNode>, CompileError> {
         .collect()
 }
 
-fn link(t: &Topology, l: &Link) -> Result<TopoLink, CompileError> {
-    let missing = |what: &str| bad(format!("link to '{}' has no {what}", l.to));
+/// The end whose node a link's GPIOs (a UART's `pins`, `nrst`, `boot`) are
+/// on; the compiled link holds one end's.
+fn gpio_end(l: &Link) -> Result<Option<&End>, CompileError> {
+    let names = |e: &End| {
+        e.nrst.is_some() || e.boot.is_some() || (l.kind == LinkKind::Uart && e.pins.is_some())
+    };
+    match l.ends.each_ref().map(names) {
+        [true, true] => Err(bad(format!(
+            "link {}: both ends name GPIOs; the compiled topology holds one end's",
+            l.named()
+        ))),
+        [true, false] => Ok(Some(&l.ends[0])),
+        [false, true] => Ok(Some(&l.ends[1])),
+        [false, false] => Ok(None),
+    }
+}
+
+fn end(reg: &Registry, t: &Topology, e: &End) -> Result<TopoEnd, CompileError> {
+    let node = index_of(t, &e.node)?;
+    let port = t
+        .node(&e.node)
+        .and_then(|n| reg.mcu(&n.mcu))
+        .and_then(|m| m.port(&e.port))
+        .ok_or_else(|| bad(format!("'{}' has no port '{}'", e.node, e.port)))?;
+    Ok(TopoEnd {
+        node,
+        port: port.index,
+        addr: e.addr.unwrap_or(tp::NONE),
+    })
+}
+
+fn link(reg: &Registry, t: &Topology, l: &Link) -> Result<TopoLink, CompileError> {
+    let named = l.named();
+    let missing = |what: &str| bad(format!("link {named} has no {what}"));
     let pin = |p: Option<u8>| p.unwrap_or(tp::NONE);
-    let (iface, tx_pin, rx_pin, baud, i2c_addr, bus_id) = match l.kind {
+    let gpios = gpio_end(l)?;
+    let (iface, tx_pin, rx_pin, baud, bus_id) = match l.kind {
         LinkKind::I2c => {
             let name = l.bus.as_deref().ok_or_else(|| missing("bus"))?;
             let bus_id = t
@@ -182,18 +218,17 @@ fn link(t: &Topology, l: &Link) -> Result<TopoLink, CompileError> {
                 bus.sda,
                 bus.scl,
                 bus.i2c_hz(),
-                l.addr.ok_or_else(|| missing("addr"))?,
                 bus_id as u8,
             )
         }
         LinkKind::Uart => {
-            let pins = l.pins.ok_or_else(|| missing("pins"))?;
+            let pins = gpios.and_then(|e| e.pins).ok_or_else(|| missing("pins"))?;
             let iface = match l.iface.ok_or_else(|| missing("iface"))? {
                 UartIface::HwUart0 => tp::iface::HW_UART0,
                 UartIface::PioUart => tp::iface::PIO_UART,
             };
             let baud = l.uart_baud();
-            (iface, pins.tx, pins.rx, baud, tp::NONE, tp::NONE)
+            (iface, pins.tx, pins.rx, baud, tp::NONE)
         }
         LinkKind::Can
         | LinkKind::Ethernet
@@ -201,15 +236,20 @@ fn link(t: &Topology, l: &Link) -> Result<TopoLink, CompileError> {
         | LinkKind::Ble
         | LinkKind::WifiTcp => {
             // updatable() leaves these out; reaching here is a caller's bug.
-            return Err(bad(format!(
-                "link to '{}' is not updatable yet (V-23)",
-                l.to
-            )));
+            return Err(bad(format!("link {named} is not updatable yet (V-23)")));
         }
     };
+    let mut ends = [end(reg, t, &l.ends[0])?, end(reg, t, &l.ends[1])?];
+    ends.sort_by_key(|e| e.node);
+    let gpio_end = match gpios {
+        Some(g) => {
+            let at = index_of(t, &g.node)?;
+            ends.iter().position(|e| e.node == at).unwrap_or(0) as u8
+        }
+        None => tp::NONE,
+    };
     Ok(TopoLink {
-        from: index_of(t, &l.from)?,
-        to: index_of(t, &l.to)?,
+        ends,
         iface,
         control: match l.control.kind {
             ControlKind::Full => tp::control::FULL,
@@ -217,8 +257,8 @@ fn link(t: &Topology, l: &Link) -> Result<TopoLink, CompileError> {
         },
         tx_pin,
         rx_pin,
-        nrst_pin: pin(l.control.nrst),
-        boot_pin: pin(l.control.boot),
+        nrst_pin: pin(gpios.and_then(|e| e.nrst)),
+        boot_pin: pin(gpios.and_then(|e| e.boot)),
         baud,
         rom_entry: match l.control.rom_entry {
             None => tp::rom_entry::NONE,
@@ -226,8 +266,8 @@ fn link(t: &Topology, l: &Link) -> Result<TopoLink, CompileError> {
             Some(RomEntry::M5pm1) => tp::rom_entry::M5PM1,
             Some(RomEntry::Stm32I2cRom) => tp::rom_entry::STM32_I2C_ROM,
         },
-        i2c_addr,
         bus_id,
+        gpio_end,
     })
 }
 
@@ -264,9 +304,9 @@ fn encode(reg: &Registry, t: &Topology) -> Result<Vec<u8>, CompileError> {
     let mut links = t
         .links
         .iter()
-        .map(|l| link(t, l))
+        .map(|l| link(reg, t, l))
         .collect::<Result<Vec<_>, _>>()?;
-    links.sort_by_key(|l| l.to);
+    links.sort_by_key(|l| (l.ends[0].node, l.ends[1].node));
     let constraints = t
         .constraints
         .iter()
@@ -292,10 +332,48 @@ mod tests {
     }
 
     #[test]
-    fn link_order_in_yaml_does_not_change_bytes() {
+    fn link_and_end_order_in_yaml_does_not_change_bytes() {
         let mut t = parse_str(SAMPLE_YAML).unwrap();
         t.links.reverse();
         assert_eq!(compile(&t).unwrap(), compile_str(SAMPLE_YAML).unwrap());
+        t.links.iter_mut().for_each(|l| l.ends.reverse());
+        assert_eq!(compile(&t).unwrap(), compile_str(SAMPLE_YAML).unwrap());
+    }
+
+    #[test]
+    fn each_end_keeps_its_port_index_and_address() {
+        let bin = compile_str(SAMPLE_YAML).unwrap();
+        let v = tp::TopologyView::parse(&bin).unwrap();
+        let seg = v.link(0);
+        // hub: rp2040 port i2c0 (index 1); seg: stm32f401re i2c3 (index 3) at 0x42.
+        assert_eq!(seg.end(0).map(|e| (e.port, e.addr)), Some((1, tp::NONE)));
+        assert_eq!(seg.end(1).map(|e| (e.port, e.addr)), Some((3, 0x42)));
+        let watch = v.link(1);
+        assert_eq!(watch.end(2).map(|e| (e.port, e.addr)), Some((1, tp::NONE)));
+        // The 親機 (end 0) names the reset lines and the UART pins.
+        assert_eq!((seg.gpio_end, watch.gpio_end), (0, 0));
+        let flipped = SAMPLE_YAML
+            .replace(
+                "{ node: watch, port: uart0 }",
+                "{ node: watch, port: uart0, pins: { tx: 43, rx: 44 } }",
+            )
+            .replace(
+                "{ node: hub, port: pio-uart, pins: { tx: 26, rx: 27 } }",
+                "{ node: hub, port: pio-uart }",
+            );
+        let v2 = compile_str(&flipped).unwrap();
+        let w = tp::TopologyView::parse(&v2).unwrap().link(1);
+        assert_eq!((w.gpio_end, w.tx_pin, w.rx_pin), (1, 43, 44));
+    }
+
+    #[test]
+    fn pins_named_on_both_ends_cannot_be_compiled() {
+        let yaml = SAMPLE_YAML.replace(
+            "{ node: watch, port: uart0 }",
+            "{ node: watch, port: uart0, pins: { tx: 43, rx: 44 } }",
+        );
+        let e = compile_str(&yaml).unwrap_err().to_string();
+        assert!(e.contains("both ends name GPIOs"), "{e}");
     }
 
     #[test]
@@ -309,7 +387,7 @@ mod tests {
 
     #[test]
     fn invalid_topology_is_rejected_before_encoding() {
-        let yaml = SAMPLE_YAML.replace("dagon: 1", "dagon: 2");
+        let yaml = SAMPLE_YAML.replace("dagon: 2", "dagon: 1");
         assert!(matches!(compile_str(&yaml), Err(CompileError::Invalid(_))));
     }
 }

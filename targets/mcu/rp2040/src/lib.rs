@@ -11,8 +11,10 @@
 //!   ([`flash`]), the liveness-gated watchdog ([`watchdog`]), the APP slot
 //!   store behind dagon-agent ([`store`]), link drivers ([`links`]: an I2C
 //!   controller with the DAGON mailbox, a PIO UART stream) and sub-MCU
-//!   control lines ([`sub`]); the verifying key embedded at build time
-//!   ([`PUBKEY`], [`TEST_KEY`]).
+//!   control lines ([`sub`]).
+//! - `hal` and `image-stage0`: the verifying key embedded at build time
+//!   ([`PUBKEY`], [`TEST_KEY`]); stage0 holds it in its own flash
+//!   ([`STAGE0_KEY_PLACE`]).
 //! - `usb`: DAGON over USB CDC ([`usb`]), DAGON's high-priority executor
 //!   ([`exec`]) and `node::start`.
 //! - `relay`: the relay of `dagon-relay` on this MCU ([`relay`]: its
@@ -99,5 +101,5 @@ pub const LINKED_SLOT: u8 = if cfg!(feature = "slot-b") { 1 } else { 0 };
 pub const TOPOLOGY_MCU: &str = "rp2040";
 pub const FLASH_MAP: &str = "rp2040-4m";
 
-#[cfg(feature = "hal")]
+#[cfg(any(feature = "hal", feature = "image-stage0"))]
 include!(concat!(env!("OUT_DIR"), "/pubkey.rs"));

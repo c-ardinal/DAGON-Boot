@@ -246,8 +246,12 @@ node's board definition's `[boot] led`, `led_active` and `halt` (a node
 without a board has none). Builds without `DAGON_BOOT_CRATE` fail, and a
 boot crate that links anything else than DAGON's packages and its
 trusted extensions with the source hash dagon.toml declares does not
-build. Both builds take `--features diag` for step blink codes (see the
-hub README).
+build. The boot core build takes `--features diag` for step blink codes
+(see the hub README). Stage0 checks a boot core's signature under the key
+built into its own flash and starts no core whose signature does not
+verify; with none to start, it blinks the reason's code on the board's
+`[boot] led` (a node without a board, or a board without the LED or with
+its halt pattern off, shows nothing).
 
 
 ## Keys

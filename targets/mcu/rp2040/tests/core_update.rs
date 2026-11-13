@@ -1,13 +1,14 @@
 //! Boot core A/B self-update over the hub's real layout: the agent's writes
 //! (idle boot core slot, header last, SLOT_PENDING), stage0's choice
-//! (`bl::choose`) with the trial cell, the started core's settle
+//! (`bl::choose`, the signature included) with the trial cell, the started core's settle
 //! (`bl::settle_core`), and a power cut at every flash operation of the
 //! whole update, for a new core that works and one that fails its own
 //! check. After any cut a boot core starts, and the log ends with one
 //! confirmed core and nothing pending.
 
-use dagon_core::bootcore::CLEARED;
+use dagon_core::bootcore::{CoreFail, NoDiag, CLEARED};
 use dagon_core::log::{trial_room, Log, SlotRef};
+use dagon_ed25519::Ed25519Small;
 use dagon_format::header::*;
 use dagon_format::statelog::{kind, FaceHeader};
 use dagon_format::{key_id, sha256, Version};
@@ -65,6 +66,11 @@ fn bootcore(slot: u8, minor: u8) -> Vec<u8> {
     let msg = [SIGN_DOMAIN, &h.to_bytes()[..SIGNED_LEN]].concat();
     h.signature = *kp.sk.sign(msg, None);
     [&h.to_bytes()[..], &body].concat()
+}
+
+/// Stage0's verifier, under the key the cores are signed with.
+fn verifier() -> Ed25519Small {
+    Ed25519Small::new(*KeyPair::from_seed(Seed::new(SEED)).pk)
 }
 
 /// Core A installed and recorded, as the install UF2 leaves the flash.
@@ -138,7 +144,7 @@ fn boot(f: &mut SimFlash, cell: &mut [u32; 2]) -> u8 {
         if !f.is_powered() {
             return 0xFF;
         }
-        let start = bl::choose(f, *cell).expect("a boot core starts");
+        let start = bl::choose(f, *cell, &verifier(), &mut NoDiag).expect("a boot core starts");
         *cell = start.cell;
         let ok = healthy(f, start.slot);
         match bl::settle_core(f, start.slot, (*cell, true), ok) {
@@ -190,7 +196,7 @@ fn a_new_core_is_tried_and_confirms_itself() {
         "recorded pending"
     );
     let mut cell = CLEARED;
-    let start = bl::choose(&mut f, cell).unwrap();
+    let start = bl::choose(&mut f, cell, &verifier(), &mut NoDiag).unwrap();
     assert_eq!((start.slot, start.trial), (1, true), "stage0 tries it");
     assert_eq!(
         bl::settle_core(&mut f, 1, (start.cell, true), false),
@@ -200,7 +206,7 @@ fn a_new_core_is_tried_and_confirms_itself() {
     assert_eq!(boot(&mut f, &mut cell), 1);
     let (c, p) = core_log(&mut f);
     assert_eq!((c.map(|c| c.slot), p), (Some(1), None));
-    let again = bl::choose(&mut f, cell).unwrap();
+    let again = bl::choose(&mut f, cell, &verifier(), &mut NoDiag).unwrap();
     assert_eq!((again.slot, again.trial), (1, false));
 }
 
@@ -211,7 +217,7 @@ fn a_core_that_fails_its_check_falls_back_after_the_trial_starts() {
     let mut cell = CLEARED;
     let mut tries = 0;
     loop {
-        let start = bl::choose(&mut f, cell).unwrap();
+        let start = bl::choose(&mut f, cell, &verifier(), &mut NoDiag).unwrap();
         cell = start.cell;
         if !start.trial {
             assert_eq!(start.slot, 0);
@@ -247,7 +253,7 @@ fn a_core_whose_image_does_not_check_out_is_never_started() {
     b[last] ^= 1;
     agent_writes(&mut f, 1, &b).unwrap();
     let mut cell = CLEARED;
-    let start = bl::choose(&mut f, cell).unwrap();
+    let start = bl::choose(&mut f, cell, &verifier(), &mut NoDiag).unwrap();
     assert_eq!((start.slot, start.trial), (0, false));
     cell = start.cell;
     assert_eq!(
@@ -289,7 +295,7 @@ fn a_forged_newer_face_naming_a_bad_slot_does_not_strand_the_hub() {
             .unwrap();
         f.write(BL_LOG[1], &FaceHeader { generation: 99 }.to_bytes())
             .unwrap();
-        let start = bl::choose(&mut f, CLEARED).expect("core A starts");
+        let start = bl::choose(&mut f, CLEARED, &verifier(), &mut NoDiag).expect("core A starts");
         assert_eq!(
             (start.slot, start.trial),
             (0, false),
@@ -298,7 +304,7 @@ fn a_forged_newer_face_naming_a_bad_slot_does_not_strand_the_hub() {
     }
     // Nothing anywhere: stage0 has nothing to start (it halts).
     let mut empty = flash();
-    assert!(bl::choose(&mut empty, CLEARED).is_err());
+    assert!(bl::choose(&mut empty, CLEARED, &verifier(), &mut NoDiag).is_err());
 }
 
 /// Stage0 and the boot core never erase, so no erase runs under a trial
@@ -383,9 +389,41 @@ fn a_power_cut_at_every_flash_step_leaves_a_bootable_core() {
                     minor != BROKEN || running == 0,
                     "{cut:?}: a broken core was confirmed"
                 );
-                let start = bl::choose(&mut f, CLEARED).unwrap();
+                let start = bl::choose(&mut f, CLEARED, &verifier(), &mut NoDiag).unwrap();
                 assert_eq!((start.slot, start.trial), (running, false), "{cut:?}");
             }
         }
+    }
+}
+
+/// Stage0 never starts a core whose signature does not verify under its
+/// key, a recorded one or one alone in a slot: an unsigned core (every
+/// digest right) and one signed by another key are refused.
+#[test]
+fn stage0_starts_no_core_without_a_valid_signature() {
+    let other = KeyPair::from_seed(Seed::new([5; 32]));
+    let unsigned = |mut img: Vec<u8>| {
+        img[0x1C0..0x200].fill(0);
+        img
+    };
+    let resigned = |mut img: Vec<u8>| {
+        img[0x48..0x50].copy_from_slice(&key_id(&other.pk));
+        let msg = [SIGN_DOMAIN, &img[..SIGNED_LEN]].concat();
+        let sig = other.sk.sign(msg, None);
+        img[0x1C0..0x200].copy_from_slice(&sig[..]);
+        img
+    };
+    for bad in [unsigned(bootcore(0, 0)), resigned(bootcore(0, 0))] {
+        // Recorded as the confirmed core.
+        let mut f = installed();
+        f.erase(BL_SLOT[0], sectors(bad.len() as u32)).unwrap();
+        f.write(BL_SLOT[0], &bad).unwrap();
+        let e = bl::choose(&mut f, CLEARED, &verifier(), &mut NoDiag).unwrap_err();
+        assert_eq!(e.why, CoreFail::Signature);
+        // Alone in a slot, with an empty log.
+        let mut f = flash();
+        f.write(BL_SLOT[0], &bad).unwrap();
+        let e = bl::choose(&mut f, CLEARED, &verifier(), &mut NoDiag).unwrap_err();
+        assert_eq!((e.named, e.why), (false, CoreFail::Signature));
     }
 }

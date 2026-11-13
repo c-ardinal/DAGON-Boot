@@ -149,6 +149,17 @@ pub mod led {
         }
     }
 
+    /// Stage0's diagnostic output on the board's `[boot] led` (the
+    /// generated `BoardDiag` calls it): takes the LED (`gpio`, lit at
+    /// `active_high`'s level) and shows `code` until reset for a board
+    /// whose halt pattern blinks every `period_ms`
+    /// (`dagon_core::bootcore::blink_code`).
+    pub fn report(gpio: u8, active_high: bool, period_ms: u32, code: u8) -> ! {
+        init(gpio, active_high);
+        let c = cycles_per_ms();
+        dagon_core::bootcore::blink_code(code, period_ms, set, |ms| wait(ms, c))
+    }
+
     /// Blinks forever with `ms` on and off: a visible halt.
     pub fn halt(ms: u32, cycles_per_ms: u32) -> ! {
         loop {

@@ -36,9 +36,15 @@ mod tests {
     #[test]
     fn two_misses_in_a_row_then_back_on_reply() {
         let mut w = Watch::default();
-        let seg = Target::I2c(0x42);
+        let at = |link, addr| Target::Linked {
+            link,
+            addr,
+            max_payload: 32,
+        };
+        let seg = at(7, 0x42);
         assert!(w.record(seg, false));
-        assert!(w.record(Target::Uart, false), "targets count separately");
+        assert!(w.record(at(9, 0x42), false), "targets count separately");
+        assert!(w.record(Target::Local, false));
         assert!(!w.record(seg, false));
         assert!(!w.record(seg, false));
         assert!(w.record(seg, true));

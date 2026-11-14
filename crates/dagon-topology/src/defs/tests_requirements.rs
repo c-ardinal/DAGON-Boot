@@ -69,6 +69,7 @@ fn every_numeric_field_has_a_declared_requirement_and_back() {
     let detached = detached_mcu();
     let isolated = isolated_mcu();
     let (clock_mcu, clock_board) = super::tests_clock::clock_texts();
+    let hal_clock_mcu = super::tests_hal_clock::hal_clock_text();
     let (mut mcu_texts, mut board_texts) = builtin_texts();
     mcu_texts.extend([
         FAKE_MCU,
@@ -76,6 +77,7 @@ fn every_numeric_field_has_a_declared_requirement_and_back() {
         detached.as_str(),
         isolated.as_str(),
         clock_mcu.as_str(),
+        hal_clock_mcu.as_str(),
     ]);
     let board_fake = format!("id = \"x\"\n{FAKE_BOARD}");
     let boot_fake = boot_board();

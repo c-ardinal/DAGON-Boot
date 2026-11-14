@@ -146,6 +146,44 @@ pub const MCU: &[Requirement<McuCheck>] = &[
         check: clock::check_mcu,
     },
     Requirement {
+        engine: "boot loader and app clock setup (their HAL, from their build and wiring.rs)",
+        fields: &[
+            "bootcore.clock[].in_hz",
+            "bootcore.clock[].out_hz",
+            "bootcore.clock[].pll.refdiv",
+            "bootcore.clock[].pll.fbdiv",
+            "bootcore.clock[].pll.postdiv1",
+            "bootcore.clock[].pll.postdiv2",
+            "bootcore.clock[].pll.usb_refdiv",
+            "bootcore.clock[].pll.usb_fbdiv",
+            "bootcore.clock[].pll.usb_postdiv1",
+            "bootcore.clock[].pll.usb_postdiv2",
+            "bootcore.clock[].pll.m",
+            "bootcore.clock[].pll.n",
+            "bootcore.clock[].pll.p",
+            "bootcore.clock[].pll.q",
+            "bootcore.clock[].pll.flash_wait_states",
+            "app.clock[].in_hz",
+            "app.clock[].out_hz",
+            "app.clock[].pll.refdiv",
+            "app.clock[].pll.fbdiv",
+            "app.clock[].pll.postdiv1",
+            "app.clock[].pll.postdiv2",
+            "app.clock[].pll.usb_refdiv",
+            "app.clock[].pll.usb_fbdiv",
+            "app.clock[].pll.usb_postdiv1",
+            "app.clock[].pll.usb_postdiv2",
+            "app.clock[].pll.m",
+            "app.clock[].pll.n",
+            "app.clock[].pll.p",
+            "app.clock[].pll.q",
+            "app.clock[].pll.flash_wait_states",
+            "app.clock[].tolerance_ppm",
+        ],
+        rule: "exactly when a bootcore slot; per table exactly one internal setup (out_hz, or in_hz and a pll); other setups with in_hz; pll fields that name a PLL_RULES row serving the stage, whose rules they meet; frequencies above 0; no two setups of one source and in_hz with the same out_hz",
+        check: clock::check_boot_loader_and_app,
+    },
+    Requirement {
         engine: "log-face initialiser",
         fields: &["layout.bootcore_log.face_size", "layout.app_log.face_size"],
         rule: "face_size >= LOG_FACE_MIN (96)",
@@ -188,7 +226,7 @@ pub const MCU: &[Requirement<McuCheck>] = &[
             "link_uart.frac_bits",
             "link_uart.bauds[]",
         ],
-        rule: "clock_hz >= 1; clocks_per_bit >= 1; frac_bits <= 24; bauds not empty, each one the UART makes within 2 %",
+        rule: "exactly one of clock_hz >= 1 and clock = \"app\" (with [[app.clock]]); clocks_per_bit >= 1; frac_bits <= 24; bauds not empty, each one the UART makes within 2 % on clock_hz (on clock = \"app\" V-26 checks each node's)",
         check: link_uart,
     },
     Requirement {
@@ -718,7 +756,14 @@ fn link_uart(m: &McuDef) -> Result<(), String> {
     let Some(u) = &m.link_uart else {
         return Ok(());
     };
-    fail(u.clock_hz == 0 || u.clocks_per_bit == 0, || {
+    fail(u.clock_hz.is_some() == u.clock.is_some(), || {
+        "link_uart takes exactly one of clock_hz (a fixed clock) and clock = \"app\" (the app's core clock)".into()
+    })?;
+    fail(
+        u.clock.is_some() && m.clock_setups(super::ClockStage::App).is_none(),
+        || "link_uart.clock = \"app\" needs [[app.clock]]".into(),
+    )?;
+    fail(u.clock_hz == Some(0) || u.clocks_per_bit == 0, || {
         "link_uart.clock_hz and clocks_per_bit must be at least 1".into()
     })?;
     fail(u.frac_bits > 24, || {
@@ -727,8 +772,13 @@ fn link_uart(m: &McuDef) -> Result<(), String> {
     fail(u.bauds.is_empty(), || {
         "link_uart.bauds must name at least one bit rate".into()
     })?;
+    // On the app's clock the rate depends on the node's board: V-26 checks
+    // each node's.
+    let Some(hz) = u.clock_hz else {
+        return Ok(());
+    };
     let off = u.bauds.iter().find(|&&b| {
-        !u.baud_error(b)
+        !u.baud_error(hz, b)
             .is_some_and(|e| e.abs() <= super::MAX_BAUD_ERROR)
     });
     fail(off.is_some(), || {

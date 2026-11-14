@@ -379,19 +379,22 @@ fn every_builtin_mcu_and_board_chooses_a_stage0_clock() {
     assert_eq!(seen.len(), want.len(), "{seen:?}");
 }
 
-/// The requirement table names exactly the PLL fields of the MCU rules.
+/// The requirement table names, for each stage, exactly the PLL fields of
+/// the rules that serve it.
 #[test]
 fn the_requirements_name_every_pll_field_of_the_rules() {
     let (mcu, _) = super::requirements::declared_fields();
-    let mut declared: Vec<&str> = mcu
-        .iter()
-        .filter_map(|f| f.strip_prefix("stage0.clock[].pll."))
-        .collect();
-    let mut rules: Vec<&str> = super::clock::PLL_RULES
-        .iter()
-        .flat_map(|r| r.fields.iter().copied())
-        .collect();
-    declared.sort_unstable();
-    rules.sort_unstable();
-    assert_eq!(declared, rules);
+    for stage in super::ClockStage::ALL {
+        let prefix = format!("{}.clock[].pll.", stage.name());
+        let mut declared: Vec<&str> = mcu.iter().filter_map(|f| f.strip_prefix(&prefix)).collect();
+        let mut rules: Vec<&str> = super::clock::PLL_RULES
+            .iter()
+            .filter(|r| r.stages.contains(&stage))
+            .flat_map(|r| r.fields.iter().copied())
+            .collect();
+        declared.sort_unstable();
+        rules.sort_unstable();
+        rules.dedup();
+        assert_eq!(declared, rules, "{stage:?}");
+    }
 }

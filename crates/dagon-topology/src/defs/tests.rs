@@ -343,6 +343,14 @@ sub = "bootcore"
 [connection]
 label = "SWD"
 hint = "SWD probe"
+
+[[bootcore.clock]]
+source = "internal"
+out_hz = 1_000_000
+
+[[app.clock]]
+source = "internal"
+out_hz = 1_000_000
 "#;
 
 pub(super) const FAKE_BOARD: &str = r#"

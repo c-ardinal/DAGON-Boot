@@ -231,7 +231,7 @@ impl<T: Transport, C: HostClock> HubRom<'_, T, C> {
         req.encode(&mut p).map_err(|_| BusError::Io)?;
         let body = self
             .host
-            .call(Target::Hub, Cmd::I2cRaw, &p, self.timeout)
+            .call(Target::Local, Cmd::I2cRaw, &p, self.timeout)
             .await
             .map_err(bus_error)?;
         if body.len() != buf.len() {
@@ -258,7 +258,7 @@ impl<T: Transport, C: HostClock> SubControl for HubRom<'_, T, C> {
     async fn set_lines(&mut self, nrst: Nrst, boot0_high: bool) -> Result<(), BusError> {
         self.host
             .call(
-                Target::Hub,
+                Target::Local,
                 Cmd::SubCtl,
                 &[nrst as u8, boot0_high as u8],
                 REQUEST_MS,

@@ -69,13 +69,14 @@ describe("each node's target is the one dagon-host gives", () => {
   });
 
   test('a node on a port the connected node relays over no entry of has no target', () => {
-    // The watch on the hub's UART0 (the hub on its MCU alone, whose UART0 pins the board header leaves out).
-    const onUart0 = sample
-      .replace('    board: waveshare-rp2040-touch-lcd-1.28\n', '')
-      .replace('iface: pio-uart', 'iface: hw-uart0')
-      .replace('port: pio-uart, pins: { tx: 26, rx: 27 }', 'port: uart0, pins: { tx: 0, rx: 1 }');
-    expect(JSON.parse(topo_check(onUart0)).ok).toBe(true);
-    const t = topo_targets(onUart0);
+    // The watch on the hub's USB port, which the hub relays over no entry of.
+    const onUsb = sample.replace(
+      /  - kind: uart\n    iface: pio-uart\n    ends:\n.*\n.*\n    baud: 115200\n    control:\n      kind: cooperative\n      rom_entry: force-download-boot\n/,
+      '  - kind: usb-cdc\n    ends:\n      - { node: hub, port: usb }\n      - { node: watch, port: usb-serial-jtag }\n',
+    ).replace('  watch: [local, redistribute, rom-coop]', '  watch: [local]');
+    expect(onUsb).not.toBe(sample);
+    expect(JSON.parse(topo_check(onUsb)).ok).toBe(true);
+    const t = topo_targets(onUsb);
     expect(t.hub).toEqual({ kind: 'local' });
     expect(t.watch).toBeUndefined();
     expect(t.seg).toEqual(topo_targets(sample).seg);

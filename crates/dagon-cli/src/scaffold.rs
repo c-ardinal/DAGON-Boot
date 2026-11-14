@@ -90,13 +90,16 @@ fn hub_link(t: &Topology, child: &str) -> Option<String> {
 
 /// wiring.rs for the node at `index` in `t.nodes`: constants only, from
 /// the topology, `flash_bytes` for a node whose crate comes from its MCU
-/// package, and the node's erase regions (`regions`: its board's `[flash]`
-/// when present, else its MCU's), which its `BoardDef` returns.
+/// package, the node's erase regions (`regions`: its board's `[flash]`
+/// when present, else its MCU's), which its `BoardDef` returns, and for an
+/// MCU with a DAGON boot loader `clock`, the `[[app.clock]]` setup the
+/// board the node names picks, which its start-up hands its HAL.
 pub fn wiring_rs(
     t: &Topology,
     index: usize,
     flash_bytes: Option<u32>,
     regions: &[dagon_topology::defs::EraseRegionDef],
+    clock: Option<&dagon_topology::defs::ClockSetup>,
 ) -> String {
     let n = &t.nodes[index];
     let hub = n.role == Role::Coordinator;
@@ -125,6 +128,12 @@ pub fn wiring_rs(
         }
     };
     let flash = flash_bytes.map_or("None".into(), |f| format!("Some({f})"));
+    let clock = clock.map_or(String::new(), |c| {
+        format!(
+            "\n/// The clock this node's app runs on.\npub mod clock {{\n{}}}\n",
+            dagon_topology::defs::codegen::clock_rs(dagon_topology::defs::ClockStage::App, c)
+        )
+    });
     let children: Vec<String> = if hub {
         t.update
             .order
@@ -159,7 +168,7 @@ pub fn wiring_rs(
          pub const NODE: Node = Node {{\n    id: {id:?},\n    index: {index},\n    tag: {tag:?},\n    hub: {hub},\n    \
          max_attempts: {att},\n    link: {link},\n    flash_bytes: {flash},\n}};\n\n\
          /// The hub's children in update order (empty on a child).\n\
-         pub const CHILDREN: &[Child] = &[\n{kids}];\n\n{regions}",
+         pub const CHILDREN: &[Child] = &[\n{kids}];\n\n{regions}{clock}",
         topo = t.name,
         id = n.id,
         tag = n.tag,
@@ -913,7 +922,13 @@ pub fn gen(
             .mcu(&n.mcu)
             .and_then(|m| m.erase_regions_on(reg.node_board(n)))
             .unwrap_or(&[]);
-        let wiring = wiring_rs(t, index, flash, regions);
+        // The board the node names: a node naming none runs on the internal
+        // oscillator, as its boot stages do.
+        let board = n.board.as_deref().and_then(|b| reg.board(b));
+        let clock = reg
+            .mcu(&n.mcu)
+            .and_then(|m| m.clock_for(dagon_topology::defs::ClockStage::App, board));
+        let wiring = wiring_rs(t, index, flash, regions, clock);
         write(
             base,
             &format!("{dir}/src/wiring.rs"),

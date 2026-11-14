@@ -9,7 +9,9 @@
 //! - [`uart`]: request/response over a byte stream (bounded, resyncing);
 //! - [`serve`]: the agent's serving loop over any link;
 //! - [`mapped`]: read-only `Flash` over memory-mapped flash;
-//! - [`shared`]: several handles on one flash driver, no interrupt masking.
+//! - [`shared`]: several handles on one flash driver, no interrupt masking;
+//! - [`verify_time`] (feature `verify-time`): a stage0 signature check
+//!   timed in core clock cycles, for a stage0 built to measure it.
 #![no_std]
 
 #[doc(hidden)]
@@ -25,3 +27,5 @@ pub mod serve;
 pub mod shared;
 pub mod tag;
 pub mod uart;
+#[cfg(any(test, feature = "verify-time"))]
+pub mod verify_time;

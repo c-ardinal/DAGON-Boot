@@ -10,9 +10,6 @@ const GPIO_STRIDE: u32 = 0x400;
 /// Offsets of GPIOx_MODER and GPIOx_BSRR.
 const MODER: u32 = 0x00;
 const BSRR: u32 = 0x18;
-/// Stage0 runs on the HSI oscillator, 16 MHz from reset (RM0368, reset
-/// and clock control): CPU cycles per millisecond.
-const CYCLES_PER_MS: u32 = 16_000;
 
 /// Takes the LED on pin `pin` of GPIO port `port` (`PA5` → `(0, 5)`), lit
 /// at `active_high`'s level, and shows `code` until reset for a board
@@ -31,11 +28,15 @@ pub fn report((port, pin): (u32, u32), active_high: bool, period_ms: u32, code: 
         moder.write_volatile(m | 0b01 << (pin * 2));
     }
     let set = |on: bool| {
-        let bit = if on == active_high { 1 << pin } else { 1 << (pin + 16) };
+        let bit = if on == active_high {
+            1 << pin
+        } else {
+            1 << (pin + 16)
+        };
         // SAFETY: BSRR sets or resets only the bits written: this pin.
         unsafe { bsrr.write_volatile(bit) };
     };
     dagon_core::bootcore::blink_code(code, period_ms, set, |ms| {
-        cortex_m::asm::delay(ms.saturating_mul(CYCLES_PER_MS))
+        cortex_m::asm::delay(ms.saturating_mul(crate::clock::CYCLES_PER_MS))
     })
 }

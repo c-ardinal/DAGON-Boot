@@ -212,6 +212,7 @@ dependencies = [
  "dagon-core",
  "dagon-ed25519",
  "dagon-format",
+ "dagon-mcu-build",
  "dagon-mcu-common",
  "dagon-mcu-stm32f401re",
  "dagon-topology",

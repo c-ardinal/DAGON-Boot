@@ -211,7 +211,7 @@ fn newer_face_wins() {
 fn load_addr_must_be_slot_body() {
     let mut m = Mem::new();
     let a = install(&mut m, A, &image(A, 0));
-    let b = install(&mut m, B, &image_at(B, 1, SLOTS.slots[B as usize]));
+    let b = install(&mut m, B, &image_at(B, 1, SLOTS.slots[B as usize].0));
     write_log(
         &mut m,
         0,

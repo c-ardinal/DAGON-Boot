@@ -10,8 +10,7 @@ use dagon_core::log::LogState;
 
 /// The F401 bench layout with slot A only.
 const ONE: SlotLayout = SlotLayout {
-    slots: &[0x0802_0000],
-    slot_len: 0x2_0000,
+    slots: &[(0x0802_0000, 0x2_0000)],
 };
 
 fn boot_one(m: &mut Mem) -> Decision {
@@ -74,7 +73,7 @@ fn a_bad_image_in_the_single_slot_starts_nothing() {
     let mut m = Mem::new();
     let a = confirmed_a(&mut m);
     let new = install(&mut m, A, &image(A, 1));
-    m.bytes[(SLOTS.slots[0] - BASE) as usize + HEADER_SIZE + 7] ^= 0xFF;
+    m.bytes[(SLOTS.slots[0].0 - BASE) as usize + HEADER_SIZE + 7] ^= 0xFF;
     write_log(
         &mut m,
         0,

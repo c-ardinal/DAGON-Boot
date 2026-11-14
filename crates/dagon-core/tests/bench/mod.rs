@@ -22,8 +22,7 @@ pub const LOG: LogLayout = LogLayout {
     face_len: 0x4000,
 };
 pub const SLOTS: SlotLayout = SlotLayout {
-    slots: &[0x0802_0000, 0x0804_0000],
-    slot_len: 0x2_0000,
+    slots: &[(0x0802_0000, 0x2_0000), (0x0804_0000, 0x2_0000)],
 };
 pub const A: u8 = 0;
 pub const B: u8 = 1;
@@ -95,7 +94,11 @@ pub fn verifier() -> dagon_ed25519::Ed25519Compact {
 
 /// Signed image for `slot`; returns (header, body).
 pub fn image(slot: u8, minor: u8) -> ([u8; HEADER_SIZE], Vec<u8>) {
-    image_at(slot, minor, SLOTS.slots[slot as usize] + HEADER_SIZE as u32)
+    image_at(
+        slot,
+        minor,
+        SLOTS.slots[slot as usize].0 + HEADER_SIZE as u32,
+    )
 }
 
 pub fn image_at(slot: u8, minor: u8, load_addr: u32) -> ([u8; HEADER_SIZE], Vec<u8>) {
@@ -134,8 +137,8 @@ pub fn slot_ref(slot: u8, hdr: &[u8; HEADER_SIZE]) -> SlotRef {
 }
 
 pub fn install(m: &mut Mem, slot: u8, (hdr, body): &([u8; HEADER_SIZE], Vec<u8>)) -> SlotRef {
-    let base = SLOTS.slots[slot as usize];
-    m.erase(base, SLOTS.slot_len).unwrap();
+    let (base, len) = SLOTS.slots[slot as usize];
+    m.erase(base, len).unwrap();
     m.put(base, hdr);
     m.put(base + HEADER_SIZE as u32, body);
     slot_ref(slot, hdr)
@@ -193,7 +196,7 @@ pub fn boot(m: &mut Mem) -> Decision {
 }
 
 pub fn entry(slot: u8) -> u32 {
-    SLOTS.slots[slot as usize] + HEADER_SIZE as u32
+    SLOTS.slots[slot as usize].0 + HEADER_SIZE as u32
 }
 
 pub fn state(m: &mut Mem) -> dagon_core::log::LogState {

@@ -65,9 +65,10 @@ pub mod led {
         Some(GPIO.load(Ordering::Relaxed)).filter(|&g| g != NONE)
     }
 
-    /// Cycles per millisecond: ROSC at reset (about 6.5 MHz, varies a lot
-    /// between chips) and the 125 MHz PLL clock after HAL init.
-    pub const ROSC_MS: u32 = 6_500;
+    /// Cycles per millisecond: ROSC at reset (the MCU definition's
+    /// internal `[[stage0.clock]]` setup, nominal; it varies a lot between
+    /// chips) and the 125 MHz PLL clock after HAL init.
+    pub const ROSC_MS: u32 = crate::STAGE0_INTERNAL_HZ / 1000;
     pub const PLL_MS: u32 = 125_000;
 
     /// Selects `gpio` (0..=29) as the LED lit at `active_high`'s level and
@@ -150,14 +151,14 @@ pub mod led {
     }
 
     /// Stage0's diagnostic output on the board's `[boot] led` (the
-    /// generated `BoardDiag` calls it): takes the LED (`gpio`, lit at
-    /// `active_high`'s level) and shows `code` until reset for a board
-    /// whose halt pattern blinks every `period_ms`
-    /// (`dagon_core::bootcore::blink_code`).
-    pub fn report(gpio: u8, active_high: bool, period_ms: u32, code: u8) -> ! {
+    /// generated `BoardDiag` calls it through stage0): takes the LED
+    /// (`gpio`, lit at `active_high`'s level) and shows `code` until reset
+    /// for a board whose halt pattern blinks every `period_ms`
+    /// (`dagon_core::bootcore::blink_code`), the core running
+    /// `cycles_per_ms` (the clock stage0 runs on).
+    pub fn report(gpio: u8, active_high: bool, period_ms: u32, code: u8, cycles_per_ms: u32) -> ! {
         init(gpio, active_high);
-        let c = cycles_per_ms();
-        dagon_core::bootcore::blink_code(code, period_ms, set, |ms| wait(ms, c))
+        dagon_core::bootcore::blink_code(code, period_ms, set, |ms| wait(ms, cycles_per_ms))
     }
 
     /// Blinks forever with `ms` on and off: a visible halt.
@@ -232,9 +233,10 @@ pub mod trial {
     const TICK: *mut u32 = 0x4005_802C as *mut u32;
     const CTRL_ENABLE: u32 = 1 << 30;
     const TICK_ENABLE: u32 = 1 << 9;
-    /// clk_ref cycles per tick: the ring oscillator's nominal 6.5 MHz at
-    /// reset, so a tick is about 1 µs (it varies with the chip).
-    const TICK_CYCLES: u32 = 6;
+    /// clk_ref cycles per tick: clk_ref is the ring oscillator when stage0
+    /// arms the watchdog, at the MCU definition's internal setup (nominal
+    /// 6.5 MHz), so a tick is about 1 µs (it varies with the chip).
+    const TICK_CYCLES: u32 = crate::STAGE0_INTERNAL_HZ / 1_000_000;
     const LOAD_MAX: u32 = 0x00FF_FFFF;
     /// The counter runs down twice per tick (erratum RP2040-E1).
     const COUNTS_PER_US: u32 = 2;

@@ -29,6 +29,20 @@ app_log = { faces = [0x1000_6000, 0x1000_7000], face_size = 0x1000 }
 key = "flash"
 region_bytes = 0x4000
 
+# The ring oscillator stage0 starts on: nominal 6.5 MHz at reset, anywhere
+# from 1.8 to 12 MHz (RP2040 datasheet section 2.17.1).
+[[stage0.clock]]
+source = "internal"
+out_hz = 6_500_000
+
+# A 12 MHz crystal through the system PLL: 12 MHz / 1 x 125 = 1500 MHz VCO,
+# / 6 / 2 = 125 MHz (RP2040 datasheet section 2.18.2).
+[[stage0.clock]]
+source = "crystal"
+in_hz = 12_000_000
+out_hz = 125_000_000
+pll = { refdiv = 1, fbdiv = 125, postdiv1 = 6, postdiv2 = 2 }
+
 [[slot]]
 image = "bootcore"
 binding = "a"

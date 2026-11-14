@@ -1600,6 +1600,7 @@ fn build_output_reaches_the_page_without_local_folders() {
         "format = 1\ntopology = \"topology/t.yaml\"\n[build.seg]\npackage = \"private/token/app\"\n",
     )
     .unwrap();
+    crate::nodebuild::write_test_definition(&a.dir, "seg", "stm32f401re");
     let rx = a.server.subscribe();
     let (st, started) = post(&a, "/v1/build", serde_json::json!({ "nodes": ["seg"] }));
     assert_eq!(st, 202, "{started}");

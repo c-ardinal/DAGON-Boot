@@ -1052,6 +1052,365 @@ fn gen_boot_core_slots_sign_rp2040_without_a_crystal() {
     gen_boot_core_slots_sign_from(&without_uart(&sample_by_mcu()), "hub", false);
 }
 
+/// The RP2040 slots a project moves by overriding the built-in definition
+/// (each slot elsewhere, the app slots smaller).
+const MOVED_RP2040_SLOTS: &str = "
+[[mcu_override.rp2040.slot]]
+image = \"bootcore\"
+binding = \"a\"
+at = 0x1001_0000
+
+[[mcu_override.rp2040.slot]]
+image = \"bootcore\"
+binding = \"b\"
+at = 0x1003_0000
+
+[[mcu_override.rp2040.slot]]
+image = \"app\"
+binding = \"a\"
+at = 0x1005_0000
+size = 0xC_0000
+
+[[mcu_override.rp2040.slot]]
+image = \"app\"
+binding = \"b\"
+at = 0x1011_0000
+size = 0x8_0000
+
+[[mcu_override.rp2040.slot_layout]]
+target = \"bootcore\"
+slot = \"a\"
+start = 0x1001_0000
+
+[[mcu_override.rp2040.slot_layout]]
+target = \"bootcore\"
+slot = \"b\"
+start = 0x1003_0000
+
+[[mcu_override.rp2040.slot_layout]]
+target = \"app\"
+slot = \"a\"
+start = 0x1005_0000
+capacity = 0xB_FE00
+
+[[mcu_override.rp2040.slot_layout]]
+target = \"app\"
+slot = \"b\"
+start = 0x1011_0000
+capacity = 0x7_FE00
+
+[mcu_override.rp2040.watchdog]
+trial_ms = 6_000
+confirmed_ms = 8_000
+";
+
+/// The constants each `dagon-mcu-*` build generated below `target`
+/// (`definition.rs` in its `OUT_DIR`).
+fn generated_definitions(target: &Path) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut todo = vec![target.to_path_buf()];
+    while let Some(dir) = todo.pop() {
+        for e in std::fs::read_dir(&dir).into_iter().flatten().flatten() {
+            let path = e.path();
+            if path.is_dir() {
+                todo.push(path);
+            } else if path.file_name().is_some_and(|n| n == "definition.rs")
+                && path.to_string_lossy().contains("dagon-mcu-")
+            {
+                out.push(std::fs::read_to_string(&path).unwrap());
+            }
+        }
+    }
+    out
+}
+
+/// Whether every definition generated below `target` carries all of `want`.
+fn every_build_generated(target: &Path, want: &[&str]) {
+    let defs = generated_definitions(target);
+    assert!(
+        !defs.is_empty(),
+        "no generated definition below {}",
+        target.display()
+    );
+    for d in &defs {
+        for w in want {
+            assert!(d.contains(w), "{w} not in {}:\n{d}", target.display());
+        }
+    }
+}
+
+/// A project that moves the RP2040's slots by overriding its definition,
+/// with app slots of unequal lengths and unequal trial and confirmed
+/// watchdog periods, gets firmware laid out for them, without a code edit:
+/// `dagon gen` writes the merged definition into the node's boot folder,
+/// the app (both slots), the boot core (both slots) and stage0 build from
+/// it, each binary loads at its moved slot, stage0's slot table names the
+/// moved boot core slots, and every build generated the overridden values.
+/// An `mcu.toml` of another MCU or definition format is refused (real
+/// firmware builds: run with --ignored).
+#[test]
+#[ignore = "builds firmware for the RP2040"]
+fn a_project_slot_override_reaches_the_firmware() {
+    use dagon_format::header::{image_kind, slot_binding};
+    let d = tmp("lay");
+    // Short: the boot core's build folders are deep below it.
+    let dir = d.join("p");
+    // The hub's board: its crystal gives the USB uplink its clock.
+    new_project(&dir, "proj", SAMPLE, &d.join("keys"), &dev()).unwrap();
+    let config = dir.join(crate::config::CONFIG_FILE);
+    let mut text = std::fs::read_to_string(&config).unwrap();
+    text.push_str(MOVED_RP2040_SLOTS);
+    std::fs::write(&config, text).unwrap();
+    let lines = gen_project(&config, &["hub".to_string()], false).unwrap();
+    assert!(!lines.iter().any(|l| l.starts_with("skipped")), "{lines:?}");
+    let cfg = Config::load(Some(&config.to_string_lossy())).unwrap();
+    let reg = crate::defs::registry(&cfg).unwrap();
+    let mcu_toml = dir.join("boot/hub/mcu.toml");
+    assert_eq!(
+        std::fs::read_to_string(&mcu_toml).ok(),
+        dagon_topology::defs::boot_folder::mcu_file_text(&reg, "rp2040")
+    );
+    let slot = |kind, binding| *reg.slot("rp2040", kind, binding).unwrap();
+    let loads_at = |elf: &[u8], at: u32, what: &str| {
+        dagon_sign::image::payload_from_file(elf, at).unwrap_or_else(|e| panic!("{what}: {e}"))
+    };
+    let cancel = std::sync::atomic::AtomicBool::new(false);
+    let mut log = Vec::new();
+
+    // The app, both slots.
+    let built = crate::nodebuild::build_nodes(
+        &cfg,
+        &["hub".to_string()],
+        &mut |l| log.push(l.to_string()),
+        &cancel,
+    )
+    .unwrap_or_else(|e| panic!("{e}\n{}", log.join("\n")));
+    let apps = &built[0].slots;
+    assert_eq!(apps.len(), 2);
+    for (letter, path, _) in apps {
+        let binding = crate::commands::binding_of(*letter);
+        let s = slot(image_kind::APP, binding);
+        assert_eq!(
+            s.start,
+            if *letter == 'a' {
+                0x1005_0000
+            } else {
+                0x1011_0000
+            }
+        );
+        loads_at(
+            &std::fs::read(path).unwrap(),
+            s.load_addr,
+            &format!("app {letter}"),
+        );
+    }
+    let overridden = [
+        "pub const APP: [(u32, u32); 2] = [(0x10050000, 0xc0000), (0x10110000, 0x80000)];",
+        "pub const TRIAL_WDT_MS: u32 = 6000;",
+        "pub const CONFIRMED_WDT_MS: u32 = 8000;",
+    ];
+    every_build_generated(&dir.join("nodes/hub/target"), &overridden);
+
+    // The boot core, both slots.
+    let key = ed25519_compact::KeyPair::from_seed(ed25519_compact::Seed::new([9; 32]));
+    let hex = dagon_sign::to_hex(&key.pk[..]);
+    let n = cfg_topology(&cfg).node("hub").unwrap().clone();
+    let cores =
+        crate::flash::build_core_slots(&cfg, &reg, &n, &hex, &mut |l| log.push(l.into()), &cancel)
+            .unwrap_or_else(|e| panic!("{e}\n{}", log.join("\n")));
+    assert_eq!(cores.len(), 2);
+    let core_starts: Vec<u32> = [slot_binding::A, slot_binding::B]
+        .into_iter()
+        .map(|b| slot(image_kind::BOOTCORE, b).start)
+        .collect();
+    assert_eq!(core_starts, [0x1001_0000, 0x1003_0000]);
+    for (letter, elf) in &cores {
+        let s = slot(image_kind::BOOTCORE, crate::commands::binding_of(*letter));
+        loads_at(elf, s.load_addr, &format!("boot core {letter}"));
+    }
+
+    // Stage0: its table of boot core slots is the moved one.
+    let parts = crate::flash::build_parts(
+        &cfg,
+        &reg,
+        &n,
+        Path::new(crate::dagonsrc::BUILT_FROM),
+        &hex,
+        crate::flash::Paths::Full,
+        &mut |l| log.push(l.into()),
+        &cancel,
+    )
+    .unwrap_or_else(|e| panic!("{e}\n{}", log.join("\n")));
+    let stage0 = &parts.iter().find(|(name, _)| name == "stage0").unwrap().1;
+    let stage0_at = reg.mcu("rp2040").unwrap().layout.stage0.unwrap().at;
+    let image = loads_at(&std::fs::read(stage0).unwrap(), stage0_at, "stage0");
+    let has_word = |w: u32| image.windows(4).any(|x| x == w.to_le_bytes());
+    for at in &core_starts {
+        assert!(has_word(*at), "stage0 does not name boot core slot {at:#x}");
+    }
+    for builtin in [0x1000_8000u32, 0x1002_8000] {
+        assert!(!has_word(builtin), "stage0 still names {builtin:#x}");
+    }
+    every_build_generated(&dir.join("out"), &overridden);
+
+    // A node definition of another MCU or format is refused.
+    let good = std::fs::read_to_string(&mcu_toml).unwrap();
+    for (bad, says) in [
+        (
+            good.replace("id = \"rp2040\"", "id = \"stm32f401re\""),
+            "this package is for MCU 'rp2040'",
+        ),
+        (
+            good.replace("format = 2", "format = 3"),
+            "this package reads definition format 2",
+        ),
+    ] {
+        assert_ne!(bad, good);
+        std::fs::write(&mcu_toml, bad).unwrap();
+        let mut log = Vec::new();
+        let r = crate::nodebuild::build_nodes(
+            &cfg,
+            &["hub".to_string()],
+            &mut |l| log.push(l.to_string()),
+            &cancel,
+        );
+        assert!(r.is_err(), "{says}");
+        assert!(log.join("\n").contains(says), "{says}\n{}", log.join("\n"));
+    }
+    std::fs::write(&mcu_toml, good).unwrap();
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+/// The F401's app slots of unequal lengths (slot B shorter than its sector) and
+/// unequal trial and confirmed watchdog periods, by a project override.
+const UNEQUAL_F401: &str = "
+[[mcu_override.stm32f401re.slot]]
+image = \"app\"
+binding = \"b\"
+size = 0x1_C000
+
+[[mcu_override.stm32f401re.slot_layout]]
+target = \"app\"
+slot = \"b\"
+capacity = 0x1_BE00
+
+[mcu_override.stm32f401re.watchdog]
+trial_ms = 9_000
+confirmed_ms = 12_000
+";
+
+/// The F401 node builds from the project's definition as the RP2040 hub
+/// does: both app slots, at their own lengths, and the boot core and
+/// stage0 with the overridden watchdog periods (real firmware builds: run
+/// with --ignored).
+#[test]
+#[ignore = "builds firmware for the STM32F401"]
+fn a_project_override_of_unequal_f401_slots_reaches_the_firmware() {
+    use dagon_format::header::image_kind;
+    let d = tmp("f4u");
+    let dir = d.join("p");
+    let topology = without_uart(&sample_by_mcu());
+    new_project(&dir, "proj", &topology, &d.join("keys"), &dev()).unwrap();
+    let config = dir.join(crate::config::CONFIG_FILE);
+    let mut text = std::fs::read_to_string(&config).unwrap();
+    text.push_str(UNEQUAL_F401);
+    std::fs::write(&config, text).unwrap();
+    let lines = gen_project(&config, &["seg".to_string()], false).unwrap();
+    assert!(!lines.iter().any(|l| l.starts_with("skipped")), "{lines:?}");
+    let cfg = Config::load(Some(&config.to_string_lossy())).unwrap();
+    let reg = crate::defs::registry(&cfg).unwrap();
+    let cancel = std::sync::atomic::AtomicBool::new(false);
+    let mut log = Vec::new();
+    let built = crate::nodebuild::build_nodes(
+        &cfg,
+        &["seg".to_string()],
+        &mut |l| log.push(l.to_string()),
+        &cancel,
+    )
+    .unwrap_or_else(|e| panic!("{e}\n{}", log.join("\n")));
+    for (letter, path, _) in &built[0].slots {
+        let s = reg
+            .slot(
+                "stm32f401re",
+                image_kind::APP,
+                crate::commands::binding_of(*letter),
+            )
+            .unwrap();
+        dagon_sign::image::payload_from_file(&std::fs::read(path).unwrap(), s.load_addr)
+            .unwrap_or_else(|e| panic!("app {letter}: {e}"));
+    }
+    let overridden = [
+        "pub const APP: [(u32, u32); 2] = [(0x8020000, 0x20000), (0x8040000, 0x1c000)];",
+        "pub const TRIAL_WDT_MS: u32 = 9000;",
+        "pub const CONFIRMED_WDT_MS: u32 = 12000;",
+    ];
+    every_build_generated(&dir.join("nodes/seg/target"), &overridden);
+    let key = ed25519_compact::KeyPair::from_seed(ed25519_compact::Seed::new([9; 32]));
+    let hex = dagon_sign::to_hex(&key.pk[..]);
+    let n = cfg_topology(&cfg).node("seg").unwrap().clone();
+    crate::flash::build_parts(
+        &cfg,
+        &reg,
+        &n,
+        Path::new(crate::dagonsrc::BUILT_FROM),
+        &hex,
+        crate::flash::Paths::Full,
+        &mut |l| log.push(l.into()),
+        &cancel,
+    )
+    .unwrap_or_else(|e| panic!("{e}\n{}", log.join("\n")));
+    every_build_generated(&dir.join("out"), &overridden);
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+/// The ESP32-S3 node's factory agent, a part of its board package, builds
+/// from the project's definition like the app: an override of the
+/// watchdog periods reaches it (real firmware builds with the ESP
+/// toolchain: run with --ignored).
+#[test]
+#[ignore = "builds firmware with the ESP toolchain"]
+fn a_project_override_reaches_the_esp32s3_factory_agent() {
+    let d = tmp("espf");
+    let dir = d.join("p");
+    new_project(&dir, "proj", SAMPLE, &d.join("keys"), &dev()).unwrap();
+    let config = dir.join(crate::config::CONFIG_FILE);
+    let mut text = std::fs::read_to_string(&config).unwrap();
+    text.push_str("\n[mcu_override.esp32s3.watchdog]\ntrial_ms = 3_000\nconfirmed_ms = 7_000\n");
+    std::fs::write(&config, text).unwrap();
+    let lines = gen_project(&config, &["watch".to_string()], false).unwrap();
+    assert!(!lines.iter().any(|l| l.starts_with("skipped")), "{lines:?}");
+    assert!(dir.join("boot/watch/mcu.toml").is_file());
+    let cfg = Config::load(Some(&config.to_string_lossy())).unwrap();
+    let reg = crate::defs::registry(&cfg).unwrap();
+    let n = cfg_topology(&cfg).node("watch").unwrap().clone();
+    let key = ed25519_compact::KeyPair::from_seed(ed25519_compact::Seed::new([9; 32]));
+    let mut log: Vec<String> = Vec::new();
+    let parts = crate::flash::build_parts(
+        &cfg,
+        &reg,
+        &n,
+        Path::new(crate::dagonsrc::BUILT_FROM),
+        &dagon_sign::to_hex(&key.pk[..]),
+        crate::flash::Paths::Full,
+        &mut |l| log.push(l.into()),
+        &std::sync::atomic::AtomicBool::new(false),
+    )
+    .unwrap_or_else(|e| panic!("{e}\n{}", log.join("\n")));
+    assert!(parts.iter().any(|(name, _)| name == "factory"), "{parts:?}");
+    every_build_generated(
+        &dir.join("out/flash/target/factory"),
+        &[
+            "pub const TRIAL_WDT_MS: u32 = 3000;",
+            "pub const CONFIRMED_WDT_MS: u32 = 7000;",
+        ],
+    );
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+fn cfg_topology(cfg: &Config) -> Topology {
+    read_topology(cfg, &cfg.topology_path(None).unwrap()).unwrap()
+}
+
 #[test]
 fn a_new_project_whose_key_cannot_be_made_leaves_nothing_behind() {
     let d = tmp("new-undo");
@@ -1145,6 +1504,28 @@ fn hop_placeholders_name_each_nodes_link_kinds() {
     )
     .unwrap();
     assert_eq!(up, "dagon_mcu_esp32s3::links::Kind::Uart");
+}
+
+/// Every app template (an MCU's or a board's) builds the app from the
+/// node's MCU definition `dagon gen` writes into `boot/<id>/`, as the
+/// boot crate builds its boot core and stage0 (the same folder).
+#[test]
+fn every_app_template_builds_from_the_nodes_mcu_definition() {
+    let root = Path::new(crate::dagonsrc::BUILT_FROM).join("targets");
+    let want =
+        "DAGON_BOOT_CRATE = { value = \"../../boot/{{node}}\", relative = true, force = true }";
+    let mut seen = 0;
+    for group in ["mcu", "boards"] {
+        for e in std::fs::read_dir(root.join(group)).unwrap().flatten() {
+            let config = e.path().join("template/.cargo/config.toml");
+            let Ok(text) = std::fs::read_to_string(&config) else {
+                continue;
+            };
+            seen += 1;
+            assert!(text.contains(want), "{}", config.display());
+        }
+    }
+    assert!(seen >= 6, "{seen}");
 }
 
 /// An MCU package's template (a node without a board package) takes its

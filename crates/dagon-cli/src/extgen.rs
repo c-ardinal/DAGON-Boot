@@ -4,7 +4,9 @@
 //! define their RAM) and the readable `protection.toml`; and, for an MCU
 //! with a DAGON boot stage, the node's boot crate in `boot/<id>/` (its own
 //! folder: cargo would merge a node crate's `.cargo/config.toml`, made for
-//! the app, into a crate below it).
+//! the app, into a crate below it). Every node's `boot/<id>/` holds
+//! `mcu.toml`: the MCU definition its firmware builds from, with the
+//! project's overrides applied (`DAGON_BOOT_CRATE` names the folder).
 //!
 //! dagon.toml:
 //!
@@ -22,7 +24,7 @@ use std::path::{Path, PathBuf};
 
 use dagon_extension::node::{self, Ext, Image, ImagePlan};
 use dagon_extension::{gen, Known, Manifest, MANIFEST_FILE};
-use dagon_topology::defs::boot_folder::source_sha256;
+use dagon_topology::defs::boot_folder::{mcu_file_text, source_sha256, MCU_FILE};
 use dagon_topology::defs::{ImageKind, McuDef, PortKind, Registry};
 use dagon_topology::schema::{Node, Role};
 use serde::Deserialize;
@@ -449,6 +451,10 @@ fn plan_files(
         format!("{dir}/protection.toml"),
         gen::protection_map(&n.id, def, &plans),
     ));
+    // The definition the node's firmware builds from: the app's, and the
+    // boot core's and stage0's where the MCU has them.
+    let mcu = mcu_file_text(reg, &n.mcu).ok_or_else(|| format!("unknown MCU {}", n.mcu))?;
+    files.push((format!("{BOOT_CRATES}/{}/{MCU_FILE}", n.id), mcu));
     Ok((files, notes))
 }
 
@@ -572,9 +578,8 @@ pub fn write_nodes(
             match plan_files(reg, n, mine, &found, &known, p, &fields) {
                 Ok((files, notes)) => {
                     planned = true;
-                    let boot = files
-                        .iter()
-                        .any(|(rel, _)| rel.starts_with(&format!("{BOOT_CRATES}/")));
+                    let manifest = format!("{BOOT_CRATES}/{}/Cargo.toml", n.id);
+                    let boot = files.iter().any(|(rel, _)| *rel == manifest);
                     for (rel, text) in files {
                         write(base, &rel, &text, true, &mut written)?;
                     }
@@ -738,10 +743,25 @@ mod tests {
         ] {
             assert!(has(p), "{p}: {lines:?}");
         }
+        // Every node's firmware builds from its MCU definition as the
+        // project resolves it, in the folder DAGON_BOOT_CRATE names.
+        let reg = Registry::builtin();
+        for (id, mcu) in [
+            ("seg", "stm32f401re"),
+            ("hub", "rp2040"),
+            ("watch", "esp32s3"),
+        ] {
+            let rel = format!("boot/{id}/mcu.toml");
+            assert!(has(&rel), "{rel}: {lines:?}");
+            let text = std::fs::read_to_string(base.join(&rel)).unwrap();
+            assert_eq!(Some(text), mcu_file_text(reg, mcu), "{rel}");
+        }
         // No boot stage, no RAM in the definition: no boot crate, no
         // wiring, no fragments.
         assert!(!has("nodes/watch/dagon/boot_wiring.rs"));
-        assert!(!lines.iter().any(|l| l.contains("boot/watch")));
+        assert!(!lines
+            .iter()
+            .any(|l| l.contains("boot/watch") && !l.ends_with("boot/watch/mcu.toml")));
         assert!(!lines
             .iter()
             .any(|l| l.contains("nodes/watch/dagon/memory-")));

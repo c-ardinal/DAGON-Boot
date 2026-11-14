@@ -13,5 +13,9 @@ rustflags = [
 build-std = ["core"]
 
 [env]
+# The folder `dagon gen` writes this node's MCU definition into
+# (`mcu.toml`): the app builds from the definition every image of the
+# node builds from, the project's overrides included.
+DAGON_BOOT_CRATE = { value = "../../boot/{{node}}", relative = true, force = true }
 # This node's image target tag: the app announces it.
 DAGON_TARGET_TAG = { value = "{{tag}}", force = true }

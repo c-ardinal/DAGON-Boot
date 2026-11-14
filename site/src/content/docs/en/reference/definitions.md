@@ -55,7 +55,7 @@ errors; kind fields accept only the values listed below.
 | `[isolation]` | table | no | How DAGON keeps extensions away from itself (below). Left out: `kind = "none"`, `level = "none"`. |
 | `[[peripheral]]` | tables | no | Every register block: `id`, `base`, `size`, `window_eligible` (an extension may get it as a window), `bus_master` (it can write memory), `privileged_why` (one or a list of `dma`, `flash`, `watchdog`, `clock`, `reset`, `irq-routing`, `pinmux`, `power`, `rom`, `core-control`, `protection`, `shared`), `dma = { streams, channels }` (a DMA controller, a bus master: its streams, each selecting one of `channels` requests), `dma_requests = [{ signal, controller, stream, channel }]` (the block's rows of the MCU's DMA request mapping table: `signal` `a-z 0-9` such as `tx`, `rx`, `ch1`, `up`; one cell serves one block). Board packages and MCU templates take DMA streams from these (first row of the request on a free stream). |
 | `[[core]]` | tables | no | Every processor core, `id`; DAGON runs on the first. |
-| `[watchdog]` | table | no | `kind` (`iwdg`, `rp-watchdog`, `rtc-wdt`), `trial_ms` (armed on a trial boot), `confirmed_ms` (armed otherwise), `trial_attempts` (boots the boot stage gives a pending image before it rolls back: the boot core's limit, or the vendor second stage's). An app may delay a reboot by at most half the shorter period. The MCU package's build turns `trial_attempts` into the constant its boot core and its agent use. `flag` (required): the watchdog-reset flag the lockup fuse needs (set by a watchdog reset, kept over every later reset but power-on, cleared when a start acknowledges it), a fact of `none`, `register` (a reset-flag register; name it and its source in a comment) or `package` (the MCU package keeps it): `"register"`, `{ unverified = "package" }`, `"unmeasured"`. Without a flag with a source the MCU has no lockup fuse. |
+| `[watchdog]` | table | no | `kind` (`iwdg`, `rp-watchdog`, `rtc-wdt`), `trial_ms` (armed on a trial boot), `confirmed_ms` (armed otherwise), `trial_attempts` (boots the boot stage gives a pending image before it rolls back: the boot core's limit, or the vendor second stage's). An app may delay a reboot by at most half the shorter period. The MCU package's build turns `trial_attempts` into the constant its boot core and its agent use. `flag` (required): the watchdog-reset flag the lockup fuse needs (set by a watchdog reset, kept over every later reset but power-on, cleared when a start acknowledges it), a fact of `none`, `register` (a reset-flag register; name it and its source in a comment) or `package` (the MCU package keeps it): `"register"`, `{ unverified = "package" }`, `"unmeasured"`. Without a flag with a source the MCU has no lockup fuse. `range_ms` (required): `{ min, max }`, the periods the MCU's watchdog can run, ms, with its source in a comment; a definition whose `trial_ms` or `confirmed_ms` lies outside it is refused, when the definitions load and when the firmware layout is generated. |
 | `[execution]` | table | no | Hardware facts of the execution model (site/src/content/docs/en/explanation/lifecycle-events.md, "Execution model"): `masked_max_us` (longest DAGON's own code masks interrupts, 1..=1000), `flash_op` (what an erase or program stops: `fetch-stall`, `xip-off-masked`, `cache-off-masked`), `erase_regions = [{ start, len, unit, unit_max_ms }]` (the flash DAGON erases in: each region's erase unit and that unit's datasheet maximum erase time; whole units, not overlapping; 2 x `unit_max_ms` at most `watchdog.trial_ms` and `watchdog.confirmed_ms`). A fact is a number checked against its source (cite it in a comment), `{ unverified = N }` or `"unmeasured"` (no value; not for `unit_max_ms`). |
 | `[[slot_layout]]` | tables | no | Every XFER target and slot the node receives into: `target` (`app`, `bootcore`, `agent`, `topology`), `slot` (`a`, `b`, `factory`), `start`, `capacity` (largest body, header excluded), `header` (`"inline"` at `start`, or `{ detached = <address> }`), `partition` (optional: the partition the body region is, checked against the table). One per target and slot, with `[execution]`; each `[[slot]]` image has its own, and an erase of the largest body lies in `erase_regions`. The node and the host plan every erase from these. |
 | `[conformance]` | table | no | `scratch = { at, size }`: flash a conformance build erases and writes; apart from every slot, header, log face and stage0. |
@@ -198,6 +198,23 @@ board (a board of this tree or an inline `[board.<id>]` of the project)
 and its trusted boot extensions. A build without it fails; a node
 without a board gets no boot LED and no halt pattern. The code holds no
 pin, address or pattern of its own.
+
+An MCU package's build script generates its layout from the MCU
+definition the node build is given (`dagon_mcu_build::definition`):
+every slot's address and length per image kind, the stage0 region, the
+logs, the erase regions and slot layouts, and the watchdog and trial
+values. That definition is `boot/<id>/mcu.toml`, which `dagon gen` writes
+for every node: the built-in definition with the project's overrides
+applied. The app's `.cargo/config.toml` and the boot crate's both set
+`DAGON_BOOT_CRATE` to that folder, and `dagon build`, `deploy` and
+`flash` give it to every image they build for the node, a board's own
+parts (such as a recovery agent) included. So every image of one node
+builds from one file, and a project that moves its slots, gives them
+lengths of their own or sets other watchdog periods gets matching
+firmware without a code edit. An `mcu.toml` of another MCU or
+another definition format is refused; a build without
+`DAGON_BOOT_CRATE` (a plain `cargo build` of the package) reads the
+package's own `dagon-mcu.toml`.
 
 ## What leaves this machine
 

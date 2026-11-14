@@ -14,7 +14,7 @@ publish = false
 # the lint uses a neutral tag and the boot folder in lint/.
 [package.metadata.dagon]
 bootcore = "stm32f401re"
-lint = { features = ["", "slot-b"], env = { DAGON_TARGET_TAG = "lint", DAGON_BOOT_CRATE = "lint" } }
+lint = { features = ["", "slot-b"], env = { DAGON_TARGET_TAG = "lint", DAGON_BOOT_CRATE = "./lint" } }
 
 # Standalone: built for thumbv7em only, so it stays out of the host workspace.
 # Its memory.x and verifying key come from dagon-mcu-stm32f401re.

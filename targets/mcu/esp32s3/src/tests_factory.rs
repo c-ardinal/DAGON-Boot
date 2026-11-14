@@ -233,7 +233,8 @@ fn the_running_app_writes_a_new_factory_agent() {
     assert_eq!((st.active, st.confirmed), (SLOT_A, SLOT_A));
     let at = crate::layout::FACTORY.offset as usize;
     assert_eq!(&pc.store().flash.0[at..at + 5000], &ag[HEADER_SIZE..]);
-    let h = crate::store::header_addr(SLOT_FACTORY).unwrap() as usize;
+    let h = crate::store::header_addr(dagon_proto::payload::target::AGENT, SLOT_FACTORY).unwrap()
+        as usize;
     assert_eq!(&pc.store().flash.0[h..h + HEADER_SIZE], &ag[..HEADER_SIZE]);
     assert_eq!(
         pc.call(Cmd::SetPending, &[target::AGENT, SLOT_FACTORY]).0,

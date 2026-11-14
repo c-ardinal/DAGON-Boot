@@ -12,14 +12,13 @@ use dagon_format::statelog::{kind, reason, target};
 use dagon_format::{Sha256, SigVerifier};
 use dagon_port::Flash;
 
-/// Where the APP slots live: one start address per slot the MCU definition
-/// gives the app, index = slot (A, then B when there is one). Each slot
-/// starts with its 512-byte header; the body (vector table first) follows at
-/// `+HEADER_SIZE`.
+/// Where the APP slots live: `(start, length)` of each slot the MCU
+/// definition gives the app, index = slot (A, then B when there is one);
+/// each slot has its own length. Each slot starts with its 512-byte header;
+/// the body (vector table first) follows at `+HEADER_SIZE`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SlotLayout<'a> {
-    pub slots: &'a [u32],
-    pub slot_len: u32,
+    pub slots: &'a [(u32, u32)],
 }
 
 /// What this boot core accepts (the signature key lives in the verifier
@@ -116,7 +115,7 @@ fn check<F: Flash, V: SigVerifier + ?Sized>(
     r: SlotRef,
     signature: bool,
 ) -> Result<u32, u8> {
-    let base = *slots
+    let (base, len) = *slots
         .slots
         .get(r.slot as usize)
         .ok_or(reason::NO_VALID_IMAGE)?;
@@ -139,7 +138,7 @@ fn check<F: Flash, V: SigVerifier + ?Sized>(
         && h.target_tag == cfg.target_tag
         && h.slot_binding == r.slot
         && h.placement == placement::INLINE
-        && h.payload_size <= slots.slot_len - HEADER_SIZE as u32;
+        && h.payload_size <= len.saturating_sub(HEADER_SIZE as u32);
     if !fits {
         return Err(reason::SIG_INVALID);
     }

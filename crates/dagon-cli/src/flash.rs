@@ -556,12 +556,10 @@ pub(crate) fn build_parts(
 ) -> Result<Vec<(String, PathBuf)>, String> {
     let node = &n.id;
     let mut built = Vec::new();
-    // The node's boot stages (stage0, boot core) are built for its boot crate.
-    let boot = boot_crate(cfg, n).ok();
     let link_baud = nodebuild::link_baud(cfg, node)?;
     for part in parts(reg, &n.mcu, n.board.as_deref()) {
         let mut dir = part_dir(root, &part)?;
-        let boot_folder = boot_folder_of(&part, &dir, boot.as_deref())?;
+        let folder = part_folder(cfg, n, &part, &dir)?;
         let mut bin = match &part.bin {
             Some(b) => b.clone(),
             None => nodebuild::package_name(&dir)?,
@@ -603,7 +601,7 @@ pub(crate) fn build_parts(
                 pubkey_hex: Some(hex),
                 // The boot core accepts only images carrying this tag.
                 target_tag: Some(&n.tag),
-                boot_crate: boot_folder,
+                boot_crate: Some(&folder),
                 // A recovery agent talks over the same link as the app.
                 link_baud,
             },
@@ -690,17 +688,22 @@ fn boot_crate(cfg: &Config, n: &dagon_topology::schema::Node) -> Result<PathBuf,
     Ok(dir)
 }
 
-/// The boot folder part `part` (its package in `dir`) is built for:
-/// `boot` for a boot stage (stage0, or a boot core library), `None` for
-/// any other part, so a part that is not a boot stage never reads a
-/// node's boot crate.
-fn boot_folder_of<'a>(
+/// The folder part `part` (its package in `dir`) of node `n` builds from
+/// (`DAGON_BOOT_CRATE`): the node's folder holding its MCU definition, for
+/// every part, so each image of the node takes the definition with the
+/// project's overrides. A boot stage (stage0, a boot core library) also
+/// reads the node's boot crate there, which must exist.
+fn part_folder(
+    cfg: &Config,
+    n: &dagon_topology::schema::Node,
     part: &Part,
     dir: &Path,
-    boot: Option<&'a Path>,
-) -> Result<Option<&'a Path>, String> {
-    let stage = part.name == STAGE0 || boot_library(dir)?;
-    Ok(boot.filter(|_| stage))
+) -> Result<PathBuf, String> {
+    let folder = nodebuild::definition_folder(&cfg.base, &n.id)?;
+    if part.name == STAGE0 || boot_library(dir)? {
+        boot_crate(cfg, n)?;
+    }
+    Ok(folder)
 }
 
 /// Whether the package in `dir` is a boot core library (it declares
@@ -1514,39 +1517,49 @@ mod tests {
         assert_eq!(names, ["stage0", "bootcore"]);
     }
 
-    /// Only the boot stages (stage0 and a boot core library) are built for
-    /// the node's boot folder (`DAGON_BOOT_CRATE`); every other first-write
-    /// part (the ESP32-S3 factory agent, a board's own part) is built
-    /// without it.
+    /// Every first-write part of a node (stage0, a boot core library, the
+    /// ESP32-S3 factory agent, a board's own part) builds from the node's
+    /// MCU definition (`DAGON_BOOT_CRATE`, `boot/<id>/mcu.toml`); a boot
+    /// stage needs the node's boot crate there as well, any other part
+    /// only the definition. Without the definition no part builds.
     #[test]
-    fn only_boot_stages_get_the_boot_folder() {
+    fn every_part_builds_from_the_node_s_definition() {
         let reg = &crate::defs::registry_at(&Config::default(), Some(&here())).unwrap();
+        let (cfg, _) = area("parts");
+        let folder = cfg.base.join("boot/n");
+        let node = |mcu: &str| dagon_topology::schema::Node {
+            id: "n".into(),
+            mcu: mcu.into(),
+            ..dagon_topology::parse_str(YAML).unwrap().nodes[0].clone()
+        };
         let mut seen = Vec::new();
         for mcu in reg.mcus().iter().map(|m| m.id.as_str()) {
             let board = reg.default_board(mcu).map(|b| b.id.as_str());
             for p in parts(reg, mcu, board) {
                 let dir = part_dir(&here(), &p).unwrap();
-                let folder = boot_folder_of(&p, &dir, Some(Path::new("boot/n"))).unwrap();
-                seen.push((mcu.to_string(), p.name.clone(), folder.is_some()));
+                let e = part_folder(&cfg, &node(mcu), &p, &dir).unwrap_err();
+                assert!(e.contains("dagon gen"), "{mcu} {}: {e}", p.name);
+                std::fs::create_dir_all(&folder).unwrap();
+                std::fs::write(folder.join("mcu.toml"), "").unwrap();
+                let got = part_folder(&cfg, &node(mcu), &p, &dir);
+                seen.push((mcu.to_string(), p.name.clone(), got.clone().ok()));
+                std::fs::write(folder.join("Cargo.toml"), "").unwrap();
+                assert_eq!(
+                    part_folder(&cfg, &node(mcu), &p, &dir),
+                    Ok(folder.clone()),
+                    "{mcu} {}",
+                    p.name
+                );
+                std::fs::remove_dir_all(&folder).unwrap();
             }
         }
         let boot_stage = |name: &str| ["stage0", "bootcore"].contains(&name);
         assert!(seen.iter().any(|(_, n, _)| !boot_stage(n)), "{seen:?}");
-        for (mcu, name, has) in &seen {
-            assert_eq!(*has, boot_stage(name), "{mcu} {name}");
+        for (mcu, name, got) in &seen {
+            // Without a boot crate only the parts that are no boot stage build.
+            assert_eq!(got.is_some(), !boot_stage(name), "{mcu} {name}");
         }
-        let app = Part {
-            name: "app".into(),
-            owner: Want::Mcu("rp2040".into()),
-            sub: String::new(),
-            bin: None,
-            package: None,
-        };
-        let dir = here().join("targets/mcu/rp2040");
-        assert_eq!(
-            boot_folder_of(&app, &dir, Some(Path::new("boot/n"))).unwrap(),
-            None
-        );
+        let _ = std::fs::remove_dir_all(&cfg.base);
     }
 
     #[test]

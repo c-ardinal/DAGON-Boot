@@ -26,8 +26,6 @@ toml = { version = "0.8", default-features = false, features = ["parse"] }
 [dev-dependencies]
 # Parity tests: the definitions match the built-in tables (these crates depend
 # on this one; the cycle is through dev-dependencies only).
-# The MCU packages' layout.rs files, included by tests/defs_layout.rs.
-dagon-core = { path = "../dagon-core" }
 dagon-host = { path = "../dagon-host", features = ["defs"] }
 dagon-romlink = { path = "../dagon-romlink" }
 dagon-sign = { path = "../dagon-sign" }

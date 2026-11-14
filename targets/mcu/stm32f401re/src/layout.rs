@@ -1,6 +1,9 @@
 //! STM32F401RE flash layout (512 KiB: sectors 16K x4, 64K, 128K x3; the
-//! topology's `f401-default` flash map) and the boot settings. Plain data:
-//! this package's build.rs and the host test-image tool include this file.
+//! topology's `f401-default` flash map) and the boot settings. Every
+//! address, length and period comes from the MCU definition the node build
+//! is given (the generated constants: `crate::slots`, `crate::APP_LOG_REGION`
+//! and the others); nothing here is a second copy. The table is the
+//! built-in definition's:
 //!
 //! | Sector | Size | Holds |
 //! |---|---|---|
@@ -13,84 +16,107 @@
 
 use dagon_core::boot::SlotLayout;
 use dagon_core::log::LogLayout;
+use dagon_format::header::HEADER_SIZE;
 use dagon_port::FlashRegion;
 
-/// Stage0: all of sector 0, where the core fetches its reset vector.
-pub const STAGE0: u32 = 0x0800_0000;
-pub const STAGE0_SIZE: u32 = 0x4000;
+/// Stage0: where the core fetches its reset vector.
+pub const STAGE0: u32 = crate::STAGE0_REGION.0;
+pub const STAGE0_SIZE: u32 = crate::STAGE0_REGION.1;
 
-/// State log faces A and B: sectors 1 and 2. One log holds the APP and the
-/// boot core records (the small sectors leave no room for a second pair).
-pub const LOG: LogLayout = LogLayout {
-    faces: [0x0800_4000, 0x0800_8000],
-    face_len: 0x4000,
+/// State log faces A and B. One log holds the APP and the boot core
+/// records, so the definition gives both logs the same faces.
+pub const LOG: LogLayout = {
+    let (app, core) = (crate::APP_LOG_REGION, crate::BOOTCORE_LOG_REGION);
+    assert!(
+        app.0[0] == core.0[0] && app.0[1] == core.0[1] && app.1 == core.1,
+        "the STM32F401RE package keeps app and boot core records in one log:          [layout] app_log and bootcore_log must agree"
+    );
+    LogLayout {
+        faces: app.0,
+        face_len: app.1,
+    }
 };
 
-/// Boot core slots A (sector 4) and B (sector 7): (start, length), header
-/// inline at the slot start, body (vector table) at +512.
-pub const CORE_SLOTS: [(u32, u32); 2] = [(0x0801_0000, 0x1_0000), (0x0806_0000, 0x2_0000)];
+/// Boot core slots (start, length), A first, header inline at the slot
+/// start, body (vector table) at +512.
+pub const CORE_SLOTS: [(u32, u32); crate::slots::BOOTCORE.len()] = crate::slots::BOOTCORE;
 
-/// APP-A (sector 5) and APP-B (sector 6), header inline at the slot start.
+/// The APP slots `(start, length)`, A first, each with its own length,
+/// header inline at the slot start.
 pub const SLOTS: SlotLayout = SlotLayout {
-    slots: &[0x0802_0000, 0x0804_0000],
-    slot_len: 0x2_0000,
+    slots: &crate::slots::APP,
 };
 
-pub const MCU_ID: u16 = dagon_format::header::mcu_id::STM32F401XE;
-/// Smallest flash the layout fits (boot core B ends in sector 7).
-pub const MIN_FLASH_SIZE: usize = 512 * 1024;
+/// The MCU id in image headers (`wire_id`).
+pub const MCU_ID: u16 = crate::MCU_WIRE_ID;
+/// Smallest flash the layout fits: the default flash map.
+pub const MIN_FLASH_SIZE: usize = crate::DEFAULT_FLASH.1 as usize;
 /// RAM every image links against.
-pub const RAM: u32 = 0x2000_0000;
-pub const RAM_LEN: u32 = 96 * 1024;
-pub const HEADER_LEN: u32 = 512;
+pub const RAM: u32 = crate::RAM_REGION.0;
+pub const RAM_LEN: u32 = crate::RAM_REGION.1;
+pub const HEADER_LEN: u32 = HEADER_SIZE as u32;
 
-pub const TRIAL_WDT_MS: u32 = 8_000;
-pub const CONFIRMED_WDT_MS: u32 = 8_000;
+pub use crate::{CONFIRMED_WDT_MS, TRIAL_WDT_MS};
 
-/// Sector 3: the conformance build's scratch (`[conformance] scratch` of
-/// dagon-mcu.toml); no image or log is there.
-pub const SCRATCH_SECTOR: u32 = 0x0800_C000;
-pub const SCRATCH_SECTOR_LEN: u32 = 0x4000;
+/// The conformance build's scratch (`[conformance] scratch`); no image or
+/// log is there.
+pub const SCRATCH_SECTOR: u32 = scratch().0;
+pub const SCRATCH_SECTOR_LEN: u32 = scratch().1;
 
 /// Regions DAGON may erase and write (the flash port's geometry, and the
-/// layout a conformance build declares): the two log faces, the scratch
-/// sector, boot core slot A, the two APP slots and boot core slot B.
-/// Reads are allowed anywhere in flash; stage0's sector is never erased or
-/// written through the port.
-pub const FLASH_REGIONS: [FlashRegion; 5] = [
+/// layout a conformance build declares): the log faces, the scratch, each
+/// boot core slot and each APP slot, each erased in the unit of the
+/// definition's erase region it starts in. Reads are allowed anywhere in
+/// flash; stage0's region is never erased or written through the port.
+pub const FLASH_REGIONS: [FlashRegion; 2 + CORE_SLOTS.len() + crate::slots::APP.len()] = {
+    let mut out = [region(0, 0); 2 + CORE_SLOTS.len() + crate::slots::APP.len()];
+    assert!(
+        LOG.faces[1] == LOG.faces[0] + LOG.face_len,
+        "the state log faces are adjacent"
+    );
+    out[0] = region(LOG.faces[0], 2 * LOG.face_len);
+    out[1] = region(SCRATCH_SECTOR, SCRATCH_SECTOR_LEN);
+    let mut i = 0;
+    while i < CORE_SLOTS.len() {
+        out[2 + i] = region(CORE_SLOTS[i].0, CORE_SLOTS[i].1);
+        i += 1;
+    }
+    let mut j = 0;
+    while j < crate::slots::APP.len() {
+        out[2 + i + j] = region(crate::slots::APP[j].0, crate::slots::APP[j].1);
+        j += 1;
+    }
+    out
+};
+
+/// A writable region erased in the unit of the erase region it starts in.
+const fn region(start: u32, len: u32) -> FlashRegion {
     FlashRegion {
-        start: LOG.faces[0],
-        len: 2 * LOG.face_len,
-        erase_size: LOG.face_len,
+        start,
+        len,
+        erase_size: erase_unit(start),
         write_size: 4,
         erased_value: 0xFF,
-    },
-    FlashRegion {
-        start: SCRATCH_SECTOR,
-        len: SCRATCH_SECTOR_LEN,
-        erase_size: SCRATCH_SECTOR_LEN,
-        write_size: 4,
-        erased_value: 0xFF,
-    },
-    FlashRegion {
-        start: CORE_SLOTS[0].0,
-        len: CORE_SLOTS[0].1,
-        erase_size: CORE_SLOTS[0].1,
-        write_size: 4,
-        erased_value: 0xFF,
-    },
-    FlashRegion {
-        start: SLOTS.slots[0],
-        len: 2 * SLOTS.slot_len,
-        erase_size: SLOTS.slot_len,
-        write_size: 4,
-        erased_value: 0xFF,
-    },
-    FlashRegion {
-        start: CORE_SLOTS[1].0,
-        len: CORE_SLOTS[1].1,
-        erase_size: CORE_SLOTS[1].1,
-        write_size: 4,
-        erased_value: 0xFF,
-    },
-];
+    }
+}
+
+/// The erase unit at `addr` (`[execution] erase_regions`); the first
+/// region's for an address outside them all.
+const fn erase_unit(addr: u32) -> u32 {
+    let r = &crate::ERASE_REGIONS;
+    let mut i = 0;
+    while i < r.len() {
+        if addr >= r[i].start && addr - r[i].start < r[i].len {
+            return r[i].unit;
+        }
+        i += 1;
+    }
+    r[0].unit
+}
+
+const fn scratch() -> (u32, u32) {
+    match crate::CONFORM_SCRATCH {
+        Some(s) => s,
+        None => panic!("the STM32F401RE definition gives a conformance scratch"),
+    }
+}

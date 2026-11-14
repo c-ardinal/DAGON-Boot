@@ -29,6 +29,7 @@ pub mod links;
 pub mod liveness;
 pub mod otadata;
 pub mod rom;
+pub mod rwdt;
 pub mod serve;
 pub mod store;
 pub mod trial;

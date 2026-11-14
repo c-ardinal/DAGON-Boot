@@ -363,6 +363,18 @@ pub struct Watchdog {
     /// The watchdog-reset flag the lockup fuse needs (retained-formats.md
     /// 3.4), as a fact: where it comes from, or `none`.
     pub flag: Fact<WatchdogFlag>,
+    /// The periods this MCU's watchdog can run, ms: `trial_ms` and
+    /// `confirmed_ms` lie inside it.
+    pub range_ms: PeriodRange,
+}
+
+/// `[watchdog] range_ms`: the shortest and the longest period, ms, both
+/// included.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PeriodRange {
+    pub min: u32,
+    pub max: u32,
 }
 
 /// Where a watchdog-reset flag comes from: set by a watchdog reset, kept
@@ -1137,9 +1149,22 @@ pub(super) fn peripherals(m: &McuDef) -> Result<(), String> {
 /// `[watchdog]` periods.
 pub(super) fn watchdog(m: &McuDef) -> Result<(), String> {
     let Some(w) = &m.watchdog else { return Ok(()) };
-    fail(w.trial_ms == 0 || w.confirmed_ms == 0, || {
-        "watchdog.trial_ms and confirmed_ms must be above 0".into()
+    let r = w.range_ms;
+    fail(r.min == 0 || r.min > r.max, || {
+        format!(
+            "watchdog.range_ms {}..={} must be a range of periods above 0",
+            r.min, r.max
+        )
     })?;
+    for (name, ms) in [("trial_ms", w.trial_ms), ("confirmed_ms", w.confirmed_ms)] {
+        fail(ms < r.min || ms > r.max, || {
+            format!(
+                "watchdog.{name} {ms} is outside the periods MCU '{}'s watchdog can run, \
+                 {}..={} ms (watchdog.range_ms)",
+                m.id, r.min, r.max
+            )
+        })?;
+    }
     fail(w.trial_attempts == 0, || {
         "watchdog.trial_attempts must be above 0".into()
     })

@@ -235,7 +235,7 @@ built for one node of a project, after `dagon gen`:
 ```sh
 export DAGON_PUBKEY=/path/outside/the/repo/dagon-signing.pub
 (cd <project>/boot/<node> && cargo build --release)    # the boot core
-(cd targets/mcu/rp2040/stage0 && DAGON_BOOT_CRATE=<project>/boot/<node> cargo build --release)
+(cd targets/mcu/rp2040/stage0 && DAGON_BOOT_CRATE=/abs/path/to/<project>/boot/<node> cargo build --release)
 ```
 
 `--features slot-b` links the boot core for boot core slot B; a release
@@ -259,6 +259,15 @@ built into its own flash and starts no core whose signature does not
 verify; with none to start, it blinks the reason's code on the board's
 `[boot] led` (a node without a board, or a board without the LED or with
 its halt pattern off, shows nothing).
+
+The addresses and lengths every image links for (slots, logs, stage0)
+and the watchdog and trial values come from the node's MCU definition in
+that folder, `mcu.toml`, which `dagon gen` writes with the project's
+overrides applied (the app's `.cargo/config.toml` names the same folder),
+so a project that moves its slots gets matching firmware without a code
+edit. `DAGON_BOOT_CRATE` is an absolute path; an `mcu.toml` of another MCU
+or another definition format is refused, and a build without the variable
+uses this package's `dagon-mcu.toml`.
 
 
 ## Keys

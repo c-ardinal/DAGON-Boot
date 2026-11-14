@@ -66,7 +66,9 @@ def firmware_lints():
     """One clippy run per firmware build a package declares in
     `[package.metadata.dagon.lint]`: `features` (one feature set per run,
     "" for the defaults), `target` (left out: the package's own
-    `.cargo/config.toml` names it) and `env` (variables the build needs).
+    `.cargo/config.toml` names it) and `env` (variables the build needs; a
+    value starting with `./` or `../` is a folder relative to the package,
+    which the run gives as an absolute path).
     `toolchain` is the package's own `rust-toolchain.toml` channel, else
     "stable"."""
     runs = []

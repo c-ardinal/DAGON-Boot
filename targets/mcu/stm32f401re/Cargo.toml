@@ -57,10 +57,8 @@ ed25519-compact = { version = "2.6", default-features = false, features = ["opt_
 
 [build-dependencies]
 dagon-mcu-build = { path = "../build" }
-# build.rs includes src/layout.rs (one source for addresses and memory.x).
-dagon-core = { path = "../../../crates/dagon-core" }
+# build.rs: the inline header's size (memory.x puts the body after it).
 dagon-format = { path = "../../../crates/dagon-format" }
-dagon-port = { path = "../../../crates/dagon-port" }
 
 [dev-dependencies]
 # tests/dma_map.rs: the definition's DMA request mapping against ST's chip

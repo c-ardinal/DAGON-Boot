@@ -1,9 +1,10 @@
 //! The agent's receiver on the ESP32-S3 (kind V).
 //!
-//! - Bodies go to the OTA partition of the slot (ota_0 = A, ota_1 = B), from
-//!   the partition start; only what the body covers is erased.
-//! - The 512-byte header is detached: one 4 KiB sector per slot at the start
-//!   of the dagon partition (+0x0000 A, +0x1000 B, +0x2000 factory).
+//! - Each target and slot (app A and B, the agent's factory slot) is where
+//!   the definition's slot layout puts it (`[[slot_layout]]`: start,
+//!   capacity, detached header): the body from the start, only what it
+//!   covers erased; the 512-byte header in its own erase unit of the dagon
+//!   partition.
 //! - SET_PENDING writes an otadata trial entry; CONFIRM marks the running
 //!   entry Valid. No DAGON state log is kept: STATUS maps otadata.
 //! - Otadata keeps no digest, so an erase first takes the slot out of the
@@ -14,16 +15,17 @@
 //!   stage starts factory when no OTA slot is valid), so there is nothing
 //!   to withdraw or select.
 
-use crate::layout::{app_partition, Partition, DAGON, SLOT_A, SLOT_B, SLOT_FACTORY, WRITE_UNIT};
+use crate::layout::{SLOT_FACTORY, WRITE_UNIT};
 use crate::otadata::{selected_view, Counted, ENTRY_LEN};
 use dagon_agent::{erase_plan, SlotStore, StoreError, Transition};
 use dagon_format::header::{self, ImageHeader, HEADER_SIZE};
-use dagon_port::timeout::{EraseLayout, EraseRegion, Plan};
+use dagon_port::timeout::{EraseLayout, EraseRegion, HeaderPlace, Plan, SlotLayout};
 use dagon_port::{Flash, Watchdog};
 use dagon_proto::payload::{target, SlotState, StatusResp};
 
-/// One detached header sector per slot in the dagon partition.
-pub const HEADER_SECTOR: u32 = 0x1000;
+/// One detached header sector (an erase unit) per slot in the dagon
+/// partition.
+pub const HEADER_SECTOR: u32 = crate::layout::ERASE_UNIT;
 const WORD: usize = WRITE_UNIT as usize;
 
 /// otadata as the receiver needs it.
@@ -62,26 +64,45 @@ pub struct EspStore<F, O, W> {
     pub(crate) wdt: W,
     /// The erase regions the board returns (`BoardDef::erase_regions`).
     regions: &'static [EraseRegion],
+    /// Where each target and slot lies (the definition's slot layouts).
+    slots: &'static [SlotLayout],
     rx: Option<Rx>,
 }
 
-/// The partition a slot of `t` writes: an OTA slot for APP, factory for
-/// AGENT.
-fn ota_slot(t: u8, slot: u8) -> Result<Partition, StoreError> {
-    match (t, slot) {
-        (target::APP, SLOT_A | SLOT_B) | (target::AGENT, SLOT_FACTORY) => {
-            app_partition(slot).ok_or(StoreError::Unsupported)
-        }
-        _ => Err(StoreError::Unsupported),
+/// Where a body (start, capacity) and its detached header go, for a target
+/// this store receives (the app and the agent).
+#[derive(Clone, Copy)]
+struct Place {
+    start: u32,
+    capacity: u32,
+    header: u32,
+}
+
+/// The place of slot `slot` of target `t` in `slots`.
+fn place(slots: &[SlotLayout], t: u8, slot: u8) -> Result<Place, StoreError> {
+    if t != target::APP && t != target::AGENT {
+        return Err(StoreError::Unsupported);
+    }
+    let l = slots
+        .iter()
+        .find(|l| (l.target, l.slot) == (t, slot))
+        .ok_or(StoreError::Unsupported)?;
+    match l.header {
+        HeaderPlace::Detached { at } => Ok(Place {
+            start: l.start,
+            capacity: l.capacity,
+            header: at,
+        }),
+        HeaderPlace::Inline => Err(StoreError::Unsupported),
     }
 }
 
-/// Start of the detached header sector of `slot` (A, B or factory).
-pub fn header_addr(slot: u8) -> Result<u32, StoreError> {
-    if slot > SLOT_FACTORY {
-        return Err(StoreError::Range);
-    }
-    Ok(DAGON.offset + u32::from(slot) * HEADER_SECTOR)
+/// Start of the detached header sector of slot `slot` of target `t` in the
+/// definition's slot layouts.
+pub fn header_addr(t: u8, slot: u8) -> Result<u32, StoreError> {
+    place(&crate::SLOT_LAYOUTS, t, slot)
+        .map(|p| p.header)
+        .map_err(|_| StoreError::Range)
 }
 
 fn flash_err<T>(r: Result<T, dagon_port::FlashError>) -> Result<T, StoreError> {
@@ -96,14 +117,25 @@ impl<F: Flash, O: Otadata, W: Watchdog> EspStore<F, O, W> {
             ota,
             wdt,
             regions,
+            slots: &crate::SLOT_LAYOUTS,
             rx: None,
         }
     }
 
-    /// Parsable header of `slot`, if any.
-    fn header(&mut self, slot: u8) -> Option<[u8; HEADER_SIZE]> {
+    /// Receives into the places `slots` gives instead of the definition's.
+    pub fn with_slots(self, slots: &'static [SlotLayout]) -> Self {
+        Self { slots, ..self }
+    }
+
+    fn place(&self, t: u8, slot: u8) -> Result<Place, StoreError> {
+        place(self.slots, t, slot)
+    }
+
+    /// Parsable header of slot `slot` of target `t`, if any.
+    fn target_header(&mut self, t: u8, slot: u8) -> Option<[u8; HEADER_SIZE]> {
+        let at = self.place(t, slot).ok()?.header;
         let mut h = [0u8; HEADER_SIZE];
-        self.read_header(slot, &mut h).ok()?;
+        flash_err(self.flash.read(at, &mut h)).ok()?;
         ImageHeader::parse(&h).ok().map(|_| h)
     }
 
@@ -125,8 +157,12 @@ impl<F: Flash, O: Otadata, W: Watchdog> SlotStore for EspStore<F, O, W> {
             ..Default::default()
         };
         let mut present = [false; 3];
-        for s in [SLOT_A, SLOT_B, SLOT_FACTORY] {
-            if let Some(h) = self.header(s) {
+        for l in self.slots {
+            let s = l.slot;
+            if usize::from(s) >= st.slots.len() {
+                continue;
+            }
+            if let Some(h) = self.target_header(l.target, s) {
                 let info = &mut st.slots[s as usize];
                 info.state = SlotState::Written;
                 info.version = ImageHeader::parse(&h)
@@ -179,7 +215,7 @@ impl<F: Flash, O: Otadata, W: Watchdog> SlotStore for EspStore<F, O, W> {
     }
 
     fn capacity(&self, t: u8, slot: u8) -> u32 {
-        ota_slot(t, slot).map_or(0, |p| p.size)
+        self.place(t, slot).map_or(0, |p| p.capacity)
     }
 
     /// The definition's plan ([`SlotStore::erase_planned`]).
@@ -193,7 +229,7 @@ impl<F: Flash, O: Otadata, W: Watchdog> SlotStore for EspStore<F, O, W> {
     fn erase_layout(&self) -> Option<EraseLayout> {
         Some(EraseLayout {
             regions: self.regions,
-            slots: &crate::SLOT_LAYOUTS,
+            slots: self.slots,
         })
     }
 
@@ -208,12 +244,12 @@ impl<F: Flash, O: Otadata, W: Watchdog> SlotStore for EspStore<F, O, W> {
         plan: Plan<'_>,
         _: &Transition,
     ) -> Result<(), StoreError> {
-        let p = ota_slot(t, slot)?;
+        let p = self.place(t, slot)?;
         // Never wipe what is running, whatever the caller thinks.
         if slot == self.ota.running() {
             return Err(StoreError::Unsupported);
         }
-        if len > p.size {
+        if len > p.capacity {
             return Err(StoreError::Range);
         }
         self.rx = None;
@@ -243,7 +279,7 @@ impl<F: Flash, O: Otadata, W: Watchdog> SlotStore for EspStore<F, O, W> {
         data: &[u8],
         _: &Transition,
     ) -> Result<(), StoreError> {
-        let p = ota_slot(t, slot)?;
+        let p = self.place(t, slot)?;
         let mut rx = self
             .rx
             .filter(|r| r.slot == slot)
@@ -261,14 +297,14 @@ impl<F: Flash, O: Otadata, W: Watchdog> SlotStore for EspStore<F, O, W> {
             rx.tail_len += n;
             data = &data[n..];
             if rx.tail_len == WORD {
-                self.program(p.offset + rx.flushed, &rx.tail)?;
+                self.program(p.start + rx.flushed, &rx.tail)?;
                 rx.flushed += WRITE_UNIT;
                 rx.tail_len = 0;
             }
         }
         let whole = data.len() / WORD * WORD;
         if whole > 0 {
-            self.program(p.offset + rx.flushed, &data[..whole])?;
+            self.program(p.start + rx.flushed, &data[..whole])?;
             rx.flushed += whole as u32;
         }
         let rest = &data[whole..];
@@ -276,7 +312,7 @@ impl<F: Flash, O: Otadata, W: Watchdog> SlotStore for EspStore<F, O, W> {
         rx.tail_len += rest.len();
         if end == rx.len as u64 && rx.tail_len > 0 {
             rx.tail[rx.tail_len..].fill(0xFF);
-            self.program(p.offset + rx.flushed, &rx.tail)?;
+            self.program(p.start + rx.flushed, &rx.tail)?;
             rx.flushed += WRITE_UNIT;
             rx.tail_len = 0;
         }
@@ -285,12 +321,12 @@ impl<F: Flash, O: Otadata, W: Watchdog> SlotStore for EspStore<F, O, W> {
     }
 
     fn read(&mut self, t: u8, slot: u8, offset: u32, buf: &mut [u8]) -> Result<(), StoreError> {
-        let p = ota_slot(t, slot)?;
-        if offset as u64 + buf.len() as u64 > p.size as u64 {
+        let p = self.place(t, slot)?;
+        if offset as u64 + buf.len() as u64 > p.capacity as u64 {
             return Err(StoreError::Range);
         }
         self.wdt.feed();
-        flash_err(self.flash.read(p.offset + offset, buf))
+        flash_err(self.flash.read(p.start + offset, buf))
     }
 
     fn write_header(
@@ -299,13 +335,17 @@ impl<F: Flash, O: Otadata, W: Watchdog> SlotStore for EspStore<F, O, W> {
         hdr: &[u8; HEADER_SIZE],
         _: &Transition,
     ) -> Result<(), StoreError> {
-        ota_slot(target::APP, slot)?;
+        let at = self.place(target::APP, slot)?.header;
         self.rx = None;
-        self.program(header_addr(slot)?, hdr)
+        self.program(at, hdr)
     }
 
     fn read_header(&mut self, slot: u8, out: &mut [u8; HEADER_SIZE]) -> Result<(), StoreError> {
-        flash_err(self.flash.read(header_addr(slot)?, out))
+        let at = self
+            .place(target::APP, slot)
+            .map_err(|_| StoreError::Range)?
+            .header;
+        flash_err(self.flash.read(at, out))
     }
 
     fn set_pending(
@@ -314,7 +354,7 @@ impl<F: Flash, O: Otadata, W: Watchdog> SlotStore for EspStore<F, O, W> {
         _header: &[u8; HEADER_SIZE],
         _: &Transition,
     ) -> Result<(), StoreError> {
-        ota_slot(target::APP, slot)?;
+        self.place(target::APP, slot)?;
         self.ota.set_next(slot)
     }
 
@@ -334,9 +374,9 @@ impl<F: Flash, O: Otadata, W: Watchdog> SlotStore for EspStore<F, O, W> {
         hdr: &[u8; HEADER_SIZE],
         _: &Transition,
     ) -> Result<(), StoreError> {
-        ota_slot(t, slot)?;
+        let at = self.place(t, slot)?.header;
         self.rx = None;
-        self.program(header_addr(slot)?, hdr)
+        self.program(at, hdr)
     }
 
     fn read_target_header(
@@ -345,7 +385,7 @@ impl<F: Flash, O: Otadata, W: Watchdog> SlotStore for EspStore<F, O, W> {
         slot: u8,
         out: &mut [u8; HEADER_SIZE],
     ) -> Result<(), StoreError> {
-        ota_slot(t, slot)?;
-        self.read_header(slot, out)
+        let at = self.place(t, slot).map_err(|_| StoreError::Range)?.header;
+        flash_err(self.flash.read(at, out))
     }
 }

@@ -1,9 +1,10 @@
 //! Trial watchdog: an app on trial never feeds or restarts the RTC WDT, so an
-//! image that is not confirmed within the WDT timeout (4 s from start) is
-//! reset and the 2nd stage rolls it back (one attempt). Until the trial
-//! status is known it does not feed either. Once confirmed it feeds, and with
-//! a [`Liveness`] registry attached only while every task is within the
-//! deadline it announced.
+//! image that is not confirmed within the trial period (`[watchdog]
+//! trial_ms`, armed at start) is reset and the 2nd stage rolls it back (one
+//! attempt). Until the trial status is known it does not feed either. Once
+//! confirmed it restarts the watchdog with the confirmed period (`[watchdog]
+//! confirmed_ms`) and feeds, and with a [`Liveness`] registry attached only
+//! while every task is within the deadline it announced.
 
 use dagon_events::Clock;
 use dagon_port::Watchdog;
@@ -24,15 +25,19 @@ pub struct TrialWatchdog<W, C> {
     clock: C,
     status: Status,
     liveness: Option<&'static Liveness>,
+    /// The period a confirmed image runs, ms.
+    confirmed_ms: u32,
 }
 
 impl<W: Watchdog, C: Clock> TrialWatchdog<W, C> {
-    pub fn new(wdt: W, clock: C) -> Self {
+    /// `confirmed_ms`: the period a confirmed image runs.
+    pub fn new(wdt: W, clock: C, confirmed_ms: u32) -> Self {
         Self {
             wdt,
             clock,
             status: Status::Unknown,
             liveness: None,
+            confirmed_ms,
         }
     }
 
@@ -54,9 +59,13 @@ impl<W: Watchdog, C: Clock> TrialWatchdog<W, C> {
         self.status = Status::Trial;
     }
 
-    /// Confirmed (or found confirmed at start): feed, subject to liveness.
+    /// Confirmed (or found confirmed at start): the confirmed period from
+    /// now on, then feed, subject to liveness.
     pub fn end_trial(&mut self) {
-        self.status = Status::Confirmed;
+        if self.status != Status::Confirmed {
+            self.status = Status::Confirmed;
+            self.wdt.start(self.confirmed_ms);
+        }
     }
 
     pub fn on_trial(&self) -> bool {
@@ -114,7 +123,7 @@ mod tests {
     #[test]
     fn no_feeding_on_trial_until_confirmed() {
         let (fed, now) = (Rc::new(Cell::new(0)), Rc::new(Cell::new(0)));
-        let mut w = TrialWatchdog::new(Count(fed.clone()), Fake(now.clone()));
+        let mut w = TrialWatchdog::new(Count(fed.clone()), Fake(now.clone()), 4000);
         // Status not read yet: neither feed nor restart.
         w.feed();
         w.start(4000);
@@ -127,15 +136,46 @@ mod tests {
         }
         assert_eq!(fed.get(), 0, "fed or restarted on trial");
         w.end_trial();
+        assert_eq!(fed.get(), 100, "restarted with the confirmed period");
         w.feed();
-        assert_eq!(fed.get(), 1);
+        assert_eq!(fed.get(), 101);
+    }
+
+    struct Starts(Rc<std::cell::RefCell<Vec<u32>>>);
+    impl Watchdog for Starts {
+        fn start(&mut self, ms: u32) {
+            self.0.borrow_mut().push(ms);
+        }
+        fn feed(&mut self) {}
+    }
+
+    /// The trial period runs until the image is confirmed; from then on the
+    /// confirmed period, once, whatever the two are.
+    #[test]
+    fn a_confirmed_image_runs_the_confirmed_period() {
+        let starts = Rc::new(std::cell::RefCell::new(Vec::new()));
+        let mut w = TrialWatchdog::new(Starts(starts.clone()), Fake(Rc::new(Cell::new(0))), 9_000);
+        w.begin_trial();
+        assert!(
+            starts.borrow().is_empty(),
+            "the trial period is the one armed at start"
+        );
+        w.end_trial();
+        w.end_trial();
+        assert_eq!(*starts.borrow(), [9_000]);
+        // Found confirmed at start: straight to the confirmed period.
+        let starts = Rc::new(std::cell::RefCell::new(Vec::new()));
+        let mut w = TrialWatchdog::new(Starts(starts.clone()), Fake(Rc::new(Cell::new(0))), 7_000);
+        w.end_trial();
+        assert_eq!(*starts.borrow(), [7_000]);
     }
 
     #[test]
     fn an_overdue_task_stops_the_feeding() {
         static L: Liveness = Liveness::new();
         let (fed, now) = (Rc::new(Cell::new(0)), Rc::new(Cell::new(0)));
-        let mut w = TrialWatchdog::new(Count(fed.clone()), Fake(now.clone())).with_liveness(&L);
+        let mut w =
+            TrialWatchdog::new(Count(fed.clone()), Fake(now.clone()), 4000).with_liveness(&L);
         w.end_trial();
         let task = L.register().unwrap();
         task.busy(0, 100);
@@ -143,9 +183,9 @@ mod tests {
         w.feed();
         now.set(100_000);
         w.feed();
-        assert_eq!(fed.get(), 1, "overdue at 100 ms");
+        assert_eq!(fed.get(), 101, "overdue at 100 ms");
         task.idle();
         w.feed();
-        assert_eq!(fed.get(), 2);
+        assert_eq!(fed.get(), 102);
     }
 }

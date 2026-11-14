@@ -1,6 +1,6 @@
 //! The boot core trial cell (`dagon_core::bootcore::trial_cell`) in the
 //! RTC backup registers BKP0R and BKP1R, and the independent watchdog
-//! stage0 starts before a core on trial. The backup registers keep their
+//! stage0 starts before a core on trial ([`crate::iwdg`] sets it). The backup registers keep their
 //! value through every system reset (the watchdog's included) and lose it
 //! with the backup domain's supply (RM0368, RTC backup registers; on a
 //! board whose VBAT is tied to VDD, with power). Writing them needs the
@@ -42,31 +42,9 @@ pub fn holds() -> bool {
     dagon_core::bootcore::cell_holds(read, write_word)
 }
 
-const IWDG_KR: *mut u32 = 0x4000_3000 as *mut u32;
-const IWDG_PR: *mut u32 = 0x4000_3004 as *mut u32;
-const IWDG_RLR: *mut u32 = 0x4000_3008 as *mut u32;
-const IWDG_SR: *const u32 = 0x4000_300C as *const u32;
-const KEY_UNLOCK: u32 = 0x5555;
-const KEY_RELOAD: u32 = 0xAAAA;
-const KEY_START: u32 = 0xCCCC;
-/// LSI / 64: a 2 ms tick at the LSI's nominal 32 kHz (RM0368, IWDG).
-const PRESCALE_64: u32 = 4;
-const TICK_MS: u32 = 2;
-const RELOAD_MAX: u32 = 0xFFF;
-
-/// Starts the independent watchdog with a period of `ms` (at most 8190)
-/// before stage0 jumps to a core on trial, so a core that hangs before it
-/// takes the watchdog over is reset and its start counted. The period
-/// follows the LSI, which varies between parts.
+/// Starts the independent watchdog with a period of `ms` before stage0
+/// jumps to a core on trial, so a core that hangs before it takes the
+/// watchdog over is reset and its start counted.
 pub fn arm_watchdog(ms: u32) {
-    // SAFETY: fixed IWDG registers; the started core takes the watchdog
-    // over (embassy-stm32 `IndependentWatchdog`).
-    unsafe {
-        IWDG_KR.write_volatile(KEY_START);
-        IWDG_KR.write_volatile(KEY_UNLOCK);
-        IWDG_PR.write_volatile(PRESCALE_64);
-        IWDG_RLR.write_volatile((ms / TICK_MS).min(RELOAD_MAX));
-        while IWDG_SR.read_volatile() != 0 {}
-        IWDG_KR.write_volatile(KEY_RELOAD);
-    }
+    crate::iwdg::start(ms);
 }

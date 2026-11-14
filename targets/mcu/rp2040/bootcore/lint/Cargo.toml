@@ -1,5 +1,5 @@
 # The boot folder the firmware lint builds this package against
-# (`DAGON_BOOT_CRATE = "lint"` in [package.metadata.dagon] lint): a node
+# (`DAGON_BOOT_CRATE = "./lint"` in [package.metadata.dagon] lint): a node
 # on this MCU without a board and without extensions. Never built itself.
 [package]
 name = "dagon-rp2040-bootcore-lint"

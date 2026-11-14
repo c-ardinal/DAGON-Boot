@@ -723,7 +723,6 @@ dependencies = [
 name = "dagon-topology"
 version = "0.1.0"
 dependencies = [
- "dagon-core",
  "dagon-format",
  "dagon-host",
  "dagon-port",

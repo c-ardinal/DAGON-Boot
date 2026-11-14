@@ -1,13 +1,17 @@
-//! DAGON's flash layout on the ESP32-S3. `partitions.csv` (next to this
-//! crate's `Cargo.toml`) is the table that gets flashed; a host test keeps
-//! the two in step. It needs a chip with at least [`MIN_FLASH_SIZE`]; the
-//! board crate states the actual size (espflash `--flash-size`).
+//! DAGON's flash layout on the ESP32-S3: the partition table the MCU
+//! definition names (`partitions.csv` next to this crate's `Cargo.toml`,
+//! the table that gets flashed), as the build generates it
+//! (`crate::PARTITION_TABLE`); nothing here is a second copy. It needs a
+//! chip with at least [`MIN_FLASH_SIZE`]; the board crate states the actual
+//! size (espflash `--flash-size`).
 
 use dagon_port::FlashRegion;
 
-/// Smallest flash the table fits (it ends at 0x720000).
-pub const MIN_FLASH_SIZE: u32 = 8 * 1024 * 1024;
-pub const ERASE_UNIT: u32 = 4096;
+/// Smallest flash the table fits: its end, rounded up to a power of two.
+pub const MIN_FLASH_SIZE: u32 = table_end().next_power_of_two();
+/// The erase unit of the MCU's first erase region (`[execution]
+/// erase_regions`).
+pub const ERASE_UNIT: u32 = crate::ERASE_REGIONS[0].unit;
 pub const WRITE_UNIT: u32 = 4;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -19,45 +23,77 @@ pub struct Partition {
     pub size: u32,
 }
 
-pub const OTADATA: Partition = Partition {
-    name: "otadata",
-    ptype: 0x01,
-    subtype: 0x00,
-    offset: 0x00D000,
-    size: 0x2000,
-};
-pub const FACTORY: Partition = Partition {
-    name: "factory",
-    ptype: 0x00,
-    subtype: 0x00,
-    offset: 0x010000,
-    size: 0x100000,
-};
-pub const OTA_0: Partition = Partition {
-    name: "ota_0",
-    ptype: 0x00,
-    subtype: 0x10,
-    offset: 0x110000,
-    size: 0x300000,
-};
-pub const OTA_1: Partition = Partition {
-    name: "ota_1",
-    ptype: 0x00,
-    subtype: 0x11,
-    offset: 0x410000,
-    size: 0x300000,
-};
-/// Custom data partition (type 0x40): detached image headers.
-pub const DAGON: Partition = Partition {
-    name: "dagon",
-    ptype: 0x40,
-    subtype: 0x00,
-    offset: 0x710000,
-    size: 0x10000,
-};
+pub const OTADATA: Partition = named("otadata");
+pub const FACTORY: Partition = named("factory");
+pub const OTA_0: Partition = named("ota_0");
+pub const OTA_1: Partition = named("ota_1");
+/// Custom data partition: detached image headers.
+pub const DAGON: Partition = named("dagon");
 
 /// Every partition in table order.
-pub const PARTITIONS: [Partition; 5] = [OTADATA, FACTORY, OTA_0, OTA_1, DAGON];
+pub const PARTITIONS: [Partition; crate::PARTITION_TABLE.len()] = {
+    let t = &crate::PARTITION_TABLE;
+    let mut out = [named("factory"); crate::PARTITION_TABLE.len()];
+    let mut i = 0;
+    while i < t.len() {
+        out[i] = row(i);
+        i += 1;
+    }
+    out
+};
+
+const fn row(i: usize) -> Partition {
+    let (name, ptype, subtype, offset, size) = crate::PARTITION_TABLE[i];
+    Partition {
+        name,
+        ptype,
+        subtype,
+        offset,
+        size,
+    }
+}
+
+const fn same(a: &str, b: &str) -> bool {
+    let (a, b) = (a.as_bytes(), b.as_bytes());
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut i = 0;
+    while i < a.len() {
+        if a[i] != b[i] {
+            return false;
+        }
+        i += 1;
+    }
+    true
+}
+
+/// The partition named `name` in the table.
+const fn named(name: &str) -> Partition {
+    let mut i = 0;
+    while i < crate::PARTITION_TABLE.len() {
+        if same(crate::PARTITION_TABLE[i].0, name) {
+            return row(i);
+        }
+        i += 1;
+    }
+    panic!(
+        "the partition table lacks a partition DAGON uses (otadata, factory, ota_0, ota_1, dagon)"
+    )
+}
+
+const fn table_end() -> u32 {
+    let mut end = 0;
+    let mut i = 0;
+    while i < crate::PARTITION_TABLE.len() {
+        let (_, _, _, offset, size) = crate::PARTITION_TABLE[i];
+        if offset + size > end {
+            end = offset + size;
+        }
+        i += 1;
+    }
+    end
+}
 
 /// Boot-selection slot numbers (`dagon_port::BootSelectV`).
 pub const SLOT_A: u8 = 0;
@@ -74,11 +110,14 @@ pub fn app_partition(slot: u8) -> Option<Partition> {
     }
 }
 
-/// Slot whose app partition starts at `offset`.
+/// Slot whose body starts at `offset` (the app's slots and the agent's,
+/// in the definition's slot layouts).
 pub fn slot_at(offset: u32) -> Option<u8> {
-    [SLOT_A, SLOT_B, SLOT_FACTORY]
-        .into_iter()
-        .find(|&s| app_partition(s).is_some_and(|p| p.offset == offset))
+    use dagon_proto::payload::target;
+    crate::SLOT_LAYOUTS
+        .iter()
+        .find(|l| (l.target == target::APP || l.target == target::AGENT) && l.start == offset)
+        .map(|l| l.slot)
 }
 
 const fn region(p: Partition) -> FlashRegion {
@@ -108,58 +147,6 @@ pub fn region_for(addr: u32, len: u32) -> Option<&'static FlashRegion> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    const CSV: &str = include_str!("../partitions.csv");
-
-    fn num(s: &str) -> u32 {
-        let (digits, mul) = match s.as_bytes().last() {
-            Some(b'K') => (&s[..s.len() - 1], 1024),
-            Some(b'M') => (&s[..s.len() - 1], 1024 * 1024),
-            _ => (s, 1),
-        };
-        let v = match digits.strip_prefix("0x") {
-            Some(hex) => u32::from_str_radix(hex, 16).unwrap(),
-            None => digits.parse().unwrap(),
-        };
-        v * mul
-    }
-
-    fn ptype(s: &str) -> u8 {
-        match s {
-            "app" => 0x00,
-            "data" => 0x01,
-            _ => num(s) as u8,
-        }
-    }
-
-    fn subtype(s: &str) -> u8 {
-        match s {
-            "factory" | "ota" => 0x00,
-            "ota_0" => 0x10,
-            "ota_1" => 0x11,
-            _ => num(s) as u8,
-        }
-    }
-
-    #[test]
-    fn matches_partitions_csv() {
-        let rows: Vec<Partition> = CSV
-            .lines()
-            .map(str::trim)
-            .filter(|l| !l.is_empty() && !l.starts_with('#'))
-            .map(|l| {
-                let f: Vec<&str> = l.split(',').map(str::trim).collect();
-                Partition {
-                    name: PARTITIONS.iter().find(|p| p.name == f[0]).unwrap().name,
-                    ptype: ptype(f[1]),
-                    subtype: subtype(f[2]),
-                    offset: num(f[3]),
-                    size: num(f[4]),
-                }
-            })
-            .collect();
-        assert_eq!(rows, PARTITIONS);
-    }
 
     #[test]
     fn partitions_are_ordered_aligned_and_fit() {

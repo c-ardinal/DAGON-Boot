@@ -187,6 +187,9 @@ fn build_node(
         slots.push(('b', feats, Some(dir.join("target").join("slot-b"))));
     }
     let link_baud = link_baud(cfg, id)?;
+    // The app builds from the node's MCU definition, as its boot stages do
+    // (`dagon gen` writes it); without it the build stops.
+    let definition = definition_folder(&cfg.base, id)?;
     let out_rel = clear_output(cfg, id)?;
     let mut built = Vec::new();
     let version = crate::srcver::crate_version(&dir)?;
@@ -207,7 +210,7 @@ fn build_node(
             FirmwareEnv {
                 pubkey_hex,
                 target_tag: None,
-                boot_crate: None,
+                boot_crate: Some(&definition),
                 link_baud,
             },
             log,
@@ -294,6 +297,22 @@ enum Line {
     Err(String),
 }
 
+/// The folder holding node `id`'s MCU definition (`boot/<id>/mcu.toml`,
+/// the built-in definition with the project's overrides, written by `dagon
+/// gen`): every firmware image of the node builds from it
+/// (`DAGON_BOOT_CRATE`).
+pub(crate) fn definition_folder(base: &Path, id: &str) -> Result<PathBuf, String> {
+    let dir = base.join(crate::extgen::BOOT_CRATES).join(id);
+    let file = dir.join(dagon_topology::defs::boot_folder::MCU_FILE);
+    if !file.is_file() {
+        return Err(format!(
+            "{id}: no MCU definition in {}; run `dagon gen` first",
+            file.display()
+        ));
+    }
+    Ok(dir)
+}
+
 /// The node tag a boot core or stage0 build embeds (apps take theirs from
 /// their own `.cargo/config.toml`).
 pub const TARGET_TAG_ENV: &str = "DAGON_TARGET_TAG";
@@ -306,8 +325,8 @@ pub(crate) struct FirmwareEnv<'a> {
     pub pubkey_hex: Option<&'a str>,
     /// DAGON_TARGET_TAG: the node's tag from the topology.
     pub target_tag: Option<&'a str>,
-    /// DAGON_BOOT_CRATE: the node's boot crate folder, which a boot stage
-    /// (stage0, boot core) is built for.
+    /// DAGON_BOOT_CRATE: the node's folder ([`definition_folder`]): its MCU
+    /// definition for every image, its boot crate for a boot stage.
     pub boot_crate: Option<&'a Path>,
     /// DAGON_LINK_BAUD: the node's UART link speed ([`link_baud`]).
     pub link_baud: Option<u32>,
@@ -453,10 +472,78 @@ pub fn command(a: &BuildArgs) -> Result<(), String> {
     Ok(())
 }
 
+/// Writes node `id`'s MCU definition into the work area `base` as `dagon
+/// gen` does (the built-in `mcu`), for tests that build without running gen.
+#[cfg(test)]
+#[allow(clippy::disallowed_methods)]
+pub(crate) mod test_definition {
+    use std::path::Path;
+
+    pub(crate) fn write_test_definition(base: &Path, id: &str, mcu: &str) {
+        let dir = base.join(crate::extgen::BOOT_CRATES).join(id);
+        std::fs::create_dir_all(&dir).unwrap();
+        let text = dagon_topology::defs::boot_folder::mcu_file_text(
+            dagon_topology::defs::Registry::builtin(),
+            mcu,
+        )
+        .unwrap();
+        std::fs::write(dir.join(dagon_topology::defs::boot_folder::MCU_FILE), text).unwrap();
+    }
+}
+#[cfg(test)]
+pub(crate) use test_definition::write_test_definition;
+
 #[cfg(test)]
 // Tests set up and inspect their own scratch folders directly.
 #[allow(clippy::disallowed_methods)]
 mod tests {
+
+    /// An app builds only from its node's MCU definition: without
+    /// `boot/<id>/mcu.toml` the build stops and says to run `dagon gen`,
+    /// before cargo runs; with it the build goes on.
+    #[test]
+    fn an_app_build_without_the_node_s_definition_stops() {
+        let base = std::env::temp_dir().join(format!("dagon-nodef-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let pkg = base.join("pkg");
+        std::fs::create_dir_all(pkg.join("src")).unwrap();
+        std::fs::write(
+            pkg.join("Cargo.toml"),
+            "[package]\nname = \"nodef\"\nversion = \"0.1.0\"\nedition = \"2021\"\n[workspace]\n",
+        )
+        .unwrap();
+        std::fs::write(pkg.join("src/main.rs"), "fn main() {}\n").unwrap();
+        let mut cfg = Config {
+            base: base.clone(),
+            ..Config::default()
+        };
+        cfg.build.insert(
+            "nodef".into(),
+            BuildInputs {
+                package: PathBuf::from("pkg"),
+                bin: None,
+                features: vec![],
+                slot_b_feature: None,
+                boot_features: vec![],
+            },
+        );
+        let mut lines = Vec::new();
+        let e = build_nodes(
+            &cfg,
+            &[],
+            &mut |l| lines.push(l.to_string()),
+            &AtomicBool::new(false),
+        )
+        .unwrap_err();
+        assert!(
+            e.contains("run `dagon gen` first") && e.contains("mcu.toml"),
+            "{e}"
+        );
+        assert!(!lines.iter().any(|l| l.contains("Compiling")), "{lines:?}");
+        super::write_test_definition(&base, "nodef", "rp2040");
+        build_nodes(&cfg, &[], &mut |_| {}, &AtomicBool::new(false)).unwrap();
+        let _ = std::fs::remove_dir_all(&base);
+    }
 
     #[test]
     fn the_output_folder_is_never_cleared_through_a_junction() {
@@ -606,6 +693,7 @@ mod tests {
             pubkey: Some(pubkey),
             ..Config::default()
         };
+        super::write_test_definition(&base, "fresh", "rp2040");
         cfg.build.insert(
             "fresh".into(),
             BuildInputs {
@@ -679,6 +767,7 @@ mod tests {
             base: base.clone(),
             ..Config::default()
         };
+        super::write_test_definition(&base, "raised", "rp2040");
         cfg.build.insert(
             "raised".into(),
             BuildInputs {
@@ -850,6 +939,7 @@ mod tests {
             base: base.clone(),
             ..Config::default()
         };
+        super::write_test_definition(&base, "tiny", "rp2040");
         cfg.build.insert(
             "tiny".into(),
             BuildInputs {

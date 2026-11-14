@@ -1,8 +1,10 @@
 //! Build-script helpers shared by the DAGON MCU packages: the verifying key
 //! embedded at build time, the constants the package's MCU definition
-//! states, and the linker memory map of an APP slot.
+//! states (the one the node build is given), and the linker memory map of
+//! an image slot.
 
-use std::{env, fs, path::PathBuf};
+use std::path::{Path, PathBuf};
+use std::{env, fs};
 
 /// RFC 8032 section 7.1 TEST 1 public key (public test data).
 pub const TEST_PUBKEY_HEX: &str =
@@ -95,16 +97,386 @@ pub fn write_memory_x(text: &str) {
     println!("cargo:rustc-link-search={}", out.display());
 }
 
-/// Writes `$OUT_DIR/definition.rs`: the constants the package's own MCU
-/// definition (`dagon-mcu.toml` next to its Cargo.toml) states, so the boot
-/// stage and the app layer read one value. Include it with
+/// The variable naming a node's boot folder (`boot/<id>/` of a project).
+pub const BOOT_FOLDER_ENV: &str = "DAGON_BOOT_CRATE";
+/// The node's MCU definition in its boot folder, as `dagon gen` writes it:
+/// the built-in definition with the project's overrides applied.
+pub const NODE_DEFINITION: &str = "mcu.toml";
+
+/// Writes `$OUT_DIR/definition.rs`, the constants of the MCU definition the
+/// node build is given, and returns that definition (for the build
+/// script's memory.x). Include it with
 /// `include!(concat!(env!("OUT_DIR"), "/definition.rs"))`.
-pub fn definition() {
-    let dir = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"));
-    let path = dir.join("dagon-mcu.toml");
+///
+/// The definition is `$DAGON_BOOT_CRATE/mcu.toml` when the variable is set
+/// (an absolute path), so the app, boot core and stage0 of one node build
+/// from one file; else the package's own `dagon-mcu.toml`. A node
+/// definition of another MCU, or in another definition format, is refused.
+pub fn definition() -> Definition {
+    let dir = manifest_dir();
+    let def = Definition::parse(&node_definition_text(), |rel| read(&dir.join(rel)));
+    fs::write(out_dir().join("definition.rs"), def.rs()).unwrap();
+    def
+}
+
+fn manifest_dir() -> PathBuf {
+    PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"))
+}
+
+/// The text of the MCU definition the node build is given ([`definition`]).
+fn node_definition_text() -> String {
+    println!("cargo:rerun-if-env-changed={BOOT_FOLDER_ENV}");
+    let own = read(&manifest_dir().join("dagon-mcu.toml"));
+    let Some(folder) = env::var_os(BOOT_FOLDER_ENV) else {
+        return own;
+    };
+    let folder = PathBuf::from(folder);
+    assert!(
+        folder.is_absolute(),
+        "{BOOT_FOLDER_ENV}={}: give the boot folder as an absolute path",
+        folder.display()
+    );
+    let path = folder.join(NODE_DEFINITION);
     println!("cargo:rerun-if-changed={}", path.display());
-    let text = fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
-    fs::write(out_dir().join("definition.rs"), definition_rs(&text)).unwrap();
+    let text = fs::read_to_string(&path).unwrap_or_else(|e| {
+        panic!(
+            "{}: {e} (`dagon gen` writes the node's MCU definition there)",
+            path.display()
+        )
+    });
+    same_mcu(&own, &text).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+    text
+}
+
+fn read(path: &Path) -> String {
+    println!("cargo:rerun-if-changed={}", path.display());
+    fs::read_to_string(path).unwrap_or_else(|e| panic!("{}: {e}", path.display()))
+}
+
+/// Whether the definition `given` is of the same MCU (`id`) and in the same
+/// definition format (`format`, 1 when absent) as the package's own `own`.
+pub fn same_mcu(own: &str, given: &str) -> Result<(), String> {
+    let id_format = |text: &str| -> Result<(String, i64), String> {
+        let t: toml::Table = text
+            .parse()
+            .map_err(|e| format!("not an MCU definition: {e}"))?;
+        let id = t.get("id").and_then(|v| v.as_str()).unwrap_or_default();
+        let format = t.get("format").and_then(|v| v.as_integer()).unwrap_or(1);
+        Ok((id.to_string(), format))
+    };
+    let (own_id, own_format) = id_format(own)?;
+    let (id, format) = id_format(given)?;
+    if id != own_id {
+        return Err(format!(
+            "the definition of MCU '{id}'; this package is for MCU '{own_id}'"
+        ));
+    }
+    if format != own_format {
+        return Err(format!(
+            "definition format {format}; this package reads definition format {own_format}"
+        ));
+    }
+    Ok(())
+}
+
+/// One row of an ESP-IDF partition table.
+struct Partition {
+    name: String,
+    ptype: u8,
+    subtype: u8,
+    offset: u32,
+    size: u32,
+}
+
+/// An MCU definition as a build reads it.
+pub struct Definition {
+    t: toml::Table,
+    partitions: Vec<Partition>,
+}
+
+impl Definition {
+    /// `text`; `file` reads a file the definition names (its partition
+    /// table), relative to the defining package.
+    pub fn parse(text: &str, file: impl Fn(&str) -> String) -> Definition {
+        let t: toml::Table = text.parse().expect("dagon-mcu.toml");
+        let partitions = match t.get("partitions").and_then(|v| v.as_str()) {
+            Some(rel) => partition_table(&file(rel)),
+            None => Vec::new(),
+        };
+        Definition { t, partitions }
+    }
+
+    /// The generated module.
+    pub fn rs(&self) -> String {
+        constants_rs(&self.t) + &self.layout_rs()
+    }
+
+    /// The slots of image kind `image` (`[[slot]]`), slot A first: (start,
+    /// bytes).
+    pub fn slots(&self, image: &str) -> Vec<(u32, u32)> {
+        let mut out: Vec<(u8, (u32, u32))> = self
+            .slot_rows()
+            .into_iter()
+            .filter(|(i, _, _)| i == image)
+            .map(|(_, index, place)| (index, place))
+            .collect();
+        out.sort_by_key(|(index, _)| *index);
+        out.into_iter().map(|(_, place)| place).collect()
+    }
+
+    /// Slot A (or B with `slot_b`) of `image`; a build for a slot the
+    /// definition does not give is refused.
+    pub fn slot(&self, image: &str, slot_b: bool) -> (u32, u32) {
+        let name = if slot_b { "b" } else { "a" };
+        *self
+            .slots(image)
+            .get(usize::from(slot_b))
+            .unwrap_or_else(|| panic!("the MCU definition has no {image} slot {name}"))
+    }
+
+    /// `[layout] stage0`: (start, bytes).
+    pub fn stage0(&self) -> Option<(u32, u32)> {
+        region(self.t.get("layout")?.get("stage0")?, "[layout] stage0")
+    }
+
+    /// `ram`: (start, bytes).
+    pub fn ram(&self) -> Option<(u32, u32)> {
+        region(self.t.get("ram")?, "ram")
+    }
+
+    /// `[boot.record]`: (start, bytes).
+    pub fn boot_record(&self) -> Option<(u32, u32)> {
+        region(self.t.get("boot")?.get("record")?, "[boot.record]")
+    }
+
+    /// A `[layout]` log: its two faces and the face bytes.
+    fn log(&self, key: &str) -> Option<([u32; 2], u32)> {
+        let l = self.t.get("layout")?.get(key)?;
+        let what = format!("[layout] {key}");
+        let faces: Vec<u32> = l
+            .get("faces")
+            .and_then(|f| f.as_array())
+            .unwrap_or_else(|| panic!("{what}: faces is missing"))
+            .iter()
+            .map(|f| int(f, &what))
+            .collect();
+        let faces: [u32; 2] = faces
+            .try_into()
+            .unwrap_or_else(|_| panic!("{what}: two faces"));
+        let size = l
+            .get("face_size")
+            .unwrap_or_else(|| panic!("{what}: face_size is missing"));
+        Some((faces, int(size, &what)))
+    }
+
+    /// Every `[[slot]]`: image kind, slot index (a and any 0, b 1), (start,
+    /// bytes).
+    fn slot_rows(&self) -> Vec<(String, u8, (u32, u32))> {
+        let rows = self
+            .t
+            .get("slot")
+            .and_then(|v| v.as_array())
+            .map_or(&[][..], |v| v.as_slice());
+        rows.iter()
+            .map(|s| {
+                let word = |k: &str| s.get(k).and_then(|v| v.as_str());
+                let image = word("image").expect("[[slot]] image is missing");
+                let index = match word("binding") {
+                    Some("a" | "any") => 0,
+                    Some("b") => 1,
+                    other => panic!("[[slot]] binding {other:?} is not a, b or any"),
+                };
+                let place = match (s.get("at"), s.get("size"), word("partition")) {
+                    (Some(at), Some(size), None) => (int(at, "slot at"), int(size, "slot size")),
+                    (None, None, Some(name)) => {
+                        let p = self
+                            .partitions
+                            .iter()
+                            .find(|p| p.name == name)
+                            .unwrap_or_else(|| {
+                                panic!("[[slot]]: no partition '{name}' in the table")
+                            });
+                        (p.offset, p.size)
+                    }
+                    _ => panic!("[[slot]] {image}: give either at + size or partition"),
+                };
+                (image.to_string(), index, place)
+            })
+            .collect()
+    }
+
+    fn layout_rs(&self) -> String {
+        let pair = |(a, b): (u32, u32)| format!("({a:#x}, {b:#x})");
+        let mut out = String::new();
+        if let Some(id) = self.t.get("wire_id") {
+            let id = u16::try_from(int(id, "wire_id")).expect("wire_id fits a u16");
+            out += "/// The MCU's id in image headers (`wire_id`).\n";
+            out += &format!("pub const MCU_WIRE_ID: u16 = {id:#x};\n");
+        }
+        let first_map = self
+            .t
+            .get("flash_map")
+            .and_then(|v| v.as_array())
+            .and_then(|v| v.first());
+        if let Some(m) = first_map {
+            let num = |k: &str| int(m.get(k).unwrap_or(&toml::Value::Integer(-1)), k);
+            out += "/// The default flash map (the first `[[flash_map]]`): base, bytes.\n";
+            out += &format!(
+                "pub const DEFAULT_FLASH: (u32, u32) = {};\n",
+                pair((num("base"), num("bytes")))
+            );
+        }
+        for (name, what, v) in [
+            ("RAM_REGION", "RAM (`ram`)", self.ram()),
+            (
+                "BOOT_RECORD_REGION",
+                "The boot record (`[boot.record]`)",
+                self.boot_record(),
+            ),
+            (
+                "STAGE0_REGION",
+                "Stage0's region (`[layout] stage0`)",
+                self.stage0(),
+            ),
+        ] {
+            if let Some(v) = v {
+                out += &format!("/// {what}: start, bytes.\n");
+                out += &format!("pub const {name}: (u32, u32) = {};\n", pair(v));
+            }
+        }
+        for (name, key) in [
+            ("APP_LOG_REGION", "app_log"),
+            ("BOOTCORE_LOG_REGION", "bootcore_log"),
+        ] {
+            if let Some((faces, size)) = self.log(key) {
+                out += &format!("/// The `[layout] {key}`: its two faces, face bytes.\n");
+                out += &format!(
+                    "pub const {name}: ([u32; 2], u32) = ([{:#x}, {:#x}], {size:#x});\n",
+                    faces[0], faces[1]
+                );
+            }
+        }
+        out += "/// Each image kind's slots (`[[slot]]`), slot A first: start, bytes.\n";
+        out += "pub mod slots {\n";
+        let kinds: std::collections::BTreeSet<String> =
+            self.slot_rows().into_iter().map(|(i, _, _)| i).collect();
+        for kind in kinds {
+            assert!(
+                kind.bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_'),
+                "[[slot]] image {kind:?} is not a name"
+            );
+            let slots: Vec<String> = self.slots(&kind).into_iter().map(pair).collect();
+            out += &format!("    /// `image = \"{kind}\"`.\n");
+            out += &format!(
+                "    pub const {}: [(u32, u32); {}] = [{}];\n",
+                kind.to_ascii_uppercase().replace('-', "_"),
+                slots.len(),
+                slots.join(", ")
+            );
+        }
+        out += "}\n";
+        if !self.partitions.is_empty() {
+            out += "/// The partition table (`partitions`), in table order: name, type,\n";
+            out += "/// subtype, offset, bytes.\n";
+            out += &format!(
+                "pub const PARTITION_TABLE: [(&str, u8, u8, u32, u32); {}] = [\n",
+                self.partitions.len()
+            );
+            for p in &self.partitions {
+                out += &format!(
+                    "    ({:?}, {:#x}, {:#x}, {:#x}, {:#x}),\n",
+                    p.name, p.ptype, p.subtype, p.offset, p.size
+                );
+            }
+            out += "];\n";
+        }
+        out
+    }
+}
+
+/// `{ at, size }`.
+fn region(v: &toml::Value, what: &str) -> Option<(u32, u32)> {
+    let num = |k: &str| {
+        int(
+            v.get(k).unwrap_or_else(|| panic!("{what}: {k} is missing")),
+            what,
+        )
+    };
+    Some((num("at"), num("size")))
+}
+
+/// A number of an ESP-IDF partition table: decimal or `0x` hex, with an
+/// optional `K` or `M` multiplier.
+fn csv_number(s: &str) -> Option<u32> {
+    let s = s.trim();
+    let (digits, mul) = match s.as_bytes().last() {
+        Some(b'K' | b'k') => (&s[..s.len() - 1], 1024),
+        Some(b'M' | b'm') => (&s[..s.len() - 1], 1024 * 1024),
+        _ => (s, 1),
+    };
+    let v = match digits
+        .strip_prefix("0x")
+        .or_else(|| digits.strip_prefix("0X"))
+    {
+        Some(h) => u32::from_str_radix(h, 16).ok()?,
+        None => digits.parse().ok()?,
+    };
+    v.checked_mul(mul)
+}
+
+/// An ESP-IDF partition table (`# Name, Type, SubType, Offset, Size`,
+/// offsets explicit). Type and subtype names are ESP-IDF's (Partition
+/// Tables, "Type field" and "SubType"); anything else is a number.
+fn partition_table(csv: &str) -> Vec<Partition> {
+    csv.lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty() && !l.starts_with('#'))
+        .map(|l| {
+            let f: Vec<&str> = l.split(',').map(str::trim).collect();
+            let bad = || -> ! { panic!("partition row '{l}': name, type, subtype, offset, size") };
+            let byte = |s: &str| csv_number(s).and_then(|n| u8::try_from(n).ok());
+            let ptype = match f.get(1).copied() {
+                Some("app") => 0x00,
+                Some("data") => 0x01,
+                Some(s) => byte(s).unwrap_or_else(|| bad()),
+                None => bad(),
+            };
+            let subtype = match (ptype, f.get(2).copied().unwrap_or_else(|| bad())) {
+                (0x00, "factory") => 0x00,
+                (0x00, "test") => 0x20,
+                (0x00, s) if s.starts_with("ota_") => s[4..]
+                    .parse::<u8>()
+                    .ok()
+                    .filter(|n| *n < 16)
+                    .map_or_else(|| bad(), |n| 0x10 + n),
+                (0x01, "ota") => 0x00,
+                (0x01, "phy") => 0x01,
+                (0x01, "nvs") => 0x02,
+                (0x01, "coredump") => 0x03,
+                (0x01, "nvs_keys") => 0x04,
+                (0x01, "efuse") => 0x05,
+                (0x01, "undefined") => 0x06,
+                (0x01, "esphttpd") => 0x80,
+                (0x01, "fat") => 0x81,
+                (0x01, "spiffs") => 0x82,
+                (0x01, "littlefs") => 0x83,
+                (_, s) => byte(s).unwrap_or_else(|| bad()),
+            };
+            let num = |i: usize| {
+                f.get(i)
+                    .and_then(|s| csv_number(s))
+                    .unwrap_or_else(|| bad())
+            };
+            Partition {
+                name: f[0].to_string(),
+                ptype,
+                subtype,
+                offset: num(3),
+                size: num(4),
+            }
+        })
+        .collect()
 }
 
 fn required<'a>(t: &'a toml::Table, table: &str, key: &str) -> &'a toml::Value {
@@ -132,15 +504,36 @@ fn fact(v: &toml::Value, what: &str) -> (Option<u32>, bool) {
     }
 }
 
-/// The generated source for a definition's text.
+/// The generated source for a definition's text (one that names no
+/// package file).
 pub fn definition_rs(text: &str) -> String {
-    let t: toml::Table = text.parse().expect("dagon-mcu.toml");
+    Definition::parse(text, |f| panic!("{f}: no package files here")).rs()
+}
+
+/// The watchdog, trial, execution, erase and conformance constants.
+fn constants_rs(t: &toml::Table) -> String {
     let mut out = String::new();
-    let attempts = int(required(&t, "watchdog", "trial_attempts"), "trial_attempts");
+    let attempts = int(required(t, "watchdog", "trial_attempts"), "trial_attempts");
     let attempts = u8::try_from(attempts).expect("[watchdog] trial_attempts fits a u8");
     out += "/// Boots the boot stage gives a pending image before it rolls back\n";
     out += "/// (`[watchdog] trial_attempts`).\n";
     out += &format!("pub const TRIAL_ATTEMPTS: u8 = {attempts};\n");
+    // The periods the MCU's watchdog can run: a period outside them would
+    // build firmware whose watchdog cannot be armed.
+    let range = required(t, "watchdog", "range_ms");
+    let bound = |k: &str| {
+        int(
+            range
+                .get(k)
+                .unwrap_or_else(|| panic!("dagon-mcu.toml: [watchdog] range_ms.{k} is missing")),
+            "range_ms",
+        )
+    };
+    let (min, max) = (bound("min"), bound("max"));
+    out += "/// The periods the MCU's watchdog can run, ms, both included\n";
+    out += "/// (`[watchdog] range_ms`).\n";
+    out += &format!("pub const WATCHDOG_RANGE_MS: (u32, u32) = ({min}, {max});\n");
+    let id = t.get("id").and_then(|v| v.as_str()).unwrap_or("?");
     for (key, name, what) in [
         (
             "trial_ms",
@@ -149,23 +542,28 @@ pub fn definition_rs(text: &str) -> String {
         ),
         ("confirmed_ms", "CONFIRMED_WDT_MS", "a confirmed boot"),
     ] {
-        let ms = int(required(&t, "watchdog", key), key);
+        let ms = int(required(t, "watchdog", key), key);
+        assert!(
+            (min..=max).contains(&ms),
+            "MCU '{id}': [watchdog] {key} {ms} is outside the periods its watchdog can run, \
+             {min}..={max} ms ([watchdog] range_ms)"
+        );
         out += &format!("/// Watchdog period of {what}, ms (`[watchdog] {key}`).\n");
         out += &format!("pub const {name}: u32 = {ms};\n");
     }
 
-    out += &stage0_key_place_rs(&t);
-    out += &stage0_internal_hz_rs(&t);
+    out += &stage0_key_place_rs(t);
+    out += &stage0_internal_hz_rs(t);
 
-    let (masked, masked_known) = fact(required(&t, "execution", "masked_max_us"), "masked_max_us");
+    let (masked, masked_known) = fact(required(t, "execution", "masked_max_us"), "masked_max_us");
     out += "/// Longest DAGON's own code masks interrupts, us (`[execution]\n";
     out += "/// masked_max_us`); `None` while it is not measured.\n";
     out += &format!("pub const MASKED_MAX_US: Option<u32> = {masked:?};\n");
     out += "/// `MASKED_MAX_US` is checked against its source.\n";
     out += &format!("pub const MASKED_MAX_US_KNOWN: bool = {masked_known};\n");
 
-    out += &erase_layout_rs(&t);
-    out += &relay_links_rs(&t);
+    out += &erase_layout_rs(t);
+    out += &relay_links_rs(t);
 
     let scratch = t
         .get("conformance")
@@ -341,13 +739,11 @@ pub const STAGE0_ASSERT: &str = "__stage0_image_end = LOADADDR(.data) + SIZEOF(.
 ASSERT(__stage0_image_end - ORIGIN(STAGE0) <= LENGTH(STAGE0) - LENGTH(STAGE0) / 16, \
 \"stage0 does not leave 1/16 of its region free\");\n";
 
-/// `[layout] stage0` start and `[stage0] region_bytes` of the package's
-/// own MCU definition: stage0's whole region.
+/// `[layout] stage0` start and `[stage0] region_bytes` of the MCU
+/// definition the node build is given ([`definition`]): stage0's whole
+/// region.
 pub fn stage0_region() -> (u32, u32) {
-    let dir = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"));
-    let path = dir.join("dagon-mcu.toml");
-    let text = fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
-    stage0_region_of(&text)
+    stage0_region_of(&node_definition_text())
 }
 
 fn stage0_region_of(text: &str) -> (u32, u32) {
@@ -505,6 +901,7 @@ mod tests {
     use super::*;
 
     const DEF: &str = "[watchdog]\ntrial_attempts = 3\ntrial_ms = 4000\nconfirmed_ms = 8000\n\
+                       range_ms = { min = 1, max = 9000 }\n\
                        [execution]\nmasked_max_us = 50\n\
                        erase_regions = [{ start = 0x0, len = 0x4000, unit = 0x1000, unit_max_ms = 400 },\n\
                        { start = 0x4000, len = 0x8000, unit = 0x4000, unit_max_ms = 900 }]\n\
@@ -712,5 +1109,232 @@ mod tests {
             rs.contains("pub const ERASE_UNIT_MAX_MS_KNOWN: bool = false;\n"),
             "{rs}"
         );
+    }
+
+    /// A definition with every layout fact the generated module carries:
+    /// boot core slot B written before A, one app slot.
+    const LAYOUT: &str = "format = 2\nid = \"m\"\nwire_id = 0x0042\n\
+                          ram = { at = 0x2000_0000, size = 0x1_0000 }\n\
+                          [[flash_map]]\nname = \"m-1m\"\nxip = true\nbase = 0x1000_0000\nbytes = 0x10_0000\n\
+                          [layout]\nstage0 = { at = 0x1000_0000, size = 0x4000 }\n\
+                          app_log = { faces = [0x1000_4000, 0x1000_5000], face_size = 0x1000 }\n\
+                          bootcore_log = { faces = [0x1000_6000, 0x1000_7000], face_size = 0x1000 }\n\
+                          [[slot]]\nimage = \"bootcore\"\nbinding = \"b\"\nheader = \"inline\"\nat = 0x1002_0000\nsize = 0x4000\n\
+                          [[slot]]\nimage = \"bootcore\"\nbinding = \"a\"\nheader = \"inline\"\nat = 0x1000_8000\nsize = 0x2000\n\
+                          [[slot]]\nimage = \"app\"\nbinding = \"a\"\nheader = \"inline\"\nat = 0x1003_0000\nsize = 0x1_0000\n\
+                          [watchdog]\ntrial_attempts = 3\ntrial_ms = 4000\nconfirmed_ms = 8000\n\
+                       range_ms = { min = 1, max = 9000 }\n\
+                          [execution]\nmasked_max_us = 50\n\
+                          erase_regions = [{ start = 0x1000_0000, len = 0x10_0000, unit = 0x1000, unit_max_ms = 400 }]\n\
+                          [boot.record]\nat = 0x2000_F000\nsize = 0x800\n";
+
+    fn layout() -> Definition {
+        Definition::parse(LAYOUT, |f| panic!("no file {f}"))
+    }
+
+    /// Each image kind gets its slots in slot order (A first), as many as
+    /// the definition lists, whatever order it lists them in.
+    #[test]
+    fn the_slots_of_each_kind_come_from_the_definition() {
+        let rs = layout().rs();
+        assert!(rs.contains("pub mod slots {"), "{rs}");
+        assert!(
+            rs.contains(
+                "pub const BOOTCORE: [(u32, u32); 2] = [(0x10008000, 0x2000), (0x10020000, 0x4000)];"
+            ),
+            "{rs}"
+        );
+        assert!(
+            rs.contains("pub const APP: [(u32, u32); 1] = [(0x10030000, 0x10000)];"),
+            "{rs}"
+        );
+        let d = layout();
+        assert_eq!(
+            d.slots("bootcore"),
+            [(0x1000_8000, 0x2000), (0x1002_0000, 0x4000)]
+        );
+        assert_eq!(d.slot("bootcore", true), (0x1002_0000, 0x4000));
+        assert_eq!(d.slot("app", false), (0x1003_0000, 0x1_0000));
+    }
+
+    /// A build linked for a slot the definition does not give is refused
+    /// by name.
+    #[test]
+    #[should_panic(expected = "no app slot b")]
+    fn a_build_for_a_slot_the_definition_lacks_is_refused() {
+        layout().slot("app", true);
+    }
+
+    #[test]
+    fn the_layout_regions_come_from_the_definition() {
+        let rs = layout().rs();
+        for want in [
+            "pub const MCU_WIRE_ID: u16 = 0x42;",
+            "pub const DEFAULT_FLASH: (u32, u32) = (0x10000000, 0x100000);",
+            "pub const RAM_REGION: (u32, u32) = (0x20000000, 0x10000);",
+            "pub const BOOT_RECORD_REGION: (u32, u32) = (0x2000f000, 0x800);",
+            "pub const STAGE0_REGION: (u32, u32) = (0x10000000, 0x4000);",
+            "pub const APP_LOG_REGION: ([u32; 2], u32) = ([0x10004000, 0x10005000], 0x1000);",
+            "pub const BOOTCORE_LOG_REGION: ([u32; 2], u32) = ([0x10006000, 0x10007000], 0x1000);",
+        ] {
+            assert!(rs.contains(want), "{want}\n{rs}");
+        }
+        let d = layout();
+        assert_eq!(d.stage0(), Some((0x1000_0000, 0x4000)));
+        assert_eq!(d.ram(), Some((0x2000_0000, 0x1_0000)));
+        assert_eq!(d.boot_record(), Some((0x2000_F000, 0x800)));
+    }
+
+    /// A definition without stage0, logs, RAM or boot record states none of
+    /// them (its package has no use for them).
+    #[test]
+    fn facts_a_definition_leaves_out_are_not_made_up() {
+        let def =
+            format!("wire_id = 7\n[[flash_map]]\nname = \"x\"\nbase = 0\nbytes = 0x1000\n{DEF}");
+        let rs = Definition::parse(&def, |f| panic!("no file {f}")).rs();
+        for absent in [
+            "STAGE0_REGION",
+            "APP_LOG_REGION",
+            "RAM_REGION",
+            "BOOT_RECORD_REGION",
+            "PARTITION_TABLE",
+        ] {
+            assert!(!rs.contains(absent), "{absent}\n{rs}");
+        }
+    }
+
+    /// A slot given as a partition takes its place from the partition
+    /// table the definition names; the table itself is generated too.
+    #[test]
+    fn a_partition_slot_takes_the_partition_table() {
+        let def = "format = 2\nid = \"e\"\nwire_id = 3\npartitions = \"p.csv\"\n\
+                   [[flash_map]]\nname = \"e-16m\"\nxip = false\nbase = 0x0\nbytes = 0x100_0000\n\
+                   [[slot]]\nimage = \"app\"\nbinding = \"any\"\nheader = \"detached\"\npartition = \"ota_0\"\n\
+                   [watchdog]\ntrial_attempts = 3\ntrial_ms = 4000\nconfirmed_ms = 4000\n\
+                   range_ms = { min = 1, max = 9000 }\n\
+                   [execution]\nmasked_max_us = 50\n\
+                   erase_regions = [{ start = 0x0, len = 0x100_0000, unit = 0x1000, unit_max_ms = 500 }]\n";
+        let csv = "# Name, Type, SubType, Offset, Size\n\
+                   otadata, data, ota, 0x00D000, 0x2000\n\
+                   factory, app, factory, 0x010000, 1M\n\
+                   ota_0, app, ota_0, 0x110000, 3M\n\
+                   dagon, 0x40, 0x00, 0x710000, 64K\n";
+        let d = Definition::parse(def, |f| {
+            assert_eq!(f, "p.csv");
+            csv.to_string()
+        });
+        let rs = d.rs();
+        assert!(
+            rs.contains("pub const APP: [(u32, u32); 1] = [(0x110000, 0x300000)];"),
+            "{rs}"
+        );
+        for row in [
+            "(\"otadata\", 0x1, 0x0, 0xd000, 0x2000)",
+            "(\"factory\", 0x0, 0x0, 0x10000, 0x100000)",
+            "(\"ota_0\", 0x0, 0x10, 0x110000, 0x300000)",
+            "(\"dagon\", 0x40, 0x0, 0x710000, 0x10000)",
+        ] {
+            assert!(rs.contains(row), "{row}\n{rs}");
+        }
+        assert!(
+            rs.contains("pub const PARTITION_TABLE: [(&str, u8, u8, u32, u32); 4]"),
+            "{rs}"
+        );
+    }
+
+    /// The node's definition (`$DAGON_BOOT_CRATE/mcu.toml`) is taken only
+    /// for this package's MCU, in this package's definition format.
+    #[test]
+    fn the_node_definition_is_the_packages_mcu_in_its_format() {
+        let own = "format = 2\nid = \"m\"\n";
+        assert_eq!(
+            same_mcu(own, "format = 2\nid = \"m\"\nwire_id = 1\n"),
+            Ok(())
+        );
+        let e = same_mcu(own, "format = 2\nid = \"other\"\n").unwrap_err();
+        assert!(e.contains("'other'") && e.contains("'m'"), "{e}");
+        let e = same_mcu(own, "format = 3\nid = \"m\"\n").unwrap_err();
+        assert!(e.contains("format 3") && e.contains("format 2"), "{e}");
+        let e = same_mcu(own, "id = \"m\"\n").unwrap_err();
+        assert!(e.contains("format 1"), "{e}");
+        assert!(same_mcu(own, "not toml [").is_err());
+    }
+
+    /// The generated periods lie inside the range the MCU's watchdog can
+    /// run (`[watchdog] range_ms`): both boundaries are taken.
+    #[test]
+    fn periods_on_the_boundaries_of_the_watchdog_range_are_taken() {
+        let def = DEF.replace(
+            "range_ms = { min = 1, max = 9000 }",
+            "range_ms = { min = 4000, max = 8000 }",
+        );
+        let rs = definition_rs(&format!("id = \"m\"\n{def}"));
+        assert!(rs.contains("pub const TRIAL_WDT_MS: u32 = 4000;\n"), "{rs}");
+        assert!(
+            rs.contains("pub const WATCHDOG_RANGE_MS: (u32, u32) = (4000, 8000);\n"),
+            "{rs}"
+        );
+        assert!(
+            rs.contains("pub const CONFIRMED_WDT_MS: u32 = 8000;\n"),
+            "{rs}"
+        );
+    }
+
+    #[test]
+    #[should_panic(
+        expected = "MCU 'm': [watchdog] confirmed_ms 8001 is outside the periods its watchdog can run, 4000..=8000 ms"
+    )]
+    fn a_period_past_the_watchdog_range_is_refused() {
+        let def = DEF
+            .replace(
+                "range_ms = { min = 1, max = 9000 }",
+                "range_ms = { min = 4000, max = 8000 }",
+            )
+            .replace("confirmed_ms = 8000", "confirmed_ms = 8001");
+        definition_rs(&format!("id = \"m\"\n{def}"));
+    }
+
+    #[test]
+    #[should_panic(
+        expected = "MCU 'm': [watchdog] trial_ms 3999 is outside the periods its watchdog can run, 4000..=8000 ms"
+    )]
+    fn a_period_below_the_watchdog_range_is_refused() {
+        let def = DEF
+            .replace(
+                "range_ms = { min = 1, max = 9000 }",
+                "range_ms = { min = 4000, max = 8000 }",
+            )
+            .replace("trial_ms = 4000", "trial_ms = 3999");
+        definition_rs(&format!("id = \"m\"\n{def}"));
+    }
+
+    /// The ESP32-S3 definition ends its watchdog range at 3,600,000 ms: a
+    /// period on it generates, one past it is refused.
+    #[test]
+    fn the_esp32s3_definition_bounds_its_watchdog_at_3_600_000_ms() {
+        let text = include_str!("../../esp32s3/dagon-mcu.toml");
+        let csv = include_str!("../../esp32s3/partitions.csv");
+        let gen = |t: &str| {
+            Definition::parse(t, |f| {
+                assert_eq!(f, "partitions.csv");
+                csv.to_string()
+            })
+            .rs()
+        };
+        let with = |ms: &str| text.replace("confirmed_ms = 4_000", &format!("confirmed_ms = {ms}"));
+        assert!(gen(&with("3_600_000")).contains("pub const CONFIRMED_WDT_MS: u32 = 3600000;\n"));
+        let past = with("3_600_001");
+        let e = std::panic::catch_unwind(|| gen(&past)).unwrap_err();
+        let e = e.downcast_ref::<String>().unwrap();
+        assert!(
+            e.contains("MCU 'esp32s3': [watchdog] confirmed_ms 3600001 is outside the periods its watchdog can run, 1..=3600000 ms"),
+            "{e}"
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "[watchdog] range_ms is missing")]
+    fn a_definition_without_the_watchdog_range_is_refused() {
+        definition_rs(&DEF.replace("range_ms = { min = 1, max = 9000 }\n", ""));
     }
 }

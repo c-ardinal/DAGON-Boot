@@ -62,6 +62,7 @@ kind = "iwdg"
 trial_ms = TRIAL
 confirmed_ms = 6_000
 trial_attempts = ATTEMPTS
+range_ms = { min = 1, max = 32_768 }
 flag = "unmeasured"
 
 [execution]

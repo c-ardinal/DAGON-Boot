@@ -40,6 +40,67 @@ pub trait Dog {
     fn feed(&mut self);
     /// Reset the chip now.
     fn reset(&mut self);
+    /// The running image is (no longer) on trial: a watchdog whose period
+    /// differs between a trial and a confirmed image runs the one for
+    /// `on_trial` from the next feed on.
+    fn trial(&mut self, _on_trial: bool) {}
+}
+
+/// A running watchdog whose period can be changed.
+pub trait Rearm {
+    /// Run `period_ms` from now on (the countdown restarts with it).
+    fn set_period(&mut self, period_ms: u32);
+    /// Restart the countdown with the period it runs.
+    fn feed(&mut self);
+    /// Reset the chip now.
+    fn reset(&mut self);
+}
+
+/// A [`Dog`] over a [`Rearm`] watchdog: it runs the trial period while
+/// the image is on trial and the confirmed period once it is confirmed
+/// (the MCU definition's `[watchdog] trial_ms` and `confirmed_ms`). The
+/// period is set at the first feed and when it changes.
+pub struct PeriodDog<H> {
+    pub hw: H,
+    trial_ms: u32,
+    confirmed_ms: u32,
+    on_trial: bool,
+    running_ms: Option<u32>,
+}
+
+impl<H> PeriodDog<H> {
+    pub const fn new(hw: H, trial_ms: u32, confirmed_ms: u32) -> Self {
+        PeriodDog {
+            hw,
+            trial_ms,
+            confirmed_ms,
+            on_trial: true,
+            running_ms: None,
+        }
+    }
+}
+
+impl<H: Rearm> Dog for PeriodDog<H> {
+    fn feed(&mut self) {
+        let ms = if self.on_trial {
+            self.trial_ms
+        } else {
+            self.confirmed_ms
+        };
+        if self.running_ms != Some(ms) {
+            self.hw.set_period(ms);
+            self.running_ms = Some(ms);
+        }
+        self.hw.feed();
+    }
+
+    fn reset(&mut self) {
+        self.hw.reset();
+    }
+
+    fn trial(&mut self, on_trial: bool) {
+        self.on_trial = on_trial;
+    }
 }
 
 /// What an image on trial does with the watchdog.
@@ -143,6 +204,8 @@ impl<D: Dog, const N: usize> Guard<D, N> {
     /// Takes the running watchdog (started by the boot core or the app).
     pub fn install(&self, dog: D, on_trial: bool) {
         self.with_state(|s| {
+            let mut dog = dog;
+            dog.trial(on_trial);
             s.dog = Some(dog);
             s.on_trial = on_trial;
         });
@@ -150,7 +213,12 @@ impl<D: Dog, const N: usize> Guard<D, N> {
 
     /// The running image is (no longer) on trial.
     pub fn set_trial(&self, on_trial: bool) {
-        self.with_state(|s| s.on_trial = on_trial);
+        self.with_state(|s| {
+            s.on_trial = on_trial;
+            if let Some(d) = s.dog.as_mut() {
+                d.trial(on_trial);
+            }
+        });
     }
 
     /// `task` starts (or makes progress in) a piece of work.
@@ -290,5 +358,78 @@ mod tests {
         node.set_trial(false);
         node.progress(0);
         assert_eq!(fed(&node), 1);
+    }
+
+    /// The watchdog learns whether the image is on trial, at install and on
+    /// every change, so it runs the trial or the confirmed period.
+    #[test]
+    fn the_watchdog_is_told_the_trial_state() {
+        extern crate std;
+        use std::vec::Vec;
+        #[derive(Default)]
+        struct Periods(Vec<bool>);
+        impl Dog for Periods {
+            fn feed(&mut self) {}
+            fn reset(&mut self) {}
+            fn trial(&mut self, on_trial: bool) {
+                self.0.push(on_trial);
+            }
+        }
+        let g = Guard::new([Level::Preempting], Trial::NeverFeed, now);
+        g.install(Periods::default(), true);
+        g.set_trial(false);
+        assert_eq!(g.with_dog(|d| d.0.clone()).unwrap(), [true, false]);
+        let g = Guard::new([Level::Preempting], Trial::NeverFeed, now);
+        g.install(Periods::default(), false);
+        assert_eq!(g.with_dog(|d| d.0.clone()).unwrap(), [false]);
+    }
+
+    /// A watchdog with a period runs the trial period while the image is
+    /// on trial and the confirmed one from its confirmation on, without a
+    /// restart; its period is set only when it changes, not on every feed.
+    #[test]
+    fn a_period_dog_switches_to_the_confirmed_period_on_confirmation() {
+        extern crate std;
+        use std::vec::Vec;
+        #[derive(Debug, PartialEq)]
+        enum Hw {
+            Set(u32),
+            Feed,
+        }
+        #[derive(Default)]
+        struct Log(Vec<Hw>);
+        impl Rearm for Log {
+            fn set_period(&mut self, period_ms: u32) {
+                self.0.push(Hw::Set(period_ms));
+            }
+            fn feed(&mut self) {
+                self.0.push(Hw::Feed);
+            }
+            fn reset(&mut self) {}
+        }
+        // Its own clock: the shared one is moved by other tests.
+        let g = Guard::new([Level::Preempting], Trial::FeedUntilMs(60_000), || 0);
+        g.install(PeriodDog::new(Log::default(), 4_000, 9_000), true);
+        g.feed();
+        g.feed();
+        g.set_trial(false);
+        g.feed();
+        g.feed();
+        use Hw::{Feed, Set};
+        assert_eq!(
+            g.with_dog(|d| d.hw.0.drain(..).collect::<Vec<_>>())
+                .unwrap(),
+            [Set(4_000), Feed, Feed, Set(9_000), Feed, Feed]
+        );
+        // Found confirmed at start: the confirmed period from the first feed.
+        let g = Guard::new([Level::Preempting], Trial::NeverFeed, || 0);
+        g.install(PeriodDog::new(Log::default(), 4_000, 9_000), false);
+        g.feed();
+        g.feed();
+        assert_eq!(
+            g.with_dog(|d| d.hw.0.drain(..).collect::<Vec<_>>())
+                .unwrap(),
+            [Set(9_000), Feed, Feed]
+        );
     }
 }

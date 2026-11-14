@@ -6,6 +6,10 @@ target = "thumbv6m-none-eabi"
 rustflags = ["-C", "link-arg=--nmagic", "-C", "link-arg=-Tlink.x"]
 
 [env]
+# The folder `dagon gen` writes this node's MCU definition into
+# (`mcu.toml`): the app builds from the definition every image of the
+# node builds from, the project's overrides included.
+DAGON_BOOT_CRATE = { value = "../../boot/{{node}}", relative = true, force = true }
 # This node's image target tag: the app announces it, and the boot core
 # for this node must be built with the same DAGON_TARGET_TAG.
 DAGON_TARGET_TAG = { value = "{{tag}}", force = true }

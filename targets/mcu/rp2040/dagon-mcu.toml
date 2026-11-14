@@ -1,5 +1,6 @@
-# DAGON MCU definition (format: targets/README.md). Addresses match
-# src/layout.rs; never move them.
+# DAGON MCU definition (format: targets/README.md). The firmware's layout
+# is generated from it; these addresses never move (a project moves its
+# slots by overriding them).
 format = 2
 id = "rp2040"
 name = "RP2040"
@@ -240,6 +241,11 @@ max_payload = 1024
 kind = "rp-watchdog"
 trial_ms = 8_000
 confirmed_ms = 8_000
+# The periods the watchdog can run: its 24-bit LOAD counts down twice a
+# microsecond (RP2040 datasheet section 4.7, erratum RP2040-E1), so at most
+# 0xFFFFFF / 2 us = 8,388 ms; embassy-rp 0.10 `Watchdog::feed` refuses
+# longer. DAGON arms whole milliseconds, from 1.
+range_ms = { min = 1, max = 8_388 }
 # The boot core starts a pending image this many times before it rolls back.
 trial_attempts = 3
 # The lockup fuse's watchdog-reset flag: WATCHDOG REASON is cleared by a

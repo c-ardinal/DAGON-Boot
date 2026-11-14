@@ -72,6 +72,7 @@ trial_ms = 4_000
 confirmed_ms = 8_000
 trial_attempts = 3
 flag = "register"
+range_ms = {{ min = 1, max = 32_768 }}
 
 [[slot_layout]]
 target = "bootcore"
@@ -368,6 +369,54 @@ fn the_record_lies_inside_ram_within_its_limit() {
     assert!(e.contains("[watchdog driver"), "{e}");
     let e = mcu_err(&isolated("trial_attempts = 3", "trial_attempts = 0"));
     assert!(e.contains("trial_attempts must be above 0"), "{e}");
+}
+
+/// `[watchdog] range_ms`: the periods the MCU's watchdog can run. A trial
+/// or confirmed period on either boundary loads; one past either is
+/// refused, naming the MCU, the value and the range; a definition without
+/// the range is refused.
+#[test]
+fn the_watchdog_periods_are_inside_the_range_the_mcu_can_run() {
+    let with = |range: &str, trial: &str, confirmed: &str| {
+        isolated("range_ms = { min = 1, max = 32_768 }", range)
+            .replace("trial_ms = 4_000", trial)
+            .replace("confirmed_ms = 8_000", confirmed)
+    };
+    let range = "range_ms = { min = 2_000, max = 9_000 }";
+    for (trial, confirmed) in [("2_000", "9_000"), ("9_000", "2_000")] {
+        parse_mcu_text(
+            &with(
+                range,
+                &format!("trial_ms = {trial}"),
+                &format!("confirmed_ms = {confirmed}"),
+            ),
+            &[],
+        )
+        .unwrap();
+    }
+    for (trial, confirmed, says) in [
+        ("1_999", "8_000", "watchdog.trial_ms 1999"),
+        ("2_000", "9_001", "watchdog.confirmed_ms 9001"),
+    ] {
+        let e = mcu_err(&with(
+            range,
+            &format!("trial_ms = {trial}"),
+            &format!("confirmed_ms = {confirmed}"),
+        ));
+        assert!(e.contains(says), "{e}");
+        assert!(
+            e.contains("MCU 'fake-m0'") && e.contains("2000..=9000 ms"),
+            "{e}"
+        );
+    }
+    let e = mcu_err(&with("", "trial_ms = 4_000", "confirmed_ms = 8_000"));
+    assert!(e.contains("range_ms"), "{e}");
+    let e = mcu_err(&with(
+        "range_ms = { min = 9_000, max = 2_000 }",
+        "trial_ms = 4_000",
+        "confirmed_ms = 8_000",
+    ));
+    assert!(e.contains("range_ms"), "{e}");
 }
 
 /// `[execution]`: two erases fit every watchdog period; `[conformance]`: the

@@ -1,5 +1,6 @@
-# DAGON MCU definition (format: targets/README.md). Addresses match
-# src/layout.rs (sectors 16K x4, 64K, 128K x3); never move them. Sector 0
+# DAGON MCU definition (format: targets/README.md). The firmware's layout
+# is generated from it (sectors 16K x4, 64K, 128K x3); these addresses never
+# move (a project moves its slots by overriding them). Sector 0
 # stage0, 1-2 the state log, 3 conformance scratch, 4 boot core A, 5-6 APP
 # A/B, 7 boot core B.
 format = 2
@@ -201,6 +202,11 @@ kind = "uart"
 kind = "iwdg"
 trial_ms = 8_000
 confirmed_ms = 8_000
+# The periods the IWDG can run: its 12-bit reload with the /256 prescaler
+# on the 32 kHz LSI reaches 32,768 ms (RM0368 section 17.3.3, min/max IWDG
+# timeout period at 32 kHz); embassy-stm32 0.6 `IndependentWatchdog::new`
+# finds no prescaler past it. DAGON arms whole milliseconds, from 1.
+range_ms = { min = 1, max = 32_768 }
 # The boot core starts a pending image this many times before it rolls back.
 trial_attempts = 3
 # The lockup fuse's watchdog-reset flag: RCC_CSR IWDGRSTF/WWDGRSTF (RM0368,

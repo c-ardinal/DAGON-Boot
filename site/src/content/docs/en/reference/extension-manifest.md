@@ -141,7 +141,9 @@ core library, `dagon-events` and each boot extension's package, and the
 node, its MCU, its board and its trusted extensions under
 `[package.metadata.dagon.boot]`), `boot.rs` (the boot loader's `main`, from
 `nodes/<id>/dagon/boot_wiring.rs`), `graph.stamp` (below) and `.cargo/config.toml` (the target,
-`DAGON_BOOT_CRATE` and the node's `DAGON_TARGET_TAG`). It is a folder of
+`DAGON_BOOT_CRATE` and the node's `DAGON_TARGET_TAG`). For every node, on
+any MCU, it also writes `boot/<id>/mcu.toml`, the MCU definition the node's
+firmware builds from (see [MCU and board definitions](/en/reference/definitions/)). It is a folder of
 its own because cargo merges the `.cargo/config.toml` of every folder
 above a crate, and the node's app crate has one made for the app.
 `boot/<id>/` holds only what the last `dagon gen` wrote, as

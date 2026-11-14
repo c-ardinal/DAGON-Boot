@@ -181,10 +181,15 @@ jobs:
           FEATURES: ${{ matrix.lint.features }}
           LINT_ENV: ${{ toJSON(matrix.lint.env) }}
         # In the package's folder: its rust-toolchain.toml and
-        # .cargo/config.toml (the repository's, or its own) apply.
+        # .cargo/config.toml (the repository's, or its own) apply. A value
+        # starting with ./ or ../ is a folder relative to the package, given
+        # as an absolute path (every build script reads it as one).
         run: |
-          eval "$(jq -r 'to_entries[] | "export \(.key)=\(.value | @sh)"' <<< "$LINT_ENV")"
           cd "$DIR"
+          while IFS=$'\t' read -r key value; do
+            case "$value" in ./*|../*) value="$(realpath "$value")" ;; esac
+            export "$key=$value"
+          done < <(jq -r 'to_entries[] | "\(.key)\t\(.value)"' <<< "$LINT_ENV")
           args=(clippy --release)
           if [ -n "$TARGET" ]; then
             rustup target add "$TARGET"
@@ -248,8 +253,10 @@ jobs:
   # crate built for both boot core slots and signed for each, as a release
   # does (crates/dagon-cli/src/scaffold/tests.rs); and an app crate's and a
   # boot crate's raised versions reaching the package after `dagon gen` and
-  # the build (crates/dagon-cli/src/serve/api.rs); and a node with no board
-  # named, generated from its MCU package's template, built.
+  # the build (crates/dagon-cli/src/serve/api.rs); a project's override of
+  # an MCU's slots and watchdog periods reaching every image of an RP2040
+  # and an STM32F401RE node; and a node with no board named, generated from
+  # its MCU package's template, built.
   boot-crates:
     runs-on: ubuntu-24.04
     steps:
@@ -270,6 +277,10 @@ jobs:
           for t in $(python scripts/stage0_size.py --targets); do rustup target add "$t"; done
           cargo test -p dagon-cli --bin dagon --locked -- --ignored gen_boot_core_slots_sign
           cargo test -p dagon-cli --bin dagon --locked -- --ignored raised_versions_reach_the_package
+      - name: A project's definition overrides reach the firmware
+        run: |
+          cargo test -p dagon-cli --bin dagon --locked -- --ignored a_project_slot_override_reaches_the_firmware
+          cargo test -p dagon-cli --bin dagon --locked -- --ignored a_project_override_of_unequal_f401_slots_reaches_the_firmware
       - name: Build each MCU package's template
         run: |
           cargo test -p dagon-cli --bin dagon --locked -- --ignored new_gen_build_rp2040_hub_by_mcu

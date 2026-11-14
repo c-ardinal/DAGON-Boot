@@ -1,153 +1,184 @@
-//! Each MCU definition agrees with the MCU package's own flash layout
-//! (`targets/mcu/<id>/src/layout.rs`) and with the memory.x its build.rs
-//! writes from it (FLASH = the image body each slot leaves after its header).
+//! The MCU packages lay out their firmware from the MCU definition the node
+//! build is given, through the module `dagon_mcu_build` generates from it
+//! (targets/mcu/build): that generator reads every definition as the
+//! loader does, and each package's layout, build script (memory.x),
+//! stage0 and slot store take addresses and lengths only from it, with no
+//! copy of their own.
 
-#![allow(dead_code)]
+use std::path::{Path, PathBuf};
 
-use dagon_format::header::{image_kind, slot_binding};
-use dagon_topology::defs::{McuDef, Registry, Slot};
+use dagon_topology::defs::{Binding, ImageKind, Registry};
 
-#[path = "../../../targets/mcu/esp32s3/src/layout.rs"]
-mod esp32s3;
-#[path = "../../../targets/mcu/rp2040/src/layout.rs"]
-mod rp2040;
-#[path = "../../../targets/mcu/stm32f401re/src/layout.rs"]
-mod stm32f401re;
+#[allow(dead_code)]
+#[path = "../../../targets/mcu/build/src/lib.rs"]
+mod mcu_build;
 
-fn mcu(id: &str) -> &'static McuDef {
-    Registry::builtin().mcu(id).unwrap()
+fn mcu_dir() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../targets/mcu")
 }
 
-fn slot(mcu: &str, kind: u8, binding: u8) -> &'static Slot {
-    Registry::builtin().slot(mcu, kind, binding).unwrap()
+/// Every MCU package folder with its definition: (folder, MCU id).
+fn packages() -> Vec<(PathBuf, String)> {
+    let mut out = Vec::new();
+    for e in std::fs::read_dir(mcu_dir()).unwrap().flatten() {
+        let def = e.path().join("dagon-mcu.toml");
+        let Ok(text) = std::fs::read_to_string(&def) else {
+            continue;
+        };
+        let t: toml::Table = text.parse().unwrap();
+        out.push((e.path(), t["id"].as_str().unwrap().to_string()));
+    }
+    assert!(out.len() >= 3, "{out:?}");
+    out
 }
 
-/// memory.x FLASH (origin, length) of an image in `s`.
-fn flash(s: &Slot) -> (u32, u32) {
-    (s.load_addr, s.max_payload)
+fn kind_name(k: ImageKind) -> String {
+    format!("{k:?}").to_ascii_lowercase()
 }
 
+/// The generator reads each built-in definition as the loader does: the
+/// same slots per image kind in slot order (partitions resolved), stage0,
+/// RAM and boot record.
 #[test]
-fn rp2040_matches_its_layout_and_memory_x() {
-    use rp2040::*;
-    let m = mcu("rp2040");
-    let map = m.default_flash_map();
-    assert_eq!(map.base, XIP_BASE);
-    assert!(map.bytes as usize >= MIN_FLASH_SIZE);
-    let stage0 = m.layout.stage0.unwrap();
-    assert_eq!((stage0.at, stage0.size), (STAGE0, STAGE0_SIZE));
-    let bl = m.layout.bootcore_log.unwrap();
-    assert_eq!((bl.faces, bl.face_size), (BL_LOG, LOG_FACE_SIZE));
-    let app = m.layout.app_log.unwrap();
-    assert_eq!((app.faces, app.face_size), (APP_LOG, LOG_FACE_SIZE));
-    assert_eq!(app.faces, APP_LOG_LAYOUT.faces);
-    for (i, b) in [slot_binding::A, slot_binding::B].into_iter().enumerate() {
-        let bc = slot("rp2040", image_kind::BOOTCORE, b);
-        assert_eq!((bc.start, bc.size), (BL_SLOT[i], BL_SLOT_SIZE));
-        let a = slot("rp2040", image_kind::APP, b);
-        assert_eq!((a.start, a.size), (APP_SLOT[i], APP_SLOT_SIZE));
-        assert_eq!((a.start, a.size), (APP_SLOTS.slots[i], APP_SLOTS.slot_len));
-        // build.rs: body after the header, HEADER_LEN shorter than the slot.
+fn the_generated_layout_is_the_loaders() {
+    for (dir, id) in packages() {
+        let text = std::fs::read_to_string(dir.join("dagon-mcu.toml")).unwrap();
+        let def = mcu_build::Definition::parse(&text, |rel| {
+            std::fs::read_to_string(dir.join(rel)).unwrap()
+        });
+        let m = Registry::builtin().mcu(&id).unwrap();
+        let kinds: std::collections::BTreeSet<ImageKind> =
+            m.slots.iter().map(|s| s.image).collect();
+        for k in kinds {
+            let mut want: Vec<(u8, (u32, u32))> = m
+                .slots
+                .iter()
+                .filter(|s| s.image == k)
+                .map(|s| (u8::from(s.binding == Binding::B), (s.start, s.size)))
+                .collect();
+            want.sort();
+            let want: Vec<(u32, u32)> = want.into_iter().map(|(_, p)| p).collect();
+            assert_eq!(def.slots(&kind_name(k)), want, "{id} {k:?}");
+        }
         assert_eq!(
-            flash(bc),
-            (BL_SLOT[i] + HEADER_LEN, body_capacity(BL_SLOT_SIZE))
+            def.stage0(),
+            m.layout.stage0.map(|s| (s.at, s.size)),
+            "{id}"
         );
+        assert_eq!(def.ram(), m.ram.map(|r| (r.at, r.size)), "{id}");
         assert_eq!(
-            flash(a),
-            (APP_SLOT[i] + HEADER_LEN, body_capacity(APP_SLOT_SIZE))
+            def.boot_record(),
+            m.record().map(|r| (r.at, r.size)),
+            "{id}"
+        );
+        let rs = def.rs();
+        assert!(
+            rs.contains(&format!("pub const MCU_WIRE_ID: u16 = {:#x};", m.wire_id)),
+            "{id}"
         );
     }
-    // The images' RAM is the RAM below the boot record (SRAM4 and SRAM5
-    // stay outside it); one watchdog period for trial and confirmed.
-    let ram = m.ram.unwrap();
-    assert_eq!(ram.at, RAM);
-    assert_eq!(m.record().unwrap().at - ram.at, RAM_LEN);
-    let w = m.watchdog.unwrap();
-    assert_eq!((w.trial_ms, w.confirmed_ms), (WDT_MS, WDT_MS));
-    // The topology store lies outside every region the definition claims.
-    for s in &m.slots {
-        assert!(TOPOLOGY >= s.start + s.size || TOPOLOGY + TOPOLOGY_SIZE <= s.start);
-    }
-    assert!(TOPOLOGY + TOPOLOGY_SIZE <= map.base + map.bytes);
 }
 
-#[test]
-fn stm32f401re_matches_its_layout_and_memory_x() {
-    use stm32f401re::*;
-    let m = mcu("stm32f401re");
-    let map = m.default_flash_map();
-    assert_eq!(m.wire_id, MCU_ID);
-    assert_eq!(map.base, STAGE0);
-    assert!(map.bytes as usize >= MIN_FLASH_SIZE);
-    let stage0 = m.layout.stage0.unwrap();
-    assert_eq!((stage0.at, stage0.size), (STAGE0, STAGE0_SIZE));
-    // One log for both targets.
-    let log = m.layout.app_log.unwrap();
-    assert_eq!((log.faces, log.face_size), (LOG.faces, LOG.face_len));
-    assert_eq!(m.layout.bootcore_log, Some(log));
-    for (i, b) in [slot_binding::A, slot_binding::B].into_iter().enumerate() {
-        let bc = slot("stm32f401re", image_kind::BOOTCORE, b);
-        assert_eq!((bc.start, bc.size), CORE_SLOTS[i]);
-        // build.rs: body after the header.
-        assert_eq!(
-            flash(bc),
-            (CORE_SLOTS[i].0 + HEADER_LEN, CORE_SLOTS[i].1 - HEADER_LEN)
-        );
-        let a = slot("stm32f401re", image_kind::APP, b);
-        assert_eq!((a.start, a.size), (SLOTS.slots[i], SLOTS.slot_len));
-        assert_eq!(
-            flash(a),
-            (SLOTS.slots[i] + HEADER_LEN, SLOTS.slot_len - HEADER_LEN)
-        );
-    }
-    let ram = m.ram.unwrap();
-    assert_eq!((ram.at, ram.size), (RAM, RAM_LEN));
-    let w = m.watchdog.unwrap();
-    assert_eq!(
-        (w.trial_ms, w.confirmed_ms),
-        (TRIAL_WDT_MS, CONFIRMED_WDT_MS)
-    );
-    // The port's writable regions are exactly the log faces, the
-    // conformance scratch, the boot core slots and the APP slots.
-    assert_eq!(FLASH_REGIONS[0].start, log.faces[0]);
-    assert_eq!(FLASH_REGIONS[0].len, 2 * log.face_size);
-    let scratch = m.conformance.unwrap().scratch;
-    assert_eq!(
-        (FLASH_REGIONS[1].start, FLASH_REGIONS[1].len),
-        (scratch.at, scratch.size)
-    );
-    assert_eq!(
-        (FLASH_REGIONS[2].start, FLASH_REGIONS[2].len),
-        CORE_SLOTS[0]
-    );
-    assert_eq!(FLASH_REGIONS[3].start, SLOTS.slots[0]);
-    assert_eq!(
-        (FLASH_REGIONS[4].start, FLASH_REGIONS[4].len),
-        CORE_SLOTS[1]
-    );
+/// The source of `path` before its tests, without comments.
+fn code(path: &Path) -> String {
+    let text = std::fs::read_to_string(path).unwrap();
+    let text = text.split("#[cfg(test)]").next().unwrap_or_default();
+    text.lines()
+        .map(|l| l.split("//").next().unwrap_or_default())
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
-#[test]
-fn esp32s3_matches_its_layout() {
-    use esp32s3::*;
-    let m = mcu("esp32s3");
-    assert!(m.default_flash_map().bytes >= MIN_FLASH_SIZE);
-    let table: Vec<(&str, u32, u32)> = m
-        .partition_table
-        .iter()
-        .map(|p| (p.name.as_str(), p.offset, p.size))
-        .collect();
-    let want: Vec<(&str, u32, u32)> = PARTITIONS
-        .iter()
-        .map(|p| (p.name, p.offset, p.size))
-        .collect();
-    assert_eq!(table, want);
-    let app = slot("esp32s3", image_kind::APP, slot_binding::A);
-    assert_eq!((app.start, app.size), (OTA_0.offset, OTA_0.size));
-    let agent = slot("esp32s3", image_kind::AGENT, slot_binding::A);
-    assert_eq!((agent.start, agent.size), (FACTORY.offset, FACTORY.size));
-    for s in [app, agent] {
-        // Detached headers sit in the dagon partition, writable by DAGON.
-        assert!(region_for(s.header_addr, 512).is_some_and(|r| r.start == DAGON.offset));
+/// Integer literals of 0x200 (512) and more in `src`: addresses and
+/// lengths. Smaller ones are units, counts and the RP2040's 256-byte boot2.
+fn large_literals(src: &str) -> Vec<String> {
+    let b = src.as_bytes();
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < b.len() {
+        // Text in string literals (messages) is no layout.
+        if b[i] == b'"' {
+            i += 1;
+            while i < b.len() && b[i] != b'"' {
+                i += if b[i] == b'\\' { 2 } else { 1 };
+            }
+            i += 1;
+            continue;
+        }
+        let starts = b[i].is_ascii_digit()
+            && (i == 0 || !(b[i - 1].is_ascii_alphanumeric() || b[i - 1] == b'_'));
+        if !starts {
+            i += 1;
+            continue;
+        }
+        let at = i;
+        while i < b.len() && (b[i].is_ascii_alphanumeric() || b[i] == b'_') {
+            i += 1;
+        }
+        let lit = src[at..i].replace('_', "");
+        let digits = ["u32", "u16", "u8", "usize", "u64"]
+            .iter()
+            .find_map(|s| lit.strip_suffix(s))
+            .unwrap_or(&lit);
+        let value = match digits.strip_prefix("0x") {
+            Some(h) => u64::from_str_radix(h, 16).ok(),
+            None => digits.parse::<u64>().ok(),
+        };
+        if value.is_some_and(|v| v >= 0x200) {
+            out.push(src[at..i].to_string());
+        }
     }
+    out
+}
+
+/// Each package's layout, build script, stage0 and slot store hold no
+/// address or length of their own: they take the generated module's.
+#[test]
+fn the_packages_use_the_generated_layout_only() {
+    let mut checked = 0;
+    for (dir, id) in packages() {
+        let build = std::fs::read_to_string(dir.join("build.rs")).unwrap();
+        assert!(
+            build.contains("dagon_mcu_build::definition()"),
+            "{id}: build.rs generates the layout"
+        );
+        assert!(
+            !build.contains("#[path"),
+            "{id}: build.rs includes no layout copy"
+        );
+        for rel in [
+            "build.rs",
+            "src/layout.rs",
+            "src/store.rs",
+            "src/regions.rs",
+            "src/bl.rs",
+            "stage0/src/main.rs",
+        ] {
+            let path = dir.join(rel);
+            if !path.is_file() {
+                continue;
+            }
+            checked += 1;
+            let found = large_literals(&code(&path));
+            assert!(found.is_empty(), "{id} {rel}: {found:?}");
+        }
+        let layout = code(&dir.join("src/layout.rs"));
+        assert!(
+            ["crate::slots::", "crate::PARTITION_TABLE"]
+                .iter()
+                .any(|g| layout.contains(g)),
+            "{id}: layout.rs takes the generated slots"
+        );
+    }
+    assert!(checked >= 10, "{checked}");
+}
+
+/// The literal scan finds what it is meant to find.
+#[test]
+fn the_literal_scan_finds_addresses() {
+    assert_eq!(
+        large_literals("const A: u32 = 0x1000_8000; let n = 8_000; x[1]; v2 = 3; \"RFC 8032\";"),
+        ["0x1000_8000", "8_000"]
+    );
+    assert!(large_literals("thumbv6m 0x100 255u8 HEADER_SIZE as u32").is_empty());
 }

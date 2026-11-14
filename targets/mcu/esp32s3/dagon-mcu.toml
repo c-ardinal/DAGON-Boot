@@ -136,6 +136,13 @@ kind = "can"
 kind = "rtc-wdt"
 trial_ms = 4_000
 confirmed_ms = 4_000
+# The periods the RTC watchdog can run: the package counts the period in
+# calibrated RTC slow clock ticks in 64 bits and writes the stage 0 hold
+# register (32 bits) only with a count that fits it (`rwdt::stage0_hold`).
+# 3,600,000 ms is 4.28e9 ticks at a slow clock calibrated at 1.19 MHz,
+# under 2^32, and 4.9e8 at the nominal 136 kHz RC_SLOW_CLK (ESP32-S3 TRM,
+# clock tree). DAGON arms whole milliseconds, from 1.
+range_ms = { min = 1, max = 3_600_000 }
 # The ESP-IDF 2nd stage with app rollback (vendor/sdkconfig.defaults) aborts
 # an image left on trial at its next boot: one boot.
 trial_attempts = 1

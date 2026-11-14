@@ -3,8 +3,9 @@
 use dagon_events::Clock;
 use dagon_port::{Reset, ResetCause, Watchdog};
 use esp_hal::{
-    rtc_cntl::{Rwdt, RwdtStage, SocResetReason},
-    time::{Duration, Instant},
+    peripherals::LPWR,
+    rtc_cntl::{Rwdt, SocResetReason},
+    time::Instant,
 };
 
 pub struct EspClock;
@@ -35,10 +36,25 @@ impl RtcWatchdog {
     }
 }
 
+/// The RTC watchdog's write protection key (esp-hal 1.2 `Rwdt`).
+const WDT_WKEY: u32 = 0x50D8_3AA1;
+
+/// Sets stage 0 to `timeout_ms`, counted by [`crate::rwdt::stage0_hold`]
+/// from the slow clock period esp-hal calibrated at start-up (STORE1)
+/// instead of `Rwdt::set_timeout`, which cuts the count to 32 bits.
+fn set_stage0(timeout_ms: u32) {
+    let regs = LPWR::regs();
+    let cal = regs.store1().read().bits().max(1);
+    let hold = crate::rwdt::stage0_hold(timeout_ms, cal, esp_hal::efuse::rwdt_multiplier());
+    regs.wdtwprotect().write(|w| unsafe { w.bits(WDT_WKEY) });
+    regs.wdtconfig(0)
+        .modify(|_, w| unsafe { w.hold().bits(hold) });
+    regs.wdtwprotect().write(|w| unsafe { w.bits(0) });
+}
+
 impl Watchdog for RtcWatchdog {
     fn start(&mut self, timeout_ms: u32) {
-        self.rwdt
-            .set_timeout(RwdtStage::Stage0, Duration::from_millis(timeout_ms.into()));
+        set_stage0(timeout_ms);
         self.rwdt.enable();
         self.rwdt.feed();
     }

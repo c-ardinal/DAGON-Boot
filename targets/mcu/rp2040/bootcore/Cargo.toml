@@ -14,7 +14,7 @@ publish = false
 # the lint uses a neutral tag and the boot folder in lint/.
 [package.metadata.dagon]
 bootcore = "rp2040"
-lint = { features = ["", "slot-b"], env = { DAGON_TARGET_TAG = "lint", DAGON_BOOT_CRATE = "lint" } }
+lint = { features = ["", "slot-b"], env = { DAGON_TARGET_TAG = "lint", DAGON_BOOT_CRATE = "./lint" } }
 
 # Standalone: built for thumbv6m only, so it stays out of the host workspace.
 # Its memory.x and verifying key come from dagon-mcu-rp2040.

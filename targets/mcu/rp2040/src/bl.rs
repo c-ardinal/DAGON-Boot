@@ -6,30 +6,19 @@
 
 use dagon_core::bootcore::{self, CoreFail, Diag, NoCore, Stage0, Start};
 pub use dagon_core::bootcore::{MustReset, Settled};
-use dagon_format::header::mcu_id;
 use dagon_format::SigVerifier;
 use dagon_port::Flash;
 
-use crate::layout::{BL_LOG_LAYOUT, BL_SLOT, BL_SLOT_SIZE};
+use crate::layout::BL_LOG_LAYOUT;
 use crate::TRIAL_ATTEMPTS;
 
-/// The boot core slots as `(base, size)`, slot A first.
-const CORE_SLOTS: [(u32, u32); BL_SLOT.len()] = {
-    let mut s = [(0, 0); BL_SLOT.len()];
-    let mut i = 0;
-    while i < s.len() {
-        s[i] = (BL_SLOT[i], BL_SLOT_SIZE);
-        i += 1;
-    }
-    s
-};
-
-/// What stage0 knows of this MCU (`dagon_core::bootcore::decide`).
+/// What stage0 knows of this MCU (`dagon_core::bootcore::decide`): the boot
+/// core slots `(base, size)`, slot A first, from the generated definition.
 pub const STAGE0: Stage0<'static> = Stage0 {
     log: &BL_LOG_LAYOUT,
-    slots: &CORE_SLOTS,
+    slots: &crate::slots::BOOTCORE,
     max: TRIAL_ATTEMPTS,
-    mcu_id: mcu_id::RP2040,
+    mcu_id: crate::MCU_WIRE_ID,
 };
 
 /// Stage0's choice from the boot core log and the trial cell `cell` read

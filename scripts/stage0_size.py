@@ -249,6 +249,9 @@ def build_all() -> None:
                 folder = pkg / "target" / "stage0-size" / board
                 folder.mkdir(parents=True, exist_ok=True)
                 (folder / "Cargo.toml").write_text(boot_folder_toml(mcu, board), encoding="utf-8")
+                # The node's MCU definition, as `dagon gen` writes it: here
+                # the built-in one.
+                (folder / "mcu.toml").write_bytes((MCU / mcu / "dagon-mcu.toml").read_bytes())
                 out = folder / "target"
             env = dict(os.environ, DAGON_BOOT_CRATE=str(folder), CARGO_TARGET_DIR=str(out))
             env.setdefault("DAGON_ALLOW_TEST_KEY", "1")

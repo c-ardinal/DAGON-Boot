@@ -1,37 +1,38 @@
-//! Hub-side port traits over the simulated bus, so hub logic written against
-//! `dagon-port` runs unchanged on the simulator. All futures complete at once;
-//! drive them with [`crate::block_on`].
+//! Port traits over the simulated ports, so relay logic written against
+//! `dagon-port` runs unchanged on the simulator. All futures complete at
+//! once; drive them with [`crate::block_on`].
 
-use crate::hub::SimBus;
+use crate::relay::{SimBus, SimPort};
 use dagon_port::{BusError, I2cBus, Nrst, StreamPort, SubControl};
 
-impl I2cBus for SimBus {
+/// An I2C port.
+impl I2cBus for SimPort<'_> {
     async fn write(&mut self, addr: u8, data: &[u8]) -> Result<(), BusError> {
-        self.i2c_write(addr, data)
+        self.bus.i2c_write(self.port, addr, data)
     }
 
     async fn read(&mut self, addr: u8, buf: &mut [u8]) -> Result<(), BusError> {
-        self.i2c_read(addr, buf)
+        self.bus.i2c_read(self.port, addr, buf)
     }
 
     async fn write_read(&mut self, addr: u8, data: &[u8], buf: &mut [u8]) -> Result<(), BusError> {
-        self.i2c_write(addr, data)?;
-        self.i2c_read(addr, buf)
+        self.bus.i2c_write(self.port, addr, data)?;
+        self.bus.i2c_read(self.port, addr, buf)
     }
 }
 
-/// The UART node's byte stream (PIO UART on the hub).
-impl StreamPort for SimBus {
+/// A UART port's byte stream.
+impl StreamPort for SimPort<'_> {
     async fn read(&mut self, buf: &mut [u8], timeout_ms: u32) -> Result<usize, BusError> {
-        if self.uart_pending() == 0 {
-            self.advance_ms(timeout_ms as u64);
+        if self.bus.uart_pending(self.port) == 0 {
+            self.bus.advance_ms(timeout_ms as u64);
             return Err(BusError::Timeout);
         }
-        Ok(self.uart_take(buf))
+        Ok(self.bus.uart_take(self.port, buf))
     }
 
     async fn write(&mut self, data: &[u8]) -> Result<(), BusError> {
-        self.uart_write(data);
+        self.bus.uart_write(self.port, data);
         Ok(())
     }
 }

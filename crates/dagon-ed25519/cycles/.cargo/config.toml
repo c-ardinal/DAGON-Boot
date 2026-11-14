@@ -1,0 +1,7 @@
+[build]
+target = "thumbv6m-none-eabi"
+
+[target.thumbv6m-none-eabi]
+# m0.ld places the program at the RP2040's flash and RAM; the SHA-2 rounds
+# are the compact ones the stage0s are built with.
+rustflags = ["-C", "link-arg=-Tm0.ld", "--cfg", 'sha2_backend_soft="compact"']

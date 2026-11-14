@@ -1,0 +1,24 @@
+[package]
+name = "dagon-ed25519-cycles"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+version = "0.0.0"
+publish = false
+
+# Ed25519Small verifying one stage0-shaped message, built for a Cortex-M0+
+# as the stage0s are: the program dagon-ed25519's tests/m0_cycles.rs runs
+# on its ARMv6-M emulator to estimate the verify's cycles. Built for
+# thumbv6m only (.cargo/config.toml), so it stays out of the host workspace.
+[workspace]
+
+[dependencies]
+dagon-ed25519 = { path = ".." }
+dagon-format = { path = "../../dagon-format" }
+
+# The stage0 profile (targets/mcu/*/stage0/Cargo.toml).
+[profile.release]
+opt-level = "z"
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+debug = true

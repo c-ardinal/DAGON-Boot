@@ -22,6 +22,7 @@
 use board::{Board, BoardDef};
 use dagon_board_waveshare_rp2040_touch_lcd_1_28 as board;
 use dagon_mcu_rp2040::arm::{led, step};
+use dagon_mcu_rp2040::clock::Setup as Clock;
 use dagon_mcu_rp2040::links::Kind;
 use dagon_mcu_rp2040::node::{always, App};
 use dagon_mcu_rp2040::relay::{self, Setup};
@@ -45,6 +46,11 @@ static GUARD: Guard<{ board::APP_TASKS }> = Guard::new(
 
 static EXECUTOR_LOW: StaticCell<Executor> = StaticCell::new();
 
+/// The clock an app on the board runs on (its `[clock]` and the MCU's
+/// `[[app.clock]]`); the PC link needs its USB clock.
+const CLOCK: Clock = dagon_mcu_rp2040::clock_setup!(board::def::app_clock);
+dagon_mcu_rp2040::require_uplink_clock!(CLOCK, Kind::UsbCdc, "hub");
+
 /// The sample's wiring, shown and polled until a topology display copy
 /// is stored.
 static SAMPLE_WIRING: [LinkedNode; 2] = [
@@ -58,7 +64,7 @@ fn main() -> ! {
     // 13 polling nodes, 14 answering the PC, 15 drawing.
     led::select(board::DIAG_LED, board::DIAG_LED_ACTIVE_HIGH);
     step(10);
-    let (dagon, io) = Board::split(embassy_rp::init(Default::default()));
+    let (dagon, io) = Board::split(embassy_rp::init(CLOCK.hal_config()));
     step(11);
     let setup = Setup {
         tag: dagon_mcu_rp2040::target_tag!(),

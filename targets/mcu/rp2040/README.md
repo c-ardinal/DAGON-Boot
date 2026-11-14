@@ -44,6 +44,7 @@ DAGON_TARGET_TAG = { value = "my-hub", force = true }
 
 ```rust
 use dagon_board_waveshare_rp2040_touch_lcd_1_28::{self as board, Board, BoardDef};
+use dagon_mcu_rp2040::clock::Setup as Clock;
 use dagon_mcu_rp2040::links::{self, Kind};
 use dagon_mcu_rp2040::relay::{self, Setup};
 use dagon_mcu_rp2040::watchdog::{now_ms, Guard, Trial};
@@ -54,6 +55,12 @@ const DOWNLINKS: &[Kind] = &[Kind::I2c, Kind::Uart];
 const _: () = links::require_uplink(UPLINK);
 const _: () = links::require_downlinks(DOWNLINKS);
 
+// The clock the definitions choose for the node (dagon gen writes it into
+// wiring.rs; a board package has its own in `def::app_clock`). A USB
+// uplink needs the USB clock, which only a crystal gives.
+const CLOCK: Clock = dagon_mcu_rp2040::clock_setup!(wiring::clock);
+dagon_mcu_rp2040::require_uplink_clock!(CLOCK, UPLINK, "my-hub");
+
 const TASKS: usize = board::APP_TASKS + app::TASKS;
 static GUARD: Guard<TASKS> = Guard::new(
     relay::levels::<TASKS>(),
@@ -63,7 +70,7 @@ static GUARD: Guard<TASKS> = Guard::new(
 
 #[embassy_executor::main]
 async fn main(spawner: embassy_executor::Spawner) {
-    let (dagon, io) = Board::split(embassy_rp::init(Default::default()));
+    let (dagon, io) = Board::split(embassy_rp::init(CLOCK.hal_config()));
     let setup = Setup {
         tag: dagon_mcu_rp2040::target_tag!(),
         // The node's index in the 構成 (wiring.rs).

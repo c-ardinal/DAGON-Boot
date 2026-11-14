@@ -1,10 +1,12 @@
 //! The halt LED and pattern come from the board of the node whose boot
-//! folder `DAGON_BOOT_CRATE` names (`board.rs`, `pins.rs`); the build
-//! fails without it, and without the stamp `dagon gen` writes there once
-//! the boot crate's dependency graph passed its check for the current
-//! inputs.
+//! folder `DAGON_BOOT_CRATE` names (`board.rs`, `pins.rs`), and the clock
+//! from the MCU's `[[bootcore.clock]]` setup for that board's `[clock]`
+//! (`clock.rs`; the internal one for a node without a board); the build
+//! fails without the folder, and without the stamp `dagon gen` writes
+//! there once the boot crate's dependency graph passed its check for the
+//! current inputs.
 
-use dagon_topology::defs::codegen::{boot_build, boot_verify_stamp, Hal};
+use dagon_topology::defs::codegen::{boot_build, boot_verify_stamp, bootcore_clock_build, Hal};
 
 fn main() {
     boot_verify_stamp();
@@ -14,6 +16,7 @@ fn main() {
         name: &name,
         lifetime: false,
     }));
+    bootcore_clock_build(b.as_ref());
     println!("cargo::rustc-check-cfg=cfg(boot_led)");
     let Some(b) = b else {
         return;

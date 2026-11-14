@@ -12,9 +12,10 @@ mod app;
 mod wiring;
 
 use dagon_board_nucleo_f401re::{self as board, Board, BoardDef};
+use dagon_mcu_stm32f401re::clock::Setup;
 use dagon_mcu_stm32f401re::links::{self, Kind};
+use dagon_mcu_stm32f401re::node;
 use dagon_mcu_stm32f401re::watchdog::{now_ms, Guard, Trial};
-use dagon_mcu_stm32f401re::{clocks, node};
 use embassy_executor::Spawner;
 use {defmt_rtt as _, panic_probe as _};
 
@@ -27,6 +28,10 @@ const DOWNLINKS: &[Kind] = &[{{downlinks}}];
 const _: () = links::require_uplink(UPLINK);
 const _: () = links::require_downlinks(DOWNLINKS);
 
+/// The clock this node runs on, from its board's `[clock]` and the MCU's
+/// `[[app.clock]]` (wiring.rs).
+const CLOCK: Setup = dagon_mcu_stm32f401re::clock_setup!(wiring::clock);
+
 /// Watchdog guard tasks: DAGON's link, then app.rs's.
 const TASKS: usize = node::APP_TASKS + app::TASKS;
 
@@ -37,7 +42,7 @@ static GUARD: Guard<TASKS> = Guard::new(node::levels::<TASKS>(), Trial::NeverFee
 
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
-    let (dagon, io) = Board::split(embassy_stm32::init(clocks()));
+    let (dagon, io) = Board::split(embassy_stm32::init(CLOCK.hal_config()));
     // DAGON_TARGET_TAG in .cargo/config.toml (the boot core uses it too).
     let tag = dagon_mcu_stm32f401re::target_tag!();
     // An unreadable state log: nothing starts and the watchdog resets.

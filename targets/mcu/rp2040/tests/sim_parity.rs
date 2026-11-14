@@ -1,4 +1,4 @@
-//! The hub command argument rules against dagon-sim's hub with no node
+//! The relay command argument rules against dagon-sim's relaying node with no node
 //! answering: a request the rules reject must get the same status from the
 //! sim; one they accept reaches the bus (and times out there).
 
@@ -7,18 +7,18 @@ use dagon_proto::payload::link::UART_ADDR;
 use dagon_proto::payload::{boot0, nrst, I2cRaw, Relay, Show, SubCtl};
 use dagon_proto::{finish, frame_len, max_payload, split_status, Cmd, Frame, Status};
 use dagon_relay::cmd;
-use dagon_sim::{demo_hub, SimHub};
+use dagon_sim::{demo_hub, SimRelay};
 
-fn ask(h: &mut SimHub, c: Cmd, payload: &[u8]) -> Status {
+fn ask(h: &mut SimRelay, c: Cmd, payload: &[u8]) -> Status {
     let mut buf = vec![0u8; frame_len(payload.len())];
     buf[8..8 + payload.len()].copy_from_slice(payload);
     finish(&mut buf, 0, 1, c as u8, payload.len()).unwrap();
-    let resp = h.request(&buf).expect("hub answers");
+    let resp = h.request(&buf).expect("the relaying node answers");
     let (f, _) = Frame::decode(&resp, max_payload::USB).unwrap();
     split_status(f.payload).unwrap().0
 }
 
-fn relay(h: &mut SimHub, l: u8, addr: u8, inner_len: usize) -> Status {
+fn relay(h: &mut SimRelay, l: u8, addr: u8, inner_len: usize) -> Status {
     let inner = vec![0u8; inner_len];
     let r = Relay {
         link: l,

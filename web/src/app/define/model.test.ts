@@ -36,8 +36,8 @@ describe('define document', () => {
   test('the graph view of sample matches the sample the operate mode draws', () => {
     const names = Object.fromEntries(SAMPLE_CONFIG.nodes.map((n) => [n.id, n.name]));
     const c = toConfig(fromYaml(SAMPLE_YAML, names), supportedBoards());
-    expect(c.nodes.map((n) => [n.id, n.name, n.role, n.via, n.reset, n.boot, n.target])).toEqual(
-      SAMPLE_CONFIG.nodes.map((n) => [n.id, n.name, n.role, n.via, n.reset, n.boot, n.target]),
+    expect(c.nodes.map((n) => [n.id, n.name, n.role, n.via, n.reset, n.boot])).toEqual(
+      SAMPLE_CONFIG.nodes.map((n) => [n.id, n.name, n.role, n.via, n.reset, n.boot]),
     );
     expect(c.order).toEqual(SAMPLE_CONFIG.order);
     expect(c.links.map((l) => [l.from, l.to, l.kind, l.addr, l.wires.length])).toEqual(SAMPLE_CONFIG.links.map((l) => [l.from, l.to, l.kind, l.addr, l.wires.length]));

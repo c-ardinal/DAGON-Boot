@@ -7,6 +7,8 @@
 import { CMD, FLAG_RESP, MAX_PAYLOAD_USB, STATUS_OK, encodeFrame, parseFrame } from './frame.ts';
 import { ROLE_HUB, ROLE_NODE, encodeHelloResp, versionRaw, type HelloResp } from './hello.ts';
 import { FrameQueue, type Transport } from './transport.ts';
+import sampleYaml from '../../../topology/sample.yaml?raw';
+import { topo_targets, type Target } from '../wasm/dagon.ts';
 
 const STATUS_UNSUPPORTED = 0x02;
 const STATUS_ARG = 0x03;
@@ -22,8 +24,6 @@ const CMD_CONFIRM = 0x22;
 const CMD_SHOW = 0x41;
 const CMD_RELAY = 0x50;
 const TARGET_TOPOLOGY = 3;
-const LINK_I2C0 = 1;
-const LINK_PIO_UART = 2;
 const RELAY_HEAD_LEN = 4;
 const CHUNK_HEAD = 4;
 const HDR_VERSION_AT = 0x018;
@@ -84,6 +84,18 @@ interface Device {
 
 /** Device keys: `hub`, `i2c:<addr>`, `uart`. */
 export type DeviceKey = 'hub' | `i2c:${number}` | 'uart';
+
+/** The device of each linked node of the sample configuration. */
+const SAMPLE_DEVICE: Record<string, DeviceKey> = { seg: 'i2c:66', watch: 'uart' };
+
+let sampleTargets: Record<string, Target> | undefined;
+
+/** The device a RELAY over `link` to `addr` reaches: by the sample's targets as dagon-host gives them (read once dagon-wasm runs). */
+function deviceAt(link: number, addr: number): DeviceKey | null {
+  sampleTargets ??= topo_targets(sampleYaml);
+  const hit = Object.entries(sampleTargets).find(([, t]) => t.kind === 'linked' && t.link === link && t.addr === addr);
+  return hit ? (SAMPLE_DEVICE[hit[0]] ?? null) : null;
+}
 
 const aConfirmed = (): Slot[] => [
   { state: SLOT_CONFIRMED, version: V100 },
@@ -220,7 +232,7 @@ export class MockTransport implements Transport {
   private async relay(p: Uint8Array): Promise<Uint8Array> {
     if (p.length < RELAY_HEAD_LEN) return Uint8Array.of(STATUS_ARG);
     const [link, addr] = p;
-    const key: DeviceKey | null = link === LINK_I2C0 ? `i2c:${addr}` : link === LINK_PIO_UART ? 'uart' : null;
+    const key = deviceAt(link, addr);
     const dev = key && !this.quiet.has(key) ? this.devices.get(key) : undefined;
     if (!key || !dev) return Uint8Array.of(STATUS_TIMEOUT);
     const inner = parseFrame(p.subarray(RELAY_HEAD_LEN));

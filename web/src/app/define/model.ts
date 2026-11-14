@@ -657,7 +657,6 @@ export function toConfig(doc: Doc, boards: Board[]): Config {
       via,
       reset: gpio(s?.up.nrst),
       boot: gpio(s?.up.boot),
-      target: n.role === 'coordinator' ? { kind: 'hub', addr: 0 } : l?.kind === 'i2c' ? { kind: 'i2c', addr: s?.down.addr ?? 0 } : { kind: 'uart', addr: 0 },
       depth: depth(n.id),
       ...(n.role === 'coordinator' && n.uplink && !l ? { uplink: { kind: n.uplink.kind, host: n.uplink.host ?? 'pc-cli' } } : {}),
       ...(skipped[n.id] ? { notYet: skipped[n.id] } : {}),

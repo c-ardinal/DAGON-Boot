@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, test } from 'vitest';
-import { decodeHelloResp, supportedBoards, topo_check, topo_compile, verify_release } from './dagon.ts';
+import { decodeHelloResp, newHost, supportedBoards, topo_check, topo_compile, topo_targets, verify_release } from './dagon.ts';
+import type { HostLink } from './pkg/dagon_wasm.js';
 
 const repo = (rel: string) => new URL(`../../../${rel}`, import.meta.url);
 const golden = (name: string) => new Uint8Array(readFileSync(repo(`crates/dagon-format/golden/${name}`)));
@@ -35,5 +36,48 @@ describe('dagon-wasm exports', () => {
 
   test('a short HELLO body throws', () => {
     expect(() => decodeHelloResp(new Uint8Array(23))).toThrow();
+  });
+});
+
+describe("each node's target is the one dagon-host gives", () => {
+  const sample = new TextDecoder().decode(readFileSync(repo('topology/sample.yaml')));
+  const idle: HostLink = {
+    write: async () => undefined,
+    read: async () => new Uint8Array(),
+    reopen: async () => undefined,
+    maxPayload: () => 1024,
+    reconnectKind: () => 'reopen',
+    now: () => 0,
+    sleep: async () => undefined,
+  };
+
+  test('the connected node is local, the others linked over their own entries, the same for the host', () => {
+    const t = topo_targets(sample);
+    expect(t.hub).toEqual({ kind: 'local' });
+    const [seg, watch] = [t.seg, t.watch];
+    expect(seg.kind === 'linked' && watch.kind === 'linked' && seg.link !== watch.link).toBe(true);
+    expect(seg.kind === 'linked' && seg.addr).toBe(0x42);
+    const h = newHost(idle as never);
+    expect(h.setTimings(sample)).toEqual(t);
+    h.free();
+  });
+
+  test("the order of a link's ends changes nothing", () => {
+    const reversed = sample.replace(/( {6}- \{ node: hub, port: i2c0[^\n]*\n)( {6}- \{ node: seg[^\n]*\n)/, '$2$1');
+    expect(reversed).not.toBe(sample);
+    expect(topo_targets(reversed)).toEqual(topo_targets(sample));
+  });
+
+  test('a node on a port the connected node relays over no entry of has no target', () => {
+    // The watch on the hub's UART0 (the hub on its MCU alone, whose UART0 pins the board header leaves out).
+    const onUart0 = sample
+      .replace('    board: waveshare-rp2040-touch-lcd-1.28\n', '')
+      .replace('iface: pio-uart', 'iface: hw-uart0')
+      .replace('port: pio-uart, pins: { tx: 26, rx: 27 }', 'port: uart0, pins: { tx: 0, rx: 1 }');
+    expect(JSON.parse(topo_check(onUart0)).ok).toBe(true);
+    const t = topo_targets(onUart0);
+    expect(t.hub).toEqual({ kind: 'local' });
+    expect(t.watch).toBeUndefined();
+    expect(t.seg).toEqual(topo_targets(sample).seg);
   });
 });

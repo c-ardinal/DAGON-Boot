@@ -29,7 +29,7 @@ use dagon_relay::{
     RelayClock, State,
 };
 use dagon_sim::store::SimStore;
-use dagon_sim::{sample_hub, SimBus, NODE_I2C_ADDR};
+use dagon_sim::{sample_hub, SimBus, NODE_I2C_ADDR, NODE_I2C_PORT, WATCH_UART_PORT};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex as Cs;
 use embassy_sync::channel::Channel;
 
@@ -182,6 +182,8 @@ struct SimNodeLink<'a> {
     clock: VirtualClock,
     id: u8,
     addressed: bool,
+    /// The simulated port the node is on.
+    port: u8,
     /// The address of every exchange, in order.
     asked: Rc<RefCell<Vec<u8>>>,
 }
@@ -226,9 +228,9 @@ impl NodeLink for SimNodeLink<'_> {
         let resp = {
             let mut b = self.bus.borrow_mut();
             if self.addressed {
-                b.i2c_exchange(addr, frame, timeout_ms.into())
+                b.i2c_exchange(self.port, addr, frame, timeout_ms.into())
             } else {
-                b.uart_exchange(frame, timeout_ms.into())
+                b.uart_exchange(self.port, frame, timeout_ms.into())
             }
         };
         self.spend(t0).await;
@@ -244,10 +246,12 @@ impl NodeLink for SimNodeLink<'_> {
         }
         let mut b = self.bus.borrow_mut();
         if !write.is_empty() {
-            b.i2c_write(addr, write).map_err(|_| Status::Timeout)?;
+            b.i2c_write(self.port, addr, write)
+                .map_err(|_| Status::Timeout)?;
         }
         if !read.is_empty() {
-            b.i2c_read(addr, read).map_err(|_| Status::Timeout)?;
+            b.i2c_read(self.port, addr, read)
+                .map_err(|_| Status::Timeout)?;
         }
         Ok(())
     }
@@ -450,6 +454,16 @@ impl Pc<'_> {
     }
 }
 
+/// The sample's simulated ports, and the ports its F401 and its watch are on.
+fn sample_bus() -> (RefCell<SimBus>, [u8; 2]) {
+    let sample = sample_hub(7);
+    let ports = [
+        sample.port(NODE_I2C_PORT, LinkKind::I2c),
+        sample.port(WATCH_UART_PORT, LinkKind::Uart),
+    ];
+    (RefCell::new(sample.bus), ports)
+}
+
 /// The relayed answer frame is a successful HELLO answer.
 fn hello_answered(status: Status, body: &[u8], max: usize) -> bool {
     status == Status::Ok && dagon_port::hello_answer(body, max).is_some()
@@ -457,7 +471,7 @@ fn hello_answered(status: Status, body: &[u8], max: usize) -> bool {
 
 #[test]
 fn the_relay_serves_the_pc_over_its_links() {
-    let bus = RefCell::new(sample_hub(7).bus);
+    let (bus, sim_ports) = sample_bus();
     let clock = VirtualClock::default();
     let state = State::new();
     let config = Config {
@@ -486,6 +500,7 @@ fn the_relay_serves_the_pc_over_its_links() {
         clock: clock.clone(),
         id: LINKS[i].id,
         addressed: i == 0,
+        port: sim_ports[i],
         asked,
     };
     let relay = Relay {
@@ -555,17 +570,18 @@ fn the_relay_serves_the_pc_over_its_links() {
 
         // I2C_RAW only while BOOT0 is high, as last set successfully.
         assert_eq!(pc.rom_get().await.0, Status::State);
+        let wired = bus.borrow().sub;
         bus.borrow_mut().sub = None;
         assert_eq!(pc.lines(true, nrst::PULSE).await, Status::Timeout);
         assert_eq!(pc.rom_get().await.0, Status::State);
-        bus.borrow_mut().sub = Some(0);
+        bus.borrow_mut().sub = wired;
         assert_eq!(pc.lines(true, nrst::PULSE).await, Status::Ok);
         assert!(bus.borrow_mut().sub_mut().unwrap().boot0());
         clock.wait_until(clock.now_ms() + 100).await;
         assert_eq!(pc.rom_get().await, (Status::Ok, vec![dagon_sim::rom::ACK]));
         bus.borrow_mut().sub = None;
         assert_eq!(pc.lines(false, nrst::PULSE).await, Status::Timeout);
-        bus.borrow_mut().sub = Some(0);
+        bus.borrow_mut().sub = wired;
         assert_ne!(pc.rom_get().await.0, Status::State);
         assert_eq!(pc.lines(false, nrst::PULSE).await, Status::Ok);
         assert_eq!(pc.rom_get().await.0, Status::State);
@@ -714,7 +730,7 @@ fn same_tag_topology() -> Stored {
 /// [`same_tag_topology`]: the nodes it lists and the addresses its bus
 /// worker polls.
 fn serves(index: u8) -> (Vec<dagon_relay::nodes::LinkedNode>, Vec<u8>) {
-    let bus = RefCell::new(sample_hub(7).bus);
+    let (bus, sim_ports) = sample_bus();
     let clock = VirtualClock::default();
     let state = State::new();
     let config = Config::default();
@@ -755,6 +771,7 @@ fn serves(index: u8) -> (Vec<dagon_relay::nodes::LinkedNode>, Vec<u8>) {
             clock: clock.clone(),
             id: BUS,
             addressed: true,
+            port: sim_ports[0],
             asked: asked.clone(),
         };
         run_link(

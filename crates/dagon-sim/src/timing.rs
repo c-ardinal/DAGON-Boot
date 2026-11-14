@@ -1,12 +1,13 @@
 //! How long the links and the flash take, so a simulated write runs about
-//! as long as it does on hardware: the uplink between the PC and the 親機
-//! (USB CDC, a USB-UART adapter, Wi-Fi TCP), the I2C and UART links to the
-//! 子機, and the sector erase and final check of a transfer.
+//! as long as it does on hardware: the uplink between the PC and the node
+//! it is connected to (USB CDC, a USB-UART adapter, Wi-Fi TCP), each relay
+//! link at the rate of its port's kind, and the sector erase and final
+//! check of a transfer.
 //!
-//! [`TimedHub`] holds each answer of a [`SimHub`] back until its simulated
-//! arrival time. `dagon demo` (serve) and the browser demo both drive the
-//! simulator through it; only their clocks differ (serve follows the wall
-//! clock, the browser advances the simulator while it waits).
+//! [`TimedRelay`] holds each answer of a [`SimRelay`] back until its
+//! simulated arrival time. `dagon demo` (serve) and the browser demo both
+//! drive the simulator through it; only their clocks differ (serve follows
+//! the wall clock, the browser advances the simulator while it waits).
 
 use std::collections::VecDeque;
 
@@ -14,12 +15,13 @@ use dagon_proto::payload::Relay;
 use dagon_proto::{max_payload, Cmd, HEADER_LEN};
 use dagon_topology::schema::LinkKind;
 
-use crate::SimHub;
+use crate::SimRelay;
+use dagon_port::RelayLinkDef;
 
-/// The uplink simulated between the PC and the 親機.
+/// The uplink simulated between the PC and the node it is connected to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Medium {
-    /// USB CDC: fast, gone while the hub reboots.
+    /// USB CDC: fast, gone while the node reboots.
     UsbCdc,
     /// A USB-UART adapter at 115200 baud: slow, smaller frames, stays.
     Uart,
@@ -55,7 +57,7 @@ impl Medium {
         }
     }
 
-    /// Whether the link stays open while the 親機 reboots (a USB-UART
+    /// Whether the link stays open while the node reboots (a USB-UART
     /// adapter does; USB CDC and TCP go away and are opened again).
     pub fn stays_on_reboot(self) -> bool {
         self == Medium::Uart
@@ -79,14 +81,26 @@ const WIFI_BYTES_PER_MS: f64 = 300.0;
 const WIFI_LATENCY_MS: f64 = 8.0;
 const I2C_BYTES_PER_MS: f64 = 25.0;
 const UART_BYTES_PER_MS: f64 = 11.0;
-/// Fixed cost of one exchange (USB round trip, the hub's work).
+/// Fixed cost of one exchange (USB round trip, the relaying node's work).
 const EXCHANGE_MS: f64 = 2.0;
 /// Sector erase before a transfer, and the final check after it.
 pub const ERASE_MS: f64 = 600.0;
 const DIGEST_CHECK_MS: f64 = 150.0;
 
-/// Simulated ms the exchange of request `frame` takes on its links.
-pub fn exchange_ms(frame: &[u8], medium: Medium) -> f64 {
+/// Bytes per simulated ms over a relay link of `kind`; `None` for a kind
+/// the simulator has no medium for (its RELAY is refused at once).
+fn link_rate(kind: dagon_port::LinkKind) -> Option<f64> {
+    match kind {
+        dagon_port::LinkKind::I2c => Some(I2C_BYTES_PER_MS),
+        dagon_port::LinkKind::Uart => Some(UART_BYTES_PER_MS),
+        _ => None,
+    }
+}
+
+/// Simulated ms the exchange of request `frame` takes on its links: the
+/// uplink, and for a RELAY the link of `links` its id names, at the rate of
+/// that link's kind (an id `links` does not list is refused at once).
+pub fn exchange_ms(frame: &[u8], medium: Medium, links: &[RelayLinkDef]) -> f64 {
     let cmd = frame.get(5).copied().unwrap_or(0);
     let payload = frame
         .get(HEADER_LEN..frame.len().saturating_sub(4))
@@ -105,37 +119,37 @@ pub fn exchange_ms(frame: &[u8], medium: Medium) -> f64 {
     let Ok(r) = Relay::parse(payload) else {
         return latency + usb;
     };
-    let links = crate::store::relay_links(crate::store::Layout::RP2040_HUB.mcu);
-    let kind = links.iter().find(|l| l.id == r.link).map(|l| l.kind);
-    let rate = if kind == Some(dagon_port::LinkKind::Uart) {
-        UART_BYTES_PER_MS
-    } else {
-        I2C_BYTES_PER_MS
+    let Some(rate) = links
+        .iter()
+        .find(|l| l.id == r.link)
+        .and_then(|l| link_rate(l.kind))
+    else {
+        return latency + usb;
     };
     let inner_cmd = r.inner.get(5).copied().unwrap_or(0);
     // The request out and an answer of about the same size back.
     latency + usb + 2.0 * r.inner.len() as f64 / rate + work(inner_cmd)
 }
 
-/// A [`SimHub`] whose answers arrive when the links would have carried them.
-pub struct TimedHub {
-    hub: SimHub,
+/// A [`SimRelay`] whose answers arrive when the links would have carried them.
+pub struct TimedRelay {
+    relay: SimRelay,
     medium: Medium,
     /// Answers and the simulated time they arrive at, in order.
     out: VecDeque<(u64, Vec<u8>)>,
 }
 
-impl TimedHub {
-    pub fn new(hub: SimHub) -> TimedHub {
-        TimedHub {
-            hub,
+impl TimedRelay {
+    pub fn new(relay: SimRelay) -> TimedRelay {
+        TimedRelay {
+            relay,
             medium: Medium::UsbCdc,
             out: VecDeque::new(),
         }
     }
 
-    pub fn hub_mut(&mut self) -> &mut SimHub {
-        &mut self.hub
+    pub fn relay_mut(&mut self) -> &mut SimRelay {
+        &mut self.relay
     }
 
     pub fn medium(&self) -> Medium {
@@ -147,23 +161,24 @@ impl TimedHub {
     }
 
     pub fn now_ms(&self) -> u64 {
-        self.hub.now_ms()
+        self.relay.now_ms()
     }
 
     pub fn advance_ms(&mut self, ms: u64) {
-        self.hub.advance_ms(ms);
+        self.relay.advance_ms(ms);
     }
 
-    /// Bytes from the PC to the 親機; its answer is held until it arrives.
-    /// A frame larger than the uplink carries never reaches the hub.
+    /// Bytes from the PC to the relaying node; its answer is held until it
+    /// arrives. A frame larger than the uplink carries never reaches it.
     pub fn write(&mut self, bytes: &[u8]) {
         if bytes.len().saturating_sub(dagon_proto::frame_len(0)) > self.medium.max_payload() {
             return;
         }
-        self.hub.usb_write(bytes);
-        // The hub's own work may move its clock; the links' time comes on top.
-        let due = self.hub.now_ms() + exchange_ms(bytes, self.medium) as u64;
-        let answer = self.hub.usb_read();
+        self.relay.usb_write(bytes);
+        // The node's own work may move its clock; the links' time comes on top.
+        let links = self.relay.links();
+        let due = self.relay.now_ms() + exchange_ms(bytes, self.medium, links) as u64;
+        let answer = self.relay.usb_read();
         if !answer.is_empty() {
             self.out.push_back((due, answer));
         }
@@ -176,7 +191,7 @@ impl TimedHub {
 
     /// The answers that have arrived by now; empty when none has.
     pub fn read(&mut self) -> Vec<u8> {
-        let now = self.hub.now_ms();
+        let now = self.relay.now_ms();
         let mut got = Vec::new();
         while self.out.front().is_some_and(|(due, _)| *due <= now) {
             got.extend(self.out.pop_front().expect("checked").1);
@@ -217,24 +232,28 @@ mod tests {
     #[test]
     fn links_take_their_real_time() {
         let data = frame(Cmd::XferData as u8, &[0; 1000]);
-        let hub = exchange_ms(&data, Medium::UsbCdc);
-        let i2c_link = crate::store::relay_link_id(crate::store::Layout::RP2040_HUB.mcu, "i2c0");
-        let uart_link =
-            crate::store::relay_link_id(crate::store::Layout::RP2040_HUB.mcu, "pio-uart");
-        let i2c = exchange_ms(&relay(i2c_link, &data), Medium::UsbCdc);
-        let uart = exchange_ms(&relay(uart_link, &data), Medium::UsbCdc);
-        assert!(hub < 5.0 && hub < i2c && i2c < uart, "{hub} {i2c} {uart}");
+        let mcu = crate::store::Layout::RP2040_HUB.mcu;
+        let links = crate::store::relay_links(mcu);
+        let own = exchange_ms(&data, Medium::UsbCdc, &links);
+        let i2c_link = crate::store::relay_link_id(mcu, "i2c0");
+        let uart_link = crate::store::relay_link_id(mcu, "pio-uart");
+        let i2c = exchange_ms(&relay(i2c_link, &data), Medium::UsbCdc, &links);
+        let uart = exchange_ms(&relay(uart_link, &data), Medium::UsbCdc, &links);
+        assert!(own < 5.0 && own < i2c && i2c < uart, "{own} {i2c} {uart}");
         // 1 KB over I2C and back: about 80 ms; the UART about 180 ms. Both
         // stay inside the 300 ms a node has to answer.
         assert!((70.0..100.0).contains(&i2c) && uart < 300.0, "{i2c} {uart}");
         let begin = frame(Cmd::XferBegin as u8, &[0; 8]);
-        assert!(exchange_ms(&relay(i2c_link, &begin), Medium::UsbCdc) >= ERASE_MS);
+        assert!(exchange_ms(&relay(i2c_link, &begin), Medium::UsbCdc, &links) >= ERASE_MS);
     }
 
     #[test]
     fn each_uplink_has_its_own_size_speed_and_reboot() {
         let data = frame(Cmd::XferData as u8, &[0; 1000]);
-        let t: Vec<f64> = Medium::ALL.iter().map(|m| exchange_ms(&data, *m)).collect();
+        let t: Vec<f64> = Medium::ALL
+            .iter()
+            .map(|m| exchange_ms(&data, *m, &[]))
+            .collect();
         assert!(t[0] < t[2] && t[2] < t[1], "usb < wifi < uart: {t:?}");
         assert_eq!(Medium::Uart.max_payload(), max_payload::UART);
         assert!(Medium::Uart.stays_on_reboot());
@@ -247,9 +266,9 @@ mod tests {
 
     #[test]
     fn an_answer_arrives_only_once_its_time_has_passed() {
-        let mut t = TimedHub::new(crate::sample_hub(1));
+        let mut t = TimedRelay::new(crate::sample_hub(1));
         t.write(&frame(Cmd::Hello as u8, &[1, 0, 0, 0, 0x40, 0x04]));
-        let due = t.next_due().expect("the hub answers HELLO");
+        let due = t.next_due().expect("the node answers HELLO");
         assert!(due > t.now_ms());
         assert!(t.read().is_empty(), "not before it arrives");
         t.advance_ms(due - t.now_ms());

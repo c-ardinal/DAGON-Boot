@@ -1,4 +1,4 @@
-// The simulator (dagon-sim's SimHub through dagon-wasm's Simulator) as a
+// The simulator (dagon-sim's SimRelay through dagon-wasm's Simulator) as a
 // Transport and the clock dagon-host runs on: the same HostLink path as Web
 // Serial, with the F401's ROM loader simulated. Answers arrive when the links
 // and flash would have carried them (dagon-sim's timing model). Present

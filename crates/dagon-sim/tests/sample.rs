@@ -1,4 +1,4 @@
-//! The sample hub: three nodes on 1.0.0 and the pre-signed 1.1.0 release.
+//! The sample: three nodes on 1.0.0 and the pre-signed 1.1.0 release.
 
 use dagon_format::bundle::BundleView;
 use dagon_format::header::{mcu_id, ImageHeader, HEADER_SIZE};
@@ -8,7 +8,7 @@ use dagon_proto::{max_payload, split_status, Cmd, Frame, Status};
 use dagon_sim::*;
 
 struct Pc {
-    hub: SimHub,
+    relay: SimRelay,
     seq: u8,
 }
 
@@ -34,7 +34,8 @@ impl Pc {
         (s, b.to_vec())
     }
 
-    /// `None` = the hub itself, `Some(link, addr)` = through RELAY.
+    /// `None` = the node the PC is connected to, `Some(link, addr)` =
+    /// through RELAY.
     fn call(&mut self, to: Option<(u8, u8)>, cmd: Cmd, p: &[u8]) -> Vec<u8> {
         let inner = self.frame(cmd, p);
         let req = match to {
@@ -51,8 +52,8 @@ impl Pc {
                 self.frame(Cmd::Relay, &rp[..n])
             }
         };
-        let (s, body) = Pc::body(&self.hub.request(&req).expect("hub answers"));
-        assert_eq!(s, Status::Ok, "{cmd:?} via hub");
+        let (s, body) = Pc::body(&self.relay.request(&req).expect("the node answers"));
+        assert_eq!(s, Status::Ok, "{cmd:?} via the relay");
         let body = if to.is_some() {
             Pc::body(&body)
         } else {
@@ -63,14 +64,14 @@ impl Pc {
     }
 }
 
-/// The nodes behind the sample hub, as (link, addr): the link ids the hub
-/// MCU's definition gives its I2C0 and PIO UART.
+/// The nodes behind the sample's relaying node, as (link, addr): the link
+/// ids its MCU definition gives the ports they are on.
 fn seg() -> Option<(u8, u8)> {
-    Some((link_on("i2c0"), NODE_I2C_ADDR))
+    Some((link_on(NODE_I2C_PORT), NODE_I2C_ADDR))
 }
 
 fn watch() -> Option<(u8, u8)> {
-    Some((link_on("pio-uart"), payload::link::UART_ADDR))
+    Some((link_on(WATCH_UART_PORT), payload::link::UART_ADDR))
 }
 
 fn link_on(port: &str) -> u8 {
@@ -90,7 +91,7 @@ fn hello() -> Vec<u8> {
 #[test]
 fn three_nodes_on_1_0_0() {
     let mut pc = Pc {
-        hub: sample_hub(1),
+        relay: sample_hub(1),
         seq: 0,
     };
     let v = Version::new(1, 0, 0);
@@ -130,7 +131,7 @@ fn release_verifies_and_updates_the_watch() {
         .expect("watch image in the release");
 
     let mut pc = Pc {
-        hub: sample_hub(2),
+        relay: sample_hub(2),
         seq: 0,
     };
     let mut b = [0u8; 8];

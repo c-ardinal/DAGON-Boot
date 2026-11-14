@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use dagon_format::header::{image_kind, slot_binding};
 use dagon_format::BundleView;
 use dagon_host::{Host, Target};
-use dagon_sim::{block_on, demo_hub, NODE_I2C_ADDR};
+use dagon_sim::{block_on, demo_hub, NODE_I2C_ADDR, NODE_I2C_PORT};
 use ed25519_compact::{KeyPair, Seed};
 
 use super::*;
@@ -86,7 +86,7 @@ fn sample_sim(t: &Topology, key: &KeyPair) -> Sim {
     };
     let mut hub = demo_hub(*key.pk, 3);
     hub.node.provision(&img("hub"), 0).unwrap();
-    hub.i2c_node(NODE_I2C_ADDR)
+    hub.i2c_node(NODE_I2C_PORT, NODE_I2C_ADDR)
         .unwrap()
         .provision(&img("seg"), 0)
         .unwrap();

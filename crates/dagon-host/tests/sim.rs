@@ -16,7 +16,7 @@ use dagon_port::timeout::{CONFIRM_RETRY_MS, NODE_POLL_MS, REQUEST_MS};
 use dagon_proto::payload::{phase, SlotState};
 use dagon_proto::{flags, Cmd, Status};
 use dagon_sign::image::{self, sign_image, ImageSpec};
-use dagon_sim::{block_on, demo_hub, SimHub, TrialApp, NODE_I2C_ADDR};
+use dagon_sim::{block_on, demo_hub, SimRelay, TrialApp, NODE_I2C_ADDR, NODE_I2C_PORT};
 use ed25519_compact::{KeyPair, Seed};
 
 /// RFC 8032 section 7.1 TEST 1 key (public test data).
@@ -100,12 +100,12 @@ fn sim() -> Sim {
     let mut hub = demo_hub(*key().pk, 7);
     let v = Version::new(1, 0, 0);
     hub.node.provision(&hub_img(0, v), 0).unwrap();
-    hub.i2c_node(NODE_I2C_ADDR)
+    hub.i2c_node(NODE_I2C_PORT, NODE_I2C_ADDR)
         .unwrap()
         .provision(&seg_img(0, v), 0)
         .unwrap();
     Sim {
-        hub: Rc::new(RefCell::new(hub)),
+        relay: Rc::new(RefCell::new(hub)),
         pending: Vec::new(),
         reopens: Rc::default(),
         late_reboot: 0,
@@ -147,7 +147,7 @@ fn effective(b: &[u8]) -> (u8, bool) {
 
 #[derive(Clone)]
 struct Sim {
-    hub: Rc<RefCell<SimHub>>,
+    relay: Rc<RefCell<SimRelay>>,
     pending: Vec<u8>,
     reopens: Rc<RefCell<u32>>,
     faults: Rc<RefCell<Faults>>,
@@ -194,10 +194,10 @@ impl Transport for Sim {
             d.1 -= 1;
             return Ok(());
         }
-        let mut hub = self.hub.borrow_mut();
+        let mut hub = self.relay.borrow_mut();
         if cmd == Cmd::XferEnd as u8 {
             let seg = hub
-                .i2c_node(NODE_I2C_ADDR)
+                .i2c_node(NODE_I2C_PORT, NODE_I2C_ADDR)
                 .map(|n| n.app_snapshot().percent);
             f.number_at_end = seg.or(f.number_at_end);
         }
@@ -223,7 +223,7 @@ impl Transport for Sim {
         Ok(())
     }
     async fn read(&mut self, buf: &mut [u8]) -> Result<usize, ()> {
-        self.pending.extend(self.hub.borrow_mut().usb_read());
+        self.pending.extend(self.relay.borrow_mut().usb_read());
         let n = buf.len().min(self.pending.len());
         buf[..n].copy_from_slice(&self.pending[..n]);
         self.pending.drain(..n);
@@ -234,7 +234,7 @@ impl Transport for Sim {
         if self.held.is_some() {
             self.late_reboot -= 1;
             if self.late_reboot == 0 {
-                let mut hub = self.hub.borrow_mut();
+                let mut hub = self.relay.borrow_mut();
                 hub.usb_write(&self.held.take().unwrap());
                 hub.usb_read();
             }
@@ -245,10 +245,10 @@ impl Transport for Sim {
 
 impl HostClock for Sim {
     fn now_ms(&self) -> u64 {
-        self.hub.borrow().now_ms()
+        self.relay.borrow().now_ms()
     }
     async fn sleep_ms(&mut self, ms: u32) {
-        self.hub.borrow_mut().advance_ms(ms as u64);
+        self.relay.borrow_mut().advance_ms(ms as u64);
     }
 }
 
@@ -273,7 +273,7 @@ fn nodes_are_reached_over_the_routes_the_host_is_given() {
 
     let mut none = host(&s);
     none.routes = dagon_host::Routes::default();
-    let before = s.hub.borrow().now_ms();
+    let before = s.relay.borrow().now_ms();
     let r = block_on(none.hello(SEG_AT));
     assert!(
         matches!(
@@ -295,7 +295,7 @@ fn nodes_are_reached_over_the_routes_the_host_is_given() {
         why.to_string().contains("'hub'") && why.to_string().contains("'seg'"),
         "{why}"
     );
-    assert_eq!(s.hub.borrow().now_ms(), before, "nothing was sent");
+    assert_eq!(s.relay.borrow().now_ms(), before, "nothing was sent");
 }
 
 /// The shortest `[watchdog] trial_ms` of the builtin MCU definitions.
@@ -343,8 +343,12 @@ fn version_of_the_hub_and_a_node_and_of_an_agent_that_predates_it() {
     // An agent built before VERSION: unknown, not an error; the rest of
     // the session goes on.
     let old = [Cmd::Version as u8].to_vec();
-    s.hub.borrow_mut().i2c_node(NODE_I2C_ADDR).unwrap().predates = old.clone();
-    s.hub.borrow_mut().node.predates = old;
+    s.relay
+        .borrow_mut()
+        .i2c_node(NODE_I2C_PORT, NODE_I2C_ADDR)
+        .unwrap()
+        .predates = old.clone();
+    s.relay.borrow_mut().node.predates = old;
     assert_eq!(block_on(h.version(SEG_AT)).unwrap(), None);
     assert_eq!(block_on(h.version(Target::Hub)).unwrap(), None);
     assert_eq!(
@@ -359,8 +363,8 @@ fn version_of_a_stage0_without_its_mark_is_unknown() {
     let mut h = host(&s);
     // A stage0 built before the mark existed: its region holds code, no mark.
     let (at, len) = dagon_sim::Layout::STM32F401XE.bootcore;
-    let mut hub = s.hub.borrow_mut();
-    let seg = hub.i2c_node(NODE_I2C_ADDR).unwrap();
+    let mut hub = s.relay.borrow_mut();
+    let seg = hub.i2c_node(NODE_I2C_PORT, NODE_I2C_ADDR).unwrap();
     let mut f = seg.flash();
     dagon_port::Flash::erase(&mut *f, at, len).unwrap();
     dagon_port::Flash::write(&mut *f, at, b"DGBC").unwrap();
@@ -380,7 +384,7 @@ fn the_number_on_the_hubs_screen_is_the_number_every_caller_is_told() {
     block_on(
         h.apply(&release(), &topology(&yaml()), &key().pk, None, &mut |e| {
             // SHOW follows its event: the screen holds what the last event said.
-            if let (Some(n), Some(screen)) = (told, s.hub.borrow().screen.as_ref()) {
+            if let (Some(n), Some(screen)) = (told, s.relay.borrow().screen.as_ref()) {
                 assert_eq!(screen.percent, n, "{e:?}");
                 seen += 1;
             }
@@ -402,8 +406,10 @@ fn the_number_on_the_hubs_screen_is_the_number_every_caller_is_told() {
 
 /// What the node's own display reads: the snapshot its app folds.
 fn seg_snapshot(s: &Sim) -> dagon_agent::snapshot::AppSnapshot {
-    let mut hub = s.hub.borrow_mut();
-    hub.i2c_node(NODE_I2C_ADDR).unwrap().app_snapshot()
+    let mut hub = s.relay.borrow_mut();
+    hub.i2c_node(NODE_I2C_PORT, NODE_I2C_ADDR)
+        .unwrap()
+        .app_snapshot()
 }
 
 #[test]
@@ -476,7 +482,11 @@ fn a_lost_tell_is_told_again_at_the_next_step_and_never_resent() {
 fn telling_a_node_costs_a_write_at_most_a_request_per_step_and_an_old_agent_none() {
     let seg_data_ms = |predates: &[u8]| {
         let s = sim();
-        s.hub.borrow_mut().i2c_node(NODE_I2C_ADDR).unwrap().predates = predates.to_vec();
+        s.relay
+            .borrow_mut()
+            .i2c_node(NODE_I2C_PORT, NODE_I2C_ADDR)
+            .unwrap()
+            .predates = predates.to_vec();
         let mut h = host(&s);
         let mut t = None;
         // The node's number changes at most once per step of the bytes:
@@ -552,7 +562,7 @@ fn full_apply_then_rollback() {
     // request the hub erases on (the last header chunk; the header's other
     // chunks and XFER_BEGIN are no phase), verify the one XFER_END, data one
     // request per body chunk and one SHOW per progress step on the LCD.
-    let rt = dagon_sim::hub::PC_ROUND_TRIP_MS as u32;
+    let rt = dagon_sim::relay::PC_ROUND_TRIP_MS as u32;
     let chunk = hub_max.min(s.max_payload()) - 4;
     let body = hub_img(1, v).len() - dagon_format::header::HEADER_SIZE;
     let shows = events
@@ -569,7 +579,7 @@ fn full_apply_then_rollback() {
         .iter()
         .filter(|e| e.phase != phase::VERIFY)
         .all(|e| e.times.is_none()));
-    let screen = s.hub.borrow().screen.clone().unwrap();
+    let screen = s.relay.borrow().screen.clone().unwrap();
     assert_eq!((screen.node, screen.phase), (0, phase::CONFIRM));
 
     for to in [SEG_AT, Target::Hub] {
@@ -578,7 +588,7 @@ fn full_apply_then_rollback() {
         assert_eq!((st.status.active, st.status.confirmed), (1, 1));
     }
     // Still confirmed after the trial watchdog would have fired.
-    s.hub.borrow_mut().advance_ms(30_000);
+    s.relay.borrow_mut().advance_ms(30_000);
     assert_eq!(block_on(h.status(SEG_AT)).unwrap().status.active, 1);
 
     let back = block_on(h.rollback(SEG_AT, SEG, SEG_SLOTS, &mut |_| {})).unwrap();
@@ -613,11 +623,11 @@ fn topology_mismatch_refuses_before_sending() {
     let s = sim();
     let mut h = host(&s);
     let other = topology(&yaml().replace("addr: 0x42", "addr: 0x43"));
-    let t0 = s.hub.borrow().now_ms();
+    let t0 = s.relay.borrow().now_ms();
     let r = block_on(h.apply(&release(), &other, &key().pk, None, &mut |_| {}));
     assert!(matches!(r, Err(Error::TopologyMismatch { .. })));
-    assert_eq!(s.hub.borrow().now_ms(), t0, "no request reached the hub");
-    assert!(s.hub.borrow().screen.is_none());
+    assert_eq!(s.relay.borrow().now_ms(), t0, "no request reached the hub");
+    assert!(s.relay.borrow().screen.is_none());
 }
 
 #[test]
@@ -664,7 +674,7 @@ fn without_host_verify_the_node_rejects_tampered_images() {
             o => panic!("flip at {at:#x}: {o:?}"),
         }
         assert!(matches!(out[1].outcome, Outcome::NotStarted));
-        let screen = s.hub.borrow().screen.clone().unwrap();
+        let screen = s.relay.borrow().screen.clone().unwrap();
         assert_eq!(
             (screen.phase, screen.text.as_slice()),
             (phase::REJECTED, text.as_bytes())
@@ -697,9 +707,9 @@ fn partial_apply_skips_the_hub() {
 #[test]
 fn node_that_falls_back_stops_the_run_and_confirm_rule() {
     let s = sim();
-    s.hub
+    s.relay
         .borrow_mut()
-        .i2c_node(NODE_I2C_ADDR)
+        .i2c_node(NODE_I2C_PORT, NODE_I2C_ADDR)
         .unwrap()
         .trial_app = TrialApp::NeverConfirms;
     let mut h = host(&s);
@@ -713,7 +723,7 @@ fn node_that_falls_back_stops_the_run_and_confirm_rule() {
         matches!(out[1].outcome, Outcome::NotStarted),
         "hub untouched"
     );
-    let screen = s.hub.borrow().screen.clone().unwrap();
+    let screen = s.relay.borrow().screen.clone().unwrap();
     assert_eq!((screen.node, screen.phase), (SEG, phase::FAILED));
     assert_eq!(screen.text, b"E_STATE");
 
@@ -727,7 +737,7 @@ fn node_that_falls_back_stops_the_run_and_confirm_rule() {
 
     // The trial watchdog takes it back to A; B is Reverted, not a target.
     for _ in 0..4 {
-        s.hub.borrow_mut().advance_ms(10_000);
+        s.relay.borrow_mut().advance_ms(10_000);
     }
     let st = block_on(h.status(SEG_AT)).unwrap().status;
     assert_eq!((st.active, st.slots[1].state), (0, SlotState::Reverted));
@@ -811,9 +821,9 @@ fn rom_plan_matches_the_provision_binary() {
 
 /// Erases the whole F401 and resets it: nothing answers on I2C any more.
 fn wipe_seg(s: &Sim) {
-    let mut hub = s.hub.borrow_mut();
+    let mut hub = s.relay.borrow_mut();
     let now = hub.now_ms();
-    let node = hub.i2c_node(NODE_I2C_ADDR).unwrap();
+    let node = hub.i2c_node(NODE_I2C_PORT, NODE_I2C_ADDR).unwrap();
     node.flash().erase_all().unwrap();
     node.reset(now);
 }
@@ -845,8 +855,8 @@ fn erased_f401_comes_back_through_the_rom_loader() {
     for (no_stretch, full_list, over) in [(true, true, 0), (true, false, 1), (false, false, 1)] {
         let s = sim();
         {
-            let mut hub = s.hub.borrow_mut();
-            let rom = &mut hub.i2c_node(NODE_I2C_ADDR).unwrap().rom;
+            let mut hub = s.relay.borrow_mut();
+            let rom = &mut hub.i2c_node(NODE_I2C_PORT, NODE_I2C_ADDR).unwrap().rom;
             rom.strict_reads = true;
             if full_list {
                 rom.commands = v11.to_vec();
@@ -870,9 +880,9 @@ fn erased_f401_comes_back_through_the_rom_loader() {
         let st = block_on(host(&s).status(SEG_AT)).unwrap();
         assert_eq!((st.hello.active_version, st.hello.trial), (v, false));
         assert_eq!((st.status.active, st.status.confirmed), (0, 0));
-        let mut hub = s.hub.borrow_mut();
+        let mut hub = s.relay.borrow_mut();
         assert_eq!(hub.screen.as_ref().unwrap().phase, phase::CONFIRM);
-        let rom = &hub.i2c_node(NODE_I2C_ADDR).unwrap().rom;
+        let rom = &hub.i2c_node(NODE_I2C_PORT, NODE_I2C_ADDR).unwrap().rom;
         assert_eq!((rom.timeouts, rom.over_reads), (0, over));
     }
 }
@@ -897,9 +907,9 @@ fn a_silent_node_with_rom_entry_waits_for_the_confirmation() {
         roms: &roms(),
         rom_confirmed: false,
     };
-    s.hub
+    s.relay
         .borrow_mut()
-        .i2c_node(NODE_I2C_ADDR)
+        .i2c_node(NODE_I2C_PORT, NODE_I2C_ADDR)
         .unwrap()
         .flash()
         .clear_ops();
@@ -911,8 +921,8 @@ fn a_silent_node_with_rom_entry_waits_for_the_confirmation() {
     );
     assert_eq!(events, 0);
     {
-        let mut hub = s.hub.borrow_mut();
-        let node = hub.i2c_node(NODE_I2C_ADDR).unwrap();
+        let mut hub = s.relay.borrow_mut();
+        let node = hub.i2c_node(NODE_I2C_PORT, NODE_I2C_ADDR).unwrap();
         assert!(!node.boot0(), "BOOT0 stays low");
         assert!(node.flash().ops().is_empty(), "nothing erased");
     }
@@ -1020,7 +1030,7 @@ fn one_write_reaches_every_node_of_a_topology_at_the_limit() {
     let tag = |i: usize| format!("n{i}-f401");
     let s = sim();
     {
-        let mut hub = s.hub.borrow_mut();
+        let mut hub = s.relay.borrow_mut();
         let now = hub.now_ms();
         for i in 0..children {
             let mut cfg = dagon_sim::f401_config(*key().pk);
@@ -1034,7 +1044,7 @@ fn one_write_reaches_every_node_of_a_topology_at_the_limit() {
             n.provision(&img("stm32f401re", &tag(i), 0, old, 0x20), 0)
                 .unwrap();
             n.reset(now);
-            hub.add_i2c(n, false);
+            hub.add_i2c(NODE_I2C_PORT, n, false);
         }
     }
     let t = dagon_topology::parse_str(&yaml).unwrap();
@@ -1080,9 +1090,12 @@ fn one_write_reaches_every_node_of_a_topology_at_the_limit() {
 fn rom_session_gives_up_after_three_attempts() {
     let s = sim();
     {
-        let mut hub = s.hub.borrow_mut();
+        let mut hub = s.relay.borrow_mut();
         // 128 KiB sector 5 then stays BUSY for 12.8 s.
-        hub.i2c_node(NODE_I2C_ADDR).unwrap().rom.erase_ms_per_kib = 100;
+        hub.i2c_node(NODE_I2C_PORT, NODE_I2C_ADDR)
+            .unwrap()
+            .rom
+            .erase_ms_per_kib = 100;
     }
     wipe_seg(&s);
     let (rel, topo, boot) = (release(), topology(&yaml()), bootcore());
@@ -1100,10 +1113,10 @@ fn rom_session_gives_up_after_three_attempts() {
         matches!(r, Err(Error::Rom(dagon_host::RomError::Busy))),
         "{r:?}"
     );
-    let mut hub = s.hub.borrow_mut();
+    let mut hub = s.relay.borrow_mut();
     assert_eq!(hub.screen.as_ref().unwrap().phase, phase::FAILED);
     assert!(
-        !hub.i2c_node(NODE_I2C_ADDR).unwrap().boot0(),
+        !hub.i2c_node(NODE_I2C_PORT, NODE_I2C_ADDR).unwrap().boot0(),
         "BOOT0 left low"
     );
 }
@@ -1244,14 +1257,14 @@ fn lost_requests_are_resent_after_300_ms_and_backoff() {
     let s = sim();
     let mut h = opened(&s);
     s.faults.borrow_mut().drop_req.push((HELLO, 2));
-    let t0 = s.hub.borrow().now_ms();
+    let t0 = s.relay.borrow().now_ms();
     let v = block_on(h.hello(SEG_AT)).unwrap().active_version;
     assert_eq!(v, Version::new(1, 0, 0));
     let seen = s.faults.borrow().seen.clone();
     assert_eq!(seen, [(HELLO, false), (HELLO, true), (HELLO, true)]);
     // Each lost attempt waits its full answer time: the node's 300 ms plus
     // 300 ms for the hub's RELAY reply. Then 50 and 100 ms backoff.
-    let waited = s.hub.borrow().now_ms() - t0;
+    let waited = s.relay.borrow().now_ms() - t0;
     let floor = 2 * (REQUEST_MS as u64 * 2) + 50 + 100;
     assert!((floor..floor + 100).contains(&waited), "{waited} ms");
 }
@@ -1322,8 +1335,8 @@ fn conf_run_is_never_resent() {
 
 /// Flash writes into seg's slot B (0x08040000..0x08060000).
 fn slot_b_writes(s: &Sim) -> Vec<(u32, u32)> {
-    let mut hub = s.hub.borrow_mut();
-    let f = hub.i2c_node(NODE_I2C_ADDR).unwrap().flash();
+    let mut hub = s.relay.borrow_mut();
+    let f = hub.i2c_node(NODE_I2C_PORT, NODE_I2C_ADDR).unwrap().flash();
     f.ops()
         .iter()
         .filter(|o| {
@@ -1436,7 +1449,7 @@ fn confirm_after_lost_polls(spacing: u32) -> u64 {
     let s = sim();
     let mut h = host(&s);
     h.node_poll_ms = spacing;
-    let (faults, hub) = (s.faults.clone(), s.hub.clone());
+    let (faults, hub) = (s.faults.clone(), s.relay.clone());
     let mut at = [0u64; 2];
     let out = block_on(h.apply(
         &release(),
@@ -1471,9 +1484,9 @@ fn polling_every_300_ms_is_what_keeps_confirm_inside_the_trial() {
 #[test]
 fn f401_confirm_lands_inside_a_4_s_trial() {
     let s = sim();
-    s.hub
+    s.relay
         .borrow_mut()
-        .i2c_node(NODE_I2C_ADDR)
+        .i2c_node(NODE_I2C_PORT, NODE_I2C_ADDR)
         .unwrap()
         .trial_wdt_ms = 4_000;
     let out = block_on(host(&s).apply(
@@ -1485,7 +1498,7 @@ fn f401_confirm_lands_inside_a_4_s_trial() {
     ))
     .unwrap();
     assert!(matches!(out[0].outcome, Outcome::Done(_)), "{out:?}");
-    s.hub.borrow_mut().advance_ms(20_000);
+    s.relay.borrow_mut().advance_ms(20_000);
     let st = block_on(host(&s).status(SEG_AT)).unwrap().status;
     assert_eq!(
         (st.active, st.confirmed),
@@ -1548,9 +1561,9 @@ fn noting_host(s: &Sim) -> (Host<Sim, Sim>, Arc<AtomicUsize>) {
 /// Applies the release to the F401 only, its trial image behaving as `app`.
 fn apply_seg_as(app: TrialApp) -> (Sim, Host<Sim, Sim>, Arc<AtomicUsize>, Vec<NodeOutcome<()>>) {
     let s = sim();
-    s.hub
+    s.relay
         .borrow_mut()
-        .i2c_node(NODE_I2C_ADDR)
+        .i2c_node(NODE_I2C_PORT, NODE_I2C_ADDR)
         .unwrap()
         .trial_app = app;
     let (mut h, notes) = noting_host(&s);
@@ -1598,7 +1611,7 @@ fn a_self_check_that_never_passes_fails_after_the_bounded_retries() {
     assert_eq!(notes.load(Ordering::Relaxed), CONFIRM_RETRY_MS.len());
     // Still rolled back by the trial watchdog.
     for _ in 0..4 {
-        s.hub.borrow_mut().advance_ms(10_000);
+        s.relay.borrow_mut().advance_ms(10_000);
     }
     let st = block_on(h.status(SEG_AT)).unwrap().status;
     assert_eq!((st.active, st.slots[1].state), (0, SlotState::Reverted));
@@ -1692,7 +1705,7 @@ fn a_release_with_hub_boot_cores_writes_the_idle_core_slot_and_the_new_core_take
 #[test]
 fn a_core_that_fails_its_own_check_is_rolled_back_and_the_run_stops() {
     let s = sim();
-    s.hub.borrow_mut().node.store().broken_core = Some(Version::new(1, 1, 0));
+    s.relay.borrow_mut().node.store().broken_core = Some(Version::new(1, 1, 0));
     let out = apply_hub(&s);
     assert!(
         matches!(
@@ -1982,9 +1995,9 @@ fn the_rom_path_leaves_boot_core_a_recorded() {
 fn a_power_cut_at_every_hub_flash_step_leaves_a_bootable_hub() {
     let ops = {
         let s = sim();
-        s.hub.borrow().node.flash().clear_ops();
+        s.relay.borrow().node.flash().clear_ops();
         apply_hub(&s);
-        let n = s.hub.borrow().node.flash().ops().len();
+        let n = s.relay.borrow().node.flash().ops().len();
         n
     };
     assert!(ops > 8, "{ops}");
@@ -1995,7 +2008,7 @@ fn a_power_cut_at_every_hub_flash_step_leaves_a_bootable_hub() {
         ] {
             let s = sim();
             {
-                let hub = s.hub.borrow();
+                let hub = s.relay.borrow();
                 let mut f = hub.node.flash();
                 f.clear_ops();
                 f.arm_cut(cut);
@@ -2008,7 +2021,7 @@ fn a_power_cut_at_every_hub_flash_step_leaves_a_bootable_hub() {
                 &mut |_| {},
             ));
             {
-                let mut hub = s.hub.borrow_mut();
+                let mut hub = s.relay.borrow_mut();
                 let now = hub.now_ms();
                 let off = !hub.node.flash().is_powered();
                 if off {

@@ -7,32 +7,34 @@
 //!   timeout, at most 256 bytes per read or write).
 //! - [`SimNode`]: dagon-agent over a [`SimStore`], with a boot decision at
 //!   reset, an I2C mailbox and selectable trial-app behaviour.
-//! - [`SimHub`]: answers the PC (directly or as a USB byte stream), relays to
-//!   nodes on I2C and UART, drives NRST/BOOT0 and raw ROM transactions.
-//! - [`TimedHub`]: a [`SimHub`] whose answers take the links' and flash's
-//!   real time (one model for `dagon demo` and the browser demo).
+//! - [`SimRelay`]: answers the PC (directly or as a USB byte stream), relays
+//!   over every link of its relay table (one bus per I2C port, one stream
+//!   per UART port, routed by link id), drives NRST/BOOT0 and raw ROM
+//!   transactions.
+//! - [`TimedRelay`]: a [`SimRelay`] whose answers take the links' and
+//!   flash's real time (one model for `dagon demo` and the browser demo).
 //!
 //! Randomness comes only from [`SimRng`] seeds, so a seed replays a run.
 #![forbid(unsafe_code)]
 
 pub mod flash;
-pub mod hub;
 pub mod link;
 pub mod node;
 mod ports;
+pub mod relay;
 pub mod rng;
 pub mod rom;
 pub mod store;
 pub mod timing;
 
 pub use flash::{CutPoint, FlashOp, OpKind, SimFlash};
-pub use hub::{FrameCutter, Screen, SimBus, SimHub};
 pub use link::SimLink;
 pub use node::{Run, SimNode, TrialApp};
+pub use relay::{FrameCutter, Screen, SimBus, SimPort, SimRelay, SimStream};
 pub use rng::SimRng;
 pub use rom::SimRom;
 pub use store::{Layout, SimStore};
-pub use timing::{Medium, TimedHub};
+pub use timing::{Medium, TimedRelay};
 
 // The simulator declares no machine of its own: its nodes run the agent's.
 dagon_events::state_machine! {}
@@ -44,6 +46,10 @@ use dagon_proto::payload::{mode, role};
 
 /// Default I2C address of the first node.
 pub const NODE_I2C_ADDR: u8 = 0x42;
+/// The sample's wiring: the RP2040 port its I2C node is on, and the one
+/// its UART node (the watch) is on.
+pub const NODE_I2C_PORT: &str = "i2c0";
+pub const WATCH_UART_PORT: &str = "pio-uart";
 
 /// Hub on RP2040, answering on USB.
 pub fn hub_config(pubkey: [u8; 32]) -> Config {
@@ -73,10 +79,11 @@ pub fn f401_config(pubkey: [u8; 32]) -> Config {
     }
 }
 
-/// Hub with an empty flash, plus an empty F401 at [`NODE_I2C_ADDR`] wired to
-/// NRST/BOOT0. Provision images with [`SimNode::provision`]; a node with
-/// nothing to run stays silent (NACK).
-pub fn demo_hub(pubkey: [u8; 32], seed: u64) -> SimHub {
+/// The sample's hub with an empty flash, plus an empty F401 at
+/// [`NODE_I2C_ADDR`] on [`NODE_I2C_PORT`], wired to NRST/BOOT0. Provision
+/// images with [`SimNode::provision`]; a node with nothing to run stays
+/// silent (NACK).
+pub fn demo_hub(pubkey: [u8; 32], seed: u64) -> SimRelay {
     let hub = SimNode::new(
         hub_config(pubkey),
         SimFlash::rp2040_2m(seed),
@@ -88,8 +95,8 @@ pub fn demo_hub(pubkey: [u8; 32], seed: u64) -> SimHub {
         Layout::STM32F401XE,
     );
     f401.i2c_addr = Some(NODE_I2C_ADDR);
-    let mut h = SimHub::new(hub);
-    h.add_i2c(f401, true);
+    let mut h = SimRelay::new(hub);
+    h.add_i2c(NODE_I2C_PORT, f401, true);
     h
 }
 
@@ -136,16 +143,16 @@ pub mod sample {
 }
 
 /// The sample, every node confirmed on 1.0.0: hub (RP2040, USB), seg
-/// (F401 on I2C at [`NODE_I2C_ADDR`], NRST/BOOT0 wired) and watch
-/// (ESP32-S3 behind a clean [`SimLink`] on the PIO UART, factory slot also
-/// holding 1.0.0). Keys: [`sample::PUBKEY`].
-pub fn sample_hub(seed: u64) -> SimHub {
+/// (F401 at [`NODE_I2C_ADDR`] on [`NODE_I2C_PORT`], NRST/BOOT0 wired) and
+/// watch (ESP32-S3 behind a clean [`SimLink`] on [`WATCH_UART_PORT`],
+/// factory slot also holding 1.0.0). Keys: [`sample::PUBKEY`].
+pub fn sample_hub(seed: u64) -> SimRelay {
     let pk = sample::PUBKEY;
     let mut h = demo_hub(pk, seed);
     h.node
         .provision(sample::HUB_1_0_0, 0)
         .expect("hub fixture fits");
-    h.i2c_node(NODE_I2C_ADDR)
+    h.i2c_node(NODE_I2C_PORT, NODE_I2C_ADDR)
         .expect("seg")
         .provision(sample::SEG_1_0_0, 0)
         .expect("seg fixture fits");
@@ -161,7 +168,7 @@ pub fn sample_hub(seed: u64) -> SimHub {
     watch
         .provision(sample::WATCH_1_0_0, 0)
         .expect("watch fixture fits");
-    h.set_uart(SimLink::new(seed ^ 3), watch);
+    h.set_uart(WATCH_UART_PORT, SimLink::new(seed ^ 3), watch);
     h
 }
 

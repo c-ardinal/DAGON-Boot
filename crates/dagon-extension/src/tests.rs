@@ -413,6 +413,7 @@ kind = "iwdg"
 trial_ms = 4_000
 confirmed_ms = 4_000
 trial_attempts = 3
+range_ms = {{ min = 1, max = 32_768 }}
 flag = "none"
 
 [isolation]

@@ -48,7 +48,7 @@ use crate::schema::{ControlKind, LinkKind, RomEntry, UartIface};
 pub use board_boot::{BoardBoot, BoardBus, BoardDevice, BoardPeripheral, BoardPin};
 pub use clock::{BoardClock, ClockKind, ClockSetup, ClockSource, ClockStage, StageClocks};
 pub use execution::{BoardFlash, Conformance, EraseRegionDef, Execution, Fact, FlashOp};
-pub use isolation::{Core, Isolation, McuBoot, Peripheral, RecordPlacement, Watchdog};
+pub use isolation::{Core, Isolation, McuBoot, PeriodRange, Peripheral, RecordPlacement, Watchdog};
 pub use load::{DefError, DefSource, Source, BUILTIN_FILES};
 pub use slot_layout::{HeaderDef, OwnedLayout, SlotLayoutDef, SlotName, TargetName};
 
@@ -719,7 +719,10 @@ pub struct McuDef {
     /// reset but power-on, cleared when a start acknowledges it), a fact of `none`, `register` (a
     /// reset-flag register; name it and its source in a comment) or `package` (the MCU package
     /// keeps it): `"register"`, `{ unverified = "package" }`, `"unmeasured"`. Without a flag with a
-    /// source the MCU has no lockup fuse.
+    /// source the MCU has no lockup fuse. `range_ms` (required): `{ min, max }`, the periods the
+    /// MCU's watchdog can run, ms, with its source in a comment; a definition whose `trial_ms` or
+    /// `confirmed_ms` lies outside it is refused, when the definitions load and when the firmware
+    /// layout is generated.
     pub watchdog: Option<Watchdog>,
     /// Hardware facts of the execution model
     /// (site/src/content/docs/en/explanation/lifecycle-events.md, "Execution model"): `masked_max_us`
@@ -1046,6 +1049,17 @@ impl Registry {
 
     pub fn mcu(&self, id: &str) -> Option<&McuDef> {
         self.mcus.iter().find(|m| m.id == id)
+    }
+
+    /// MCU `id`'s definition as one text: the merged definition when the
+    /// project overrides it, else the built-in or source-tree one; its
+    /// TOML table serialised by the `toml` crate (keys sorted, comments
+    /// dropped). The firmware of a node builds from this text
+    /// (`boot_folder::mcu_file_text`).
+    pub fn merged_mcu_toml(&self, id: &str) -> Option<String> {
+        let i = self.mcus.iter().position(|m| m.id == id)?;
+        let t: toml::Table = toml::from_str(&self.mcu_sources.get(i)?.toml).ok()?;
+        toml::to_string(&t).ok()
     }
 
     /// Where MCU `id`'s definition was read from.

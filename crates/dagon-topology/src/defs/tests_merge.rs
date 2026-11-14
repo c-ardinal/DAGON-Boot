@@ -770,6 +770,38 @@ fn the_merged_text_is_what_the_registry_stores_parses_and_sends() {
     assert_eq!(back.mcu("esp32s3").unwrap().connection.hint, PROJECT_TEXT);
 }
 
+/// The text a node's firmware builds from (`Registry::merged_mcu_toml`)
+/// is the merged definition: it parses back to the same definition, with
+/// the overridden slot; for a definition no override names it is the
+/// built-in one.
+#[test]
+fn the_text_the_firmware_builds_from_is_the_merged_definition() {
+    let r = load(
+        "firmware-text",
+        "[[mcu_override.rp2040.slot]]\nimage = \"app\"\nbinding = \"b\"\nsize = 0x8_0000\n\n\
+         [[mcu_override.rp2040.slot_layout]]\ntarget = \"app\"\nslot = \"b\"\ncapacity = 0x7_FE00\n",
+    )
+    .unwrap();
+    let text = r.merged_mcu_toml("rp2040").unwrap();
+    let parsed = as_project(parse_mcu_text(&text, &[]).unwrap());
+    assert_eq!(&parsed, r.mcu("rp2040").unwrap());
+    let t: toml::Table = text.parse().unwrap();
+    let app_b = t["slot"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|s| s["image"].as_str() == Some("app") && s["binding"].as_str() == Some("b"))
+        .unwrap();
+    assert_eq!(app_b["size"].as_integer(), Some(0x8_0000));
+    let builtin = Registry::builtin();
+    let text = builtin.merged_mcu_toml("stm32f401re").unwrap();
+    assert_eq!(
+        &parse_mcu_text(&text, &[]).unwrap(),
+        builtin.mcu("stm32f401re").unwrap()
+    );
+    assert_eq!(builtin.merged_mcu_toml("no-such-mcu"), None);
+}
+
 #[test]
 fn a_new_uniqueness_check_refuses_a_header_pin_or_i2c_pair_given_twice() {
     for (name, extra) in [
@@ -813,4 +845,52 @@ fn dagon_toml_declares_its_format_and_only_known_keys() {
         "format = 1\ntopology = \"t.yaml\"\n[build.seg]\npackage = \"x\"\n[dagon]\npath = \"..\"\n",
     )
     .unwrap();
+}
+
+/// Each built-in MCU states the periods its watchdog can run: an override
+/// on the upper boundary loads, one past either boundary is refused with
+/// the MCU, the value and the range.
+#[test]
+fn each_mcu_s_watchdog_range_bounds_an_override() {
+    let mut seen = 0;
+    for m in Registry::builtin().mcus() {
+        let Some(w) = m.watchdog else { continue };
+        seen += 1;
+        let (min, max) = (w.range_ms.min, w.range_ms.max);
+        let over = |trial: u32| format!("[mcu_override.{}.watchdog]\ntrial_ms = {trial}\n", m.id);
+        let r = load(&format!("wd-max-{}", m.id), &over(max)).unwrap();
+        assert_eq!(r.mcu(&m.id).unwrap().watchdog.unwrap().trial_ms, max);
+        for past in [max + 1, min - 1] {
+            let e = load(&format!("wd-past-{}", m.id), &over(past))
+                .expect_err(&m.id)
+                .to_string();
+            let says = format!(
+                "watchdog.trial_ms {past} is outside the periods MCU '{}'s watchdog can run, \
+                 {min}..={max} ms",
+                m.id
+            );
+            assert!(e.contains(&says), "{e}");
+        }
+    }
+    assert!(seen >= 3, "{seen}");
+}
+
+/// The ESP32-S3's watchdog range ends at 3,600,000 ms, where the RTC
+/// watchdog's tick count still fits 32 bits at any calibrated slow clock:
+/// an override on it loads, one past it is refused.
+#[test]
+fn the_esp32s3_watchdog_range_ends_at_3_600_000_ms() {
+    let over = |ms: u32| format!("[mcu_override.esp32s3.watchdog]\ntrial_ms = {ms}\n");
+    let r = load("wd-esp-max", &over(3_600_000)).unwrap();
+    assert_eq!(
+        r.mcu("esp32s3").unwrap().watchdog.unwrap().trial_ms,
+        3_600_000
+    );
+    let e = load("wd-esp-past", &over(3_600_001))
+        .unwrap_err()
+        .to_string();
+    assert!(
+        e.contains("watchdog.trial_ms 3600001 is outside the periods MCU 'esp32s3's watchdog can run, 1..=3600000 ms"),
+        "{e}"
+    );
 }

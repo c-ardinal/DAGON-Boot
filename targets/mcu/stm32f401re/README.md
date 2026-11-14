@@ -236,6 +236,15 @@ source hash dagon.toml declares does not build. The boot core must fit
 boot core slot A's 65,024-byte body: the boot extensions share that
 budget with it.
 
+The addresses and lengths every image links for (slots, logs, stage0)
+and the watchdog and trial values come from the node's MCU definition in
+that folder, `mcu.toml`, which `dagon gen` writes with the project's
+overrides applied (the app's `.cargo/config.toml` names the same folder),
+so a project that moves its slots gets matching firmware without a code
+edit. `DAGON_BOOT_CRATE` is an absolute path; an `mcu.toml` of another MCU
+or another definition format is refused, and a build without the variable
+uses this package's `dagon-mcu.toml`.
+
 
 ## Keys
 

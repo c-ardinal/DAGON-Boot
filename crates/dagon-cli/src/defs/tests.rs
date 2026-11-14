@@ -64,6 +64,14 @@ sub = "sk-ant-FAKE-TOKEN-4242/bootcore"
 [links]
 up = ["i2c"]
 
+[[bootcore.clock]]
+source = "internal"
+out_hz = 1_000_000
+
+[[app.clock]]
+source = "internal"
+out_hz = 1_000_000
+
 [link_i2c]
 hzs = [100_000, 400_000]
 

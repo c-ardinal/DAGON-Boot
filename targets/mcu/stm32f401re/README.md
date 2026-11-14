@@ -54,9 +54,10 @@ is what `dagon new` generates, see `../../boards/nucleo-f401re/template`):
 mod app;
 
 use dagon_board_nucleo_f401re::{self as board, Board, BoardDef};
+use dagon_mcu_stm32f401re::clock::Setup;
 use dagon_mcu_stm32f401re::links::{self, Kind};
+use dagon_mcu_stm32f401re::node;
 use dagon_mcu_stm32f401re::watchdog::{now_ms, Guard, Trial};
-use dagon_mcu_stm32f401re::{clocks, node};
 use embassy_executor::Spawner;
 use {defmt_rtt as _, panic_probe as _};
 
@@ -69,12 +70,17 @@ const DOWNLINKS: &[Kind] = &[];
 const _: () = links::require_uplink(UPLINK);
 const _: () = links::require_downlinks(DOWNLINKS);
 
+// The clock the definitions choose for an app on the board (the MCU's
+// [[app.clock]] for the board's [clock]; dagon gen writes a node's into its
+// wiring.rs).
+const CLOCK: Setup = dagon_mcu_stm32f401re::clock_setup!(board::def::app_clock);
+
 const TASKS: usize = node::APP_TASKS + app::TASKS;
 static GUARD: Guard<TASKS> = Guard::new(node::levels::<TASKS>(), Trial::NeverFeed, now_ms);
 
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
-    let (dagon, io) = Board::split(embassy_stm32::init(clocks()));
+    let (dagon, io) = Board::split(embassy_stm32::init(CLOCK.hal_config()));
     let tag = dagon_mcu_stm32f401re::target_tag!();
     board::start(spawner, dagon, &GUARD, tag, app::dagon(), UPLINK).ok();
     app::start(spawner, io, &GUARD, node::APP_TASKS);
@@ -168,8 +174,8 @@ builds the link on the board's pins; link types are constructed as
 
 | Feature | Adds |
 |---|---|
-| (none) | layout, slot store, mailbox (host-testable) |
-| `hal` | `clocks`, `flash`, `watchdog`; `PUBKEY` / `TEST_KEY` (the boot core stops here) |
+| (none) | layout, slot store, mailbox, `clock` (the clock setup a boot loader or an app runs on, from the definitions) (host-testable) |
+| `hal` | `flash`, `watchdog`, the embassy-stm32 configuration of a `clock::Setup`; `PUBKEY` / `TEST_KEY` (the boot core stops here) |
 | `node` (default) | `node` (board definition, start-up, serving loop) and `exec` (binds USART6's vector); logs through defmt |
 | `conform` | the conformance build's CONF_RUN in front of the agent |
 | `slot-b` | link the app for APP slot B (the boot core for boot core slot B) |
@@ -196,8 +202,11 @@ itself once it can start a verified app; one that cannot is reset and,
 after its starts run out, the old core runs again and records the
 rollback. The boot core tries a pending APP slot up to 3 times (signature
 + SHA-256, BOOT_ATTEMPT before each start, 4 s watchdog) and then rolls
-back; otherwise it starts the confirmed slot (8 s watchdog). Both run at
-84 MHz from the HSI (`clocks()`). The ROM loader's full rewrite (the last
+back; otherwise it starts the confirmed slot (8 s watchdog). The boot core
+and the app run on the clock the definitions choose for the node: the
+MCU's `[[bootcore.clock]]` and `[[app.clock]]` setups for its board's
+`[clock]`, the HSI through the PLL to 84 MHz without one
+(`clock::Setup::hal_config`). The ROM loader's full rewrite (the last
 resort) writes stage0, boot core A, the state log and APP-A.
 
 ## Boot images

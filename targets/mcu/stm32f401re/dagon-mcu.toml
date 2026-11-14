@@ -40,6 +40,21 @@ region_bytes = 0x4000
 source = "internal"
 out_hz = 16_000_000
 
+# The boot loader and the app run the HSI through the main PLL: 16 MHz / 16
+# x 336 = 336 MHz VCO, / 4 = 84 MHz (/ 7 = 48 MHz on Q), two flash wait
+# states (RM0368 sections 6.2.2 and 3.4.1).
+[[bootcore.clock]]
+source = "internal"
+in_hz = 16_000_000
+out_hz = 84_000_000
+pll = { m = 16, n = 336, p = 4, q = 7, flash_wait_states = 2 }
+
+[[app.clock]]
+source = "internal"
+in_hz = 16_000_000
+out_hz = 84_000_000
+pll = { m = 16, n = 336, p = 4, q = 7, flash_wait_states = 2 }
+
 # Boot core A/B: the only erase units of at least 32 KiB besides the APP
 # slots (sector 4, 64 KiB; sector 7, 128 KiB).
 [[slot]]

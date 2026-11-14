@@ -43,6 +43,32 @@ in_hz = 12_000_000
 out_hz = 125_000_000
 pll = { refdiv = 1, fbdiv = 125, postdiv1 = 6, postdiv2 = 2 }
 
+# The boot loader runs on stage0's setups: the ring oscillator as it runs,
+# or a 12 MHz crystal through the system PLL to 125 MHz.
+[[bootcore.clock]]
+source = "internal"
+out_hz = 6_500_000
+
+[[bootcore.clock]]
+source = "crystal"
+in_hz = 12_000_000
+out_hz = 125_000_000
+pll = { refdiv = 1, fbdiv = 125, postdiv1 = 6, postdiv2 = 2 }
+
+# The app runs on the same setups; from a crystal it also runs the USB PLL
+# for the 48 MHz its USB link needs (RP2040 datasheet section 4.1): 12 MHz /
+# 1 x 120 = 1440 MHz VCO, / 6 / 5 = 48 MHz. On the ring oscillator it has no
+# USB clock.
+[[app.clock]]
+source = "internal"
+out_hz = 6_500_000
+
+[[app.clock]]
+source = "crystal"
+in_hz = 12_000_000
+out_hz = 125_000_000
+pll = { refdiv = 1, fbdiv = 125, postdiv1 = 6, postdiv2 = 2, usb_refdiv = 1, usb_fbdiv = 120, usb_postdiv1 = 6, usb_postdiv2 = 5 }
+
 [[slot]]
 image = "bootcore"
 binding = "a"
@@ -141,11 +167,10 @@ uart0_rx = [1, 13, 17, 29]
 
 # The UART the UART links run on (src/links.rs): embassy-rp 0.10's PIO
 # UART program, 8 PIO cycles a bit, its divider clk_sys / (8 * baud) in
-# whole numbers (pio_programs/uart.rs, u32 division). clk_sys is 125 MHz:
-# embassy_rp::init's default ClockConfig::crystal(12 MHz), 12 MHz * 125 / 6
-# / 2 (RP2040 datasheet section 2.18, PLL).
+# whole numbers (pio_programs/uart.rs, u32 division). The PIO runs on
+# clk_sys, the core clock of the node's [[app.clock]] setup.
 [link_uart]
-clock_hz = 125_000_000
+clock = "app"
 clocks_per_bit = 8
 frac_bits = 0
 # Bit rates the firmware runs the link at: a link's baud is one of these on both ends.

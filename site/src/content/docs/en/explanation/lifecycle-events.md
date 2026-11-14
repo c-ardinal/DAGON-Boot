@@ -1340,7 +1340,15 @@ The one authentication rule, applied by every verifier in the chain
   and their number in `DAGON_VERIFY_COUNT` for a debug probe to read,
   shows the longest in tenths of a second, rounded up, as a blink code
   on the diagnostic output, and starts no core; the node gets its normal
-  stage0 written back afterwards.
+  stage0 written back afterwards. The boot loader and the app take their
+  clocks the same way, from the MCU definition's `[[bootcore.clock]]` and
+  `[[app.clock]]` setups for the board's `[clock] source`, and their HAL
+  sets the chosen one up; no stage assumes a crystal the board does not
+  state. On the RP2040 only a crystal gives the app its USB clock, so a
+  node whose uplink is USB does not build on a board without one, and the
+  topology check (V-26) works out each node's UART speeds from the clock
+  its app runs on, refusing a UART link on an internal oscillator whose
+  tolerance the definition does not state.
 - **No erase under a trial watchdog.** Stage0 never writes flash, and the
   boot loader writes its records (BOOT_ATTEMPT, ROLLBACK, the boot loader's
   CONFIRMED or ROLLBACK) only into room the log already has

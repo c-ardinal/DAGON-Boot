@@ -121,6 +121,8 @@ pub const ROWS: &[Row] = &[
     row(Mcu, "writer", Whole),
     // The setups are checked as a set (one internal, no two alike).
     row(Mcu, "stage0.clock", Whole),
+    row(Mcu, "bootcore.clock", Whole),
+    row(Mcu, "app.clock", Whole),
     row(Mcu, "id", Same),
     row(Mcu, "wire_id", Same),
     row(Mcu, "format", Same),

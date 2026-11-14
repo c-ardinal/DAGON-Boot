@@ -1,4 +1,6 @@
-//! STM32F401RE boot core: arms the watchdog with the trial period, reads
+//! STM32F401RE boot core: sets its clock up as the definitions choose for
+//! the node (the MCU's `[[bootcore.clock]]` setup for its board's
+//! `[clock]`), arms the watchdog with the trial period, reads
 //! the state log, picks the APP slot (trial of the pending slot, rollback
 //! after the attempts run out, otherwise the confirmed slot), sets the
 //! watchdog to the confirmed period when the slot is not on trial, and
@@ -34,11 +36,12 @@ use dagon_core::bootcore::{settle_log, Cell, MustReset, Settled, CLEARED};
 use dagon_ed25519::Ed25519Compact;
 use dagon_events::{compose_boot, BootExtension, Clock, Extension};
 use dagon_format::header::{verify_header, HEADER_SIZE};
+use dagon_mcu_stm32f401re::clock::Setup;
 use dagon_mcu_stm32f401re::flash::F401Flash;
 use dagon_mcu_stm32f401re::layout as board;
 use dagon_mcu_stm32f401re::tag::checked_tag;
-use dagon_mcu_stm32f401re::{clocks, PUBKEY, SYSCLK_HZ, TARGET_TAG};
 use dagon_mcu_stm32f401re::{trial, LINKED_SLOT, TRIAL_ATTEMPTS};
+use dagon_mcu_stm32f401re::{PUBKEY, TARGET_TAG};
 use dagon_port::BootSelectS;
 use dagon_port::Flash;
 #[allow(unused_imports)]
@@ -65,6 +68,21 @@ macro_rules! boot {
 mod board_def {
     include!(concat!(env!("OUT_DIR"), "/board.rs"));
 }
+/// The clock setup the definitions choose for the node (build.rs).
+#[allow(dead_code)]
+mod clock_def {
+    include!(concat!(env!("OUT_DIR"), "/clock.rs"));
+}
+
+const CLOCK: Setup = dagon_mcu_stm32f401re::clock_setup!(clock_def);
+
+/// The core clock, Hz.
+const SYSCLK_HZ: u32 = CLOCK.out_hz;
+const _: () = assert!(
+    SYSCLK_HZ >= 1_000_000,
+    "the boot core counts microseconds in whole core cycles"
+);
+
 #[allow(dead_code, unused_macros)]
 #[macro_use]
 mod pins {
@@ -114,7 +132,7 @@ impl Clock for Cycles {
 /// One boot with `chain` (the node's boot extensions, in order; their
 /// time limits and observed events in `limits`).
 pub fn run<E: Extension>(chain: E, limits: &'static [BootExtension]) -> ! {
-    let p = embassy_stm32::init(clocks());
+    let p = embassy_stm32::init(CLOCK.hal_config());
     // Before the log is read and before any extension runs.
     IndependentWatchdog::new(p.IWDG, board::TRIAL_WDT_MS * 1000).unleash();
     // SAFETY: the boot core takes the core peripherals nowhere else; the

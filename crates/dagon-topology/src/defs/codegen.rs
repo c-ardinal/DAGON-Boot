@@ -13,7 +13,7 @@ use super::board_boot::{code_ident, code_names, type_name as camel, Active, Halt
 use super::boot_folder::{BootFolder, BOOT_FOLDER_ENV};
 use super::execution::EraseRegionDef;
 use super::load::{self, BOARD_FILE, MCU_FILE};
-use super::{BoardDef, ClockSetup, DefError, McuDef, Registry, Source};
+use super::{BoardDef, ClockSetup, ClockStage, DefError, McuDef, Registry, Source};
 
 /// How a HAL names the singletons of pins and register blocks.
 pub struct Hal<'a> {
@@ -425,7 +425,9 @@ pub fn link_baud_rs(b: &BoardDef, env: Option<&str>) -> Result<String, String> {
 }
 
 /// A board package's build script: writes `def.rs` ([`board_rs`], the
-/// link speed and the effective erase regions, [`erase_regions_rs`]),
+/// link speed, the effective erase regions, [`erase_regions_rs`], and for
+/// an MCU with a DAGON boot loader `app_clock`, the setup an app on the
+/// board runs on, [`clock_rs`]),
 /// `pins.rs` ([`pins_rs`]) and `devices.rs` ([`devices_rs`]) into
 /// `OUT_DIR` from the package's own definition, and reruns when any
 /// definition the validation read changes; a definition that does not
@@ -437,7 +439,13 @@ pub fn package_build(hal: &Hal<'_>) {
     let env = std::env::var(LINK_BAUD_ENV).ok();
     let baud = link_baud_rs(&l.board, env.as_deref()).unwrap_or_else(|e| panic!("{e}"));
     let regions = l.mcu.erase_regions_on(Some(&l.board)).unwrap_or(&[]);
-    let def = board_rs(&l.board) + &baud + &erase_regions_rs(regions);
+    let mut def = board_rs(&l.board) + &baud + &erase_regions_rs(regions);
+    if let Some(c) = l.mcu.clock_for(ClockStage::App, Some(&l.board)) {
+        def += &format!(
+            "\n/// The clock an app on this board runs on.\npub mod app_clock {{\n{}}}\n",
+            clock_rs(ClockStage::App, c)
+        );
+    }
     write(&out_dir().join("def.rs"), &def);
     write(&out_dir().join("pins.rs"), &pins_rs(&l.board, hal));
     write(&out_dir().join("devices.rs"), &devices_rs(&l.board));
@@ -571,13 +579,62 @@ pub fn stage0_build(hal: &DiagHal<'_>) -> Stage0Build {
     let board = boot_build(None);
     let rs = diag_rs(board.as_ref(), hal).unwrap_or_else(|e| panic!("{e}"));
     write(&out_dir().join("diag.rs"), &rs);
+    let clock = boot_clock(ClockStage::Stage0, board.as_ref());
+    Stage0Build { board, clock }
+}
+
+/// The setup `stage` runs on for the node whose boot folder
+/// [`BOOT_FOLDER_ENV`] names, on `board` (its MCU definition as the node's
+/// project sees it); the build fails for a stage its MCU does not have.
+fn boot_clock(stage: ClockStage, board: Option<&BoardDef>) -> ClockSetup {
     let (dir, f) = boot_inputs();
     let mcu = boot_mcu(&dir, f.project().as_deref()).unwrap_or_else(|e| panic!("{e}"));
-    let clock = mcu
-        .stage0_clock(board.as_ref())
-        .unwrap_or_else(|| panic!("MCU '{}' has no [stage0]", mcu.id))
-        .clone();
-    Stage0Build { board, clock }
+    mcu.clock_for(stage, board)
+        .unwrap_or_else(|| panic!("MCU '{}' has no [{}] clock", mcu.id, stage.name()))
+        .clone()
+}
+
+/// A boot loader's build script: `clock.rs` ([`clock_rs`]) into `OUT_DIR`,
+/// the `[[bootcore.clock]]` setup for the board (`board`, from
+/// [`boot_build`]) of the node whose boot folder [`BOOT_FOLDER_ENV`] names;
+/// returns it.
+pub fn bootcore_clock_build(board: Option<&BoardDef>) -> ClockSetup {
+    let clock = boot_clock(ClockStage::Bootcore, board);
+    write(
+        &out_dir().join("clock.rs"),
+        &clock_rs(ClockStage::Bootcore, &clock),
+    );
+    clock
+}
+
+/// The setup `stage` runs on as constants a HAL start-up reads: `SOURCE`
+/// (`"internal"`, `"crystal"`, `"external"`), `IN_HZ`, `OUT_HZ` and `PLL`,
+/// the setup's `pll` fields by name (the MCU package's names, which it
+/// checks when it reads them). A boot loader's build includes them, and
+/// `dagon gen` writes an app's into its `wiring.rs`.
+pub fn clock_rs(stage: ClockStage, c: &ClockSetup) -> String {
+    let pll: Vec<String> = c
+        .pll_fields()
+        .iter()
+        .map(|(k, v)| format!("({k:?}, {v})"))
+        .collect();
+    format!(
+        "/// What drives the clock the {stage} runs on (the MCU definition's\n\
+         /// `[[{stage}.clock]]` setup for the node's board).\n\
+         pub const SOURCE: &str = {:?};\n\
+         /// The frequency of that input, Hz (none for the internal oscillator\n\
+         /// without a PLL).\n\
+         pub const IN_HZ: Option<u32> = {:?};\n\
+         /// The core clock the {stage} runs at, Hz.\n\
+         pub const OUT_HZ: u32 = {};\n\
+         /// The setup's PLL fields by name (none without a PLL).\n\
+         pub const PLL: &[(&str, u32)] = &[{}];\n",
+        c.source.name(),
+        c.in_hz,
+        c.out_hz,
+        pll.join(", "),
+        stage = stage.name(),
+    )
 }
 
 /// The MCU definition of the package at `mcu_dir`, from the source tree
@@ -899,5 +956,86 @@ source = { crystal_hz = 12_000_000 }
             assert_eq!(m.stage0_clock(Some(&l.board)).unwrap().out_hz, out_hz);
         }
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// The boot loader and an app on a board package run on the setup the
+    /// board picks: the crystal's, else (no `[clock]`, no crystal) the
+    /// internal one, which on the RP2040 has no USB clock.
+    #[test]
+    fn the_boot_loader_and_a_board_packages_app_take_the_clock_the_board_picks() {
+        let xtal = "[clock]
+source = { crystal_hz = 12_000_000 }
+";
+        let (dir, mcu) = tree("hal-clock", &[("with-xtal", xtal), ("plain", "")]);
+        let m = boot_mcu(&mcu, None).unwrap();
+        let none = m.clock_for(ClockStage::Bootcore, None).unwrap();
+        assert_eq!((none.source.name(), none.out_hz), ("internal", 6_500_000));
+        for (board, source, out_hz) in [
+            ("with-xtal", "crystal", 125_000_000),
+            ("plain", "internal", 6_500_000),
+        ] {
+            let l = boot_board(&mcu, Some(board), None).unwrap();
+            let boot = m.clock_for(ClockStage::Bootcore, Some(&l.board)).unwrap();
+            assert_eq!((boot.source.name(), boot.out_hz), (source, out_hz));
+            let rs = clock_rs(ClockStage::Bootcore, boot);
+            assert!(
+                rs.contains(&format!("pub const SOURCE: &str = {source:?};\n")),
+                "{rs}"
+            );
+            assert!(
+                rs.contains(&format!("pub const OUT_HZ: u32 = {out_hz};\n")),
+                "{rs}"
+            );
+            let pkg = package_board(&dir.join("targets/boards").join(board)).unwrap();
+            let app = pkg
+                .mcu
+                .clock_for(ClockStage::App, Some(&pkg.board))
+                .unwrap();
+            assert_eq!(app.out_hz, out_hz, "{board}");
+            assert_eq!(app.pll.contains_key("usb_fbdiv"), source == "crystal");
+        }
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// The constants name the setup's PLL fields as the definition does.
+    #[test]
+    fn clock_rs_writes_the_setup_by_name() {
+        let reg = Registry::builtin();
+        let ws = reg.board("waveshare-rp2040-touch-lcd-1.28").unwrap();
+        let c = reg
+            .mcu("rp2040")
+            .unwrap()
+            .clock_for(ClockStage::App, Some(ws))
+            .unwrap();
+        let rs = clock_rs(ClockStage::App, c);
+        for want in [
+            "pub const SOURCE: &str = \"crystal\";\n",
+            "pub const IN_HZ: Option<u32> = Some(12000000);\n",
+            "pub const OUT_HZ: u32 = 125000000;\n",
+            "(\"fbdiv\", 125), (\"postdiv1\", 6), (\"postdiv2\", 2), (\"refdiv\", 1), \
+             (\"usb_fbdiv\", 120), (\"usb_postdiv1\", 6), (\"usb_postdiv2\", 5), (\"usb_refdiv\", 1)];\n",
+            "`[[app.clock]]`",
+        ] {
+            assert!(rs.contains(want), "{want} in {rs}");
+        }
+        assert!(
+            rs.lines()
+                .all(|l| l.starts_with("///") || l.starts_with("pub const ")),
+            "{rs}"
+        );
+        let st = reg
+            .mcu("stm32f401re")
+            .unwrap()
+            .clock_for(ClockStage::Bootcore, None)
+            .unwrap();
+        let rs = clock_rs(ClockStage::Bootcore, st);
+        assert!(
+            rs.contains("pub const SOURCE: &str = \"internal\";\n"),
+            "{rs}"
+        );
+        assert!(
+            rs.contains("pub const IN_HZ: Option<u32> = Some(16000000);\n"),
+            "{rs}"
+        );
     }
 }

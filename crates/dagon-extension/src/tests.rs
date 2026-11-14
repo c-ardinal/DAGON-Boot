@@ -400,6 +400,14 @@ chip = "SYNTH"
 label = "SWD"
 hint = "SWD"
 
+[[bootcore.clock]]
+source = "internal"
+out_hz = 1_000_000
+
+[[app.clock]]
+source = "internal"
+out_hz = 1_000_000
+
 [watchdog]
 kind = "iwdg"
 trial_ms = 4_000

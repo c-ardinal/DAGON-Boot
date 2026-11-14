@@ -4,7 +4,10 @@
 //! confirmed slot starts after a SHA-256 check. dagon-core also requires
 //! each header's `load_addr` to be its slot body (the hub's `Flash` speaks
 //! XIP addresses). Every start arms the watchdog for 8 s before the log is
-//! read; the app keeps feeding it. With nothing startable the watchdog
+//! read; the app keeps feeding it. The core runs on the clock the
+//! definitions choose for the node (the MCU's `[[bootcore.clock]]` setup
+//! for its board's `[clock]`, the ring oscillator without a crystal). With
+//! nothing startable the watchdog
 //! stops and the board's boot LED shows its halt pattern (`[boot] led`,
 //! `halt`; reinstall with BOOTSEL + UF2). In the `diag` build a panic
 //! blinks the code of the last step (6 before HAL init, 7 after it, 8
@@ -35,6 +38,7 @@ use dagon_events::{compose_boot, BootExtension, Extension};
 use dagon_format::header::{self, mcu_id, HEADER_SIZE};
 use dagon_mcu_rp2040::arm::{jump, led, step, trial};
 use dagon_mcu_rp2040::bl::{self, Settled};
+use dagon_mcu_rp2040::clock::Setup;
 use dagon_mcu_rp2040::flash::RpFlash;
 use dagon_mcu_rp2040::layout::{APP_LOG_LAYOUT, APP_SLOTS, WDT_MS};
 use dagon_mcu_rp2040::tag::checked_tag;
@@ -71,6 +75,14 @@ const HALT_MS: Option<u32> = match board_def::HALT_BLINK_PERIOD_MS {
 mod board_def {
     include!(concat!(env!("OUT_DIR"), "/board.rs"));
 }
+
+/// The clock setup the definitions choose for the node (build.rs).
+#[allow(dead_code)]
+mod clock_def {
+    include!(concat!(env!("OUT_DIR"), "/clock.rs"));
+}
+
+const CLOCK: Setup = dagon_mcu_rp2040::clock_setup!(clock_def);
 
 /// Takes the board's boot LED, if it has one (output, on).
 fn led_init() {
@@ -119,9 +131,11 @@ fn app_verifies(flash: &mut RpFlash, slot: u8) -> bool {
         && header::verify_header(&raw, &VERIFIER).is_ok()
 }
 
-/// Microseconds since reset: the TIMER, which counts the watchdog's 1 MHz
-/// tick that HAL init starts (RP2040 datasheet section 4.6). The high word is read
-/// around the low one so a carry between the two reads is not lost.
+/// Microseconds since reset: the TIMER, which counts the watchdog's tick
+/// that HAL init starts at clk_ref / 1 MHz cycles (RP2040 datasheet
+/// section 4.6; about a microsecond on the ring oscillator, which varies).
+/// The high word is read around the low one so a carry between the two
+/// reads is not lost.
 fn now_us() -> u64 {
     let t = embassy_rp::pac::TIMER;
     loop {
@@ -150,7 +164,7 @@ pub fn run<E: Extension>(chain: E, limits: &'static [BootExtension]) -> ! {
         led::select(gpio, board_def::BOOT_LED_ACTIVE_HIGH);
     }
     step(6);
-    let p = embassy_rp::init(Default::default());
+    let p = embassy_rp::init(CLOCK.hal_config());
     step(7);
     let mut flash = RpFlash::new(p.FLASH);
     let mut wdt = Watchdog::new(p.WATCHDOG);
@@ -202,7 +216,7 @@ pub fn run<E: Extension>(chain: E, limits: &'static [BootExtension]) -> ! {
         led::code(9)
     }
     match HALT_MS {
-        Some(ms) => led::halt(ms, led::PLL_MS),
+        Some(ms) => led::halt(ms, led::cycles_per_ms()),
         None => {
             led::set(false);
             loop {

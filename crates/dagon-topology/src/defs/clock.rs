@@ -1,6 +1,7 @@
-//! Stage0's clock: a board's `[clock] source` (what drives the MCU's clock
-//! input), the MCU's `[[stage0.clock]]` setups, their checks, and the setup
-//! stage0 runs on for a node.
+//! The clocks DAGON's stages run on: a board's `[clock] source` (what
+//! drives the MCU's clock input), the MCU's setups for each stage
+//! (`[[stage0.clock]]`, `[[bootcore.clock]]`, `[[app.clock]]`), their
+//! checks, and the setup each stage runs on for a node.
 //!
 //! A PLL's fields are the MCU's own, and they name the PLL: the rules that
 //! check them are one row per PLL in [`PLL_RULES`], found by its fields, so
@@ -12,7 +13,7 @@ use std::collections::BTreeMap;
 
 use serde::Deserialize;
 
-use super::{BoardDef, McuDef, Stage0Def};
+use super::{BoardDef, ImageKind, McuDef, Stage0Def};
 
 /// What a clock comes from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -34,6 +35,44 @@ impl ClockKind {
             Self::External => "external",
         }
     }
+}
+
+/// A stage that sets its clock up from the definitions: stage0 itself, and
+/// the DAGON boot loader and the app through their HAL.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum ClockStage {
+    Stage0,
+    Bootcore,
+    App,
+}
+
+impl ClockStage {
+    /// Every stage, in boot order.
+    pub const ALL: [ClockStage; 3] = [Self::Stage0, Self::Bootcore, Self::App];
+
+    /// The definition's table: `stage0`, `bootcore`, `app`.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Stage0 => "stage0",
+            Self::Bootcore => "bootcore",
+            Self::App => "app",
+        }
+    }
+
+    /// It sets its clocks up through a HAL, which may run a PLL from the
+    /// internal oscillator; stage0 runs its internal setup as the chip
+    /// starts.
+    fn has_hal(self) -> bool {
+        self != Self::Stage0
+    }
+}
+
+/// `[bootcore]` or `[app]` of an MCU with a DAGON boot loader: the setups
+/// that stage runs on (`[[bootcore.clock]]`, `[[app.clock]]`).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StageClocks {
+    pub clock: Vec<ClockSetup>,
 }
 
 /// A board's `[clock] source`: `"internal"`, `{ crystal_hz = N }` or
@@ -97,9 +136,10 @@ pub struct BoardClock {
     pub source: ClockSource,
 }
 
-/// One `[[stage0.clock]]` setup: from `source` (at `in_hz` for a crystal or
-/// an external clock) stage0 runs at `out_hz`, through `pll` (the MCU's own
-/// fields) when it has one.
+/// One `[[<stage>.clock]]` setup: from `source` (at `in_hz` for a crystal,
+/// an external clock, or an internal oscillator a PLL multiplies) the
+/// stage runs at `out_hz`, through `pll` (the MCU's own fields) when it
+/// has one.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ClockSetup {
@@ -108,20 +148,40 @@ pub struct ClockSetup {
     pub out_hz: u32,
     #[serde(default)]
     pub pll: BTreeMap<String, u32>,
+    /// How far an internal oscillator may run from `out_hz`, in parts per
+    /// million (an app's internal setup only; left out: unbounded, so no
+    /// UART link runs on it).
+    pub tolerance_ppm: Option<u32>,
 }
 
 impl ClockSetup {
-    /// The `pll` fields by name, as a stage0 build writes them.
+    /// The `pll` fields by name, as a stage's build writes them.
     pub fn pll_fields(&self) -> Vec<(&str, u32)> {
         self.pll.iter().map(|(k, v)| (k.as_str(), *v)).collect()
     }
 
     /// The setup serves a node whose clock comes from `source`: the
-    /// internal setup an internal source, another setup a source of its
-    /// kind at its `in_hz`.
+    /// internal setup an internal source (whatever frequency it states
+    /// for the internal oscillator its PLL multiplies), another setup a
+    /// source of its kind at its `in_hz`.
     pub fn matches(&self, source: ClockSource) -> bool {
-        self.source == source.kind() && self.in_hz == source.in_hz()
+        match source {
+            ClockSource::Internal => self.source == ClockKind::Internal,
+            _ => self.source == source.kind() && self.in_hz == source.in_hz(),
+        }
     }
+}
+
+/// The setup of `setups` a stage runs on for a node whose clock comes from
+/// `source`: the matching setup with the highest `out_hz`, else the
+/// internal one.
+fn choose(setups: &[ClockSetup], source: ClockSource) -> &ClockSetup {
+    setups
+        .iter()
+        .filter(|s| s.matches(source))
+        .max_by_key(|s| s.out_hz)
+        .or_else(|| setups.iter().find(|s| s.source == ClockKind::Internal))
+        .expect("one internal setup, checked on load")
 }
 
 impl Stage0Def {
@@ -129,12 +189,7 @@ impl Stage0Def {
     /// `source`: the matching setup with the highest `out_hz`, else the
     /// internal one.
     pub fn clock_for(&self, source: ClockSource) -> &ClockSetup {
-        self.clock
-            .iter()
-            .filter(|s| s.matches(source))
-            .max_by_key(|s| s.out_hz)
-            .or_else(|| self.clock.iter().find(|s| s.source == ClockKind::Internal))
-            .expect("one internal setup, checked on load")
+        choose(&self.clock, source)
     }
 }
 
@@ -150,34 +205,80 @@ impl McuDef {
     /// no board, so the internal oscillator); `None` for an MCU without a
     /// DAGON stage0.
     pub fn stage0_clock(&self, board: Option<&BoardDef>) -> Option<&ClockSetup> {
+        self.clock_for(ClockStage::Stage0, board)
+    }
+
+    /// The setups `stage` may run on; `None` for a stage this MCU's
+    /// package does not have (no DAGON stage0, or no DAGON boot loader).
+    pub fn clock_setups(&self, stage: ClockStage) -> Option<&[ClockSetup]> {
+        match stage {
+            ClockStage::Stage0 => self.stage0.as_ref().map(|s| s.clock.as_slice()),
+            ClockStage::Bootcore => self.bootcore.as_ref().map(|s| s.clock.as_slice()),
+            ClockStage::App => self.app.as_ref().map(|s| s.clock.as_slice()),
+        }
+    }
+
+    /// The setup `stage` runs on for a node on `board` (`None`: no board,
+    /// so the internal oscillator): the matching setup with the highest
+    /// `out_hz`, else the internal one; `None` for a stage this MCU's
+    /// package does not have.
+    pub fn clock_for(&self, stage: ClockStage, board: Option<&BoardDef>) -> Option<&ClockSetup> {
         let source = board.map_or(ClockSource::Internal, BoardDef::clock_source);
-        self.stage0.as_ref().map(|s| s.clock_for(source))
+        self.clock_setups(stage).map(|s| choose(s, source))
+    }
+
+    /// The MCU's firmware has a DAGON boot loader (a boot core slot).
+    pub fn has_dagon_boot_loader(&self) -> bool {
+        self.slot_defs
+            .iter()
+            .any(|s| s.image == ImageKind::Bootcore)
     }
 }
 
-/// How a stage0 takes a clock through one kind of PLL.
+/// How a stage takes a clock through one kind of PLL.
 pub struct PllRules {
     /// The PLL, for messages.
     pub pll: &'static str,
-    /// The sources besides the internal one its stage0 takes.
+    /// The sources it runs from.
     pub sources: &'static [ClockKind],
+    /// The stages whose package sets it up.
+    pub stages: &'static [ClockStage],
     /// The fields of a setup's `pll`, all required: they name this PLL.
     pub fields: &'static [&'static str],
-    /// Checks a setup with those fields (its source among `sources`).
-    pub check: fn(&ClockSetup) -> Result<(), String>,
+    /// Checks a setup with those fields (its source among `sources`) for a
+    /// stage among `stages`.
+    pub check: fn(&ClockSetup, ClockStage) -> Result<(), String>,
 }
 
-/// Every PLL a DAGON stage0 runs from, one row each.
+/// Every PLL a DAGON stage runs from, one row each.
 pub const PLL_RULES: &[PllRules] = &[
     PllRules {
         pll: "the RP2040 system PLL",
         sources: &[ClockKind::Crystal],
+        stages: &ClockStage::ALL,
         fields: &["refdiv", "fbdiv", "postdiv1", "postdiv2"],
         check: rp2040_pll,
     },
     PllRules {
+        pll: "the RP2040 system and USB PLLs",
+        sources: &[ClockKind::Crystal],
+        stages: &[ClockStage::Bootcore, ClockStage::App],
+        fields: &[
+            "refdiv",
+            "fbdiv",
+            "postdiv1",
+            "postdiv2",
+            "usb_refdiv",
+            "usb_fbdiv",
+            "usb_postdiv1",
+            "usb_postdiv2",
+        ],
+        check: rp2040_plls,
+    },
+    PllRules {
         pll: "the STM32F401 main PLL",
-        sources: &[ClockKind::Crystal, ClockKind::External],
+        sources: &[ClockKind::Internal, ClockKind::Crystal, ClockKind::External],
+        stages: &ClockStage::ALL,
         fields: &["m", "n", "p", "q", "flash_wait_states"],
         check: stm32f401_pll,
     },
@@ -230,47 +331,94 @@ fn gives(s: &ClockSetup, num: u64, den: u64) -> Result<(), String> {
     ))
 }
 
-/// The RP2040 system PLL (RP2040 datasheet section 2.18.2): REFDIV 1 to 63
-/// (CS.REFDIV, as embassy-rp 0.10 checks it), FREF / REFDIV at least 5 MHz,
-/// FBDIV 16 to 320, POSTDIV1 and POSTDIV2 1 to 7, the VCO 750 to 1600 MHz,
-/// the system clock at most 133 MHz; the crystal 1 to 15 MHz (section
-/// 2.16.1).
-fn rp2040_pll(s: &ClockSetup) -> Result<(), String> {
-    let f = |k: &str| s.pll[k];
+/// One RP2040 PLL (RP2040 datasheet section 2.18.2), its fields named
+/// `<prefix>refdiv` and so on: REFDIV 1 to 63 (CS.REFDIV, as embassy-rp 0.10
+/// checks it), FREF / REFDIV at least 5 MHz, FBDIV 16 to 320, POSTDIV1 and
+/// POSTDIV2 1 to 7, the VCO 750 to 1600 MHz; for a stage that sets it up
+/// through embassy-rp 0.10, POSTDIV2 at most POSTDIV1 (its `configure_pll`
+/// refuses the rest). The PLL gives `in_hz * mul / div`; returns `(mul, div)`.
+fn rp2040_one_pll(
+    s: &ClockSetup,
+    stage: ClockStage,
+    prefix: &str,
+    what: &str,
+) -> Result<(u64, u64), String> {
+    let f = |k: &str| s.pll[&format!("{prefix}{k}")];
     let (refdiv, fbdiv, pd1, pd2) = (f("refdiv"), f("fbdiv"), f("postdiv1"), f("postdiv2"));
     let input = u64::from(s.in_hz.unwrap_or(0));
-    hz_within("crystal", input, 1_000_000, 15_000_000)?;
-    within("refdiv", refdiv, 1, 63)?;
-    within("fbdiv", fbdiv, 16, 320)?;
-    within("postdiv1", pd1, 1, 7)?;
-    within("postdiv2", pd2, 1, 7)?;
+    within(&format!("{prefix}refdiv"), refdiv, 1, 63)?;
+    within(&format!("{prefix}fbdiv"), fbdiv, 16, 320)?;
+    within(&format!("{prefix}postdiv1"), pd1, 1, 7)?;
+    within(&format!("{prefix}postdiv2"), pd2, 1, 7)?;
+    if stage.has_hal() && pd2 > pd1 {
+        return Err(format!(
+            "pll.{prefix}postdiv2 {pd2} is above {prefix}postdiv1 {pd1}"
+        ));
+    }
     ratio_within(
-        "reference (in_hz / refdiv)",
+        &format!("{what}reference (in_hz / {prefix}refdiv)"),
         input,
         u64::from(refdiv),
         5_000_000,
         u64::MAX,
     )?;
-    let vco = input * u64::from(fbdiv);
-    ratio_within("VCO", vco, u64::from(refdiv), 750_000_000, 1_600_000_000)?;
-    gives(s, u64::from(fbdiv), u64::from(refdiv * pd1 * pd2))?;
+    ratio_within(
+        &format!("{what}VCO"),
+        input * u64::from(fbdiv),
+        u64::from(refdiv),
+        750_000_000,
+        1_600_000_000,
+    )?;
+    Ok((u64::from(fbdiv), u64::from(refdiv * pd1 * pd2)))
+}
+
+/// The RP2040 system PLL (one PLL as [`rp2040_one_pll`]): the system clock
+/// at most 133 MHz; the crystal 1 to 15 MHz (section 2.16.1).
+fn rp2040_pll(s: &ClockSetup, stage: ClockStage) -> Result<(), String> {
+    let input = u64::from(s.in_hz.unwrap_or(0));
+    hz_within("crystal", input, 1_000_000, 15_000_000)?;
+    let (mul, div) = rp2040_one_pll(s, stage, "", "")?;
+    gives(s, mul, div)?;
     hz_within("system clock", u64::from(s.out_hz), 1, 133_000_000)
 }
 
-/// The STM32F401 main PLL from the HSE: PLLM 2 to 63, PLLN 50 to 432, PLLP 2,
-/// 4, 6 or 8, PLLQ 2 to 15 (the RCC_PLLCFGR fields as stm32-metapac 21.0.0
-/// `rcc_f4` lists them); the PLL input 1 to 2.1 MHz, the VCO 100 to 432 MHz,
-/// the system clock at most 84 MHz, a crystal 4 to 26 MHz and an external
-/// clock 1 to 50 MHz (embassy-stm32 0.6.0 `rcc/f247.rs`, the STM32F401
-/// limits); flash wait states at least one per started 30 MHz above the
-/// first (as that file sets them) and at most 15 (FLASH_ACR.LATENCY).
-fn stm32f401_pll(s: &ClockSetup) -> Result<(), String> {
+/// USB's clock on the RP2040: 48 MHz (RP2040 datasheet section 4.1, the
+/// USB controller's `clk_usb`).
+const RP2040_USB_HZ: u64 = 48_000_000;
+
+/// The RP2040 system PLL as [`rp2040_pll`] and its USB PLL (`usb_` fields,
+/// the same rules), which gives exactly the USB clock.
+fn rp2040_plls(s: &ClockSetup, stage: ClockStage) -> Result<(), String> {
+    rp2040_pll(s, stage)?;
+    let (mul, den) = rp2040_one_pll(s, stage, "usb_", "USB ")?;
+    let num = u64::from(s.in_hz.unwrap_or(0)) * mul;
+    if num == RP2040_USB_HZ * den {
+        return Ok(());
+    }
+    let gives = if num.is_multiple_of(den) {
+        (num / den).to_string()
+    } else {
+        format!("{num}/{den}")
+    };
+    Err(format!("the USB PLL gives {gives} Hz, not {RP2040_USB_HZ}"))
+}
+
+/// The STM32F401 main PLL: PLLM 2 to 63, PLLN 50 to 432, PLLP 2, 4, 6 or 8,
+/// PLLQ 2 to 15 (the RCC_PLLCFGR fields as stm32-metapac 21.0.0 `rcc_f4`
+/// lists them); the PLL input 1 to 2.1 MHz, the VCO 100 to 432 MHz, the
+/// system clock at most 84 MHz, a crystal 4 to 26 MHz and an external clock
+/// 1 to 50 MHz (embassy-stm32 0.6.0 `rcc/f247.rs`, the STM32F401 limits),
+/// the internal oscillator (HSI) 16 MHz (RM0368 section 6.2.2); flash wait
+/// states at least one per started 30 MHz above the first (as that file
+/// sets them) and at most 15 (FLASH_ACR.LATENCY).
+fn stm32f401_pll(s: &ClockSetup, _: ClockStage) -> Result<(), String> {
     let f = |k: &str| s.pll[k];
     let (m, n, p, q, ws) = (f("m"), f("n"), f("p"), f("q"), f("flash_wait_states"));
     let input = u64::from(s.in_hz.unwrap_or(0));
     match s.source {
         ClockKind::Crystal => hz_within("crystal", input, 4_000_000, 26_000_000)?,
-        _ => hz_within("external", input, 1_000_000, 50_000_000)?,
+        ClockKind::External => hz_within("external", input, 1_000_000, 50_000_000)?,
+        ClockKind::Internal => hz_within("HSI", input, 16_000_000, 16_000_000)?,
     }
     within("m", m, 2, 63)?;
     within("n", n, 50, 432)?;
@@ -299,32 +447,65 @@ fn stm32f401_pll(s: &ClockSetup) -> Result<(), String> {
     Ok(())
 }
 
-/// `[[stage0.clock]]` of an MCU with a stage0: exactly one internal setup
-/// (only `out_hz`); every other setup with its `in_hz` and a `pll` its MCU's
-/// rules accept; frequencies above 0; no two setups stage0 could not choose
-/// between (same source and input, same output).
+/// `[[stage0.clock]]` of an MCU with a stage0 ([`check_stage`]).
 pub fn check_mcu(m: &McuDef) -> Result<(), String> {
-    let Some(s) = &m.stage0 else {
-        return Ok(());
-    };
-    let internal = s
-        .clock
+    match &m.stage0 {
+        Some(s) => check_stage(ClockStage::Stage0, &s.clock),
+        None => Ok(()),
+    }
+}
+
+/// `[[bootcore.clock]]` and `[[app.clock]]`, exactly when the MCU has a
+/// DAGON boot loader (a boot core slot), each as [`check_stage`].
+pub fn check_boot_loader_and_app(m: &McuDef) -> Result<(), String> {
+    let boot = m.has_dagon_boot_loader();
+    for stage in [ClockStage::Bootcore, ClockStage::App] {
+        match (m.clock_setups(stage), boot) {
+            (None, false) => {}
+            (Some(c), true) => check_stage(stage, c)?,
+            (None, true) => {
+                return Err(format!(
+                    "{}.clock needs exactly one setup with source \"internal\" (it has none): an \
+                     MCU with a DAGON boot loader (a bootcore slot) lists the setups its boot \
+                     loader and its app run on",
+                    stage.name()
+                ))
+            }
+            (Some(_), false) => {
+                return Err(format!(
+                    "[{}] lists a clock for a DAGON boot loader and its app, and this MCU has no \
+                     DAGON boot loader (no bootcore slot)",
+                    stage.name()
+                ))
+            }
+        }
+    }
+    Ok(())
+}
+
+/// One stage's table: exactly one internal setup (stage0's only
+/// `out_hz`); every other setup its `in_hz` and a `pll` its MCU's rules
+/// accept for that stage; frequencies above 0; no two setups the stage
+/// could not choose between (same source and input, same output).
+fn check_stage(stage: ClockStage, setups: &[ClockSetup]) -> Result<(), String> {
+    let name = stage.name();
+    let internal = setups
         .iter()
         .filter(|c| c.source == ClockKind::Internal)
         .count();
     if internal != 1 {
         return Err(format!(
-            "stage0.clock needs exactly one setup with source \"internal\" (it has {internal})"
+            "{name}.clock needs exactly one setup with source \"internal\" (it has {internal})"
         ));
     }
-    for (i, c) in s.clock.iter().enumerate() {
-        check_setup(c)?;
-        if let Some(d) = s.clock[..i]
+    for (i, c) in setups.iter().enumerate() {
+        check_setup(stage, c)?;
+        if let Some(d) = setups[..i]
             .iter()
             .find(|d| d.source == c.source && d.in_hz == c.in_hz && d.out_hz == c.out_hz)
         {
             return Err(format!(
-                "two {} setups for {} Hz give {} Hz: stage0 cannot choose between them",
+                "two {} setups for {} Hz give {} Hz: {name} cannot choose between them",
                 d.source.name(),
                 d.in_hz.unwrap_or(0),
                 d.out_hz
@@ -334,24 +515,69 @@ pub fn check_mcu(m: &McuDef) -> Result<(), String> {
     Ok(())
 }
 
-fn check_setup(c: &ClockSetup) -> Result<(), String> {
-    if c.out_hz == 0 {
-        return Err("stage0.clock out_hz 0 is not a frequency".into());
+/// An internal setup: stage0's runs the oscillator as the chip starts
+/// (`out_hz` only); a HAL stage's may run a PLL from it, stating the
+/// oscillator's frequency in `in_hz`.
+fn check_internal(stage: ClockStage, c: &ClockSetup) -> Result<bool, String> {
+    let name = stage.name();
+    match (stage.has_hal(), c.in_hz.is_some(), c.pll.is_empty()) {
+        (false, false, true) | (true, false, true) => Ok(false),
+        (false, _, _) => Err(format!(
+            "{name}.clock: the internal setup takes only out_hz"
+        )),
+        (true, true, true) => Err(format!(
+            "{name}.clock: an internal setup without a pll takes only out_hz"
+        )),
+        (true, false, false) => Err(format!(
+            "{name}.clock: an internal setup with a pll needs in_hz (its oscillator's frequency)"
+        )),
+        (true, true, false) => Ok(true),
     }
-    if c.source == ClockKind::Internal {
-        if c.in_hz.is_some() || !c.pll.is_empty() {
-            return Err("stage0.clock: the internal setup takes only out_hz".into());
-        }
+}
+
+fn check_setup(stage: ClockStage, c: &ClockSetup) -> Result<(), String> {
+    let name = stage.name();
+    if c.out_hz == 0 {
+        return Err(format!("{name}.clock out_hz 0 is not a frequency"));
+    }
+    if c.tolerance_ppm.is_some() && (stage != ClockStage::App || c.source != ClockKind::Internal) {
+        return Err(format!(
+            "{name}.clock: tolerance_ppm is for the app's internal setup (a crystal's or an \
+             external clock's frequency is its in_hz)"
+        ));
+    }
+    if c.source == ClockKind::Internal && !check_internal(stage, c)? {
         return Ok(());
     }
     let kind = c.source.name();
     match c.in_hz {
-        None => return Err(format!("stage0.clock: a {kind} setup needs in_hz")),
-        Some(0) => return Err("stage0.clock in_hz 0 is not a frequency".into()),
+        None => return Err(format!("{name}.clock: a {kind} setup needs in_hz")),
+        Some(0) => return Err(format!("{name}.clock in_hz 0 is not a frequency")),
         Some(_) => {}
     }
+    let rules = pll_rules(name, c)?;
+    if !rules.stages.contains(&stage) {
+        return Err(format!(
+            "{name}.clock: {} set up no {name} clock",
+            rules.pll
+        ));
+    }
+    if !rules.sources.contains(&c.source) {
+        let names: Vec<&str> = rules.sources.iter().map(|k| k.name()).collect();
+        return Err(format!(
+            "{name}.clock: a {name} on {} takes no {kind} clock (it takes: {})",
+            rules.pll,
+            names.join(", ")
+        ));
+    }
+    (rules.check)(c, stage)
+        .map_err(|e| format!("{name}.clock ({kind} {} Hz): {e}", c.in_hz.unwrap_or(0)))
+}
+
+/// The [`PLL_RULES`] row whose fields `c`'s `pll` has.
+fn pll_rules(name: &str, c: &ClockSetup) -> Result<&'static PllRules, String> {
     let has: Vec<&str> = c.pll.keys().map(String::as_str).collect();
-    let rules = PLL_RULES
+    PLL_RULES
         .iter()
         .find(|r| {
             let mut want = r.fields.to_vec();
@@ -364,7 +590,7 @@ fn check_setup(c: &ClockSetup) -> Result<(), String> {
                 .map(|r| format!("{} ({})", r.pll, r.fields.join(", ")))
                 .collect();
             format!(
-                "stage0.clock: this dagon has no rules for a pll with {}; it knows {}",
+                "{name}.clock: this dagon has no rules for a pll with {}; it knows {}",
                 if has.is_empty() {
                     "no fields".to_string()
                 } else {
@@ -372,16 +598,7 @@ fn check_setup(c: &ClockSetup) -> Result<(), String> {
                 },
                 known.join("; ")
             )
-        })?;
-    if !rules.sources.contains(&c.source) {
-        let names: Vec<&str> = rules.sources.iter().map(|k| k.name()).collect();
-        return Err(format!(
-            "stage0.clock: a stage0 on {} takes no {kind} clock (it takes: {})",
-            rules.pll,
-            names.join(", ")
-        ));
-    }
-    (rules.check)(c).map_err(|e| format!("stage0.clock ({kind} {} Hz): {e}", c.in_hz.unwrap_or(0)))
+        })
 }
 
 /// A board's `[clock] source` frequency is above 0. A source no setup of

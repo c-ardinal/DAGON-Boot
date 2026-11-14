@@ -5,6 +5,9 @@
 //!   reaches nodes over ([`RELAY_LINKS`]), and the MCU-independent
 //!   parts re-exported from `dagon-mcu-common` ([`liveness`], [`frames`],
 //!   [`uart`], [`mapped`]).
+//! - Always: the clock setup a boot loader or an app runs on, from the
+//!   definitions' constants ([`clock`]); with `hal`, its embassy-rp
+//!   configuration.
 //! - Target only: XIP reader, image start and raw backlight blink ([`arm`]).
 //! - `hal` (embassy-rp): the board definition and node start-up
 //!   ([`node`], [`BoardDef`]), the flash port
@@ -42,6 +45,7 @@ include!(concat!(env!("OUT_DIR"), "/definition.rs"));
 pub use dagon_port::timeout::EraseRegion;
 
 pub mod bl;
+pub mod clock;
 pub mod image;
 pub mod kinds;
 pub mod layout;

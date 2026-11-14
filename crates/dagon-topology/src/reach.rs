@@ -387,8 +387,11 @@ links:
     }
 
     fn checked(yaml: &str) -> (Topology, Cut) {
+        checked_in(Registry::builtin(), yaml)
+    }
+
+    fn checked_in(reg: &Registry, yaml: &str) -> (Topology, Cut) {
         let t = parse_str(yaml).unwrap();
-        let reg = Registry::builtin();
         assert!(
             check_with(reg, &t).is_pushable(),
             "{}",
@@ -476,7 +479,20 @@ links:
                 ),
             )
             .replace("order: [n0, hub]", "order: [n0, a, b, c, hub]");
-        let (_, cut) = checked(&yaml);
+        // a, b and c name no board, so their apps run on the RP2040's ring
+        // oscillator; a project bounds it (1 %) so their UART links check.
+        let dir = std::env::temp_dir().join(format!("dagon-reach-loop-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let toml = dir.join("dagon.toml");
+        std::fs::write(
+            &toml,
+            "format = 1\n[[mcu_override.rp2040.app.clock]]\nsource = \"internal\"\n\
+             out_hz = 6_500_000\ntolerance_ppm = 10_000\n",
+        )
+        .unwrap();
+        let reg = Registry::load(&[crate::defs::Source::Project(&toml)]).unwrap();
+        std::fs::remove_dir_all(&dir).unwrap();
+        let (_, cut) = checked_in(&reg, &yaml);
         assert_eq!(cut.reach, ["hub", "n0"]);
         assert_eq!(
             cut.skipped,

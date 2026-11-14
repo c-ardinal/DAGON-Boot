@@ -3,8 +3,11 @@
 //! - Always (host-testable): the flash [`layout`], the kind S slot store
 //!   behind dagon-agent ([`KindSStore`]), the I2C target [`mailbox`], and
 //!   the conformance scratch.
-//! - `hal` (embassy-stm32): clocks ([`clocks`]), the flash port
-//!   ([`flash`]), the liveness-gated IWDG ([`watchdog`]).
+//! - Always: the clock setup a boot loader or an app runs on, from the
+//!   definitions' constants ([`clock`]); with `hal`, its embassy-stm32
+//!   configuration.
+//! - `hal` (embassy-stm32): the flash port ([`flash`]), the liveness-gated
+//!   IWDG ([`watchdog`]).
 //! - `hal` and `image-stage0`: the verifying key embedded at build time
 //!   ([`PUBKEY`], [`TEST_KEY`]); stage0 holds it in its own flash
 //!   ([`STAGE0_KEY_PLACE`]).
@@ -22,6 +25,7 @@
 //! Board pins, the link's address and extras live in a board package.
 #![no_std]
 
+pub mod clock;
 pub mod layout;
 pub mod links;
 pub mod mailbox;
@@ -34,10 +38,6 @@ pub mod trial;
 /// APP slot, or the boot core's boot core slot.
 pub const LINKED_SLOT: u8 = if cfg!(feature = "slot-b") { 1 } else { 0 };
 
-#[cfg(feature = "hal")]
-mod clocks;
-#[cfg(feature = "hal")]
-pub use clocks::{clocks, SYSCLK_HZ};
 #[cfg(feature = "node")]
 pub mod exec;
 #[cfg(feature = "hal")]

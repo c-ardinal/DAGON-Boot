@@ -145,7 +145,8 @@ fn p1_coordinator_chosen_by_mcu_is_checked_by_its_gpio_range() {
     // Without a named board the hub is checked against RP2040 GPIO0-29, not a board header.
     let by_mcu = mutate("    board: waveshare-rp2040-touch-lcd-1.28\n", "");
     let r = check_str(&by_mcu);
-    assert!(r.issues.is_empty(), "{:?}", r.issues);
+    // Its only issue: its UART runs on the ring oscillator (V-26).
+    assert!(r.issues.iter().all(|i| i.rule == "V-26"), "{:?}", r.issues);
     assert!(!error_rules(&by_mcu.replacen("nrst: 18", "nrst: 20", 1)).contains("V-07"));
     assert_fires(&by_mcu.replacen("nrst: 18", "nrst: 30", 1), "V-07");
     assert_fires(&DEMO.replacen("nrst: 18", "nrst: 20", 1), "V-07");
@@ -590,6 +591,71 @@ fn v26_refuses_a_uart_end_whose_mcu_states_no_link_uart() {
         "  - id: watch\n    mcu: stm32f401re\n",
     );
     assert!(messages(&yaml, "V-26").is_empty());
+}
+
+/// A registry of the built-in definitions with a project's `overrides`.
+fn with_overrides(name: &str, overrides: &str) -> Registry {
+    let dir = std::env::temp_dir().join(format!("dagon-rules-{name}-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let toml = dir.join("dagon.toml");
+    std::fs::write(&toml, format!("format = 1\n{overrides}")).unwrap();
+    let r = Registry::load(&[dagon_topology::defs::Source::Project(&toml)]).unwrap();
+    std::fs::remove_dir_all(dir).unwrap();
+    r
+}
+
+fn v26_with(reg: &Registry, yaml: &str) -> Vec<String> {
+    check_str_with(reg, yaml)
+        .errors()
+        .filter(|i| i.rule == "V-26")
+        .map(|i| i.message.clone())
+        .collect()
+}
+
+/// Each UART end runs on the clock the definitions choose for its node's
+/// app: the hub's board crystal (125 MHz), no board (the internal
+/// oscillator, whose frequency no tolerance bounds: refused, naming the
+/// node), and a project's overrides of the board or the MCU.
+#[test]
+fn v26_takes_each_ends_uart_clock_from_its_app_clock_setup() {
+    // A crystal: the sample's hub on its board's 12 MHz crystal.
+    assert!(messages(DEMO, "V-26").is_empty());
+    // The internal setup: the hub named by MCU alone.
+    let by_mcu = mutate("    board: waveshare-rp2040-touch-lcd-1.28\n", "");
+    let got = messages(&by_mcu, "V-26");
+    assert_eq!(got.len(), 1, "{got:?}");
+    assert!(
+        got[0].starts_with("baud 115200: hub (RP2040) runs its UART on the internal oscillator"),
+        "{got:?}"
+    );
+    // A project override of the board: its clock input is internal.
+    let reg = with_overrides(
+        "v26-board",
+        "[board_override.\"waveshare-rp2040-touch-lcd-1.28\".clock]\nsource = \"internal\"\n",
+    );
+    let got = v26_with(&reg, DEMO);
+    assert_eq!(got.len(), 1, "{got:?}");
+    assert!(
+        got[0].contains("hub (RP2040) runs its UART on the internal oscillator"),
+        "{got:?}"
+    );
+    // A project override of the MCU: an internal app setup with a stated
+    // tolerance of 1 %, which the check adds to the divider's error: 115200
+    // (+0.76 %) runs, 230400 (+17.5 %) does not.
+    let reg = with_overrides(
+        "v26-mcu",
+        "[[mcu_override.rp2040.app.clock]]\nsource = \"internal\"\nout_hz = 6_500_000\n\
+         tolerance_ppm = 10_000\n\n\
+         [board_override.\"waveshare-rp2040-touch-lcd-1.28\".clock]\nsource = \"internal\"\n",
+    );
+    assert_eq!(v26_with(&reg, DEMO), Vec::<String>::new());
+    let got = v26_with(&reg, &mutate("baud: 115200", "baud: 230400"));
+    assert_eq!(got.len(), 1, "{got:?}");
+    assert!(
+        got[0].starts_with("baud 230400: hub (RP2040) runs at"),
+        "{got:?}"
+    );
+    assert!(got[0].contains("including its clock's 1.00 %"), "{got:?}");
 }
 
 #[test]

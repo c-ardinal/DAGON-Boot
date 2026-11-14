@@ -664,6 +664,78 @@ fn regen_adds_a_dagon_package_the_template_newly_needs() {
     );
 }
 
+/// wiring.rs carries the clock the app runs on: the MCU's `[[app.clock]]`
+/// setup the node's board picks (internal without a board or crystal); an
+/// MCU without a DAGON boot loader keeps its HAL's clock and gets none.
+#[test]
+fn wiring_names_the_clock_the_board_picks_for_the_app() {
+    let d = tmp("wiring-clock");
+    let src = clone(&d);
+    let base = project(&d);
+    let reg = dagon_topology::defs::Registry::builtin();
+    gen(
+        reg,
+        &base,
+        &sample(),
+        &src,
+        &["seg".into(), "watch".into()],
+        false,
+    )
+    .unwrap();
+    let seg = read(&base, "nodes/seg/src/wiring.rs");
+    for want in [
+        "pub mod clock {\n",
+        "pub const SOURCE: &str = \"internal\";\n",
+        "pub const IN_HZ: Option<u32> = Some(16000000);\n",
+        "pub const OUT_HZ: u32 = 84000000;\n",
+    ] {
+        assert!(seg.contains(want), "{want} in {seg}");
+    }
+    assert!(!read(&base, "nodes/watch/src/wiring.rs").contains("pub mod clock"));
+    // The hub on its board's crystal, and the same hub without a board.
+    let t = sample();
+    let hub = t.nodes.iter().position(|n| n.id == "hub").unwrap();
+    let m = reg.mcu("rp2040").unwrap();
+    let on = |board| {
+        m.clock_for(dagon_topology::defs::ClockStage::App, board)
+            .unwrap()
+    };
+    let ws = reg.board("waveshare-rp2040-touch-lcd-1.28");
+    let xtal = wiring_rs(&t, hub, None, &[], Some(on(ws)));
+    assert!(
+        xtal.contains("pub const SOURCE: &str = \"crystal\";\n"),
+        "{xtal}"
+    );
+    assert!(xtal.contains("(\"usb_fbdiv\", 120)"), "{xtal}");
+    let none = wiring_rs(&t, hub, None, &[], Some(on(None)));
+    assert!(
+        none.contains("pub const SOURCE: &str = \"internal\";\n"),
+        "{none}"
+    );
+    assert!(
+        none.contains("pub const PLL: &[(&str, u32)] = &[];\n"),
+        "{none}"
+    );
+    // A project's override of the MCU's [[app.clock]] reaches wiring.rs.
+    let toml = d.join("override.toml");
+    std::fs::write(
+        &toml,
+        "format = 1\n[[mcu_override.stm32f401re.app.clock]]\nsource = \"internal\"\nout_hz = 16_000_000\n",
+    )
+    .unwrap();
+    let over =
+        dagon_topology::defs::Registry::load(&[dagon_topology::defs::Source::Project(&toml)])
+            .unwrap();
+    gen(&over, &base, &sample(), &src, &["seg".into()], false).unwrap();
+    let seg = read(&base, "nodes/seg/src/wiring.rs");
+    assert!(seg.contains("pub const OUT_HZ: u32 = 16000000;\n"), "{seg}");
+    assert!(
+        seg.contains("pub const IN_HZ: Option<u32> = None;\n"),
+        "{seg}"
+    );
+    let _ = std::fs::remove_dir_all(&d);
+}
+
 #[test]
 fn topology_names_and_tags_cannot_break_out_of_generated_code() {
     let d = tmp("inject");
@@ -701,10 +773,10 @@ fn new_gen_build(node: &str) {
     new_gen_build_from(SAMPLE, node, &format!("e2e-{node}"));
 }
 
-/// As [`new_gen_build`] for the sample with no board named: the node is
-/// generated from its MCU package's template.
-fn new_gen_build_by_mcu(node: &str) {
-    let text: String = SAMPLE
+/// The sample with no board named: its nodes are generated from their MCU
+/// packages' templates and run on their MCUs' internal oscillators.
+fn sample_by_mcu() -> String {
+    SAMPLE
         .lines()
         .filter(|l| !l.trim_start().starts_with("board:"))
         .map(|l| {
@@ -713,11 +785,49 @@ fn new_gen_build_by_mcu(node: &str) {
 "
             )
         })
-        .collect();
-    new_gen_build_from(&text, node, &format!("e2e-mcu-{node}"));
+        .collect()
+}
+
+/// `topology` (the sample's shape) without the watch and its UART link:
+/// the hub and seg over I2C. A UART link needs a clock with a known
+/// accuracy on each end (V-26), which a node without a board's crystal
+/// does not have.
+fn without_uart(topology: &str) -> String {
+    let cut = |s: &str, from: &str, to: &str| {
+        let a = s.find(from).unwrap_or_else(|| panic!("no {from:?}"));
+        let b = a + s[a..].find(to).unwrap_or_else(|| panic!("no {to:?}")) + to.len();
+        format!("{}{}", &s[..a], &s[b..])
+    };
+    let s = cut(topology, "  - id: watch\n", "    tag: watch-s3\n");
+    let s = cut(
+        &s,
+        "  - kind: uart\n",
+        "      rom_entry: force-download-boot\n",
+    );
+    let s = cut(&s, "  watch: [", "]\n");
+    s.replacen("order: [seg, watch, hub]", "order: [seg, hub]", 1)
+}
+
+/// As [`new_gen_build`] for the sample with no board named, without its
+/// UART link: the node is generated from its MCU package's template.
+fn new_gen_build_by_mcu(node: &str) {
+    new_gen_build_from(
+        &without_uart(&sample_by_mcu()),
+        node,
+        &format!("e2e-mcu-{node}"),
+    );
 }
 
 fn new_gen_build_from(topology: &str, node: &str, name: &str) {
+    if let Err(log) = build_project(topology, node, name, "") {
+        panic!("{log}");
+    }
+}
+
+/// `dagon new` with `topology` (and `config_extra` added to its
+/// dagon.toml), `dagon gen`, then `dagon build` of `node`; the build's log
+/// when it fails.
+fn build_project(topology: &str, node: &str, name: &str, config_extra: &str) -> Result<(), String> {
     let d = tmp(name);
     // As deep as a project in a beginner's documents folder can be: slot B
     // (in its own target folder) must still link the host build scripts.
@@ -727,6 +837,8 @@ fn new_gen_build_from(topology: &str, node: &str, name: &str) {
         .join("proj");
     new_project(&dir, "proj", topology, &d.join("keys"), &dev()).unwrap();
     let config = dir.join(crate::config::CONFIG_FILE);
+    let text = std::fs::read_to_string(&config).unwrap();
+    std::fs::write(&config, format!("{text}\n{config_extra}")).unwrap();
     let lines = gen_project(&config, &[node.to_string()], false).unwrap();
     assert!(!lines.iter().any(|l| l.starts_with("skipped")), "{lines:?}");
     // Every placeholder rendered ({{uplink}} and {{downlinks}} among them):
@@ -741,13 +853,16 @@ fn new_gen_build_from(topology: &str, node: &str, name: &str) {
         &mut |l| log.push(l.to_string()),
         &std::sync::atomic::AtomicBool::new(false),
     );
-    assert!(r.is_ok(), "{}", log.join("\n"));
+    let Ok(built) = r else {
+        let _ = std::fs::remove_dir_all(&d);
+        return Err(log.join("\n"));
+    };
     // Both slots where the board has slot B (all but the ESP32-S3, whose
     // second slot is the vendor's).
-    let slots = r.unwrap()[0].slots.len();
-    assert_eq!(slots, if node == "watch" { 1 } else { 2 });
+    assert_eq!(built[0].slots.len(), if node == "watch" { 1 } else { 2 });
     assert!(dir.join("nodes").join(node).join("Cargo.lock").is_file());
     let _ = std::fs::remove_dir_all(&d);
+    Ok(())
 }
 
 #[test]
@@ -756,10 +871,42 @@ fn new_gen_build_esp32s3_node() {
     new_gen_build("watch");
 }
 
+/// The hub from the RP2040's template: without a board it states no
+/// crystal, so its app has no USB clock and the build stops naming it; on
+/// a board (defined in dagon.toml) that states its 12 MHz crystal it
+/// builds.
 #[test]
 #[ignore = "builds firmware for the RP2040"]
 fn new_gen_build_rp2040_hub_by_mcu() {
-    new_gen_build_by_mcu("hub");
+    let log = build_project(&without_uart(&sample_by_mcu()), "hub", "e2e-mcu-hub", "").unwrap_err();
+    assert!(
+        log.contains("node hub: its USB uplink needs the 48 MHz USB clock"),
+        "{log}"
+    );
+    // That is the only error: the rest of the template builds.
+    assert_eq!(
+        log.matches("error[E").count(),
+        log.matches("error[E0080]").count(),
+        "{log}"
+    );
+    let on_board = sample_by_mcu().replacen(
+        "    mcu: rp2040\n",
+        "    mcu: rp2040\n    board: rp2040-with-crystal\n",
+        1,
+    );
+    let board = "[board.rp2040-with-crystal]
+format = 2
+product = \"An RP2040 board with a 12 MHz crystal\"
+mcu = \"rp2040\"
+flash_bytes = 0x40_0000
+drawing = \"generic\"
+header = [{ pin = \"GPIO16\" }, { pin = \"GPIO17\" }, { pin = \"GPIO18\" }, { pin = \"GPIO26\" }, { pin = \"GPIO27\" }, { pin = \"GPIO28\" }]
+i2c = [{ controller = \"i2c0\", sda = \"GPIO16\", scl = \"GPIO17\" }]
+clock = { source = { crystal_hz = 12_000_000 } }
+";
+    if let Err(log) = build_project(&on_board, "hub", "e2e-mcu-hub-xtal", board) {
+        panic!("{log}");
+    }
 }
 
 #[test]
@@ -788,14 +935,20 @@ fn new_gen_build_f401_node() {
 /// core slot a only: slot a alone is built and signed, and slot b is not
 /// signed.
 fn gen_boot_core_slots_sign(node: &str, one_core: bool) {
+    gen_boot_core_slots_sign_from(SAMPLE, node, one_core);
+}
+
+/// [`gen_boot_core_slots_sign`] for the project of `topology`.
+fn gen_boot_core_slots_sign_from(topology: &str, node: &str, one_core: bool) {
     use dagon_format::header::{image_kind, slot_binding, ImageHeader, HEADER_SIZE};
-    let d = tmp(&format!("e2e-boot-{node}-{one_core}"));
+    let by_mcu = if topology == SAMPLE { "" } else { "-mcu" };
+    let d = tmp(&format!("e2e-boot-{node}-{one_core}{by_mcu}"));
     let dir = d.join("proj");
-    new_project(&dir, "proj", SAMPLE, &d.join("keys"), &dev()).unwrap();
+    new_project(&dir, "proj", topology, &d.join("keys"), &dev()).unwrap();
     let config = dir.join(crate::config::CONFIG_FILE);
     gen_project(&config, &[node.to_string()], false).unwrap();
     let cfg = Config::load(Some(&config.to_string_lossy())).unwrap();
-    let t = dagon_topology::parse_str(SAMPLE).unwrap();
+    let t = dagon_topology::parse_str(topology).unwrap();
     let n = t.node(node).unwrap();
     let reg = if one_core {
         super::tests_slots::with_single(&n.mcu, &["bootcore"]).unwrap()
@@ -888,6 +1041,15 @@ fn gen_boot_core_slots_sign_rp2040() {
 #[ignore = "builds firmware for the RP2040"]
 fn gen_boot_core_slots_sign_rp2040_one_core() {
     gen_boot_core_slots_sign("hub", true);
+}
+
+/// The RP2040 boot loader of a node whose board states no crystal (no
+/// board at all): it builds on the ring oscillator setup, for every boot
+/// core slot.
+#[test]
+#[ignore = "builds firmware for the RP2040"]
+fn gen_boot_core_slots_sign_rp2040_without_a_crystal() {
+    gen_boot_core_slots_sign_from(&without_uart(&sample_by_mcu()), "hub", false);
 }
 
 #[test]

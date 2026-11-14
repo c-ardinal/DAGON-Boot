@@ -21,6 +21,8 @@ mod tests;
 #[cfg(test)]
 mod tests_clock;
 #[cfg(test)]
+mod tests_hal_clock;
+#[cfg(test)]
 mod tests_isolation;
 #[cfg(test)]
 mod tests_merge;
@@ -44,7 +46,7 @@ use serde::Deserialize;
 use crate::schema::{ControlKind, LinkKind, RomEntry, UartIface};
 
 pub use board_boot::{BoardBoot, BoardBus, BoardDevice, BoardPeripheral, BoardPin};
-pub use clock::{BoardClock, ClockKind, ClockSetup, ClockSource};
+pub use clock::{BoardClock, ClockKind, ClockSetup, ClockSource, ClockStage, StageClocks};
 pub use execution::{BoardFlash, Conformance, EraseRegionDef, Execution, Fact, FlashOp};
 pub use isolation::{Core, Isolation, McuBoot, Peripheral, RecordPlacement, Watchdog};
 pub use load::{DefError, DefSource, Source, BUILTIN_FILES};
@@ -329,19 +331,38 @@ pub struct Coordinator {
 }
 
 /// How the UART the MCU package's firmware runs DAGON's UART links on makes
-/// a bit rate: `clock_hz` divided by `clocks_per_bit` times a divider with
+/// a bit rate: its clock divided by `clocks_per_bit` times a divider with
 /// `frac_bits` fraction bits, the divider rounded down (as the HAL the
-/// package builds with computes it). `bauds` lists the bit rates that
-/// firmware runs its link at: a link's `baud` must be one of them on both
-/// ends (V-26), and the Console offers only those, so no speed the
-/// definition does not name can be set or built.
+/// package builds with computes it). Its clock is `clock_hz`, a frequency
+/// no setup changes, or `clock = "app"`, the core clock of the
+/// `[[app.clock]]` setup the definitions choose for the node. `bauds` lists
+/// the bit rates that firmware runs its link at: a link's `baud` must be
+/// one of them on both ends (V-26), and the Console offers only those, so
+/// no speed the definition does not name can be set or built.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct LinkUart {
-    pub clock_hz: u32,
+    pub clock_hz: Option<u32>,
+    pub clock: Option<UartClock>,
     pub clocks_per_bit: u32,
     pub frac_bits: u8,
     pub bauds: Vec<u32>,
+}
+
+/// `[link_uart] clock`: the clock a UART's rate comes from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum UartClock {
+    /// The core clock of the node's `[[app.clock]]` setup.
+    App,
+}
+
+/// The clock a node's UART runs on: its frequency and how far it may be off
+/// (a fraction).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct UartClockOn {
+    pub hz: u32,
+    pub tolerance: f64,
 }
 
 /// The I2C bus speeds the MCU package's firmware runs DAGON's I2C link at,
@@ -364,22 +385,60 @@ impl LinkUart {
         self.bauds.contains(&baud)
     }
 
-    /// The bit rate this UART runs at when asked for `baud`; `None` when
-    /// it cannot divide its clock down to it (0, or faster than the clock).
-    pub fn actual_baud(&self, baud: u32) -> Option<f64> {
+    /// The bit rate this UART runs at on a `clock_hz` clock when asked for
+    /// `baud`; `None` when it cannot divide its clock down to it (0, or
+    /// faster than the clock).
+    pub fn actual_baud(&self, clock_hz: u32, baud: u32) -> Option<f64> {
         let per_bit = u64::from(self.clocks_per_bit) * u64::from(baud);
-        let steps = (u64::from(self.clock_hz) << self.frac_bits).checked_div(per_bit)?;
+        let steps = (u64::from(clock_hz) << self.frac_bits).checked_div(per_bit)?;
         if steps >> self.frac_bits == 0 {
             return None;
         }
         let divider = steps as f64 / f64::from(1u32 << self.frac_bits);
-        Some(f64::from(self.clock_hz) / (f64::from(self.clocks_per_bit) * divider))
+        Some(f64::from(clock_hz) / (f64::from(self.clocks_per_bit) * divider))
     }
 
     /// How far [`LinkUart::actual_baud`] is from `baud`, as a fraction
     /// (+0.0122 is 1.22 % fast).
-    pub fn baud_error(&self, baud: u32) -> Option<f64> {
-        self.actual_baud(baud).map(|a| a / f64::from(baud) - 1.0)
+    pub fn baud_error(&self, clock_hz: u32, baud: u32) -> Option<f64> {
+        self.actual_baud(clock_hz, baud)
+            .map(|a| a / f64::from(baud) - 1.0)
+    }
+}
+
+/// The UART clock an app setup gives: its core clock, bounded by its
+/// tolerance; an internal oscillator that states none is refused.
+fn uart_clock_of(s: &ClockSetup) -> Result<UartClockOn, String> {
+    match (s.source, s.tolerance_ppm) {
+        (ClockKind::Internal, None) => Err(
+            "runs its UART on the internal oscillator, whose frequency no tolerance bounds; \
+             a board that states its crystal ([clock] source) can run the link"
+                .into(),
+        ),
+        (_, ppm) => Ok(UartClockOn {
+            hz: s.out_hz,
+            tolerance: f64::from(ppm.unwrap_or(0)) / 1e6,
+        }),
+    }
+}
+
+impl McuDef {
+    /// The clock this MCU's UART runs on for a node on `board` (the board
+    /// the node names; `None`: no board, so the internal oscillator); an
+    /// error says why it has none a link can rely on.
+    pub fn uart_clock(&self, board: Option<&BoardDef>) -> Result<UartClockOn, String> {
+        let u = self
+            .link_uart
+            .as_ref()
+            .ok_or("cannot be checked: its MCU definition has no [link_uart]")?;
+        match (u.clock_hz, u.clock) {
+            (Some(hz), _) => Ok(UartClockOn { hz, tolerance: 0.0 }),
+            (None, Some(UartClock::App)) => self
+                .clock_for(ClockStage::App, board)
+                .ok_or_else(|| "cannot be checked: its MCU definition has no [[app.clock]]".into())
+                .and_then(uart_clock_of),
+            (None, None) => Err("cannot be checked: its [link_uart] names no clock".into()),
+        }
     }
 }
 
@@ -549,6 +608,23 @@ pub struct McuDef {
     /// `[clock]` source (same source and `in_hz`) with the highest `out_hz`, else on the internal
     /// one; two setups of one source and `in_hz` with the same `out_hz` are refused.
     pub stage0: Option<Stage0Def>,
+    /// The DAGON boot loader's clock, exactly when the MCU has a `bootcore` slot:
+    /// `[[bootcore.clock]]` lists the setups the boot loader runs on, as `[[stage0.clock]]` does
+    /// for stage0 and checked by the same PLL rules, and the boot loader's HAL sets the chosen
+    /// one up. Its internal setup may run a PLL from the MCU's own oscillator: `{ source =
+    /// "internal", in_hz, out_hz, pll = { ... } }`, `in_hz` that oscillator's frequency (the
+    /// STM32F401's HSI); without a `pll` it takes only `out_hz`. For a node, the boot loader runs
+    /// on the setup the board's `[clock]` picks, as stage0 does, else on the internal one.
+    pub bootcore: Option<StageClocks>,
+    /// The app's clock, exactly when the MCU has a `bootcore` slot: `[[app.clock]]`, as
+    /// `[[bootcore.clock]]` for the app, which `dagon gen` writes into the node's `wiring.rs` and
+    /// a board package into its definition module; the MCU package's app start-up sets it up.
+    /// On the RP2040 a setup with the USB PLL (`usb_refdiv`, `usb_fbdiv`, `usb_postdiv1`,
+    /// `usb_postdiv2`, giving 48 MHz) gives the app its USB clock; an app without one builds
+    /// only without a USB uplink. The internal setup may state `tolerance_ppm`, how far the
+    /// oscillator may run from `out_hz`; a node whose app runs on an internal setup without it
+    /// runs no UART link on that clock (V-26).
+    pub app: Option<StageClocks>,
     /// `image` (`app`, `bootcore`, `agent`, `stage0`), `binding` (`a`, `b`, `any`), `header`
     /// (`inline`, `trailer`, `detached`); the region is `at` + `size` or `partition`; a detached
     /// header is at `header_at` or `header_partition` + `header_offset`.
@@ -571,8 +647,11 @@ pub struct McuDef {
     /// `[coordinator]` is defined (V-25).
     pub coordinator: Option<Coordinator>,
     /// How the UART the MCU package runs DAGON's UART links on makes a bit rate, as its HAL
-    /// computes it: `clock_hz` divided by `clocks_per_bit` times a divider with `frac_bits`
-    /// fraction bits, rounded down. `bauds` lists the bit rates the firmware runs its link at;
+    /// computes it: its clock divided by `clocks_per_bit` times a divider with `frac_bits`
+    /// fraction bits, rounded down. The clock is `clock_hz` (a frequency no clock setup changes)
+    /// or `clock = "app"` (the core clock of the node's `[[app.clock]]` setup, which V-26 takes
+    /// for each node; a node on an internal setup without `tolerance_ppm` runs no UART link),
+    /// exactly one of them. `bauds` lists the bit rates the firmware runs its link at;
     /// the topology check (V-26) refuses a link `baud` that either end's list does not name or
     /// that either end makes more than 2 % off, and DAGON Console offers only the speeds both
     /// ends name. Required on an MCU whose `[links]` has `uart`: without it, every UART link
@@ -845,8 +924,9 @@ pub struct BoardDef {
     pub flash: Option<BoardFlash>,
     /// What drives the MCU's clock input on this board: `source` is `"internal"`, `{ crystal_hz =
     /// N }` or `{ external_hz = N }` (cite the schematic or datasheet that gives N in a comment).
-    /// Left out: internal. Stage0 runs on its MCU's `[[stage0.clock]]` setup for this source, or
-    /// on the internal one when none matches; on an MCU without a stage0 it is not used.
+    /// Left out: internal. Stage0, the DAGON boot loader and the app each run on their MCU's
+    /// setup for this source (`[[stage0.clock]]`, `[[bootcore.clock]]`, `[[app.clock]]`), or on
+    /// the internal one when none matches; an MCU without those stages does not use it.
     pub clock: Option<BoardClock>,
     /// As [`McuDef::package`] (inline project boards have none).
     #[serde(skip)]

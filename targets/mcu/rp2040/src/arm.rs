@@ -22,7 +22,7 @@ pub fn xip_flash() -> Mapped {
 /// through the registers, so every stage can show where it is, whatever
 /// the clocks and HAL state.
 pub mod led {
-    use core::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+    use core::sync::atomic::{AtomicBool, AtomicU32, AtomicU8, Ordering};
 
     const NONE: u8 = u8::MAX;
     static GPIO: AtomicU8 = AtomicU8::new(NONE);
@@ -65,11 +65,20 @@ pub mod led {
         Some(GPIO.load(Ordering::Relaxed)).filter(|&g| g != NONE)
     }
 
-    /// Cycles per millisecond: ROSC at reset (the MCU definition's
-    /// internal `[[stage0.clock]]` setup, nominal; it varies a lot between
-    /// chips) and the 125 MHz PLL clock after HAL init.
+    /// Cycles per millisecond on the ring oscillator as the chip starts
+    /// (the MCU definition's internal `[[stage0.clock]]` setup, nominal; it
+    /// varies a lot between chips).
     pub const ROSC_MS: u32 = crate::STAGE0_INTERNAL_HZ / 1000;
-    pub const PLL_MS: u32 = 125_000;
+
+    /// Cycles per millisecond of the clock the core runs on now: the reset
+    /// clock until a HAL start-up sets its clock up
+    /// (`crate::clock::Setup::hal_config` stores that setup's).
+    static CYCLES_PER_MS: AtomicU32 = AtomicU32::new(ROSC_MS);
+
+    /// Times the blinks from here on on a core running `cycles_per_ms`.
+    pub fn set_cycles_per_ms(cycles_per_ms: u32) {
+        CYCLES_PER_MS.store(cycles_per_ms, Ordering::Relaxed);
+    }
 
     /// Selects `gpio` (0..=29) as the LED lit at `active_high`'s level and
     /// takes it: output, on.
@@ -103,21 +112,14 @@ pub mod led {
         cortex_m::asm::delay(ms.saturating_mul(cycles_per_ms));
     }
 
-    const CLK_SYS_CTRL: *const u32 = (0x4000_8000 + 0x3C) as *const u32;
     const CODE_BLINK_MS: u32 = 250;
     const CODE_PAUSE_MS: u32 = 2_000;
     const CODE_GAP_MS: u32 = 800;
 
-    /// Cycles per millisecond for the clock clk_sys runs on now: the PLL
-    /// (aux source) after HAL init, else the reset clock.
+    /// Cycles per millisecond for the clock the core runs on now
+    /// ([`set_cycles_per_ms`], else the reset clock).
     pub fn cycles_per_ms() -> u32 {
-        // SAFETY: read-only access to a clocks register.
-        let aux = unsafe { CLK_SYS_CTRL.read_volatile() } & 1 != 0;
-        if aux {
-            PLL_MS
-        } else {
-            ROSC_MS
-        }
+        CYCLES_PER_MS.load(Ordering::Relaxed)
     }
 
     /// Repeats forever: `n` blinks, then a long dark pause. Counting the

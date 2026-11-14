@@ -1200,8 +1200,11 @@ impl<'a> Ctx<'a> {
     }
 
     /// A UART link's speed on each end whose firmware runs it, from its
-    /// MCU's `[link_uart]`; such an end whose MCU states none is refused (no
-    /// speed is known to work on it).
+    /// MCU's `[link_uart]` on the clock its node's UART runs on (for
+    /// `clock = "app"`, the `[[app.clock]]` setup the board the node names
+    /// picks, its tolerance added to the error); such an end whose MCU
+    /// states no `[link_uart]`, or whose clock no tolerance bounds, is
+    /// refused (no speed is known to work on it).
     fn v26(&mut self) {
         for (i, l) in self.links() {
             if l.kind != LinkKind::Uart {
@@ -1209,7 +1212,10 @@ impl<'a> Ctx<'a> {
             }
             let baud = l.uart_baud();
             for id in l.ends.iter().map(|e| &e.node) {
-                let Some(m) = self.t.node(id).and_then(|n| self.reg.mcu(&n.mcu)) else {
+                let Some(n) = self.t.node(id) else {
+                    continue;
+                };
+                let Some(m) = self.reg.mcu(&n.mcu) else {
                     continue;
                 };
                 // An end whose firmware runs no UART link runs no speed:
@@ -1217,17 +1223,38 @@ impl<'a> Ctx<'a> {
                 if !links::runs_in(self.reg, &m.id, LinkKind::Uart) {
                     continue;
                 }
-                let u = m.link_uart.as_ref();
-                let what = match u.map(|u| (u.runs(baud), u.actual_baud(baud), u.baud_error(baud))) {
-                    None => "cannot be checked: its MCU definition has no [link_uart]".into(),
-                    Some((_, Some(a), Some(e))) if e.abs() > MAX_BAUD_ERROR => format!(
-                        "runs at {a:.0} bit/s, {:+.2} %; each end of a UART link must be within {:.0} %",
+                // The board the node names, as its build takes it: none
+                // runs the app on the internal oscillator.
+                let board = n.board.as_deref().and_then(|b| self.reg.board(b));
+                let clock = m.uart_clock(board);
+                let u = m.link_uart.as_ref().zip(clock.as_ref().ok());
+                let at = |u: &crate::defs::LinkUart, c: &crate::defs::UartClockOn| {
+                    (
+                        u.runs(baud),
+                        u.actual_baud(c.hz, baud),
+                        u.baud_error(c.hz, baud),
+                    )
+                };
+                let tolerance = clock.as_ref().map_or(0.0, |c| c.tolerance);
+                let what = match u.map(|(u, c)| at(u, c)) {
+                    None => clock.err().unwrap_or_default(),
+                    Some((_, Some(a), Some(e))) if e.abs() + tolerance > MAX_BAUD_ERROR => format!(
+                        "runs at {a:.0} bit/s, {:+.2} %{}; each end of a UART link must be within {:.0} %",
                         e * 100.0,
+                        if tolerance > 0.0 {
+                            format!(
+                                ", up to {:.2} % including its clock's {:.2} %",
+                                (e.abs() + tolerance) * 100.0,
+                                tolerance * 100.0
+                            )
+                        } else {
+                            String::new()
+                        },
                         MAX_BAUD_ERROR * 100.0
                     ),
                     Some((false, Some(_), Some(_))) => format!(
                         "is not a speed its firmware runs the link at; its definition names {:?}",
-                        u.map(|u| u.bauds.as_slice()).unwrap_or(&[])
+                        u.map(|(u, _)| u.bauds.as_slice()).unwrap_or(&[])
                     ),
                     Some((true, Some(_), Some(_))) => continue,
                     Some(_) => "cannot make it".into(),

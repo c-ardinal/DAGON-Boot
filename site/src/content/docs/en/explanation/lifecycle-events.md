@@ -1319,6 +1319,28 @@ The one authentication rule, applied by every verifier in the chain
   the unrolled ones do not fit the RP2040's region. A stage0 that needs more
   takes a larger region before the first public release; formats before
   that release carry no compatibility promise (6).
+- **Stage0's clock and its verify time.** Stage0 runs its checks on the
+  clock the definitions choose for the node: the MCU definition's
+  `[[stage0.clock]]` setup that matches the board's `[clock] source`
+  (the one with the highest `out_hz`), else the MCU's internal
+  oscillator (a node without a board, a board without `[clock]`, or a
+  source no setup matches). The build of a node's stage0 writes the
+  chosen setup into it. Before it starts a core, stage0 puts the clocks
+  back the way the chip starts them, so every boot loader starts from
+  the same clocks on every board; its diagnostic output and the trial
+  watchdog are timed on the clock each runs on. A signature check with
+  `Ed25519Small` takes about 50 million core cycles on a Cortex-M0+
+  (`crates/dagon-ed25519/tests/m0_cycles.rs` runs it on an ARMv6-M
+  interpreter, without flash wait states, and fails above 55 million):
+  on the RP2040 about 7.7 s on its ring oscillator at the nominal
+  6.5 MHz (4.2 s to 28 s across its 1.8 to 12 MHz), and about 0.4 s at
+  125 MHz from a board's 12 MHz crystal. A stage0 built with the
+  `verify-time` feature measures it on the node: it times each check in
+  core clock cycles (SysTick), keeps the longest in `DAGON_VERIFY_CYCLES`
+  and their number in `DAGON_VERIFY_COUNT` for a debug probe to read,
+  shows the longest in tenths of a second, rounded up, as a blink code
+  on the diagnostic output, and starts no core; the node gets its normal
+  stage0 written back afterwards.
 - **No erase under a trial watchdog.** Stage0 never writes flash, and the
   boot loader writes its records (BOOT_ATTEMPT, ROLLBACK, the boot loader's
   CONFIRMED or ROLLBACK) only into room the log already has

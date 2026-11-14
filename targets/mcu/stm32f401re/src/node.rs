@@ -36,7 +36,6 @@ use defmt::{info, warn};
 use embassy_executor::Spawner;
 use embassy_stm32::i2c::{I2c, MultiMaster};
 use embassy_stm32::peripherals::{FLASH, IWDG};
-use embassy_stm32::wdg::IndependentWatchdog;
 use embassy_stm32::{mode::Async, pac, Peri, Peripherals};
 use embassy_time::{Duration, Instant, Timer};
 use static_cell::StaticCell;
@@ -45,7 +44,7 @@ use crate::flash::F401Flash;
 use crate::layout::{self, MIN_FLASH_SIZE};
 use crate::links;
 use crate::store::KindSStore;
-use crate::watchdog::{Guard, Iwdg, Watch};
+use crate::watchdog::{Guard, Iwdg, PeriodDog, Watch};
 use dagon_port::timeout::EraseRegion;
 
 /// The DAGON link: an I2C target (listening at the node's address).
@@ -122,7 +121,7 @@ pub(crate) fn open_store(
     let driver = FLASH_DRIVER.init(driver(F401Flash::new(flash)));
     let flash = SharedFlash::new(driver, &layout::FLASH_REGIONS);
     let store = KindSStore::load(flash, &layout::LOG, layout::SLOTS, regions)?
-        .with_cores(layout::CORE_SLOTS, crate::trial::holds());
+        .with_cores(&layout::CORE_SLOTS, crate::trial::holds());
     Ok((store, flash))
 }
 
@@ -166,9 +165,14 @@ pub fn install_watchdog<const N: usize>(
     period_ms: u32,
     store: &Store,
 ) {
-    let mut wdt = IndependentWatchdog::new(iwdg, period_ms * 1000);
-    wdt.unleash();
-    guard.install(Iwdg(wdt), on_trial(store));
+    let mut iwdg = iwdg;
+    crate::watchdog::start(&mut iwdg, period_ms);
+    let dog = PeriodDog::new(
+        Iwdg::new(iwdg),
+        watchdog_period_ms(true),
+        watchdog_period_ms(false),
+    );
+    guard.install(dog, on_trial(store));
 }
 
 /// The agent configuration of a node on this MCU reached over I2C. `tag`
@@ -352,6 +356,10 @@ mod conform {
     /// LSI may run at up to 47 kHz, which shortens this to about 8.2 s, still
     /// above the 4 s a 128 KiB sector erase may take between two feeds.
     pub const WDT_MS: u32 = 12_000;
+    const _: () = assert!(
+        WDT_MS >= crate::WATCHDOG_RANGE_MS.0 && WDT_MS <= crate::WATCHDOG_RANGE_MS.1,
+        "the conformance IWDG period is outside [watchdog] range_ms"
+    );
     pub const OUT_MAX: usize = RESPONSE_MAX;
 
     /// Answers a CONF_RUN request into `out`; `None` for any other frame.

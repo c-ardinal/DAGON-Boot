@@ -26,6 +26,7 @@
 #![no_std]
 
 pub mod clock;
+pub mod iwdg;
 pub mod layout;
 pub mod links;
 pub mod mailbox;

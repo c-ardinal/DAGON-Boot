@@ -32,8 +32,7 @@ const LOG: LogLayout = LogLayout {
     face_len: 0x4000,
 };
 const SLOTS: SlotLayout = SlotLayout {
-    slots: &[0x0802_0000, 0x0804_0000],
-    slot_len: 0x2_0000,
+    slots: &[(0x0802_0000, 0x2_0000), (0x0804_0000, 0x2_0000)],
 };
 const GEOMETRY: [FlashRegion; 2] = [
     FlashRegion {
@@ -137,7 +136,7 @@ fn image(slot: u8, minor: u8) -> Vec<u8> {
         mcu_id: mcu_id::STM32F401XE,
         slot_binding: slot,
         placement: placement::INLINE,
-        load_addr: SLOTS.slots[slot as usize] + HEADER_SIZE as u32,
+        load_addr: SLOTS.slots[slot as usize].0 + HEADER_SIZE as u32,
         payload_size: body.len() as u32,
         version: Version::new(1, minor, 0),
         build_flags: build_flags::TEST_KEY,
@@ -159,7 +158,7 @@ fn image(slot: u8, minor: u8) -> Vec<u8> {
 fn provisioned() -> Mem {
     let mut m = Mem::new();
     let img = image(A, 0);
-    let base = SLOTS.slots[0];
+    let base = SLOTS.slots[0].0;
     m.bytes[(base - BASE) as usize..][..img.len()].copy_from_slice(&img);
     m.write(LOG.faces[0], &FaceHeader { generation: 1 }.to_bytes())
         .unwrap();
@@ -381,7 +380,7 @@ fn update_confirm_then_back_to_previous_version() {
 fn erase_covers_header_and_body_units_only() {
     let (mut n, _) = Node::boot(provisioned());
     assert_eq!(n.transfer(B, &image(B, 1)), Status::Ok);
-    assert_eq!(n.flash.0.borrow().erases, [(SLOTS.slots[1], 0x2_0000)]);
+    assert_eq!(n.flash.0.borrow().erases, [SLOTS.slots[1]]);
 }
 
 #[test]
@@ -420,6 +419,18 @@ fn new_image_in_the_rolled_back_slot_is_written() {
     let st = n.status();
     assert_eq!(st.slots[B as usize].state, SlotState::Written);
     assert_eq!(st.slots[B as usize].version, Version::new(1, 2, 0));
+}
+
+/// Each APP slot keeps its own length: slot B shorter than slot A takes
+/// only what fits it, and slot A still takes its whole body.
+#[test]
+fn each_app_slot_has_its_own_capacity() {
+    const UNEQUAL: SlotLayout = SlotLayout {
+        slots: &[(0x0802_0000, 0x2_0000), (0x0804_0000, 0x1_0000)],
+    };
+    let s = KindSStore::load(provisioned(), &LOG, UNEQUAL, &ERASE_REGIONS).unwrap();
+    assert_eq!(s.capacity(target::APP, A), 0x2_0000 - HEADER_SIZE as u32);
+    assert_eq!(s.capacity(target::APP, B), 0x1_0000 - HEADER_SIZE as u32);
 }
 
 #[test]

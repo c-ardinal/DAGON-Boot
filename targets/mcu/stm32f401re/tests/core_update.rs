@@ -159,9 +159,9 @@ fn head(img: &[u8], slot: u8) -> SlotRef {
 fn installed() -> Cut {
     let mut f = Cut::new();
     let core = signed(image_kind::BOOTCORE, 0, CORE_SLOTS[0].0, 0, 3000);
-    let app = signed(image_kind::APP, 0, SLOTS.slots[0], 0, 2000);
+    let app = signed(image_kind::APP, 0, SLOTS.slots[0].0, 0, 2000);
     f.write(CORE_SLOTS[0].0, &core).unwrap();
-    f.write(SLOTS.slots[0], &app).unwrap();
+    f.write(SLOTS.slots[0].0, &app).unwrap();
     f.write(LOG.faces[0], &FaceHeader { generation: 1 }.to_bytes())
         .unwrap();
     let mut log = Log::load(&mut f, &LOG).unwrap();
@@ -178,7 +178,7 @@ fn installed() -> Cut {
 /// other face, both targets' records carried, the face header last.
 fn installed_full() -> Cut {
     let mut f = installed();
-    let app = signed(image_kind::APP, 0, SLOTS.slots[0], 0, 2000);
+    let app = signed(image_kind::APP, 0, SLOTS.slots[0].0, 0, 2000);
     let mut log = Log::load(&mut f, &LOG).unwrap();
     while log.room() >= trial_room(TRIAL_ATTEMPTS) {
         log.append(&mut f, kind::CONFIRMED, head(&app, 0), 0)
@@ -191,7 +191,7 @@ fn installed_full() -> Cut {
 /// What the app's agent does at start (`KindSStore::keep_room`).
 fn app_start(f: &Cut) {
     if let Ok(s) = KindSStore::load(f.clone(), &LOG, SLOTS, &ERASE_REGIONS) {
-        let _ = s.with_cores(CORE_SLOTS, true).keep_room();
+        let _ = s.with_cores(&CORE_SLOTS, true).keep_room();
     }
 }
 
@@ -223,7 +223,7 @@ fn agent_writes(f: &Cut, img: &[u8]) -> Option<()> {
     let t = Transition::for_store_tests();
     let mut s = KindSStore::load(f.clone(), &LOG, SLOTS, &ERASE_REGIONS)
         .ok()?
-        .with_cores(CORE_SLOTS, true);
+        .with_cores(&CORE_SLOTS, true);
     let st = s.target_status(target::BOOTCORE)?;
     assert_eq!((st.active, st.confirmed), (0, 0));
     let body = &img[HEADER_SIZE..];
@@ -308,7 +308,7 @@ fn a_new_core_is_tried_confirms_itself_and_the_app_records_stay() {
     assert_eq!(running, 1);
     let mut s = KindSStore::load(f.clone(), &LOG, SLOTS, &ERASE_REGIONS)
         .unwrap()
-        .with_cores(CORE_SLOTS, true);
+        .with_cores(&CORE_SLOTS, true);
     let c = s.target_status(target::BOOTCORE).unwrap();
     assert_eq!((c.active, c.confirmed), (1, 1));
     assert_eq!(
@@ -326,12 +326,12 @@ fn without_a_holding_trial_cell_no_boot_core_is_taken() {
     let f = installed();
     let s = KindSStore::load(f.clone(), &LOG, SLOTS, &ERASE_REGIONS)
         .unwrap()
-        .with_cores(CORE_SLOTS, false);
+        .with_cores(&CORE_SLOTS, false);
     assert_eq!(s.capacity(target::BOOTCORE, 1), 0);
     assert!(s.capacity(target::APP, 1) > 0);
     let s = KindSStore::load(f, &LOG, SLOTS, &ERASE_REGIONS)
         .unwrap()
-        .with_cores(CORE_SLOTS, true);
+        .with_cores(&CORE_SLOTS, true);
     assert!(s.capacity(target::BOOTCORE, 1) > 0);
 }
 
@@ -341,7 +341,7 @@ fn a_core_that_fails_its_check_falls_back_to_the_old_one() {
     assert_eq!(running, 0);
     let mut s = KindSStore::load(f, &LOG, SLOTS, &ERASE_REGIONS)
         .unwrap()
-        .with_cores(CORE_SLOTS, true);
+        .with_cores(&CORE_SLOTS, true);
     let c = s.target_status(target::BOOTCORE).unwrap();
     assert_eq!((c.confirmed, c.slots[1].state), (0, SlotState::Reverted));
     assert_eq!(
@@ -371,7 +371,7 @@ fn a_power_cut_at_every_flash_step_leaves_a_bootable_core() {
                 let (f, running) = update_from(start(), minor, Some((n, half)));
                 let mut s = KindSStore::load(f, &LOG, SLOTS, &ERASE_REGIONS)
                     .unwrap()
-                    .with_cores(CORE_SLOTS, true);
+                    .with_cores(&CORE_SLOTS, true);
                 let c = s.target_status(target::BOOTCORE).unwrap();
                 let open = c
                     .slots
@@ -396,7 +396,7 @@ fn every_slot_the_store_takes_has_one_planner_layout() {
     use dagon_agent::erase_plan;
     let s = KindSStore::load(installed(), &LOG, SLOTS, &ERASE_REGIONS)
         .unwrap()
-        .with_cores(CORE_SLOTS, true);
+        .with_cores(&CORE_SLOTS, true);
     let layout = s.erase_layout().unwrap();
     for t in 0..=u8::MAX {
         for slot in 0..=u8::MAX {
@@ -411,7 +411,7 @@ fn every_slot_the_store_takes_has_one_planner_layout() {
                 (cap, [l]) => {
                     assert_eq!(l.capacity, cap, "{t}/{slot}");
                     let start = match t {
-                        target::APP => SLOTS.slots[usize::from(slot)],
+                        target::APP => SLOTS.slots[usize::from(slot)].0,
                         _ => CORE_SLOTS[usize::from(slot)].0,
                     };
                     let inline = dagon_port::timeout::HeaderPlace::Inline;

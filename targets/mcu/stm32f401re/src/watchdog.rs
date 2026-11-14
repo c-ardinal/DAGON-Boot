@@ -2,25 +2,37 @@
 //! (see `dagon_mcu_common::guard`). It runs from start-up on: the boot
 //! core starts it ([`TRIAL_WDT_MS`](crate::layout::TRIAL_WDT_MS) on
 //! trial, else [`CONFIRMED_WDT_MS`](crate::layout::CONFIRMED_WDT_MS)) and
-//! the app takes it over with the same period. Nodes on this MCU never feed
+//! the app takes it over and sets the confirmed period once the image is
+//! confirmed. Nodes on this MCU never feed
 //! on trial ([`Trial::NeverFeed`]): an image without CONFIRM resets when
 //! the trial period runs out and the boot core counts the attempt.
 
 use embassy_stm32::peripherals::IWDG;
-use embassy_stm32::wdg::IndependentWatchdog;
+use embassy_stm32::Peri;
 use embassy_time::Instant;
 
 pub use dagon_mcu_common::guard::{
-    levels, Dog, Lease, Trial, Watch, BUSY_LIMIT_MS, BUSY_MARGIN_MS,
+    levels, Dog, Lease, PeriodDog, Rearm, Trial, Watch, BUSY_LIMIT_MS, BUSY_MARGIN_MS,
 };
 pub use dagon_mcu_common::liveness::Level;
 
-/// The IWDG as the guard drives it.
-pub struct Iwdg(pub IndependentWatchdog<'static, IWDG>);
+/// The running IWDG (owning its peripheral), programmed by [`crate::iwdg`].
+pub struct Iwdg(Peri<'static, IWDG>);
 
-impl Dog for Iwdg {
+impl Iwdg {
+    /// The IWDG, already started (by the boot core or [`start`]).
+    pub fn new(p: Peri<'static, IWDG>) -> Self {
+        Iwdg(p)
+    }
+}
+
+impl Rearm for Iwdg {
+    fn set_period(&mut self, period_ms: u32) {
+        crate::iwdg::set(period_ms);
+    }
+
     fn feed(&mut self) {
-        self.0.pet();
+        crate::iwdg::feed();
     }
 
     fn reset(&mut self) {
@@ -28,8 +40,13 @@ impl Dog for Iwdg {
     }
 }
 
+/// Starts the IWDG with `period_ms` (on a running IWDG: sets the period).
+pub fn start(_p: &mut Peri<'static, IWDG>, period_ms: u32) {
+    crate::iwdg::start(period_ms);
+}
+
 /// The app's guard over `N` tasks.
-pub type Guard<const N: usize> = dagon_mcu_common::guard::Guard<Iwdg, N>;
+pub type Guard<const N: usize> = dagon_mcu_common::guard::Guard<PeriodDog<Iwdg>, N>;
 
 /// Milliseconds since boot (the guard's clock).
 pub fn now_ms() -> u64 {

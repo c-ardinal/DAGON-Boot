@@ -13,7 +13,7 @@ use crate::layout::{STAGE0, STAGE0_SIZE};
 
 use dagon_port::timeout::{EraseLayout, EraseRegion, Plan};
 use dagon_port::{Flash, FlashError};
-use dagon_proto::payload::{target, StatusResp};
+use dagon_proto::payload::{target, SlotInfo, StatusResp};
 
 const HDR: u32 = HEADER_SIZE as u32;
 /// Flash write unit this store pads to (STM32F4: 32-bit programming).
@@ -34,9 +34,9 @@ pub struct KindSStore<F> {
     flash: F,
     log: Log,
     slots: SlotLayout<'static>,
-    /// Boot core slots A/B (start, length), header inline; `None`: the
-    /// MCU keeps none.
-    cores: Option<[(u32, u32); 2]>,
+    /// Boot core slots (start, length), A first, header inline; `None`:
+    /// the MCU keeps none.
+    cores: Option<&'static [(u32, u32)]>,
     /// The trial cell holds what is written to it; without it no boot core
     /// is taken (stage0 could not count its starts).
     cell_holds: bool,
@@ -66,11 +66,11 @@ impl<F: Flash> KindSStore<F> {
         })
     }
 
-    /// The boot core slots A/B (start, length) this store also receives
-    /// into; their records go to the same log. `cell_holds`: the trial
+    /// The boot core slots (start, length, A first) this store also
+    /// receives into; their records go to the same log. `cell_holds`: the trial
     /// cell holds what is written to it (`trial::holds`); without it the
     /// slots report no capacity, so the agent refuses BOOTCORE.
-    pub fn with_cores(self, cores: [(u32, u32); 2], cell_holds: bool) -> Self {
+    pub fn with_cores(self, cores: &'static [(u32, u32)], cell_holds: bool) -> Self {
         KindSStore {
             cores: Some(cores),
             cell_holds,
@@ -86,12 +86,7 @@ impl<F: Flash> KindSStore<F> {
     fn slot(&self, t: u8, s: u8) -> Result<(u32, u32), StoreError> {
         let i = usize::from(s);
         match t {
-            target::APP => self
-                .slots
-                .slots
-                .get(i)
-                .map(|&b| (b, self.slots.slot_len))
-                .ok_or(StoreError::Range),
+            target::APP => self.slots.slots.get(i).copied().ok_or(StoreError::Range),
             target::BOOTCORE => self
                 .cores
                 .ok_or(StoreError::Unsupported)?
@@ -129,6 +124,12 @@ impl<F: Flash> KindSStore<F> {
         })
     }
 
+    /// The header in each slot of `t` STATUS can carry (`wire`); `None`
+    /// past the slots this store has.
+    fn heads<const N: usize>(&mut self, t: u8, _wire: &[SlotInfo; N]) -> [Option<SlotRef>; N] {
+        core::array::from_fn(|s| self.head(t, s as u8))
+    }
+
     fn append(&mut self, t: u8, k: u8, s: u8, hdr: &[u8; HEADER_SIZE]) -> Result<(), StoreError> {
         let version = ImageHeader::parse(hdr)
             .map_err(|_| StoreError::Range)?
@@ -160,7 +161,7 @@ impl<F: Flash> SlotStore for KindSStore<F> {
     /// Slots with a parsing header are Written; the log upgrades the slot
     /// whose header it names (`LogState::status`).
     fn status(&mut self) -> StatusResp {
-        let heads = [0u8, 1].map(|s| self.head(target::APP, s));
+        let heads = self.heads(target::APP, &StatusResp::default().slots);
         let ls = self.log.state;
         ls.status(&heads, ls.active(), self.log.generation)
     }
@@ -316,7 +317,7 @@ impl<F: Flash> SlotStore for KindSStore<F> {
         match t {
             target::APP => Some(self.status()),
             target::BOOTCORE if self.cores.is_some() => {
-                let heads = [0u8, 1].map(|s| self.head(target::BOOTCORE, s));
+                let heads = self.heads(target::BOOTCORE, &StatusResp::default().slots);
                 let c = self.log.core;
                 let running = c.confirmed.map_or(slot::A, |r| r.slot);
                 Some(c.status(&heads, running, self.log.generation))

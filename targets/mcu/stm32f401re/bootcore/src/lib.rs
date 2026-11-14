@@ -40,13 +40,12 @@ use dagon_mcu_stm32f401re::clock::Setup;
 use dagon_mcu_stm32f401re::flash::F401Flash;
 use dagon_mcu_stm32f401re::layout as board;
 use dagon_mcu_stm32f401re::tag::checked_tag;
-use dagon_mcu_stm32f401re::{trial, LINKED_SLOT, TRIAL_ATTEMPTS};
+use dagon_mcu_stm32f401re::{iwdg, trial, LINKED_SLOT, TRIAL_ATTEMPTS};
 use dagon_mcu_stm32f401re::{PUBKEY, TARGET_TAG};
 use dagon_port::BootSelectS;
 use dagon_port::Flash;
 #[allow(unused_imports)]
 use embassy_stm32::gpio::{Level, Output, Speed};
-use embassy_stm32::wdg::IndependentWatchdog;
 
 #[doc(hidden)]
 pub use cortex_m_rt::entry as __entry;
@@ -134,7 +133,7 @@ impl Clock for Cycles {
 pub fn run<E: Extension>(chain: E, limits: &'static [BootExtension]) -> ! {
     let p = embassy_stm32::init(CLOCK.hal_config());
     // Before the log is read and before any extension runs.
-    IndependentWatchdog::new(p.IWDG, board::TRIAL_WDT_MS * 1000).unleash();
+    iwdg::start(board::TRIAL_WDT_MS);
     // SAFETY: the boot core takes the core peripherals nowhere else; the
     // cycle counter is enabled once here and only read afterwards.
     let mut cp = unsafe { cortex_m::Peripherals::steal() };
@@ -182,11 +181,7 @@ pub fn run<E: Extension>(chain: E, limits: &'static [BootExtension]) -> ! {
     }
     if let Decision::Boot { entry, trial, .. } = decision {
         if !trial {
-            // SAFETY: the IWDG was handed to the watchdog above and no
-            // handle of it is left; this sets the confirmed period on the
-            // running watchdog (new PR/RLR) and reloads it.
-            let iwdg = unsafe { embassy_stm32::peripherals::IWDG::steal() };
-            IndependentWatchdog::new(iwdg, board::CONFIRMED_WDT_MS * 1000).pet();
+            iwdg::set(board::CONFIRMED_WDT_MS);
         }
         boot.before_jump(&mut chain);
         Jump.boot(entry)
@@ -220,7 +215,7 @@ fn app_verifies(flash: &mut F401Flash, slot: u8) -> bool {
     board::SLOTS
         .slots
         .get(usize::from(slot))
-        .is_some_and(|&base| flash.read(base, &mut raw).is_ok())
+        .is_some_and(|&(base, _)| flash.read(base, &mut raw).is_ok())
         && verify_header(&raw, &VERIFIER).is_ok()
 }
 

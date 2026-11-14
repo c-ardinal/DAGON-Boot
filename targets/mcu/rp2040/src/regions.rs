@@ -1,23 +1,20 @@
 //! Where each XFER target and slot the slot store receives into lies.
 
-use crate::layout::{
-    body_capacity, APP_SLOT, APP_SLOT_SIZE, BL_SLOT, BL_SLOT_SIZE, HEADER_LEN, TOPOLOGY,
-    TOPOLOGY_SIZE,
-};
+use crate::layout::{body_capacity, HEADER_LEN, TOPOLOGY, TOPOLOGY_SIZE};
 use dagon_proto::payload::target;
 
 /// Where `t`'s region of `slot` starts, where its body starts, and its body
 /// capacity; `None` for a target and slot this package does not receive.
 pub fn region(t: u8, slot: u8) -> Option<(u32, u32, u32)> {
+    let slots: &[(u32, u32)] = match t {
+        target::APP => &crate::slots::APP,
+        target::BOOTCORE => &crate::slots::BOOTCORE,
+        _ => &[],
+    };
+    if let Some(&(base, len)) = slots.get(usize::from(slot)) {
+        return Some((base, base + HEADER_LEN, body_capacity(len)));
+    }
     match (t, slot) {
-        (target::APP, 0 | 1) => {
-            let base = APP_SLOT[slot as usize];
-            Some((base, base + HEADER_LEN, body_capacity(APP_SLOT_SIZE)))
-        }
-        (target::BOOTCORE, 0 | 1) => {
-            let base = BL_SLOT[slot as usize];
-            Some((base, base + HEADER_LEN, body_capacity(BL_SLOT_SIZE)))
-        }
         (target::TOPOLOGY, 0) => Some((TOPOLOGY, TOPOLOGY, TOPOLOGY_SIZE)),
         _ => None,
     }

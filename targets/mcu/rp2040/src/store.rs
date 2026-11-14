@@ -1,20 +1,20 @@
-//! Receiver side of an RP2040 app: APP-A/B slots, the app state log, the
-//! boot core slots A/B with the boot core log, and the topology display
+//! Receiver side of an RP2040 app: the APP slots, the app state log, the
+//! boot core slots with the boot core log, and the topology display
 //! copy, behind dagon-agent's `SlotStore`.
 
 use crate::image;
-use crate::layout::{APP_LOG_LAYOUT, APP_SLOT, BL_LOG_LAYOUT, BL_SLOT, STAGE0, STAGE0_SIZE};
+use crate::layout::{APP_LOG_LAYOUT, BL_LOG_LAYOUT, STAGE0, STAGE0_SIZE};
 use crate::node::SharedFlash;
 use crate::watchdog::Watch;
 use crate::TRIAL_ATTEMPTS;
 use dagon_agent::{erase_plan, SlotStore, StoreError, Transition};
-use dagon_core::log::{trial_room, Log};
+use dagon_core::log::{trial_room, Log, SlotRef};
 use dagon_format::header::HEADER_SIZE;
 use dagon_format::statelog::{kind, slot};
 use dagon_format::{stage0, Version};
 use dagon_port::timeout::{EraseLayout, EraseRegion, Plan};
 use dagon_port::Flash;
-use dagon_proto::payload::{target, StatusResp};
+use dagon_proto::payload::{target, SlotInfo, StatusResp};
 
 /// Slot this build is linked for (`slot-b`).
 pub const ACTIVE: u8 = if cfg!(feature = "slot-b") { 1 } else { 0 };
@@ -61,11 +61,22 @@ impl AppStore {
     }
 }
 
+impl AppStore {
+    /// The header in each slot of `t` STATUS can carry (`wire`), as a log
+    /// reference; `None` past the slots the definition gives.
+    fn heads<const N: usize>(&mut self, t: u8, _wire: &[SlotInfo; N]) -> [Option<SlotRef>; N] {
+        core::array::from_fn(|s| {
+            let (base, _, _) = crate::regions::region(t, s as u8)?;
+            image::head_ref(&mut self.flash, base, s as u8)
+        })
+    }
+}
+
 impl SlotStore for AppStore {
     fn status(&mut self) -> StatusResp {
         let (state, generation) = Log::load(&mut self.flash, &APP_LOG_LAYOUT)
             .map_or((Default::default(), 0), |l| (l.state, l.generation));
-        let heads = [0u8, 1].map(|s| image::head_ref(&mut self.flash, APP_SLOT[s as usize], s));
+        let heads = self.heads(target::APP, &StatusResp::default().slots);
         state.status(&heads, ACTIVE, generation)
     }
 
@@ -195,8 +206,7 @@ impl SlotStore for AppStore {
             target::BOOTCORE => {
                 let (core, generation) = Log::load(&mut self.flash, &BL_LOG_LAYOUT)
                     .map_or((Default::default(), 0), |l| (l.core, l.generation));
-                let heads =
-                    [0u8, 1].map(|s| image::head_ref(&mut self.flash, BL_SLOT[s as usize], s));
+                let heads = self.heads(target::BOOTCORE, &StatusResp::default().slots);
                 let running = core.confirmed.map_or(slot::A, |c| c.slot);
                 Some(core.status(&heads, running, generation))
             }

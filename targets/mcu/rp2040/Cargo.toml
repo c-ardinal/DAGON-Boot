@@ -59,8 +59,8 @@ portable-atomic = { version = "1", features = ["critical-section"], optional = t
 
 [build-dependencies]
 dagon-mcu-build = { path = "../build" }
-# build.rs includes src/layout.rs (one source for addresses and memory.x).
-dagon-core = { path = "../../../crates/dagon-core" }
+# build.rs: the inline header's size (memory.x puts the body after it).
+dagon-format = { path = "../../../crates/dagon-format" }
 
 [dev-dependencies]
 dagon-ed25519 = { path = "../../../crates/dagon-ed25519", features = ["compact"] }

@@ -48,7 +48,7 @@ impl Flash for Mem {
 
 /// Writes a signed app image into `slot`; returns its reference.
 fn put_app(m: &mut Mem, kp: &KeyPair, slot: u8, minor: u8) -> SlotRef {
-    let base = APP_SLOT[slot as usize];
+    let base = APP_SLOTS.slots[slot as usize].0;
     let body = vec![minor; 1024];
     let mut h = ImageHeader {
         image_kind: image_kind::APP,
@@ -79,7 +79,7 @@ fn put_app(m: &mut Mem, kp: &KeyPair, slot: u8, minor: u8) -> SlotRef {
 
 fn status_now(m: &mut Mem, active: u8) -> dagon_proto::payload::StatusResp {
     let log = Log::load(m, &APP_LOG_LAYOUT).unwrap();
-    let heads = [0u8, 1].map(|s| image::head_ref(m, APP_SLOT[s as usize], s));
+    let heads = [0u8, 1].map(|s| image::head_ref(m, APP_SLOTS.slots[s as usize].0, s));
     log.state.status(&heads, active, log.generation)
 }
 
@@ -88,7 +88,8 @@ fn status_now(m: &mut Mem, active: u8) -> dagon_proto::payload::StatusResp {
 fn install(kp: &KeyPair) -> (Mem, SlotRef) {
     let mut m = Mem(vec![
         0xFF;
-        (APP_SLOT[1] + APP_SLOT_SIZE - XIP_BASE) as usize
+        (APP_SLOTS.slots[1].0 + APP_SLOTS.slots[1].1 - XIP_BASE)
+            as usize
     ]);
     let a = put_app(&mut m, kp, 0, 0);
     let rec = |k, seq| Record {

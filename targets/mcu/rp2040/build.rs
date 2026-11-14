@@ -1,9 +1,10 @@
 //! `hal` and `image-stage0`: embeds the verifying key (`DAGON_PUBKEY`).
-//! For a target build, writes the final binary's memory.x from the flash
-//! layout (src/layout.rs, shared):
-//! - `image-stage0`: boot2 (256 B) + stage0 in the region the MCU
-//!   definition gives (`[layout] stage0`, `[stage0] region_bytes`), with the
-//!   link-time check that the image leaves 1/16 of it free;
+//! Always: generates the layout constants from the MCU definition the node
+//! build is given (`dagon_mcu_build::definition`). For a target build,
+//! writes the final binary's memory.x from that definition:
+//! - `image-stage0`: boot2 (256 B) + stage0 in the region the definition
+//!   gives (`[layout] stage0`, `[stage0] region_bytes`), with the link-time
+//!   check that the image leaves 1/16 of it free;
 //! - `image-bootcore`: body of boot core slot A (B with `slot-b`), after the
 //!   512-byte header;
 //! - otherwise an app: body of APP slot A (B with `slot-b`), after the
@@ -11,10 +12,11 @@
 
 use std::env;
 
-#[allow(dead_code)]
-#[path = "src/layout.rs"]
-mod layout;
-use layout::*;
+use dagon_format::header::HEADER_SIZE;
+
+/// The second stage the RP2040 boot ROM loads from the start of flash and
+/// checks: 256 bytes (RP2040 datasheet section 2.8.1.3).
+const BOOT2_LEN: u32 = 0x100;
 
 const BOOT2_SECTION: &str =
     "SECTIONS {\n  .boot2 ORIGIN(HEAD) :\n  {\n    KEEP(*(.boot2));\n  } > HEAD\n}\n";
@@ -25,7 +27,7 @@ fn feature(name: &str) -> bool {
 
 fn main() {
     println!("cargo:rerun-if-env-changed=DAGON_TARGET_TAG");
-    dagon_mcu_build::definition();
+    let def = dagon_mcu_build::definition();
     if feature("HAL") || feature("IMAGE_STAGE0") {
         dagon_mcu_build::embed_pubkey();
     }
@@ -36,14 +38,23 @@ fn main() {
     if env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("none") {
         return;
     }
+    // Every image's RAM ends at the boot record (`[boot.record]`), which
+    // survives the resets between them.
+    let (ram, _) = def.ram().expect("the RP2040 definition gives its RAM");
+    let (record, _) = def
+        .boot_record()
+        .expect("the RP2040 definition gives its boot record");
+    let ram_len = record - ram;
     if feature("IMAGE_STAGE0") {
-        dagon_mcu_build::stage0_memory_x(BOOT2_LEN, BOOT2_SECTION, RAM, RAM_LEN);
-    } else if feature("IMAGE_BOOTCORE") {
-        let body = BL_SLOT[usize::from(feature("SLOT_B"))] + HEADER_LEN;
-        dagon_mcu_build::memory_x(body, BL_SLOT_SIZE - HEADER_LEN, RAM, RAM_LEN);
-    } else {
-        let slot = usize::from(feature("SLOT_B"));
-        let body = APP_SLOT[slot] + HEADER_LEN;
-        dagon_mcu_build::memory_x(body, APP_SLOT_SIZE - HEADER_LEN, RAM, RAM_LEN);
+        dagon_mcu_build::stage0_memory_x(BOOT2_LEN, BOOT2_SECTION, ram, ram_len);
+        return;
     }
+    let image = if feature("IMAGE_BOOTCORE") {
+        "bootcore"
+    } else {
+        "app"
+    };
+    let (start, size) = def.slot(image, feature("SLOT_B"));
+    let header = HEADER_SIZE as u32;
+    dagon_mcu_build::memory_x(start + header, size - header, ram, ram_len);
 }

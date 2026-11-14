@@ -25,7 +25,7 @@ use static_cell::StaticCell;
 use crate::flash::{RpFlash, REGIONS};
 use crate::layout::MIN_FLASH_SIZE;
 use crate::store::AppStore;
-use crate::watchdog::{Guard, Wdt};
+use crate::watchdog::{wdt, Guard};
 
 /// What DAGON takes from the chip on every RP2040 node.
 pub struct DagonParts {
@@ -154,10 +154,10 @@ pub(crate) fn open<B: BoardDef, const N: usize>(
         regions: B::ERASE_REGIONS,
     };
     let trial = on_trial(&store.status());
-    guard.install(Wdt::new(watchdog), trial);
+    guard.install(wdt(watchdog), trial);
     guard.feed();
     static EVENTS: StaticCell<Events> = StaticCell::new();
-    let periods = Periods::new(crate::layout::WDT_MS, crate::layout::WDT_MS);
+    let periods = Periods::new(crate::TRIAL_WDT_MS, crate::CONFIRMED_WDT_MS);
     let now_us: fn() -> u64 = || embassy_time::Instant::now().as_micros();
     let events = EVENTS.init(Published::new());
     let (chain, events) = node_chain(
@@ -169,7 +169,7 @@ pub(crate) fn open<B: BoardDef, const N: usize>(
         periods,
     );
     let mut agent = Agent::new(config(tag, role), store, chain);
-    agent.watchdog_taken(crate::layout::WDT_MS, guard.trial_policy());
+    agent.watchdog_taken(crate::layout::watchdog_ms(trial), guard.trial_policy());
     let board = B::bring_up_port().map(|p| (B::BOARD_ID, p));
     guard.set_trial(finish_start(&mut agent, board, app.confirm));
     Opened {

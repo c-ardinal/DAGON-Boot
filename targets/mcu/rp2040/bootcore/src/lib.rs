@@ -40,7 +40,7 @@ use dagon_mcu_rp2040::arm::{jump, led, step, trial};
 use dagon_mcu_rp2040::bl::{self, Settled};
 use dagon_mcu_rp2040::clock::Setup;
 use dagon_mcu_rp2040::flash::RpFlash;
-use dagon_mcu_rp2040::layout::{APP_LOG_LAYOUT, APP_SLOTS, WDT_MS};
+use dagon_mcu_rp2040::layout::{watchdog_ms, APP_LOG_LAYOUT, APP_SLOTS};
 use dagon_mcu_rp2040::tag::checked_tag;
 use dagon_mcu_rp2040::{LINKED_SLOT, PUBKEY, TARGET_TAG, TRIAL_ATTEMPTS};
 use dagon_port::Flash;
@@ -127,7 +127,7 @@ fn app_verifies(flash: &mut RpFlash, slot: u8) -> bool {
     APP_SLOTS
         .slots
         .get(usize::from(slot))
-        .is_some_and(|&base| flash.read(base, &mut raw).is_ok())
+        .is_some_and(|&(base, _)| flash.read(base, &mut raw).is_ok())
         && header::verify_header(&raw, &VERIFIER).is_ok()
 }
 
@@ -168,7 +168,8 @@ pub fn run<E: Extension>(chain: E, limits: &'static [BootExtension]) -> ! {
     step(7);
     let mut flash = RpFlash::new(p.FLASH);
     let mut wdt = Watchdog::new(p.WATCHDOG);
-    wdt.start(Duration::from_millis(WDT_MS as u64));
+    // The boot core's own run is timed like an image on trial.
+    wdt.start(Duration::from_millis(watchdog_ms(true).into()));
     step(8);
     let mut chain = compose_boot(chain, now_us, limits);
     let mut boot = BootRun::start(
@@ -178,7 +179,7 @@ pub fn run<E: Extension>(chain: E, limits: &'static [BootExtension]) -> ! {
         &APP_SLOTS,
         &CONFIG,
         &VERIFIER,
-        WDT_MS,
+        watchdog_ms(true),
     );
     let decision = boot.decision();
     let healthy = !cfg!(feature = "no-confirm")
@@ -202,10 +203,10 @@ pub fn run<E: Extension>(chain: E, limits: &'static [BootExtension]) -> ! {
             }
         }
     }
-    if let Decision::Boot { entry, .. } = decision {
+    if let Decision::Boot { entry, trial, .. } = decision {
         boot.before_jump(&mut chain);
-
-        wdt.feed(Duration::from_millis(WDT_MS as u64));
+        // The app runs the trial period while on trial, else the confirmed one.
+        wdt.feed(Duration::from_millis(watchdog_ms(trial).into()));
         hand_back_clocks();
         jump(entry);
     }

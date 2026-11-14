@@ -13,7 +13,7 @@ use super::board_boot::{code_ident, code_names, type_name as camel, Active, Halt
 use super::boot_folder::{BootFolder, BOOT_FOLDER_ENV};
 use super::execution::EraseRegionDef;
 use super::load::{self, BOARD_FILE, MCU_FILE};
-use super::{BoardDef, DefError, McuDef, Registry, Source};
+use super::{BoardDef, ClockSetup, DefError, McuDef, Registry, Source};
 
 /// How a HAL names the singletons of pins and register blocks.
 pub struct Hal<'a> {
@@ -554,14 +554,43 @@ pub fn diag_rs(board: Option<&BoardDef>, hal: &DiagHal<'_>) -> Result<String, St
     ))
 }
 
+/// What a stage0 is built for: the node's board, and the clock setup its
+/// stage0 runs on ([`McuDef::stage0_clock`]).
+#[derive(Debug)]
+pub struct Stage0Build {
+    pub board: Option<BoardDef>,
+    pub clock: ClockSetup,
+}
+
 /// A stage0's build script: [`boot_build`] without a HAL, and `diag.rs`
 /// ([`diag_rs`]) into `OUT_DIR`; a board whose indicator stage0 cannot use
-/// fails the build. Returns the node's board.
-pub fn stage0_build(hal: &DiagHal<'_>) -> Option<BoardDef> {
+/// fails the build. Returns the node's board and the clock setup its
+/// MCU's stage0 runs on for that board (the MCU definition as the node's
+/// project sees it).
+pub fn stage0_build(hal: &DiagHal<'_>) -> Stage0Build {
     let board = boot_build(None);
     let rs = diag_rs(board.as_ref(), hal).unwrap_or_else(|e| panic!("{e}"));
     write(&out_dir().join("diag.rs"), &rs);
-    board
+    let (dir, f) = boot_inputs();
+    let mcu = boot_mcu(&dir, f.project().as_deref()).unwrap_or_else(|e| panic!("{e}"));
+    let clock = mcu
+        .stage0_clock(board.as_ref())
+        .unwrap_or_else(|| panic!("MCU '{}' has no [stage0]", mcu.id))
+        .clone();
+    Stage0Build { board, clock }
+}
+
+/// The MCU definition of the package at `mcu_dir`, from the source tree
+/// plus, when given, a project's dagon.toml (its overrides).
+fn boot_mcu(mcu_dir: &Path, project: Option<&Path>) -> Result<McuDef, DefError> {
+    let mut sources = vec![Source::Tree(tree_root(mcu_dir)?)];
+    sources.extend(project.map(Source::Project));
+    let reg = Registry::load(&sources)?;
+    let id = id_in(mcu_dir, MCU_FILE)?;
+    watch(&load::files(&sources)?);
+    reg.mcu(&id)
+        .cloned()
+        .ok_or_else(|| def_err(mcu_dir.display(), format!("no MCU '{id}'")))
 }
 
 /// A boot core library's build script: [`BootFolder::verify_stamp`] for
@@ -852,6 +881,23 @@ mod tests {
         let l = boot_board(&mcu, Some("mine"), Some(&project)).unwrap();
         assert_eq!(l.board.boot.unwrap().led.as_deref(), Some("GPIO2"));
         assert!(l.files.contains(&project));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// A stage0 build reads its MCU as the tree gives it and runs on the
+    /// setup the node's board picks: the crystal's, else the internal one.
+    #[test]
+    fn a_stage0_build_takes_the_clock_its_board_picks() {
+        let xtal = "[clock]
+source = { crystal_hz = 12_000_000 }
+";
+        let (dir, mcu) = tree("clock", &[("with-xtal", xtal), ("plain", "")]);
+        let m = boot_mcu(&mcu, None).unwrap();
+        assert_eq!(m.stage0_clock(None).unwrap().out_hz, 6_500_000);
+        for (board, out_hz) in [("with-xtal", 125_000_000), ("plain", 6_500_000)] {
+            let l = boot_board(&mcu, Some(board), None).unwrap();
+            assert_eq!(m.stage0_clock(Some(&l.board)).unwrap().out_hz, out_hz);
+        }
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }

@@ -505,7 +505,7 @@ fn checks_and_compile_follow_a_project_registry() {
 }
 
 /// A project registry from `mcu` and `board` texts (the fake ones edited).
-fn project_registry(name: &str, mcu: &str, board: &str) -> Result<Registry, DefError> {
+pub(super) fn project_registry(name: &str, mcu: &str, board: &str) -> Result<Registry, DefError> {
     let dir = scratch(name);
     write(&dir.join("m/dagon-mcu.toml"), mcu);
     std::fs::create_dir_all(dir.join("m/bootcore")).unwrap();
@@ -776,7 +776,14 @@ fn stage0_states_its_region_and_a_key_place_it_can_read() {
             "[layout]\nstage0 = { at = 0x0010_A000, size = 0x4000 }\n",
         ) + stage0
     };
-    let m = parse_mcu_text(&with("\n[stage0]\nregion_bytes = 0x4000\n"), &[]).unwrap();
+    let m = parse_mcu_text(
+        &with(
+            "\n[stage0]\nregion_bytes = 0x4000\n\
+             [[stage0.clock]]\nsource = \"internal\"\nout_hz = 1_000_000\n",
+        ),
+        &[],
+    )
+    .unwrap();
     let s = m.stage0.unwrap();
     assert_eq!((s.key.as_str(), s.region_bytes), ("flash", 0x4000));
     let e = mcu_err(&with("\n[stage0]\nkey = \"otp\"\nregion_bytes = 0x4000\n"));

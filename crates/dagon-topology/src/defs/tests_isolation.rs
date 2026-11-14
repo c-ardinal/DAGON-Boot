@@ -525,6 +525,7 @@ fn a_stage0_halt_blink_period_is_at_least_ten_ms() {
     m.stage0 = Some(super::Stage0Def {
         key: "flash".into(),
         region_bytes: 0x4000,
+        clock: Vec::new(),
     });
     let e = requirements::check_board(&at(9), &m).unwrap_err();
     assert!(e.contains("at least 10 ms"), "{e}");

@@ -5,6 +5,7 @@
 
 pub mod board_boot;
 pub mod boot_folder;
+pub mod clock;
 pub mod codegen;
 pub mod dma;
 pub mod execution;
@@ -17,6 +18,8 @@ pub mod requirements;
 pub mod slot_layout;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_clock;
 #[cfg(test)]
 mod tests_isolation;
 #[cfg(test)]
@@ -41,6 +44,7 @@ use serde::Deserialize;
 use crate::schema::{ControlKind, LinkKind, RomEntry, UartIface};
 
 pub use board_boot::{BoardBoot, BoardBus, BoardDevice, BoardPeripheral, BoardPin};
+pub use clock::{BoardClock, ClockKind, ClockSetup, ClockSource};
 pub use execution::{BoardFlash, Conformance, EraseRegionDef, Execution, Fact, FlashOp};
 pub use isolation::{Core, Isolation, McuBoot, Peripheral, RecordPlacement, Watchdog};
 pub use load::{DefError, DefSource, Source, BUILTIN_FILES};
@@ -211,6 +215,9 @@ pub struct Stage0Def {
     pub key: String,
     /// Bytes of its region, `[layout] stage0` included (the same size).
     pub region_bytes: u32,
+    /// `[[stage0.clock]]`: the clock setups stage0 may run on.
+    #[serde(default)]
+    pub clock: Vec<ClockSetup>,
 }
 
 /// The key places a DAGON stage0 reads its verifying key from: `flash`, a
@@ -532,7 +539,15 @@ pub struct McuDef {
     /// the key it checks a boot core's signature with: `"flash"`, the default and the only place,
     /// a constant in stage0's own flash written when stage0 is built; any other place is refused)
     /// and `region_bytes` (the whole region, equal to `[layout] stage0` size; stage0's image
-    /// leaves 1/16 of it free, which its link checks).
+    /// leaves 1/16 of it free, which its link checks). `[[stage0.clock]]` lists the clock setups
+    /// stage0 may run on: exactly one `{ source = "internal", out_hz }` (the MCU's own oscillator
+    /// as it runs from reset) and any number of `{ source = "crystal" | "external", in_hz, out_hz,
+    /// pll = { ... } }`, where `pll` holds the MCU's own fields (RP2040: `refdiv`, `fbdiv`,
+    /// `postdiv1`, `postdiv2`, from a crystal; STM32F401: `m`, `n`, `p`, `q`, `flash_wait_states`,
+    /// from a crystal or an external clock), which name the PLL whose rules check them; a `pll`
+    /// whose fields name no PLL DAGON knows is refused. For a node, stage0 runs on the setup of the board's
+    /// `[clock]` source (same source and `in_hz`) with the highest `out_hz`, else on the internal
+    /// one; two setups of one source and `in_hz` with the same `out_hz` are refused.
     pub stage0: Option<Stage0Def>,
     /// `image` (`app`, `bootcore`, `agent`, `stage0`), `binding` (`a`, `b`, `any`), `header`
     /// (`inline`, `trailer`, `detached`); the region is `at` + `size` or `partition`; a detached
@@ -828,6 +843,11 @@ pub struct BoardDef {
     /// whole for nodes on this board; checked with the MCU's watchdog and slot layouts. Left out:
     /// the MCU's regions. The node and the host plan every erase from the same regions.
     pub flash: Option<BoardFlash>,
+    /// What drives the MCU's clock input on this board: `source` is `"internal"`, `{ crystal_hz =
+    /// N }` or `{ external_hz = N }` (cite the schematic or datasheet that gives N in a comment).
+    /// Left out: internal. Stage0 runs on its MCU's `[[stage0.clock]]` setup for this source, or
+    /// on the internal one when none matches; on an MCU without a stage0 it is not used.
+    pub clock: Option<BoardClock>,
     /// As [`McuDef::package`] (inline project boards have none).
     #[serde(skip)]
     pub package: Option<std::path::PathBuf>,

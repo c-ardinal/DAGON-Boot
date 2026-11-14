@@ -119,6 +119,8 @@ pub const ROWS: &[Row] = &[
     row(Mcu, "execution.masked_max_us", Whole),
     row(Mcu, "watchdog.flag", Whole),
     row(Mcu, "writer", Whole),
+    // The setups are checked as a set (one internal, no two alike).
+    row(Mcu, "stage0.clock", Whole),
     row(Mcu, "id", Same),
     row(Mcu, "wire_id", Same),
     row(Mcu, "format", Same),
@@ -142,6 +144,8 @@ pub const ROWS: &[Row] = &[
     // A new part's erase timings are the part's, never the old part's.
     row(Board, "flash", WholeWhenChanged("part")),
     row(Board, "flash.erase_regions", Whole),
+    // "internal", { crystal_hz = N } or { external_hz = N }.
+    row(Board, "clock.source", Whole),
     row(Board, "id", Same),
     row(Board, "mcu", Same),
     row(Board, "format", Same),

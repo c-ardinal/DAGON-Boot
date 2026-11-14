@@ -24,9 +24,17 @@ Tests and fixtures may keep their own `RelayLinkDef { … }` tables with
 their own ids, and take a production id from a definition or a generated
 constant; they fail on a link id written as a literal at a RELAY use site
 (`Relay { link: N, … }`, `named(index, name, N, addr)`, a `(N, addr)` RELAY
-target) and on a constant that copies a production id (`const I2C0: u8 =
-1;`, `const RELAY_LINK_…: u8 = N;`). Raw expected golden wire bytes (byte
-arrays) are not a use site.
+target, a `Linked { link: N, … }` host target) and on a constant that
+copies a production id (`const I2C0: u8 = 1;`, `const RELAY_LINK_…: u8 =
+N;`). Raw expected golden wire bytes (byte arrays) are not a use site.
+
+The Console (TypeScript and Svelte under web/src, the generated wasm
+package left out) writes no link id as a literal (`link: N`, `link === N`,
+`const LINK_… = N`), tests and its stand-in hub included, and, outside its
+one entry to dagon-wasm (`src/wasm/dagon.ts`, which names the connected
+node's `local` target), builds no target of its own (`kind: 'linked'`, a
+`target: { kind: … }` literal): every node's target is the one dagon-host
+gives (`setTimings`, `topo_targets`).
 
     python -m unittest discover -s scripts -p "test_link_ids.py"
 """
@@ -63,6 +71,7 @@ TEST_LITERAL = (
     (re.compile(rf"\bRelay\s*\{{[^}}]*?(?<![\w.])link\s*:\s*{ID}"), "a RELAY with a literal link id"),
     (re.compile(rf"\bnamed\s*\([^,()]+,[^,()]+,\s*{ID}"), "a linked node with a literal link id"),
     (re.compile(rf"\bSome\s*\(\s*\(\s*{ID}\d*\s*,\s*[\w:]*ADDR\w*\s*\)\s*\)"), "a RELAY target with a literal link id"),
+    (re.compile(rf"\bLinked\s*\{{[^}}]*?(?<![\w.])link\s*:\s*{ID}"), "a host target with a literal link id"),
     (re.compile(r"\bconst\s+(?:I2C0|PIO_UART|RELAY_LINK_\w+|\w*LINK_ID\w*)\s*:\s*u8\s*=\s*\d"), "a copied production link id"),
 )
 
@@ -134,6 +143,38 @@ def file_problems(path, text):
 
 def problems(texts):
     return [p for path, text in sorted(texts.items()) for p in file_problems(path, text)]
+
+
+WEB = "web/src/"
+WEB_ENTRY = "web/src/wasm/dagon.ts"
+WEB_LITERAL = re.compile(rf"(?<![\w.])link\s*(?:===?|:)\s*{ID}|\bLINK_\w+\s*=\s*\d")
+WEB_TARGET = re.compile(r"\bkind\s*:\s*'linked'|\btarget\s*:\s*[^,;\n]*?\{\s*kind\s*:")
+JS_COMMENT = re.compile(r"/\*.*?\*/|(?<![:'\"])//[^\n]*", re.DOTALL)
+
+
+def web_texts():
+    """Path -> text of the Console's TypeScript and Svelte files, the
+    generated wasm package and dependencies left out."""
+    texts = {}
+    for pattern in ("*.ts", "*.svelte"):
+        for p in (ROOT / WEB).rglob(pattern):
+            rel = p.relative_to(ROOT).as_posix()
+            if "/pkg/" not in rel and "node_modules" not in rel:
+                texts[rel] = p.read_text(encoding="utf-8")
+    return texts
+
+
+def web_problems(texts):
+    """Console files that write a link id or build a target of their own."""
+    out = []
+    for path, text in sorted(texts.items()):
+        code = JS_COMMENT.sub(" ", text)
+        if m := WEB_LITERAL.search(code):
+            out.append(f"{path} writes a link id as a literal: {m.group(0)}")
+        production = not path.endswith(".test.ts")
+        if production and path != WEB_ENTRY and (m := WEB_TARGET.search(code)):
+            out.append(f"{path} builds a target instead of passing dagon-host's: {m.group(0)}")
+    return out
 
 
 def doc_problems(docs, rust):
@@ -250,6 +291,35 @@ class LinkIds(unittest.TestCase):
         ):
             with self.subTest(path=path):
                 self.assertTrue(self.planted(path, code))
+
+    def test_the_console_holds(self):
+        self.assertEqual(web_problems(web_texts()), [])
+
+    def test_a_link_id_or_own_target_in_the_console_fails(self):
+        for path, code in (
+            ("web/src/serial/mock.ts", "const LINK_I2C0 = 1;\n"),
+            ("web/src/serial/mock.ts", "const key = link === 2 ? 'uart' : null;\n"),
+            ("web/src/app/operate.test.ts", "const t = { kind: 'linked', link: 1, addr: 0x42, maxPayload: 32 };\n"),
+            ("web/src/app/define/model.ts", "const n = { target: n.role === 'coordinator' ? { kind: 'hub', addr: 0 } : x };\n"),
+            ("web/src/app/operate.svelte.ts", "const t: Target = { kind: 'linked', link: l, addr: a, maxPayload: m };\n"),
+        ):
+            with self.subTest(path=path, code=code):
+                self.assertTrue(web_problems({path: code}))
+
+    def test_the_entry_comments_and_targets_from_the_host_pass(self):
+        for path, code in (
+            (WEB_ENTRY, "export const LOCAL: Target = { kind: 'local' };\n"),
+            ("web/src/app/operate.svelte.ts", "// link: 1 was the I2C link\nthis.targetsBy = h.setTimings(yaml);\n"),
+            ("web/src/app/operate.test.ts", "expect(t.kind === 'linked' && t.link === to.link).toBe(true);\n"),
+        ):
+            with self.subTest(path=path):
+                self.assertEqual(web_problems({path: code}), [])
+
+    def test_a_literal_link_id_in_a_host_target_in_tests_fails(self):
+        code = "const SEG: Target = Target::Linked { link: 1, addr: 0x42, max_payload: 255 };\n"
+        self.assertTrue(self.planted("crates/dagon-host/tests/sim.rs", code))
+        own = "fn t(d: RelayLinkDef) -> Target { Target::Linked { link: d.id, addr: 0x42, max_payload: 1 } }\n"
+        self.assertEqual(self.planted("crates/dagon-host/tests/sim.rs", own), [])
 
     def test_comments_strings_and_other_folders_pass(self):
         for path, code in (

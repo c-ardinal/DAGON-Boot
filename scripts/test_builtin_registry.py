@@ -35,6 +35,8 @@ ALLOWED = {
         "node timings of the built-in sample world of `dagon sim`",
     ("crates/dagon-cli/src/simrun.rs", "s4"):
         "ROM maps of the built-in sample world of `dagon sim`",
+    ("crates/dagon-cli/src/simrun.rs", "seg_at"):
+        "the seg's target from the hub of the built-in sample world of `dagon sim`",
     ("crates/dagon-cli/src/serve/api.rs", "registry_of"):
         "`dagon serve` with no project open has no definitions but the built-in ones",
     ("crates/dagon-wasm/src/defs.rs", "with_registry"):

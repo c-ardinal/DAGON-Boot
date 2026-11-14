@@ -58,8 +58,6 @@ pub enum Command {
     Release(ReleaseCmd),
     /// Make the first-install files of a node from [provision.<node>] in dagon.toml
     Provision(ProvisionArgs),
-    /// Make the hub's rescue UF2 (boot2, stage0, logs, boot core and app)
-    Rescue(RescueArgs),
     /// Show HELLO, STATUS and VERSION of the hub and each topology node
     ///
     /// Versions of stage0, boot core, app, wire format and MCU.
@@ -280,7 +278,7 @@ pub struct ReleaseBuildArgs {
     pub config: Option<String>,
 }
 
-/// Options of the first-install files (`provision`, `rescue`).
+/// Options of the first-install files (`provision`).
 #[derive(Debug, Default, PartialEq, Args)]
 pub struct FirstInstallOpts {
     /// Output folder [default: <provision_dir>/<node>]
@@ -298,15 +296,6 @@ pub struct FirstInstallOpts {
 pub struct ProvisionArgs {
     /// Node id in the topology
     pub node: String,
-    #[command(flatten)]
-    pub files: FirstInstallOpts,
-}
-
-#[derive(Debug, Default, PartialEq, Args)]
-pub struct RescueArgs {
-    /// What to rescue (the topology's coordinator)
-    #[arg(value_parser = ["hub"])]
-    pub target: String,
     #[command(flatten)]
     pub files: FirstInstallOpts,
 }

@@ -40,7 +40,22 @@ fn yaml() -> String {
 }
 
 const SEG: u8 = 1;
-const SEG_AT: Target = Target::I2c(NODE_I2C_ADDR);
+
+/// The target of node `id` of `t` from the hub, as the built-in definitions
+/// give it.
+fn target_of(t: &dagon_topology::Topology, id: &str) -> Target {
+    let reg = dagon_topology::defs::Registry::builtin();
+    let all = dagon_host::node_targets(reg, t, "hub").unwrap();
+    all.into_iter()
+        .find(|(n, _)| n == id)
+        .map(|(_, to)| to.unwrap())
+        .unwrap()
+}
+
+/// The seg's target in the sim topology.
+fn seg_at() -> Target {
+    target_of(&dagon_topology::parse_str(&yaml()).unwrap(), "seg")
+}
 /// The app slots of the seg node's MCU (STM32F401RE: A and B).
 const SEG_SLOTS: &[u8] = &[0, 1];
 
@@ -259,43 +274,83 @@ fn host(s: &Sim) -> Host<Sim, Sim> {
     let topo = dagon_topology::parse_str(&yaml()).unwrap();
     let reg = dagon_topology::defs::Registry::builtin();
     h.timings = dagon_host::node_timings(reg, &topo).unwrap();
-    h.routes = dagon_host::relay_routes(reg, &topo, "hub");
+    h.local = dagon_host::local_node(reg, &topo, "hub");
     h
 }
 
-/// A node is reached over the route the host is given; with none, or one
-/// that fails, nothing is sent.
+/// A node's target comes from the connected node the host is given and its
+/// relay table; with no configuration, or a link whose port has no entry,
+/// nothing is sent.
 #[test]
-fn nodes_are_reached_over_the_routes_the_host_is_given() {
+fn a_nodes_target_comes_from_the_connected_node_the_host_is_given() {
     let s = sim();
+    let topo = topology(&yaml());
     let mut h = host(&s);
-    assert!(block_on(h.hello(SEG_AT)).is_ok());
+    let way = block_on(h.write_path(SEG, &topo, &[])).unwrap();
+    assert_eq!(way, WritePath::Transfer);
 
-    let mut none = host(&s);
-    none.routes = dagon_host::Routes::default();
     let before = s.relay.borrow().now_ms();
-    let r = block_on(none.hello(SEG_AT));
+    let mut none = host(&s);
+    none.local = Err(dagon_host::RouteError::NoConfiguration);
+    let r = block_on(none.write_path(SEG, &topo, &[]));
     assert!(
         matches!(
             r,
-            Err(Error::Route(dagon_host::RouteError::Unknown(SEG_AT)))
+            Err(Error::Route(dagon_host::RouteError::NoConfiguration))
         ),
         "{r:?}"
     );
-    // The seg's link from a port the hub's MCU relays over no link on.
+    // The hub's MCU relaying over no link at all.
     let mut no_entry = host(&s);
-    let t = dagon_topology::parse_str(&yaml().replace("port: i2c0,", "port: i2c1,")).unwrap();
-    no_entry.routes =
-        dagon_host::relay_routes(dagon_topology::defs::Registry::builtin(), &t, "hub");
-    let r = block_on(no_entry.hello(SEG_AT));
+    no_entry.local = Ok(dagon_host::LocalNode {
+        index: 0,
+        links: Vec::new(),
+    });
+    let r = block_on(no_entry.write_path(SEG, &topo, &[]));
     let Err(Error::Route(why)) = r else {
         panic!("{r:?}")
     };
     assert!(
-        why.to_string().contains("'hub'") && why.to_string().contains("'seg'"),
+        why.to_string().contains("node 0") && why.to_string().contains("node 1"),
         "{why}"
     );
     assert_eq!(s.relay.borrow().now_ms(), before, "nothing was sent");
+}
+
+/// An update or a topology push whose targets do not resolve sends nothing
+/// at all, not even the topology: a table without the node's port, no
+/// definition of the connected node's MCU, no configuration.
+#[test]
+fn a_route_error_sends_nothing() {
+    let topo = topology(&yaml());
+    let bundle = release();
+    let no_mcu = dagon_host::RouteError::NoMcu {
+        local: "hub".into(),
+        mcu: "nova-m4".into(),
+    };
+    let cases = [
+        Ok(dagon_host::LocalNode {
+            index: 0,
+            links: Vec::new(),
+        }),
+        Err(no_mcu),
+        Err(dagon_host::RouteError::NoConfiguration),
+    ];
+    for local in cases {
+        let s = sim();
+        let mut h = host(&s);
+        h.local = local.clone();
+        let r = block_on(h.apply(&bundle, &topo, &key().pk, None, &mut |_| {}));
+        assert!(matches!(r, Err(Error::Route(_))), "{local:?}: {r:?}");
+        let r = block_on(h.apply(&bundle, &topo, &key().pk, Some(&[SEG]), &mut |_| {}));
+        assert!(matches!(r, Err(Error::Route(_))), "{local:?}: {r:?}");
+        if local.is_err() {
+            let r = block_on(h.push_topology(&topo));
+            assert!(matches!(r, Err(Error::Route(_))), "{local:?}: {r:?}");
+        }
+        let writes = s.faults.borrow().seen.len();
+        assert_eq!(writes, 0, "{local:?}: nothing was written");
+    }
 }
 
 /// The shortest `[watchdog] trial_ms` of the builtin MCU definitions.
@@ -312,14 +367,14 @@ fn shortest_trial_ms() -> u64 {
 fn status_and_discover() {
     let s = sim();
     let mut h = host(&s);
-    let hub = block_on(h.status(Target::Hub)).unwrap();
+    let hub = block_on(h.status(Target::Local)).unwrap();
     assert_eq!(hub.hello.active_version, Version::new(1, 0, 0));
-    let seg = block_on(h.status(SEG_AT)).unwrap();
+    let seg = block_on(h.status(seg_at())).unwrap();
     assert_eq!((seg.status.active, seg.status.confirmed), (0, 0));
 
     let d = block_on(h.discover(&rom_addrs())).unwrap();
     assert_eq!(d.nodes.len(), 1);
-    assert_eq!(d.nodes[0].0, SEG_AT);
+    assert_eq!(d.nodes[0].0, seg_at());
     assert_eq!(d.nodes[0].1.active_version, Version::new(1, 0, 0));
 }
 
@@ -327,7 +382,10 @@ fn status_and_discover() {
 fn version_of_the_hub_and_a_node_and_of_an_agent_that_predates_it() {
     let s = sim();
     let mut h = host(&s);
-    for (to, mcu) in [(Target::Hub, mcu_id::RP2040), (SEG_AT, mcu_id::STM32F401XE)] {
+    for (to, mcu) in [
+        (Target::Local, mcu_id::RP2040),
+        (seg_at(), mcu_id::STM32F401XE),
+    ] {
         let v = block_on(h.version(to)).unwrap().expect("answers VERSION");
         assert_eq!((v.wire, v.mcu_id), (Some(1), Some(mcu)), "{to:?}");
         assert_eq!(v.stage0, Some(dagon_sim::store::STAGE0_VERSION));
@@ -349,10 +407,10 @@ fn version_of_the_hub_and_a_node_and_of_an_agent_that_predates_it() {
         .unwrap()
         .predates = old.clone();
     s.relay.borrow_mut().node.predates = old;
-    assert_eq!(block_on(h.version(SEG_AT)).unwrap(), None);
-    assert_eq!(block_on(h.version(Target::Hub)).unwrap(), None);
+    assert_eq!(block_on(h.version(seg_at())).unwrap(), None);
+    assert_eq!(block_on(h.version(Target::Local)).unwrap(), None);
     assert_eq!(
-        block_on(h.status(SEG_AT)).unwrap().hello.active_version,
+        block_on(h.status(seg_at())).unwrap().hello.active_version,
         Version::new(1, 0, 0)
     );
 }
@@ -370,7 +428,7 @@ fn version_of_a_stage0_without_its_mark_is_unknown() {
     dagon_port::Flash::write(&mut *f, at, b"DGBC").unwrap();
     drop(f);
     drop(hub);
-    let v = block_on(h.version(SEG_AT)).unwrap().unwrap();
+    let v = block_on(h.version(seg_at())).unwrap().unwrap();
     assert_eq!(v.stage0, None, "left out: unknown");
     assert!(v.app_slots.is_some());
 }
@@ -398,7 +456,7 @@ fn the_number_on_the_hubs_screen_is_the_number_every_caller_is_told() {
 
     // A new run on the same node starts from 0: the 100 of the write is not held over.
     let mut numbers = Vec::new();
-    block_on(h.rollback(SEG_AT, SEG, SEG_SLOTS, &mut |e| numbers.push(e.shown))).unwrap();
+    block_on(h.rollback(seg_at(), SEG, SEG_SLOTS, &mut |e| numbers.push(e.shown))).unwrap();
     assert_eq!(numbers.first(), Some(&0), "{numbers:?}");
     assert_eq!(numbers.last(), Some(&100), "{numbers:?}");
     assert!(numbers.windows(2).all(|w| w[0] <= w[1]), "{numbers:?}");
@@ -531,7 +589,7 @@ fn telling_a_node_costs_a_write_at_most_a_request_per_step_and_an_old_agent_none
 fn full_apply_then_rollback() {
     let s = sim();
     let mut h = host(&s);
-    let hub_max = usize::from(block_on(h.hello(Target::Hub)).unwrap().max_payload);
+    let hub_max = usize::from(block_on(h.hello(Target::Local)).unwrap().max_payload);
     let mut events = Vec::new();
     let out = block_on(
         h.apply(&release(), &topology(&yaml()), &key().pk, None, &mut |e| {
@@ -582,18 +640,18 @@ fn full_apply_then_rollback() {
     let screen = s.relay.borrow().screen.clone().unwrap();
     assert_eq!((screen.node, screen.phase), (0, phase::CONFIRM));
 
-    for to in [SEG_AT, Target::Hub] {
+    for to in [seg_at(), Target::Local] {
         let st = block_on(h.status(to)).unwrap();
         assert_eq!((st.hello.active_version, st.hello.trial), (v, false));
         assert_eq!((st.status.active, st.status.confirmed), (1, 1));
     }
     // Still confirmed after the trial watchdog would have fired.
     s.relay.borrow_mut().advance_ms(30_000);
-    assert_eq!(block_on(h.status(SEG_AT)).unwrap().status.active, 1);
+    assert_eq!(block_on(h.status(seg_at())).unwrap().status.active, 1);
 
-    let back = block_on(h.rollback(SEG_AT, SEG, SEG_SLOTS, &mut |_| {})).unwrap();
+    let back = block_on(h.rollback(seg_at(), SEG, SEG_SLOTS, &mut |_| {})).unwrap();
     assert_eq!(back, Version::new(1, 0, 0));
-    let st = block_on(h.status(SEG_AT)).unwrap();
+    let st = block_on(h.status(seg_at())).unwrap();
     assert_eq!((st.status.active, st.status.confirmed), (0, 0));
     assert_eq!(st.status.slots[0].state, SlotState::Confirmed);
     assert!(!st.hello.trial);
@@ -607,14 +665,14 @@ fn a_one_slot_node_is_never_switched_to_a_slot_it_does_not_have() {
     let s = sim();
     let mut h = host(&s);
     block_on(h.apply(&release(), &topology(&yaml()), &key().pk, None, &mut |_| {})).unwrap();
-    block_on(h.rollback(SEG_AT, SEG, SEG_SLOTS, &mut |_| {})).unwrap();
-    let st = block_on(h.status(SEG_AT)).unwrap().status;
+    block_on(h.rollback(seg_at(), SEG, SEG_SLOTS, &mut |_| {})).unwrap();
+    let st = block_on(h.status(seg_at())).unwrap().status;
     assert_eq!((st.active, st.slots[1].state), (0, SlotState::Written));
     let pending = count(&s, Cmd::SetPending);
-    let r = block_on(h.rollback(SEG_AT, SEG, &[0], &mut |_| {}));
+    let r = block_on(h.rollback(seg_at(), SEG, &[0], &mut |_| {}));
     assert!(matches!(r, Err(Error::NoPreviousVersion)), "{r:?}");
     assert_eq!(count(&s, Cmd::SetPending), pending, "no SET_PENDING");
-    let after = block_on(h.status(SEG_AT)).unwrap().status;
+    let after = block_on(h.status(seg_at())).unwrap().status;
     assert_eq!((after.active, after.confirmed), (0, 0));
 }
 
@@ -679,7 +737,7 @@ fn without_host_verify_the_node_rejects_tampered_images() {
             (screen.phase, screen.text.as_slice()),
             (phase::REJECTED, text.as_bytes())
         );
-        let st = block_on(h.status(SEG_AT)).unwrap();
+        let st = block_on(h.status(seg_at())).unwrap();
         assert_eq!(
             (st.hello.active_version, st.status.active),
             (Version::new(1, 0, 0), 0)
@@ -700,7 +758,7 @@ fn partial_apply_skips_the_hub() {
     ))
     .unwrap();
     assert_eq!(out.len(), 1);
-    let hub = block_on(h.hello(Target::Hub)).unwrap();
+    let hub = block_on(h.hello(Target::Local)).unwrap();
     assert_eq!(hub.active_version, Version::new(1, 0, 0));
 }
 
@@ -729,19 +787,19 @@ fn node_that_falls_back_stops_the_run_and_confirm_rule() {
 
     // On trial with the version this session applied: CONFIRM is sent (and
     // refused by the node's self-check). A fresh session must ask first.
-    let r = block_on(h.confirm(SEG_AT, false));
+    let r = block_on(h.confirm(seg_at(), false));
     assert!(matches!(r, Err(Error::Rejected { .. })));
     let mut fresh = host(&s);
-    let r = block_on(fresh.confirm(SEG_AT, false)).unwrap();
+    let r = block_on(fresh.confirm(seg_at(), false)).unwrap();
     assert_eq!(r, ConfirmOutcome::NeedsChoice(Version::new(1, 1, 0)));
 
     // The trial watchdog takes it back to A; B is Reverted, not a target.
     for _ in 0..4 {
         s.relay.borrow_mut().advance_ms(10_000);
     }
-    let st = block_on(h.status(SEG_AT)).unwrap().status;
+    let st = block_on(h.status(seg_at())).unwrap().status;
     assert_eq!((st.active, st.slots[1].state), (0, SlotState::Reverted));
-    let r = block_on(h.rollback(SEG_AT, SEG, SEG_SLOTS, &mut |_| {}));
+    let r = block_on(h.rollback(seg_at(), SEG, SEG_SLOTS, &mut |_| {}));
     assert!(matches!(r, Err(Error::NoPreviousVersion)));
 }
 
@@ -759,7 +817,7 @@ fn old_hub_firmware_answering_after_reboot_is_waited_out() {
         "{out:?}"
     );
     assert!(*s.reopens.borrow() >= 3);
-    let hub = block_on(h.status(Target::Hub)).unwrap();
+    let hub = block_on(h.status(Target::Local)).unwrap();
     assert_eq!((hub.status.active, hub.status.confirmed), (1, 1));
 }
 
@@ -867,7 +925,7 @@ fn erased_f401_comes_back_through_the_rom_loader() {
         }
         wipe_seg(&s);
         assert!(
-            block_on(host(&s).hello(SEG_AT)).is_err(),
+            block_on(host(&s).hello(seg_at())).is_err(),
             "silent after erase"
         );
 
@@ -877,7 +935,7 @@ fn erased_f401_comes_back_through_the_rom_loader() {
         };
         assert_eq!((stats.no_stretch, stats.attempts), (no_stretch, 1));
         assert_eq!(v, Version::new(1, 1, 0));
-        let st = block_on(host(&s).status(SEG_AT)).unwrap();
+        let st = block_on(host(&s).status(seg_at())).unwrap();
         assert_eq!((st.hello.active_version, st.hello.trial), (v, false));
         assert_eq!((st.status.active, st.status.confirmed), (0, 0));
         let mut hub = s.relay.borrow_mut();
@@ -1065,7 +1123,7 @@ fn one_write_reaches_every_node_of_a_topology_at_the_limit() {
     .unwrap()
     .bundle;
     let mut h = host(&s);
-    h.routes = dagon_host::relay_routes(dagon_topology::defs::Registry::builtin(), &t, "hub");
+    h.local = dagon_host::local_node(dagon_topology::defs::Registry::builtin(), &t, "hub");
     let out = block_on(h.apply(&bundle, &topo, &key().pk, None, &mut |_| {})).unwrap();
     assert_eq!(out.len(), children + 1);
     for r in &out {
@@ -1077,7 +1135,7 @@ fn one_write_reaches_every_node_of_a_topology_at_the_limit() {
         );
     }
     for i in 0..children {
-        let st = block_on(h.status(Target::I2c(0x10 + i as u8))).unwrap();
+        let st = block_on(h.status(target_of(&t, &format!("n{i}")))).unwrap();
         assert_eq!(
             (st.hello.active_version, st.hello.trial),
             (new, false),
@@ -1126,7 +1184,7 @@ fn answering_node_is_recovered_by_a_normal_transfer() {
     let s = sim();
     let (path, v) = recover_seg(&s);
     assert_eq!((path, v), (RecoverPath::Retransfer, Version::new(1, 1, 0)));
-    let st = block_on(host(&s).status(SEG_AT)).unwrap();
+    let st = block_on(host(&s).status(seg_at())).unwrap();
     assert_eq!((st.hello.active_version, st.status.active), (v, 1));
 }
 
@@ -1157,8 +1215,8 @@ const XFER_BEGIN: u8 = Cmd::XferBegin as u8;
 /// the fault log cleared.
 fn opened(s: &Sim) -> Host<Sim, Sim> {
     let mut h = host(s);
-    block_on(h.hello(Target::Hub)).unwrap();
-    block_on(h.hello(SEG_AT)).unwrap();
+    block_on(h.hello(Target::Local)).unwrap();
+    block_on(h.hello(seg_at())).unwrap();
     s.faults.borrow_mut().seen.clear();
     h
 }
@@ -1190,13 +1248,13 @@ fn a_new_session_never_gets_the_previous_sessions_stored_reply() {
     let s = sim();
     // Session A: its first request to the node, refused (bad header length).
     let mut a = host(&s);
-    let r = block_on(a.call(SEG_AT, Cmd::XferBegin, &xfer_begin(1, 0), REQUEST_MS));
+    let r = block_on(a.call(seg_at(), Cmd::XferBegin, &xfer_begin(1, 0), REQUEST_MS));
     assert!(matches!(r, Err(Error::Rejected { .. })), "{r:?}");
     drop(a);
     // Session B restarts its seq count. Its first XFER_BEGIN, valid this time,
     // must run on the node, not get A's stored refusal back.
     let mut b = host(&s);
-    let r = block_on(b.call(SEG_AT, Cmd::XferBegin, &xfer_begin(1, 512), REQUEST_MS));
+    let r = block_on(b.call(seg_at(), Cmd::XferBegin, &xfer_begin(1, 512), REQUEST_MS));
     assert!(r.is_ok(), "{r:?}");
     let seen = s.faults.borrow().seen.clone();
     let opening = seen.iter().position(|x| x.0 == XFER_BEGIN).unwrap();
@@ -1225,7 +1283,7 @@ fn replies_of_a_previous_session_still_on_the_link_are_not_taken() {
     // They arrive right before the reply to this session's opening HELLO,
     // one of them with its seq.
     s.inject.borrow_mut().extend(stale_hellos());
-    let st = block_on(h.status(Target::Hub));
+    let st = block_on(h.status(Target::Local));
     assert!(st.is_ok(), "{st:?}");
     assert_eq!(st.unwrap().hello.active_version, Version::new(1, 0, 0));
 }
@@ -1234,10 +1292,10 @@ fn replies_of_a_previous_session_still_on_the_link_are_not_taken() {
 fn what_the_link_held_before_a_reopen_is_not_taken() {
     let s = sim();
     let mut h = host(&s);
-    block_on(h.status(Target::Hub)).unwrap();
+    block_on(h.status(Target::Local)).unwrap();
     h.transport.pending.extend(stale_hellos());
     block_on(h.reopen()).unwrap();
-    let st = block_on(h.status(Target::Hub));
+    let st = block_on(h.status(Target::Local));
     assert!(st.is_ok(), "{st:?}");
 }
 
@@ -1246,7 +1304,7 @@ fn a_session_opens_each_target_once() {
     let s = sim();
     let mut h = host(&s);
     for _ in 0..3 {
-        block_on(h.status(SEG_AT)).unwrap();
+        block_on(h.status(seg_at())).unwrap();
     }
     // 1 opening HELLO + 3 × (HELLO + STATUS).
     assert_eq!((count(&s, Cmd::Hello), count(&s, Cmd::Status)), (4, 3));
@@ -1258,7 +1316,7 @@ fn lost_requests_are_resent_after_300_ms_and_backoff() {
     let mut h = opened(&s);
     s.faults.borrow_mut().drop_req.push((HELLO, 2));
     let t0 = s.relay.borrow().now_ms();
-    let v = block_on(h.hello(SEG_AT)).unwrap().active_version;
+    let v = block_on(h.hello(seg_at())).unwrap().active_version;
     assert_eq!(v, Version::new(1, 0, 0));
     let seen = s.faults.borrow().seen.clone();
     assert_eq!(seen, [(HELLO, false), (HELLO, true), (HELLO, true)]);
@@ -1274,7 +1332,7 @@ fn resending_stops_after_three_retries() {
     let s = sim();
     let mut h = opened(&s);
     s.faults.borrow_mut().drop_req.push((HELLO, 10));
-    let r = block_on(h.hello(SEG_AT));
+    let r = block_on(h.hello(seg_at()));
     assert!(matches!(r, Err(Error::Timeout)), "{r:?}");
     assert_eq!(count(&s, Cmd::Hello), 4);
 }
@@ -1286,7 +1344,7 @@ fn a_transient_nack_is_resent_and_then_answered() {
     // NRST held low during the next RELAY: the node NACKs, the hub answers
     // E_TIMEOUT; the node is released (and boots) before the resend.
     s.faults.borrow_mut().nack_once = true;
-    let v = block_on(h.hello(SEG_AT)).unwrap().active_version;
+    let v = block_on(h.hello(seg_at())).unwrap().active_version;
     assert_eq!(v, Version::new(1, 0, 0));
     let seen = s.faults.borrow().seen.clone();
     assert_eq!(seen, [(HELLO, false), (HELLO, true)]);
@@ -1298,8 +1356,7 @@ fn an_absent_node_is_tried_four_times() {
     let mut h = opened(&s);
     // The configuration has the seg at 0x43, where nothing answers.
     let t = dagon_topology::parse_str(&yaml().replace("addr: 0x42", "addr: 0x43")).unwrap();
-    h.routes = dagon_host::relay_routes(dagon_topology::defs::Registry::builtin(), &t, "hub");
-    let r = block_on(h.hello(Target::I2c(0x43)));
+    let r = block_on(h.hello(target_of(&t, "seg")));
     assert!(matches!(r, Err(Error::Relay(dagon_proto::Status::Timeout))));
     let seen = s.faults.borrow().seen.clone();
     assert_eq!(seen.len(), 4, "opening HELLO sent and resent 3 times");
@@ -1314,10 +1371,10 @@ fn subctl_and_i2c_raw_are_never_resent() {
         .borrow_mut()
         .drop_req
         .extend([(Cmd::SubCtl as u8, 1), (Cmd::I2cRaw as u8, 1)]);
-    let r = block_on(h.call(Target::Hub, Cmd::SubCtl, &[0, 0], REQUEST_MS));
+    let r = block_on(h.call(Target::Local, Cmd::SubCtl, &[0, 0], REQUEST_MS));
     assert!(matches!(r, Err(Error::Timeout)), "{r:?}");
     let raw = [1u8, 0, 1, 0, 0x00];
-    let r = block_on(h.call(Target::Hub, Cmd::I2cRaw, &raw, REQUEST_MS));
+    let r = block_on(h.call(Target::Local, Cmd::I2cRaw, &raw, REQUEST_MS));
     assert!(matches!(r, Err(Error::Timeout)), "{r:?}");
     assert_eq!((count(&s, Cmd::SubCtl), count(&s, Cmd::I2cRaw)), (1, 1));
 }
@@ -1326,9 +1383,9 @@ fn subctl_and_i2c_raw_are_never_resent() {
 fn conf_run_is_never_resent() {
     let s = sim();
     let mut h = opened(&s);
-    block_on(h.hello(SEG_AT)).unwrap();
+    block_on(h.hello(seg_at())).unwrap();
     s.faults.borrow_mut().drop_req.push((Cmd::ConfRun as u8, 1));
-    let r = block_on(h.call(SEG_AT, Cmd::ConfRun, &[1], REQUEST_MS));
+    let r = block_on(h.call(seg_at(), Cmd::ConfRun, &[1], REQUEST_MS));
     assert!(r.is_err(), "{r:?}");
     assert_eq!(count(&s, Cmd::ConfRun), 1, "a conformance step runs once");
 }
@@ -1429,7 +1486,7 @@ fn a_lost_confirm_reply_is_resent() {
         .collect();
     assert_eq!(confirms, [false, true]);
     drop(f);
-    let st = block_on(host(&s).status(SEG_AT)).unwrap().status;
+    let st = block_on(host(&s).status(seg_at())).unwrap().status;
     assert_eq!((st.active, st.confirmed), (1, 1));
 }
 
@@ -1499,7 +1556,7 @@ fn f401_confirm_lands_inside_a_4_s_trial() {
     .unwrap();
     assert!(matches!(out[0].outcome, Outcome::Done(_)), "{out:?}");
     s.relay.borrow_mut().advance_ms(20_000);
-    let st = block_on(host(&s).status(SEG_AT)).unwrap().status;
+    let st = block_on(host(&s).status(seg_at())).unwrap().status;
     assert_eq!(
         (st.active, st.confirmed),
         (1, 1),
@@ -1587,7 +1644,7 @@ fn confirm_is_sent_again_while_the_self_check_is_not_ready() {
         out[0].outcome
     );
     assert!(notes.load(Ordering::Relaxed) >= 1, "a retry is noted");
-    let st = block_on(h.status(SEG_AT)).unwrap().status;
+    let st = block_on(h.status(seg_at())).unwrap().status;
     assert_eq!((st.active, st.confirmed), (1, 1));
 }
 
@@ -1613,7 +1670,7 @@ fn a_self_check_that_never_passes_fails_after_the_bounded_retries() {
     for _ in 0..4 {
         s.relay.borrow_mut().advance_ms(10_000);
     }
-    let st = block_on(h.status(SEG_AT)).unwrap().status;
+    let st = block_on(h.status(seg_at())).unwrap().status;
     assert_eq!((st.active, st.slots[1].state), (0, SlotState::Reverted));
 }
 
@@ -1667,7 +1724,7 @@ fn apply_hub(s: &Sim) -> Vec<NodeOutcome<()>> {
 }
 
 fn core_status(s: &Sim) -> dagon_proto::payload::StatusResp {
-    block_on(host(s).boot_core_status(Target::Hub)).unwrap()
+    block_on(host(s).boot_core_status(Target::Local)).unwrap()
 }
 
 #[test]
@@ -1688,7 +1745,7 @@ fn a_release_with_hub_boot_cores_writes_the_idle_core_slot_and_the_new_core_take
     assert_eq!(after.slots[1].version, v);
     assert_eq!(after.slots[1].state, SlotState::Confirmed);
     assert_eq!(after.slots[0].state, SlotState::Written);
-    let st = block_on(host(&s).status(Target::Hub)).unwrap();
+    let st = block_on(host(&s).status(Target::Local)).unwrap();
     assert_eq!(st.hello.active_version, v, "the app updated after the core");
 
     // The same release again: the running core is the release's; nothing
@@ -1723,7 +1780,7 @@ fn a_core_that_fails_its_own_check_is_rolled_back_and_the_run_stops() {
         st.last_reason,
         dagon_format::statelog::reason::TRIAL_EXHAUSTED
     );
-    let hello = block_on(host(&s).status(Target::Hub)).unwrap().hello;
+    let hello = block_on(host(&s).status(Target::Local)).unwrap().hello;
     assert_eq!(hello.active_version, Version::new(1, 0, 0), "app untouched");
 }
 
@@ -1751,7 +1808,7 @@ fn seg_core(slot: u8, v: Version) -> Vec<u8> {
 #[test]
 fn the_f401_takes_a_new_boot_core_through_the_release() {
     let s = sim();
-    let st = block_on(host(&s).boot_core_status(SEG_AT)).unwrap();
+    let st = block_on(host(&s).boot_core_status(seg_at())).unwrap();
     assert_eq!((st.active, st.confirmed), (0, 0));
     let t = dagon_topology::parse_str(&yaml()).unwrap();
     let v = Version::new(1, 1, 0);
@@ -1789,7 +1846,7 @@ fn the_f401_takes_a_new_boot_core_through_the_release() {
         "{:?}",
         out[0].outcome
     );
-    let st = block_on(host(&s).boot_core_status(SEG_AT)).unwrap();
+    let st = block_on(host(&s).boot_core_status(seg_at())).unwrap();
     assert_eq!((st.active, st.confirmed, st.slots[1].version), (1, 1, v));
     assert_eq!(st.slots[0].state, SlotState::Written);
 }
@@ -1829,7 +1886,7 @@ fn a_boot_loader_only_write_keeps_the_app_to_go_back_to() {
     let (v0, v1) = (Version::new(1, 0, 0), Version::new(1, 1, 0));
     let apps = [seg_img(0, v1), seg_img(1, v1)];
     write_seg(&s, &apps);
-    let before = block_on(host(&s).status(SEG_AT)).unwrap().status;
+    let before = block_on(host(&s).status(seg_at())).unwrap().status;
     assert_eq!(before.active, 1);
 
     let core = [
@@ -1856,16 +1913,16 @@ fn a_boot_loader_only_write_keeps_the_app_to_go_back_to() {
         events.windows(2).all(|w| w[0].shown <= w[1].shown),
         "{events:?}"
     );
-    let after = block_on(host(&s).status(SEG_AT)).unwrap().status;
+    let after = block_on(host(&s).status(seg_at())).unwrap().status;
     assert_eq!(after.active, before.active, "the app did not move");
     assert_eq!(after.slots[0].version, v0, "the previous version stays");
     assert_eq!(
-        block_on(host(&s).boot_core_status(SEG_AT)).unwrap().slots[1].version,
+        block_on(host(&s).boot_core_status(seg_at())).unwrap().slots[1].version,
         v1
     );
 
     assert_eq!(
-        block_on(host(&s).rollback(SEG_AT, SEG, SEG_SLOTS, &mut |_| {})).unwrap(),
+        block_on(host(&s).rollback(seg_at(), SEG, SEG_SLOTS, &mut |_| {})).unwrap(),
         v0
     );
 }
@@ -1876,7 +1933,7 @@ fn nothing_differing_writes_nothing_and_says_the_node_is_on_it() {
     let v1 = Version::new(1, 1, 0);
     let apps = [seg_img(0, v1), seg_img(1, v1)];
     write_seg(&s, &apps);
-    let before = block_on(host(&s).status(SEG_AT)).unwrap().status;
+    let before = block_on(host(&s).status(seg_at())).unwrap().status;
     s.faults.borrow_mut().seen.clear();
     let events = write_seg(&s, &apps);
     assert_eq!(events.len(), 1, "{events:?}");
@@ -1886,7 +1943,7 @@ fn nothing_differing_writes_nothing_and_says_the_node_is_on_it() {
     );
     // Nothing was confirmed: no display is told so.
     assert_eq!(count(&s, Cmd::Show), 0);
-    assert_eq!(block_on(host(&s).status(SEG_AT)).unwrap().status, before);
+    assert_eq!(block_on(host(&s).status(seg_at())).unwrap().status, before);
 }
 
 #[test]
@@ -1895,7 +1952,7 @@ fn a_slot_waiting_for_the_next_boot_is_no_app_to_leave_alone() {
     let (x, y) = (Version::new(1, 1, 0), Version::new(1, 2, 0));
     let same = [seg_img(0, x), seg_img(1, x)];
     write_seg(&s, &same);
-    let st = block_on(host(&s).status(SEG_AT)).unwrap().status;
+    let st = block_on(host(&s).status(seg_at())).unwrap().status;
     assert_eq!(st.active, 1);
     // Y goes into the other slot and is set pending; its REBOOT never arrives.
     s.faults.borrow_mut().drop_req.push((Cmd::Reboot as u8, 1));
@@ -1907,7 +1964,7 @@ fn a_slot_waiting_for_the_next_boot_is_no_app_to_leave_alone() {
         Some(&[SEG]),
         &mut |_| {},
     ));
-    let st = block_on(host(&s).status(SEG_AT)).unwrap().status;
+    let st = block_on(host(&s).status(seg_at())).unwrap().status;
     assert_eq!(st.active, 1, "still on X");
     assert_eq!(st.slots[0].state, SlotState::Pending, "{st:?}");
 
@@ -1917,7 +1974,7 @@ fn a_slot_waiting_for_the_next_boot_is_no_app_to_leave_alone() {
         events.iter().any(|e| e.phase == phase::TRANSFER),
         "{events:?}"
     );
-    let st = block_on(host(&s).status(SEG_AT)).unwrap().status;
+    let st = block_on(host(&s).status(seg_at())).unwrap().status;
     assert_eq!(st.slots[usize::from(st.active)].version, x);
     assert!(
         !st.slots
@@ -1932,13 +1989,13 @@ fn a_same_version_rebuild_with_another_digest_is_written() {
     let s = sim();
     let v1 = Version::new(1, 1, 0);
     write_seg(&s, &[seg_img(0, v1), seg_img(1, v1)]);
-    let before = block_on(host(&s).status(SEG_AT)).unwrap().status;
+    let before = block_on(host(&s).status(seg_at())).unwrap().status;
     let rebuilt = |slot| img("stm32f401re", "seg-f401-7seg", slot, v1, 0x77 + slot);
     let events = write_seg(&s, &[rebuilt(0), rebuilt(1)]);
     assert!(events
         .iter()
         .any(|e| e.phase == phase::TRANSFER && !e.boot_core));
-    let after = block_on(host(&s).status(SEG_AT)).unwrap().status;
+    let after = block_on(host(&s).status(seg_at())).unwrap().status;
     assert_ne!(after.active, before.active);
     assert_ne!(
         after.slots[usize::from(after.active)].digest16,
@@ -1959,7 +2016,7 @@ fn a_recovery_rewrites_the_same_app_when_asked() {
         &mut |_| {},
     ))
     .unwrap();
-    let before = block_on(host(&s).status(SEG_AT)).unwrap().status;
+    let before = block_on(host(&s).status(seg_at())).unwrap().status;
     let topo = topology(&yaml());
     let assets = RecoverAssets {
         release: &apps,
@@ -1973,7 +2030,7 @@ fn a_recovery_rewrites_the_same_app_when_asked() {
     let (path, v) = block_on(host(&s).recover(SEG, &assets, &mut |_| {})).unwrap();
     assert_eq!((path, v), (RecoverPath::Retransfer, v1));
     assert_ne!(
-        block_on(host(&s).status(SEG_AT)).unwrap().status.active,
+        block_on(host(&s).status(seg_at())).unwrap().status.active,
         before.active
     );
 }
@@ -1983,7 +2040,7 @@ fn the_rom_path_leaves_boot_core_a_recorded() {
     let s = sim();
     wipe_seg(&s);
     recover_seg(&s);
-    let st = block_on(host(&s).boot_core_status(SEG_AT)).unwrap();
+    let st = block_on(host(&s).boot_core_status(seg_at())).unwrap();
     assert_eq!((st.active, st.confirmed), (0, 0));
     assert_eq!(st.slots[0].state, SlotState::Confirmed);
 }
@@ -2037,7 +2094,7 @@ fn a_power_cut_at_every_hub_flash_step_leaves_a_bootable_hub() {
                     .any(|x| matches!(x.state, SlotState::Pending | SlotState::Trying)),
                 "{cut:?}: open trial {st:?}"
             );
-            block_on(host(&s).status(Target::Hub))
+            block_on(host(&s).status(Target::Local))
                 .unwrap_or_else(|e| panic!("{cut:?}: hub silent: {e:?}"));
         }
     }

@@ -179,20 +179,6 @@ fn todays_invocations() -> Vec<(&'static str, Command)> {
                 },
             }),
         ),
-        (
-            "rescue hub --key /keys/dagon-signing.key",
-            C::Rescue(RescueArgs {
-                target: "hub".into(),
-                files: files(None, s("/keys/dagon-signing.key")),
-            }),
-        ),
-        (
-            "rescue --out r hub",
-            C::Rescue(RescueArgs {
-                target: "hub".into(),
-                files: files(s("r"), None),
-            }),
-        ),
         ("status", C::Status(StatusArgs::default())),
         (
             "status --port COM5 --topology t.yaml",
@@ -558,7 +544,8 @@ fn bad_command_lines_are_usage_errors() {
         ),
         ("release build --name r", ErrorKind::MissingRequiredArgument),
         ("provision", ErrorKind::MissingRequiredArgument),
-        ("rescue node", ErrorKind::InvalidValue),
+        // `provision <node>` makes any node's first-install files.
+        ("rescue hub", ErrorKind::InvalidSubcommand),
         ("rollback", ErrorKind::MissingRequiredArgument),
         ("flash", ErrorKind::MissingRequiredArgument),
         ("new", ErrorKind::MissingRequiredArgument),

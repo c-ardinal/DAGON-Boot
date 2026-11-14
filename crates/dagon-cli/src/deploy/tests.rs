@@ -136,7 +136,7 @@ fn deploys_each_node_with_its_crate_version_through_the_simulated_hub() {
 
     let sim = sample_sim(&t, &key);
     let mut host = Host::new(sim.clone(), sim.clone());
-    host.routes = crate::device::routes(dagon_topology::defs::Registry::builtin(), &t);
+    host.local = crate::device::local(dagon_topology::defs::Registry::builtin(), &t);
     crate::device::apply_bundle(
         &mut host,
         dagon_topology::defs::Registry::builtin(),
@@ -147,8 +147,11 @@ fn deploys_each_node_with_its_crate_version_through_the_simulated_hub() {
     )
     .unwrap();
     for (to, v) in [
-        (Target::Hub, Version::new(1, 2, 0)),
-        (Target::I2c(NODE_I2C_ADDR), Version::new(1, 0, 1)),
+        (Target::Local, Version::new(1, 2, 0)),
+        (
+            crate::device::target_of(dagon_topology::defs::Registry::builtin(), &t, "seg").unwrap(),
+            Version::new(1, 0, 1),
+        ),
     ] {
         let h = block_on(host.hello(to)).unwrap();
         assert_eq!((h.active_version, h.trial), (v, false), "{to:?}");
@@ -221,7 +224,7 @@ fn a_release_signed_with_another_key_is_not_applied() {
     let other = KeyPair::from_seed(Seed::new([8; 32]));
     let sim = sample_sim(&t, &other);
     let mut host = Host::new(sim.clone(), sim);
-    host.routes = crate::device::routes(dagon_topology::defs::Registry::builtin(), &t);
+    host.local = crate::device::local(dagon_topology::defs::Registry::builtin(), &t);
     assert!(crate::device::apply_bundle(
         &mut host,
         dagon_topology::defs::Registry::builtin(),

@@ -21,12 +21,20 @@ import init, {
   version_older,
   version_text,
 } from './pkg/dagon_wasm.js';
-import type { HostLink } from './pkg/dagon_wasm.js';
+import type { HostLink, Target } from './pkg/dagon_wasm.js';
 import type { HelloReq, HelloResp } from '../serial/hello.ts';
 
-export { check_release_for, initSync, release_topology, require_release_key, set_release_key, topo_check, topo_compile, verify_release, watch_interval_ms } from './pkg/dagon_wasm.js';
+export { check_release_for, initSync, release_topology, require_release_key, set_release_key, topo_check, topo_compile, topo_targets, verify_release, watch_interval_ms } from './pkg/dagon_wasm.js';
 
-export type TargetKind = 'hub' | 'i2c' | 'uart';
+export type { Target };
+
+/** The node the PC is connected to: every other node's target comes from dagon-host (`Host.setTimings`). */
+export const LOCAL: Target = { kind: 'local' };
+
+/** A key that tells targets apart, for matching what discovery found against the targets dagon-host gave. */
+export function targetKey(t: Target): string {
+  return t.kind === 'local' ? 'local' : `${t.link}:${t.addr}`;
+}
 
 export interface SlotInfo {
   /** 0 empty, 1 written, 2 next to try, 3 on trial, 4 confirmed, 5 rolled back. */
@@ -77,7 +85,7 @@ export interface WatchRound {
 
 export interface Discovery {
   hub: HelloResp;
-  nodes: { kind: TargetKind; addr: number; hello: HelloResp }[];
+  nodes: { target: Target; hello: HelloResp }[];
 }
 
 /** Progress of an update (dagon-host's Event; `phase` is the SHOW phase). */
@@ -111,8 +119,7 @@ export interface NodeFailure {
 
 export interface NodeResult {
   node: number;
-  kind: TargetKind;
-  addr: number;
+  target: Target;
   outcome: 'done' | 'failed' | 'notStarted';
   version: number | null;
   failure: NodeFailure | null;
@@ -144,29 +151,33 @@ export type Refusal = 'source' | 'key' | 'topology' | 'format';
 
 /** dagon-host's procedures for one hub session, with the shapes dagon-wasm returns. */
 export interface Host {
-  hello(kind: TargetKind, addr: number): Promise<HelloResp>;
-  status(kind: TargetKind, addr: number): Promise<NodeState>;
+  hello(to: Target): Promise<HelloResp>;
+  status(to: Target): Promise<NodeState>;
   /** STATUS of the boot core slots; rejects when the node keeps none. */
-  bootCoreStatus(kind: TargetKind, addr: number): Promise<StatusResp>;
+  bootCoreStatus(to: Target): Promise<StatusResp>;
   /** VERSION; null when the node's agent predates it. */
-  version(kind: TargetKind, addr: number): Promise<VersionResp | null>;
+  version(to: Target): Promise<VersionResp | null>;
   discover(): Promise<Discovery>;
   pushTopology(bin: Uint8Array): Promise<void>;
-  watch(kind: TargetKind, addr: number): Promise<WatchRound>;
+  watch(to: Target): Promise<WatchRound>;
   /** `dagon apply`; rejects with a Refusal (or a reason) when nothing was sent. */
-  /** The topology `yaml`'s definitions: each node's own limits (erase wait, trial) and how each linked node is reached. Throws when they do not load. */
-  setTimings(yaml: string): void;
+  /**
+   * The topology `yaml`'s definitions: each node's own limits (erase wait, trial) and the node the PC is connected to
+   * with its relay table. Returns each node's target by id (the connected node's is `local`); a node no target reaches
+   * is left out. Throws when they do not load.
+   */
+  setTimings(yaml: string): Record<string, Target>;
   /** No configuration: default limits, and only the connected node is reached. */
   clearTimings(): void;
   apply(bundle: Uint8Array, topology: Uint8Array, nodes: number[] | null, onEvent: (e: UpdateEvent) => void): Promise<NodeResult[]>;
-  confirm(kind: TargetKind, addr: number, force: boolean): Promise<ConfirmResult>;
+  confirm(to: Target, force: boolean): Promise<ConfirmResult>;
   /** How a write would reach topology node `node` now; changes nothing. */
   writePath(node: number, topology: Uint8Array): Promise<'transfer' | 'rom' | 'direct'>;
   /** Writes topology node `node`; the ROM path only with `romConfirmed`. Rejects with a Refusal or dagon-host's reason. */
   recover(node: number, release: Uint8Array, topology: Uint8Array, bootcore: Uint8Array | null, stage0: Uint8Array | null, romConfirmed: boolean, onEvent: (e: UpdateEvent) => void): Promise<RecoverResult>;
   /** Back to the version in the other slot; resolves to it. */
   /** Back to the version in another of the node's app `slots` (STATUS entries from its MCU definition). */
-  rollback(kind: TargetKind, addr: number, node: number, slots: number[], onEvent: (e: UpdateEvent) => void): Promise<number>;
+  rollback(to: Target, node: number, slots: number[], onEvent: (e: UpdateEvent) => void): Promise<number>;
   /** Releases the WASM side; calls still running finish on their own. */
   free(): void;
 }
@@ -174,20 +185,20 @@ export interface Host {
 export function newHost(link: HostLink): Host {
   const h = new WasmHost(link);
   return {
-    hello: (k, a) => h.hello(k, a),
-    status: (k, a) => h.status(k, a),
-    bootCoreStatus: (k, a) => h.boot_core_status(k, a),
-    version: (k, a) => h.version(k, a),
+    hello: (t) => h.hello(t),
+    status: (t) => h.status(t),
+    bootCoreStatus: (t) => h.boot_core_status(t),
+    version: (t) => h.version(t),
     discover: () => h.discover(),
     pushTopology: (bin) => h.push_topology(bin),
-    watch: (k, a) => h.watch(k, a),
+    watch: (t) => h.watch(t),
     setTimings: (yaml) => h.setTimings(yaml),
     clearTimings: () => h.clearTimings(),
     apply: (b, t, n, on) => h.apply(b, t, n ? Uint8Array.from(n) : undefined, on),
-    confirm: (k, a, f) => h.confirm(k, a, f),
+    confirm: (t, f) => h.confirm(t, f),
     writePath: (n, t) => h.write_path(n, t),
     recover: (n, r, t, b, s, c, on) => h.recover(n, r, t, b ?? undefined, s ?? undefined, c, on),
-    rollback: (k, a, n, s, on) => h.rollback(k, a, n, Uint8Array.from(s), on),
+    rollback: (t, n, s, on) => h.rollback(t, n, Uint8Array.from(s), on),
     free: () => h.free(),
   };
 }

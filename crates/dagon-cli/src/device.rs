@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use dagon_format::header::port_kind;
 use dagon_format::Version;
 use dagon_host::{
-    Event, Host, HostClock, NodeState, Outcome, Routes, Target, Transport, WritePath,
+    Event, Host, HostClock, LocalNode, NodeState, Outcome, RouteError, Target, Transport, WritePath,
 };
 use dagon_proto::payload::{phase, SlotState, StatusResp, VersionResp, VersionSlots};
 use dagon_proto::Status;
@@ -136,7 +136,7 @@ pub fn status(a: &StatusArgs) -> Res {
     let t = optional_topology(a.topology.as_deref(), &cfg)?;
     println!("{}", crate::versions::known_text());
     let mut host = serial::host(a.port.as_deref())?;
-    let hub = block_on(host.status(Target::Hub)).map_err(|e| format!("hub: {e:?}"))?;
+    let hub = block_on(host.status(Target::Local)).map_err(|e| format!("hub: {e:?}"))?;
     let reg = crate::defs::registry(&cfg)?;
     let hub_rows = t.as_ref().and_then(|t| hub_rows(&reg, t));
     let hub_rows = hub_rows.as_ref();
@@ -145,24 +145,22 @@ pub fn status(a: &StatusArgs) -> Res {
         "{}",
         core_line(
             "hub",
-            block_on(host.boot_core_status(Target::Hub)),
+            block_on(host.boot_core_status(Target::Local)),
             hub_rows
         )
     );
     let port = Some(hub.hello.port_kind);
     println!(
         "{}",
-        version_line("hub", block_on(host.version(Target::Hub)), port, hub_rows)
+        version_line("hub", block_on(host.version(Target::Local)), port, hub_rows)
     );
     let Some(t) = t else {
         return Ok(());
     };
-    let (nodes, routes) = node_targets(&cfg, &t)?;
-    host.routes = routes;
-    for (id, to, rows) in nodes {
+    for (id, to, rows) in node_targets(&cfg, &t)? {
         let rows = rows.as_ref();
         match to {
-            Some(to) => match block_on(host.status(to)) {
+            Ok(to) => match block_on(host.status(to)) {
                 Ok(s) => {
                     show_state(&id, &s, rows);
                     let core = block_on(host.boot_core_status(to));
@@ -173,44 +171,61 @@ pub fn status(a: &StatusArgs) -> Res {
                 }
                 Err(e) => println!("{id}: no answer ({e:?})"),
             },
-            None => println!("{id}: not reachable through the hub"),
+            Err(why) => println!("{id}: not reachable ({why})"),
         }
     }
     Ok(())
 }
 
-/// A topology node other than the hub: its id, its route through the hub
-/// (`None`: not reachable through it) and the STATUS rows it fills.
-type NodeRoute = (String, Option<Target>, Option<Rows>);
+/// A topology node other than the one the PC is connected to: its id, its
+/// target (or why it has none) and the STATUS rows it fills.
+type NodeRoute = (String, Result<Target, String>, Option<Rows>);
 
-/// The topology's nodes other than the hub, and how each is reached.
-fn node_targets(cfg: &Config, t: &Topology) -> Result<(Vec<NodeRoute>, Routes), String> {
+/// The topology's nodes other than the one the PC is connected to, and how
+/// each is reached.
+fn node_targets(cfg: &Config, t: &Topology) -> Result<Vec<NodeRoute>, String> {
     let reg = crate::defs::registry(cfg)?;
-    let bin = topology_bin(&reg, t)?;
-    let view = dagon_format::TopologyView::parse(&bin).map_err(|e| format!("{e:?}"))?;
+    let all = targets(&reg, t)?;
     let nodes = t
         .nodes
         .iter()
-        .enumerate()
-        .map(|(i, n)| {
-            (
-                n.id.clone(),
-                Target::of_node(&view, i as u8),
-                Rows::of(&reg, &n.mcu),
-            )
+        .map(|n| {
+            let to = match all.iter().find(|(id, _)| *id == n.id) {
+                Some((_, to)) => to.clone().map_err(|e| e.to_string()),
+                None => Err("updating does not reach it".to_string()),
+            };
+            (n.id.clone(), to, Rows::of(&reg, &n.mcu))
         })
-        .filter(|(_, to, _)| *to != Some(Target::Hub))
+        .filter(|(_, to, _)| *to != Ok(Target::Local))
         .collect();
-    Ok((nodes, routes(&reg, t)))
+    Ok(nodes)
 }
 
-/// How the host reaches each node of `t`: from the node the PC is connected
-/// to, the 親機 the reachable part starts from.
-pub(crate) fn routes(reg: &Registry, t: &Topology) -> dagon_host::Routes {
-    match dagon_topology::reach_root(t) {
-        Some(local) => dagon_host::relay_routes(reg, t, local),
-        None => dagon_host::Routes::failed(dagon_host::RouteError::Connected { nodes: Vec::new() }),
-    }
+/// The node the PC is connected to: the 親機 the reachable part starts from.
+fn connected(t: &Topology) -> Result<&str, RouteError> {
+    dagon_topology::reach_root(t).ok_or(RouteError::Connected { nodes: Vec::new() })
+}
+
+/// The node the PC is connected to and its MCU's relay table
+/// ([`Host::local`]).
+pub(crate) fn local(reg: &Registry, t: &Topology) -> Result<LocalNode, RouteError> {
+    dagon_host::local_node(reg, t, connected(t)?)
+}
+
+/// Each node of the part of `t` updating reaches, by id, with its target
+/// from the node the PC is connected to.
+pub(crate) fn targets(reg: &Registry, t: &Topology) -> Result<dagon_host::NodeTargets, String> {
+    let c = connected(t).map_err(|e| e.to_string())?;
+    dagon_host::node_targets(reg, t, c).map_err(|e| e.to_string())
+}
+
+/// The target of node `node` of `t` from the node the PC is connected to.
+pub(crate) fn target_of(reg: &Registry, t: &Topology, node: &str) -> Result<Target, String> {
+    let (_, to) = targets(reg, t)?
+        .into_iter()
+        .find(|(id, _)| id == node)
+        .ok_or_else(|| format!("no updatable node '{node}' in the topology"))?;
+    to.map_err(|e| format!("'{node}' is not reachable: {e}"))
 }
 
 /// The STATUS rows of the node on the PC's port.
@@ -278,15 +293,12 @@ pub(crate) fn doctor_versions(
     cfg: &Config,
     t: Option<&Topology>,
 ) -> Vec<String> {
-    let (nodes, routes) = match t.map(|t| node_targets(cfg, t)).transpose() {
+    let nodes = match t.map(|t| node_targets(cfg, t)).transpose() {
         Ok(n) => n.unwrap_or_default(),
         Err(e) => return vec![format!("node versions not read: {e}")],
     };
     match serial::host(port) {
-        Ok(mut host) => {
-            host.routes = routes;
-            version_lines(&mut host, &nodes)
-        }
+        Ok(mut host) => version_lines(&mut host, &nodes),
         Err(e) => vec![format!("node versions not read: {e}")],
     }
 }
@@ -300,11 +312,11 @@ pub(crate) fn version_lines<T: Transport, C: HostClock>(
         let port = block_on(host.hello(to)).ok().map(|h| h.port_kind);
         version_line(name, block_on(host.version(to)), port, rows)
     };
-    let mut out = vec![one("hub", Target::Hub, None)];
+    let mut out = vec![one("hub", Target::Local, None)];
     for (id, to, rows) in nodes {
         out.push(match to {
-            Some(to) => one(id, *to, rows.as_ref()),
-            None => format!("{id}: not reachable through the hub"),
+            Ok(to) => one(id, *to, rows.as_ref()),
+            Err(why) => format!("{id}: not reachable ({why})"),
         });
     }
     out
@@ -325,11 +337,7 @@ pub fn rollback_node<T: Transport, C: HostClock>(
         .position(|n| n.id == node)
         .ok_or_else(|| format!("no updatable node '{node}' in the topology"))?;
     host.timings = node_timings(reg, t)?;
-    host.routes = routes(reg, t);
-    let bin = topology_bin(reg, t)?;
-    let view = dagon_format::TopologyView::parse(&bin).map_err(|e| format!("{e:?}"))?;
-    let to = Target::of_node(&view, i as u8)
-        .ok_or_else(|| format!("'{node}' is not reachable through the hub"))?;
+    let to = target_of(reg, t, node)?;
     let mcu = &t.nodes[i].mcu;
     let rows = Rows::of(reg, mcu).ok_or_else(|| format!("{node}: no MCU definition '{mcu}'"))?;
     block_on(host.rollback(to, i as u8, &rows.image, on_event)).map_err(|e| match e {
@@ -368,6 +376,7 @@ pub fn topo_push(a: &TopoPushArgs) -> Res {
     let bin = topology_bin(&reg, &t)?;
     let mut host = serial::host(a.port.as_deref())?;
     host.timings = node_timings(&reg, &t)?;
+    host.local = local(&reg, &t);
     block_on(host.push_topology(&bin)).map_err(|e| format!("topo push: {e:?}"))?;
     println!(
         "{}: {} bytes sent to the hub, sha256 {}",
@@ -448,22 +457,31 @@ pub(crate) fn write_silent_nodes<T: Transport, C: HostClock>(
 where
     T::Error: std::fmt::Debug,
 {
-    block_on(host.hello(Target::Hub)).map_err(|e| match e {
+    // Every node's target is checked before anything is sent.
+    let indices = nodes
+        .iter()
+        .map(|node| {
+            let index = t
+                .nodes
+                .iter()
+                .position(|n| &n.id == node)
+                .ok_or_else(|| format!("no updatable node '{node}' in the topology"))?
+                as u8;
+            host.target(topology, index)
+                .map_err(|e| format!("{node}: {e:?}"))?;
+            Ok(index)
+        })
+        .collect::<Result<Vec<u8>, String>>()?;
+    block_on(host.hello(Target::Local)).map_err(|e| match e {
         dagon_host::Error::Timeout => {
-            let hub = t.nodes.first().map_or("hub", |n| n.id.as_str());
+            let hub = connected(t).unwrap_or("hub");
             format!("the hub does not answer; write it directly: dagon flash {hub}")
         }
         e => format!("{e:?}"),
     })?;
     let mut answering = Vec::new();
     let mut silent = Vec::new();
-    for node in nodes {
-        let index = t
-            .nodes
-            .iter()
-            .position(|n| &n.id == node)
-            .ok_or_else(|| format!("no updatable node '{node}' in the topology"))?
-            as u8;
+    for (node, &index) in nodes.iter().zip(&indices) {
         match block_on(host.write_path(index, topology, roms)).map_err(|e| format!("{e:?}"))? {
             WritePath::Transfer => answering.push(index),
             WritePath::Rom => {
@@ -590,7 +608,7 @@ where
     T::Error: std::fmt::Debug,
 {
     host.timings = node_timings(reg, t)?;
-    host.routes = routes(reg, t);
+    host.local = local(reg, t);
     let bin = topology_bin(reg, t)?;
     let ids: Vec<String> = t.nodes.iter().map(|n| n.id.clone()).collect();
     let name = |n: u8| ids.get(n as usize).map_or("?", String::as_str);

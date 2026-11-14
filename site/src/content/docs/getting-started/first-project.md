@@ -196,7 +196,7 @@ dagon status
 
 ### `dagon flash`を使わないとき
 
-自分でビルドしたブート用のイメージを使うときは、`dagon rescue hub`と`dagon provision <id>`が同じファイルを作ります。元になるのは`dagon.toml`の`[provision.<id>]`（親機は`stage0`、ほかに`bootcore`、`app`、`version`）です。ブート用のイメージのビルドは、マイコンの定義のREADMEにあります。
+自分でビルドしたブート用のイメージを使うときは、`dagon provision <id>`がそのファイルを作ります。元になるのは`dagon.toml`の`[provision.<id>]`（親機は`stage0`、ほかに`bootcore`、`app`、`version`）です。ブート用のイメージのビルドは、マイコンの定義のREADMEにあります。
 
 ## 6. 新しいバージョンを書き込み、必要なら戻す
 

@@ -51,7 +51,7 @@ Point `[provision.hub]` in `dagon.toml` at the three release ELFs
 (stage0, boot core, app slot A) with `version = "1.0.0"`, then:
 
 ```sh
-dagon rescue hub --key /path/outside/the/repo/dagon-signing.key
+dagon provision hub --key /path/outside/the/repo/dagon-signing.key
 (cd targets/rp2040-hub/uf2check && cargo run --release --target <host triple> --     ../../../out/provision/hub/rescue.uf2 /path/outside/the/repo/dagon-signing.pub hub-rp2040-lcd)
 ```
 

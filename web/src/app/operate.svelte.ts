@@ -5,6 +5,7 @@ import { hostLink, type LinkClock, type SwapLink } from '../serial/hostLink.ts';
 import type { HelloResp } from '../serial/hello.ts';
 import { isNote, notThisHub, type ReconnectNote, type Transport } from '../serial/transport.ts';
 import {
+  LOCAL,
   PHASE,
   check_release_for,
   newHost,
@@ -22,8 +23,10 @@ import {
   type RecoverResult,
   type Refusal,
   type StatusResp,
+  type Target,
   type VersionResp,
   type UpdateEvent,
+  targetKey,
   trialPercent,
 } from '../wasm/dagon.ts';
 import type { RollbackRecord } from './agent.svelte.ts';
@@ -31,7 +34,7 @@ import { FAILURE_BAND } from './band.ts';
 import { ConnectError, wasmReady } from './connect.ts';
 import { ANNOUNCE, FILE, WRITE } from './copy.ts';
 import { HUB_LOCKED, NODE_WRITE, WATCHED, next, type ConnectFailure, type Ctx, type Ev, type L } from './machine.ts';
-import { SAMPLE_CONFIG, targetKey, type Config, type Node } from './sample.ts';
+import { SAMPLE_CONFIG, type Config, type Node } from './sample.ts';
 import { imageRows } from './slots.ts';
 
 /** What the page knows about one node from the hub. */
@@ -244,6 +247,8 @@ export class Operate {
   config = $state<Config | null>(null);
   /** The configuration whose definitions dagon-host holds (`tellConfig`); null: none (a new host holds none). */
   private told: string | null = null;
+  /** Each node's target, as dagon-host gave it for the configuration it holds (`tellConfig`). */
+  private targetsBy: Record<string, Target> = {};
   live = $state<Record<string, Live>>({});
   /** Nodes found by the last scan (hub included). */
   found = $state(0);
@@ -390,14 +395,14 @@ export class Operate {
   private async statusOf(id: string): Promise<{ hello: HelloResp; status: StatusResp } | null> {
     const n = this.reach.find((x) => x.id === id);
     if (!n) return null;
-    return this.call((h) => h.status(n.target.kind, n.target.addr)).catch(() => null);
+    return this.call((h) => h.status(this.at(n))).catch(() => null);
   }
 
   /** The version of the boot core node `id` runs now; null when it cannot be read, or another waits for the next boot. */
   private async runningCore(id: string): Promise<number | null> {
     const n = this.reach.find((x) => x.id === id);
     if (!n) return null;
-    const core = await this.call((h) => h.bootCoreStatus(n.target.kind, n.target.addr)).catch(() => null);
+    const core = await this.call((h) => h.bootCoreStatus(this.at(n))).catch(() => null);
     return core && slotsSettled(core) ? (core.slots[core.active]?.version ?? null) : null;
   }
 
@@ -467,7 +472,7 @@ export class Operate {
       this.link = hostLink(t, this.deps.clock);
       this.host = newHost(this.link);
       this.told = null;
-      const h = await this.call((x) => x.hello('hub', 0));
+      const h = await this.call((x) => x.hello(LOCAL));
       const why = this.notThisHub(h, false);
       if (why) throw why;
       this.hubHello ??= h;
@@ -528,7 +533,7 @@ export class Operate {
     this.told = null;
     this.go('chosen');
     try {
-      this.hubHello = await this.call((h) => h.hello('hub', 0));
+      this.hubHello = await this.call((h) => h.hello(LOCAL));
     } catch {
       await this.drop();
       return this.fail(my, 'noAnswer', 'no-response');
@@ -556,14 +561,15 @@ export class Operate {
     try {
       const d = await this.call((h) => h.discover());
       if (my !== this.session) return;
-      const seen = new Map(d.nodes.map((n) => [targetKey(n), n.hello]));
-      seen.set('hub', d.hub);
+      const seen = new Map(d.nodes.map((n) => [targetKey(n.target), n.hello]));
+      seen.set(targetKey(LOCAL), d.hub);
       const now = Date.now();
       // places the sample and marks which of its nodes answered; a
       // scan result that is not the sample needs the definition mode.
       this.live = Object.fromEntries(
         this.config!.nodes.map((n) => {
-          const h = seen.get(targetKey(n.target)) ?? null;
+          const to = this.targetsBy[n.id];
+          const h = (to && seen.get(targetKey(to))) ?? null;
           return [n.id, h ? { ...UNKNOWN, responding: true, hello: h, lastSeen: now } : UNKNOWN];
         }),
       );
@@ -617,7 +623,7 @@ export class Operate {
     const before = this.responding;
     try {
       for (const n of this.reach) {
-        const r = await this.call((h) => h.watch(n.target.kind, n.target.addr));
+        const r = await this.call((h) => h.watch(this.at(n)));
         if (my !== this.session) return;
         const was = this.live[n.id] ?? UNKNOWN;
         this.live[n.id] = {
@@ -648,11 +654,11 @@ export class Operate {
     const n = this.reach.find((x) => x.id === id);
     if (!n || this.live[id]?.responding === false) return;
     try {
-      const s = await this.call((h) => h.status(n.target.kind, n.target.addr));
+      const s = await this.call((h) => h.status(this.at(n)));
       // A node without boot core slots refuses this STATUS: no row then.
-      const core = await this.call((h) => h.bootCoreStatus(n.target.kind, n.target.addr)).catch(() => null);
+      const core = await this.call((h) => h.bootCoreStatus(this.at(n))).catch(() => null);
       // An agent that predates VERSION answers null: its versions show as unknown.
-      const version = await this.call((h) => h.version(n.target.kind, n.target.addr)).catch(() => null);
+      const version = await this.call((h) => h.version(this.at(n))).catch(() => null);
       this.live[id] = { ...(this.live[id] ?? UNKNOWN), hello: s.hello, status: s.status, core, version };
     } catch {
       // A missed STATUS shows the last values; the next watch round decides answering or not.
@@ -782,7 +788,7 @@ export class Operate {
     if (e.phase === PHASE.transfer || e.phase === PHASE.verify) {
       if (was.stage !== 'writing') this.status = ANNOUNCE.A11(n.name);
       this.progress[n.id] = { stage: 'writing', percent: e.phase === PHASE.verify ? 100 : e.percent, ...(e.bootCore ? { core: e.version } : {}) };
-    } else if (e.phase === PHASE.reboot && n.role === 'hub') {
+    } else if (e.phase === PHASE.reboot && this.isLocal(n)) {
       this.progress[n.id] = { stage: 'rebooting', percent: 100, ...(e.bootCore ? { core: e.version } : {}) };
       this.hubAway(this.sentVersion[n.id]);
     } else if (e.phase === PHASE.confirm && !e.bootCore) {
@@ -828,8 +834,20 @@ export class Operate {
     const yaml = this.config?.yaml ?? null;
     if (this.told === yaml) return;
     if (yaml === null) h.clearTimings();
-    else h.setTimings(yaml);
+    this.targetsBy = yaml === null ? {} : h.setTimings(yaml);
     this.told = yaml;
+  }
+
+  /** Node `n` is the one the PC is connected to, as dagon-host's targets say. */
+  private isLocal(n: Node): boolean {
+    return this.targetsBy[n.id]?.kind === 'local';
+  }
+
+  /** Node `n`'s target as dagon-host gave it; throws (the call fails, nothing is sent) when no target reaches it. */
+  private at(n: Node): Target {
+    const to = this.targetsBy[n.id];
+    if (!to) throw new Error(`no target reaches ${n.id}`);
+    return to;
   }
 
   /** The hub reboots onto `version`: dagon-host reopens it for 45 s (hubRestarting), keeping only that hub. */
@@ -868,7 +886,7 @@ export class Operate {
     const stop = results.find((r) => r.outcome === 'failed');
     if (!stop) return this.done();
     const n = reach[stop.node];
-    if (n.role === 'hub' && this.state === 'hubRestarting' && stop.failure?.reason === 'NO ANSWER') return this.autoFailed();
+    if (this.isLocal(n) && this.state === 'hubRestarting' && stop.failure?.reason === 'NO ANSWER') return this.autoFailed();
     const why = stop.failure;
     const f = why?.running != null ? { stage: 'previous' as const } : failureStage(why?.reason ?? 'NO ANSWER');
     // A stopped update has no "cannot fix" yet: an unnamed failure is a refusal of the update.
@@ -884,7 +902,7 @@ export class Operate {
     const record: RollbackRecord = { node: id, failed_version: versionText(sent), returned_version: versionText(returned), reason, node_state: null };
     this.backRecord = record;
     try {
-      const { hello, status } = await this.call((h) => h.status(n.target.kind, n.target.addr));
+      const { hello, status } = await this.call((h) => h.status(this.at(n)));
       if (this.backRecord === record) this.backRecord = { ...record, node_state: { trial: hello.trial, last_reason: status.lastReason } };
     } catch {
       // A node that does not answer STATUS: the record says its state is not known.
@@ -942,12 +960,12 @@ export class Operate {
       const old = this.transport;
       link.use(t);
       try {
-        const why = this.notThisHub(await h.hello('hub', 0), onlyMine);
+        const why = this.notThisHub(await h.hello(LOCAL), onlyMine);
         if (why) throw why;
-        const confirmed = await h.confirm('hub', 0, false);
-        const core = await h.bootCoreStatus('hub', 0).catch(() => null);
-        const st = await h.status('hub', 0).catch(() => null);
-        const hubAt = this.reach.findIndex((n) => n.role === 'hub');
+        const confirmed = await h.confirm(LOCAL, false);
+        const core = await h.bootCoreStatus(LOCAL).catch(() => null);
+        const st = await h.status(LOCAL).catch(() => null);
+        const hubAt = this.reach.findIndex((n) => this.isLocal(n));
         const appSame = !!st && !!this.file && appUnchanged(this.file.bytes, hubAt, st);
         this.swap(t, old);
         return { confirmed, core: core ? core.slots[core.active].version : null, appSame };
@@ -988,7 +1006,7 @@ export class Operate {
 
   /** The version just sent to the hub, if any. */
   private hubSent(): number | null {
-    const hub = this.reach.find((n) => n.role === 'hub');
+    const hub = this.reach.find((n) => this.isLocal(n));
     return hub ? (this.sentVersion[hub.id] ?? null) : null;
   }
 
@@ -998,7 +1016,7 @@ export class Operate {
 
   /** reconnectNeeded: the hub confirmed on the version just sent goes on to done; on its previous version it stops there (stopped). */
   private confirmed(r: ConfirmResult, core: number | null, appSame: boolean): void {
-    const hub = this.reach.find((n) => n.role === 'hub')!;
+    const hub = this.reach.find((n) => this.isLocal(n))!;
     const stage = hubBack(r, this.sentVersion[hub.id], this.coreSent[hub.id], core, appSame);
     this.alert = '';
     if (stage === 'coreBack' || stage === 'unwritten') return this.stopAt(hub.id, stage);
@@ -1100,7 +1118,7 @@ export class Operate {
     if (!n) return;
     const index = reach.indexOf(n);
     await this.runRecovery(n, 'rollback', async (h, on) => {
-      const v = await h.rollback(n.target.kind, n.target.addr, index, imageRows(n.mcuId), on);
+      const v = await h.rollback(this.at(n), index, imageRows(n.mcuId), on);
       return { path: 'retransfer', version: v, rom: null };
     });
   }
@@ -1110,7 +1128,7 @@ export class Operate {
     const n = this.reach.find((x) => x.id === id);
     if (!n || !this.host) return;
     try {
-      await this.call((h) => h.confirm(n.target.kind, n.target.addr, true));
+      await this.call((h) => h.confirm(this.at(n), true));
     } catch {
       // The next watch round shows whether it still answers.
     }
@@ -1144,7 +1162,7 @@ export class Operate {
       // TRANSFER and REBOOT carry the version the node is given (FAILED carries the one it runs).
       if ((e.phase === PHASE.transfer || e.phase === PHASE.reboot) && !e.bootCore) this.sentVersion[n.id] = e.version;
       // The hub reboots onto it: the same reconnect and confirm rule as an update (hubRestarting / reconnectNeeded).
-      if (e.phase === PHASE.reboot && n.role === 'hub') {
+      if (e.phase === PHASE.reboot && this.isLocal(n)) {
         this.progress[n.id] = { stage: 'rebooting', percent: 100 };
         this.hubAway(this.sentVersion[n.id]);
       }

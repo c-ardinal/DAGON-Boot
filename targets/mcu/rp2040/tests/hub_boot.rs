@@ -83,7 +83,7 @@ fn status_now(m: &mut Mem, active: u8) -> dagon_proto::payload::StatusResp {
     log.state.status(&heads, active, log.generation)
 }
 
-/// Flash with app A installed and the install log as `dagon rescue hub`
+/// Flash with app A installed and the install log as `dagon provision hub`
 /// writes it.
 fn install(kp: &KeyPair) -> (Mem, SlotRef) {
     let mut m = Mem(vec![

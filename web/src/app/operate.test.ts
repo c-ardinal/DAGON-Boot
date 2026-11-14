@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import { devHub } from '../serial/devHub.ts';
 import { MockTransport, type MockOptions } from '../serial/mock.ts';
-import { topo_compile } from '../wasm/dagon.ts';
+import { LOCAL, topo_compile, type Target } from '../wasm/dagon.ts';
 import { ConnectError } from './connect.ts';
 import { ANNOUNCE, BAND } from './copy.ts';
 import { Operate } from './operate.svelte.ts';
@@ -67,12 +67,12 @@ describe('operating mode against the in-memory hub', () => {
       writes += 1;
       return write(raw);
     };
-    const call = (op as unknown as { call: (f: (h: { hello: (k: string, a: number) => Promise<unknown> }) => Promise<unknown>) => Promise<unknown> }).call.bind(op);
-    await expect(call((h) => h.hello('i2c', 0x42))).rejects.toThrow(/./);
+    const call = (op as unknown as { call: (f: (h: { hello: (to: Target) => Promise<unknown> }) => Promise<unknown>) => Promise<unknown> }).call.bind(op);
+    await expect(call((h) => h.hello(LOCAL))).rejects.toThrow(/./);
     expect(writes).toBe(0);
     // The configuration back: its definitions are given again and the call goes out.
     op.useConfig(SAMPLE_CONFIG);
-    await call((h) => h.hello('hub', 0));
+    await call((h) => h.hello(LOCAL));
     expect(writes).toBeGreaterThan(0);
   }, 20_000);
 

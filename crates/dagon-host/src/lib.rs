@@ -23,8 +23,8 @@ pub use ops::{
 };
 pub use percent::{transfer_percent, trial_percent};
 #[cfg(feature = "defs")]
-pub use routes::relay_routes;
-pub use routes::{Route, RouteError, Routes};
+pub use routes::{local_node, node_targets};
+pub use routes::{LocalNode, NodeTargets, RouteError, Target};
 #[cfg(feature = "defs")]
 pub use timings::{mcu_timings, node_timings};
 pub use timings::{HostTimings, NodeTimingError};
@@ -32,7 +32,6 @@ pub use timings::{HostTimings, NodeTimingError};
 use alloc::boxed::Box;
 use alloc::vec;
 use alloc::vec::Vec;
-use dagon_format::topology::{self, TopologyView};
 use dagon_format::{FormatError, Version};
 use dagon_port::timeout::{EraseLayout, EraseRegion, NodeTimings, SlotLayout, REQUEST_MS};
 use dagon_proto::payload::{HelloReq, HelloResp, Relay};
@@ -71,37 +70,6 @@ pub trait Transport {
 /// Monotonic time source (the same trait the ROM procedure uses).
 pub use dagon_romlink::HostClock;
 
-/// Where a request goes: the hub itself, or a node behind it via RELAY.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Target {
-    Hub,
-    /// 7-bit address on the hub's I2C0.
-    I2c(u8),
-    /// The node on the hub's PIO UART.
-    Uart,
-}
-
-impl Target {
-    /// Target of topology node `node`. `None`: no such node, or its link is
-    /// not one the hub relays on.
-    pub fn of_node(topo: &TopologyView<'_>, node: u8) -> Option<Target> {
-        let n = (node as usize) < topo.node_count();
-        if n && topo.node(node as usize).role == topology::role::COORDINATOR {
-            return Some(Target::Hub);
-        }
-        // The compiled topology holds only the hub's own links: the one with
-        // an end at `node`, whichever end, and the address at that end.
-        let l = (0..topo.link_count())
-            .map(|i| topo.link(i))
-            .find(|l| l.end(node).is_some())?;
-        match l.iface {
-            topology::iface::I2C_BUS => Some(Target::I2c(l.end(node)?.addr)),
-            topology::iface::PIO_UART => Some(Target::Uart),
-            _ => None,
-        }
-    }
-}
-
 #[derive(Debug)]
 pub enum Error<E> {
     Transport(E),
@@ -134,8 +102,8 @@ pub enum Error<E> {
     Unreachable {
         node: u8,
     },
-    /// No relay route reaches this target ([`Host::routes`]); nothing was
-    /// sent.
+    /// No target reaches this node ([`Target::of_node`] from
+    /// [`Host::local`]); nothing was sent.
     Route(RouteError),
     /// The node does not answer and its ROM path was not confirmed; nothing
     /// was touched.
@@ -212,11 +180,11 @@ pub struct Host<T: Transport, C: HostClock> {
     /// its progress number. A node with no entry gets
     /// [`NodeTimings::FALLBACK`].
     pub timings: Vec<(u8, HostTimings)>,
-    /// How each linked node is reached from the node the PC is connected
-    /// to: the topology link joining them and the relay table entry for
-    /// the connected node's port ([`relay_routes`] under the `defs`
-    /// feature). Empty: only the connected node is reached.
-    pub routes: Routes,
+    /// The node the PC is connected to and its MCU's relay table, which a
+    /// node's target is found from ([`Target::of_node`]; [`local_node`]
+    /// under the `defs` feature). [`RouteError::NoConfiguration`] (the
+    /// default): only the connected node is reached.
+    pub local: core::result::Result<LocalNode, RouteError>,
     /// Lines about steps that are retried (a CONFIRM sent again), for the
     /// caller's log; `None`: not shown.
     pub note: Option<Note>,
@@ -236,7 +204,7 @@ impl<T: Transport, C: HostClock> Host<T, C> {
             core_write: false,
             write: percent::WriteTrack::default(),
             timings: Vec::new(),
-            routes: Routes::default(),
+            local: Err(RouteError::NoConfiguration),
             note: None,
         }
     }
@@ -299,25 +267,31 @@ impl<T: Transport, C: HostClock> Host<T, C> {
     }
 
     /// Largest payload a request to `to` may carry: the uplink's, and for a
-    /// node also its link's and what fits inside a RELAY on the uplink.
+    /// linked node also its link's and what fits inside a RELAY on the uplink.
     pub(crate) fn link_max(&self, to: Target) -> usize {
         let up = self.transport.max_payload();
-        match self.node_link_max(to) {
-            None => up,
-            Some(node) => node.min(up.saturating_sub(Relay::HEAD_LEN + dagon_proto::frame_len(0))),
+        match to {
+            Target::Local => up,
+            Target::Linked { max_payload, .. } => usize::from(max_payload)
+                .min(up.saturating_sub(Relay::HEAD_LEN + dagon_proto::frame_len(0))),
         }
     }
 
-    /// Largest payload of the link to `to`; None for the connected node (or no route).
-    fn node_link_max(&self, to: Target) -> Option<usize> {
-        match to {
-            Target::Hub => None,
-            _ => self
-                .routes
-                .to(to)
-                .ok()
-                .map(|r| usize::from(r.link.max_payload)),
-        }
+    /// The target of topology node `node` of `topo` from [`Host::local`].
+    pub(crate) fn target_of(
+        &self,
+        topo: &dagon_format::topology::TopologyView<'_>,
+        node: u8,
+    ) -> core::result::Result<Target, RouteError> {
+        let me = self.local.as_ref().map_err(Clone::clone)?;
+        Target::of_node(routes::links_of(topo), me.index, node, &me.links)
+    }
+
+    /// The target of topology node `node` of the canonical binary
+    /// `topology`, from [`Host::local`]; sends nothing.
+    pub fn target(&self, topology: &[u8], node: u8) -> Result<Target, T::Error> {
+        let topo = dagon_format::topology::TopologyView::parse(topology)?;
+        self.target_of(&topo, node).map_err(Error::Route)
     }
 
     /// Version this session last applied to `to`.
@@ -485,13 +459,16 @@ impl<T: Transport, C: HostClock> Host<T, C> {
         timeout_ms: u32,
         retries: usize,
     ) -> Result<Vec<u8>, T::Error> {
-        let route = match to {
-            Target::Hub => None,
-            _ => Some(self.routes.to(to).map_err(Error::Route)?),
+        let (max, relay) = match to {
+            Target::Local => (max_payload::USB, None),
+            Target::Linked {
+                link,
+                addr,
+                max_payload,
+            } => (usize::from(max_payload), Some((link, addr))),
         };
-        let max = route.map_or(max_payload::USB, |r| usize::from(r.link.max_payload));
         let seq = self.next_seq();
-        let relay = route.map(|r| ((r.link.id, r.addr), self.next_seq()));
+        let relay = relay.map(|r| (r, self.next_seq()));
         let mut attempt = 0;
         loop {
             let fl = if attempt == 0 { 0 } else { flags::RETRY };

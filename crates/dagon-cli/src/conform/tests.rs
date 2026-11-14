@@ -27,10 +27,11 @@ const SEED: [u8; 32] = [
 ];
 const TRIAL_WDT_MS: u64 = 4_000;
 
-/// The routes of the simulated pair (`topology/sim-pair.yaml`) from its hub.
-fn sim_routes() -> dagon_host::Routes {
+/// The seg of the simulated pair (`topology/sim-pair.yaml`): its target
+/// from the hub and the kind of its link.
+fn seg() -> (Target, LinkKind) {
     let t = dagon_topology::parse_str(include_str!("../../../../topology/sim-pair.yaml")).unwrap();
-    crate::device::routes(dagon_topology::defs::Registry::builtin(), &t)
+    node_target(dagon_topology::defs::Registry::builtin(), &t, "seg").unwrap()
 }
 
 fn key() -> KeyPair {
@@ -287,16 +288,8 @@ fn twelve_of_twelve_through_the_hub() {
         pending: Vec::new(),
     };
     let mut host = Host::new(sim.clone(), sim);
-    host.routes = sim_routes();
-    let to = Target::I2c(dagon_sim::NODE_I2C_ADDR);
-    let report = run(
-        &mut host,
-        to,
-        link_of(to),
-        &images(),
-        &mut sign,
-        f401().borrowed(),
-    );
+    let (to, link) = seg();
+    let report = run(&mut host, to, link, &images(), &mut sign, f401().borrowed());
     assert_all_pass(&report);
     assert_eq!(report.link, LinkKind::I2c);
 
@@ -327,11 +320,10 @@ fn twelve_of_twelve_on_usb_as_uart() {
         pending: Vec::new(),
     };
     let mut host = Host::new(sim.clone(), sim);
-    host.routes = sim_routes();
     let report = run(
         &mut host,
-        Target::Hub,
-        link_of(Target::Hub),
+        Target::Local,
+        DIRECT,
         &images(),
         &mut sign,
         f401().borrowed(),
@@ -349,16 +341,8 @@ fn unreachable_node_gives_a_full_not_run_file() {
         pending: Vec::new(),
     };
     let mut host = Host::new(sim.clone(), sim);
-    host.routes = sim_routes();
-    let to = Target::I2c(dagon_sim::NODE_I2C_ADDR);
-    let report = run(
-        &mut host,
-        to,
-        link_of(to),
-        &images(),
-        &mut sign,
-        f401().borrowed(),
-    );
+    let (to, link) = seg();
+    let report = run(&mut host, to, link, &images(), &mut sign, f401().borrowed());
     assert_eq!(report.passed(), 0);
     let j = json(&report, "seg");
     assert_eq!(j.matches("\"not_run\"").count(), 12);

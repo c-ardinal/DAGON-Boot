@@ -1,4 +1,4 @@
-//! `image sign`, `release build`, `topo compile`, `provision`, `rescue hub`.
+//! `image sign`, `release build`, `topo compile`, `provision`.
 
 use std::path::{Path, PathBuf};
 
@@ -9,11 +9,11 @@ use dagon_sign::provision;
 use dagon_sign::release;
 use dagon_sign::to_hex;
 use dagon_topology::defs::{McuDef, Registry, Writer};
-use dagon_topology::schema::{Role, Topology};
+use dagon_topology::schema::Topology;
 use ed25519_compact::KeyPair;
 
 use crate::cli::{
-    FirstInstallOpts, ImageSignArgs, ProvisionArgs, ReleaseBuildArgs, RescueArgs, TopoCompileArgs,
+    FirstInstallOpts, ImageSignArgs, ProvisionArgs, ReleaseBuildArgs, TopoCompileArgs,
 };
 use crate::config::{load_key, read_file, read_topology, write_file, Config};
 
@@ -245,20 +245,6 @@ pub fn topo_compile(a: &TopoCompileArgs) -> Res {
 
 pub fn provision(a: &ProvisionArgs) -> Res {
     provision_node(&a.files, &a.node)
-}
-
-/// `rescue hub`: the coordinator's first-install files.
-pub fn rescue(a: &RescueArgs) -> Res {
-    let o = &a.files;
-    let cfg = Config::load(o.config.as_deref())?;
-    let t = read_topology(&cfg, &cfg.topology_path(o.topology.as_deref())?)?;
-    let hub = t
-        .nodes
-        .iter()
-        .find(|n| n.role == Role::Coordinator)
-        .ok_or("topology has no coordinator")?;
-    let id = hub.id.clone();
-    provision_node(o, &id)
 }
 
 fn provision_node(o: &FirstInstallOpts, node: &str) -> Res {

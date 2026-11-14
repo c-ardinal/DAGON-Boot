@@ -12,6 +12,7 @@ use dagon_format::{sha256, ImageHeader, Version};
 use dagon_port::timeout::{
     CONFIRM_RETRY_MS, ERASE_FALLBACK_MS, REBOOT_WAIT_MS, REQUEST_MS, VERIFY_MS,
 };
+use dagon_port::Addressing;
 use dagon_proto::payload::{
     self, phase, reboot_mode, target, HelloResp, SetPending, Show, SlotState, StatusResp,
     VersionResp, XferBegin, XferChunk,
@@ -19,7 +20,7 @@ use dagon_proto::payload::{
 use dagon_proto::{Cmd, Status};
 
 use crate::rom::RomMap;
-use crate::{Error, Host, HostClock, Result, Target, Transport};
+use crate::{Error, Host, HostClock, Result, RouteError, Target, Transport};
 
 /// REBOOT until the hub's new HELLO, reopening the port meanwhile. Stays
 /// well inside the 60 s the hub keeps its trial watchdog fed, so CONFIRM
@@ -45,8 +46,10 @@ pub struct NodeState {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Discovery {
+    /// The node the PC is connected to.
     pub hub: HelloResp,
-    /// Nodes that answered RELAY HELLO, I2C by address, then UART.
+    /// Nodes that answered RELAY HELLO, in the order of the connected
+    /// node's relay table, each link's by address.
     pub nodes: Vec<(Target, HelloResp)>,
 }
 
@@ -152,17 +155,21 @@ impl<T: Transport, C: HostClock> Host<T, C> {
             .map_err(|_| Error::BadResponse)
     }
 
-    /// Hub HELLO, then a short RELAY HELLO to every I2C address but the ROM
-    /// loaders' (`rom_addrs`, from the MCU definitions: never probed with
-    /// DAGON frames) and one on the UART.
+    /// HELLO of the connected node, then a RELAY HELLO over every entry of
+    /// its relay table ([`Host::local`]): a short one to every 7-bit
+    /// address of a seven-bit link but the ROM loaders' (`rom_addrs`, from
+    /// the MCU definitions: never probed with DAGON frames), one to the
+    /// address of a fixed-address link. Without a configuration only the
+    /// connected node is asked.
     pub async fn discover(&mut self, rom_addrs: &[u8]) -> Result<Discovery, T::Error> {
-        let hub = self.hello(Target::Hub).await?;
+        let hub = self.hello(Target::Local).await?;
+        let links = match &self.local {
+            Ok(me) => me.links.clone(),
+            Err(RouteError::NoConfiguration) => Vec::new(),
+            Err(e) => return Err(Error::Route(e.clone())),
+        };
         let mut nodes = Vec::new();
-        let i2c = I2C_SCAN.filter(|a| !rom_addrs.contains(a)).map(Target::I2c);
-        for (to, wait) in i2c
-            .map(|t| (t, DISCOVER_MS))
-            .chain([(Target::Uart, REQUEST_MS)])
-        {
+        for (to, wait) in probes(&links, rom_addrs) {
             match self.hello_within(to, wait).await {
                 Ok(h) => nodes.push((to, h)),
                 Err(Error::Transport(e)) => return Err(Error::Transport(e)),
@@ -172,13 +179,18 @@ impl<T: Transport, C: HostClock> Host<T, C> {
         Ok(Discovery { hub, nodes })
     }
 
-    /// Sends the topology canonical binary to the hub's display copy.
+    /// Sends the topology canonical binary to the display copy of the node
+    /// the PC is connected to (timed by that node's limits, [`Host::local`]).
+    /// Without that node ([`Host::local`] an error) nothing is sent.
     pub async fn push_topology(&mut self, bin: &[u8]) -> Result<(), T::Error> {
-        let topo = TopologyView::parse(bin)?;
-        let coordinator = (0..topo.node_count())
-            .find(|&i| topo.node(i).role == topology::role::COORDINATOR)
-            .and_then(|i| u8::try_from(i).ok());
-        let hub = self.hello(Target::Hub).await?;
+        TopologyView::parse(bin)?;
+        let local = Some(
+            self.local
+                .as_ref()
+                .map_err(|e| Error::Route(e.clone()))?
+                .index,
+        );
+        let hub = self.hello(Target::Local).await?;
         let mut quiet = |_: Event| {};
         let xfer = Xfer {
             tgt: target::TOPOLOGY,
@@ -186,18 +198,18 @@ impl<T: Transport, C: HostClock> Host<T, C> {
             hdr: &[],
             body: bin,
             show: None,
-            node: coordinator,
+            node: local,
         };
-        self.transfer(Target::Hub, &hub, xfer, &mut quiet)
+        self.transfer(Target::Local, &hub, xfer, &mut quiet)
             .await
             .map(|_| ())
     }
 
     /// Checks `bundle` (signature chain under `pubkey`, and that it was built
     /// for `topology`, the caller's current canonical binary), pushes the
-    /// topology, then updates the nodes: children in update order, the hub
-    /// last. `nodes` limits the run to these topology node indices (the hub
-    /// only when listed). Stops at the first node that fails.
+    /// topology, then updates the nodes: the others in update order, the
+    /// node the PC is connected to last. `nodes` limits the run to these
+    /// topology node indices. Stops at the first node that fails.
     pub async fn apply(
         &mut self,
         bundle: &[u8],
@@ -234,25 +246,35 @@ impl<T: Transport, C: HostClock> Host<T, C> {
         on_event: &mut dyn FnMut(Event),
     ) -> Result<Vec<NodeOutcome<T::Error>>, T::Error> {
         let (b, topo) = check_release(bundle, topology, pubkey)?;
+        // Every target is resolved before the first byte goes out: a route
+        // that fails sends nothing, not even the topology.
+        let local = self
+            .local
+            .as_ref()
+            .map_err(|e| Error::Route(e.clone()))?
+            .index;
+        let planned = plan(&b, &topo, nodes, local)
+            .into_iter()
+            .map(|node| Ok((node, self.target_of(&topo, node)?)))
+            .collect::<core::result::Result<Vec<_>, RouteError>>()
+            .map_err(Error::Route)?;
         self.push_topology(topology).await?;
 
-        let mut plan = plan(&b, &topo, nodes);
         let mut out = Vec::new();
         let mut failed = false;
-        for node in plan.drain(..) {
-            let target = Target::of_node(&topo, node);
-            let outcome = match target {
-                _ if failed => Outcome::NotStarted,
-                None => Outcome::Failed(Error::Unreachable { node }),
-                Some(to) => match self.update_node(&b, node, to, false, on_event).await {
+        for (node, target) in planned {
+            let outcome = if failed {
+                Outcome::NotStarted
+            } else {
+                match self.update_node(&b, node, target, false, on_event).await {
                     Ok(v) => Outcome::Done(v),
                     Err(e) => Outcome::Failed(e),
-                },
+                }
             };
             failed |= matches!(outcome, Outcome::Failed(_));
             out.push(NodeOutcome {
                 node,
-                target: target.unwrap_or(Target::Hub),
+                target,
                 outcome,
             });
         }
@@ -573,7 +595,7 @@ impl<T: Transport, C: HostClock> Host<T, C> {
     /// Polls HELLO after REBOOT until `v` answers (hub: reopening the port).
     async fn await_version(&mut self, to: Target, v: Version) -> Result<HelloResp, T::Error> {
         let (limit, pause) = match to {
-            Target::Hub => (HUB_RECONNECT_MS, REOPEN_MS),
+            Target::Local => (HUB_RECONNECT_MS, REOPEN_MS),
             _ => (REBOOT_WAIT_MS, self.node_poll_ms),
         };
         let deadline = self.clock.now_ms() + limit as u64;
@@ -586,7 +608,7 @@ impl<T: Transport, C: HostClock> Host<T, C> {
             // for slow enumeration if real ports need it.
             // A link that goes away with the hub is opened again; one that
             // stays (a UART adapter) is only polled.
-            let reopened = to != Target::Hub
+            let reopened = to != Target::Local
                 || self.transport.reconnect_kind() == crate::Reconnect::Stays
                 || self.reopen().await.is_ok();
             if reopened {
@@ -663,7 +685,7 @@ impl<T: Transport, C: HostClock> Host<T, C> {
     ) -> Result<(RecoverPath, Version), T::Error> {
         self.write = Default::default();
         let (b, topo) = check_release(a.release, a.topology, Some(a.pubkey))?;
-        let to = Target::of_node(&topo, node).ok_or(Error::Unreachable { node })?;
+        let to = self.target_of(&topo, node).map_err(Error::Route)?;
         match self.hello(to).await {
             Ok(h) => {
                 let path = if h.mode == payload::mode::AGENT {
@@ -740,7 +762,7 @@ impl<T: Transport, C: HostClock> Host<T, C> {
         roms: &[RomMap],
     ) -> Result<WritePath, T::Error> {
         let topo = TopologyView::parse(topology)?;
-        let to = Target::of_node(&topo, node).ok_or(Error::Unreachable { node })?;
+        let to = self.target_of(&topo, node).map_err(Error::Route)?;
         match self.hello(to).await {
             Ok(_) => Ok(WritePath::Transfer),
             Err(Error::Transport(e)) => Err(Error::Transport(e)),
@@ -781,7 +803,7 @@ impl<T: Transport, C: HostClock> Host<T, C> {
         // The hub's display already hears every number from `emit`. The tell
         // comes before XFER_BEGIN, so the number is there when the node's
         // display turns to the transfer, after the erase.
-        let mut tell = show.filter(|_| to != Target::Hub);
+        let mut tell = show.filter(|_| to != Target::Local);
         let mut told = None;
         self.tell(to, &mut tell, &mut told).await;
         let mut p = [0u8; 8];
@@ -935,7 +957,7 @@ impl<T: Transport, C: HostClock> Host<T, C> {
             version,
             text,
         };
-        let _ = self.show_to(Target::Hub, &show).await;
+        let _ = self.show_to(Target::Local, &show).await;
     }
 
     /// One SHOW, never resent.
@@ -1117,9 +1139,33 @@ struct Xfer<'a> {
     node: Option<u8>,
 }
 
+/// What [`Host::discover`] asks over `links`: each target and its wait.
+fn probes(links: &[dagon_port::RelayLinkDef], rom_addrs: &[u8]) -> Vec<(Target, u32)> {
+    let mut out = Vec::new();
+    for d in links {
+        let to = |addr| Target::Linked {
+            link: d.id,
+            addr,
+            max_payload: d.max_payload,
+        };
+        match d.addressing {
+            Addressing::SevenBit => out.extend(
+                I2C_SCAN
+                    .filter(|a| !rom_addrs.contains(a))
+                    .map(|a| (to(a), DISCOVER_MS)),
+            ),
+            Addressing::Fixed(a) => out.push((to(a), REQUEST_MS)),
+            // A way of addressing this version does not know: nothing to ask.
+            _ => {}
+        }
+    }
+    out
+}
+
 /// Nodes with an APP or boot core image in the release, filtered by
-/// `only`: children by update order, then the coordinator.
-fn plan(b: &BundleView<'_>, topo: &TopologyView<'_>, only: Option<&[u8]>) -> Vec<u8> {
+/// `only`: the others by update order, then `local`, the node the PC is
+/// connected to (which relays to the others).
+fn plan(b: &BundleView<'_>, topo: &TopologyView<'_>, only: Option<&[u8]>, local: u8) -> Vec<u8> {
     let m = b.manifest();
     let mut nodes: Vec<u8> = (0..m.entry_count())
         .map(|i| m.entry(i))
@@ -1133,10 +1179,7 @@ fn plan(b: &BundleView<'_>, topo: &TopologyView<'_>, only: Option<&[u8]>) -> Vec
         .filter(|&n| (n as usize) < topo.node_count())
         .filter(|n| only.is_none_or(|o| o.contains(n)))
         .collect();
-    nodes.sort_by_key(|&n| {
-        let t = topo.node(n as usize);
-        (t.role == topology::role::COORDINATOR, t.order_rank, n)
-    });
+    nodes.sort_by_key(|&n| (n == local, topo.node(n as usize).order_rank, n));
     nodes.dedup();
     nodes
 }

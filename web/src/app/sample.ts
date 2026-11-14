@@ -8,12 +8,6 @@ export const SAMPLE_YAML: string = sampleYaml;
 
 export type LinkKind = 'USB' | 'UART' | 'I2C' | 'BLE' | 'Wi-Fi' | 'Ethernet' | 'CAN';
 
-/** How dagon-host reaches a node: the hub itself, or RELAY on I2C / UART. */
-export interface Target {
-  kind: 'hub' | 'i2c' | 'uart';
-  addr: number;
-}
-
 export interface Node {
   id: string;
   /** Number shown as "[2]". */
@@ -30,7 +24,6 @@ export interface Node {
   /** Hub pins driving reset and boot; null when the node switches itself. */
   reset: string | null;
   boot: string | null;
-  target: Target;
   /** Row on the graph: 0 親機, 1 子機, 2 and on deeper. Absent: by role. */
   depth?: number;
   /** A 親機's uplink as the 構成 writes it; absent when none is written (USB to the PC) or the 親機 is linked from another node. */
@@ -83,9 +76,9 @@ export const SAMPLE_CONFIG: Config = {
   name: 'sample',
   yaml: SAMPLE_YAML,
   nodes: [
-    { id: 'hub', no: 1, name: 'メイン', role: 'hub', product: 'Waveshare RP2040-Touch-LCD-1.28', mcu: 'RP2040', mcuId: 'rp2040', via: '', reset: null, boot: null, target: { kind: 'hub', addr: 0 } },
-    { id: 'seg', no: 2, name: '7セグ', role: 'node', product: 'NUCLEO-F401RE', mcu: 'STM32F401RE', mcuId: 'stm32f401re', via: 'I2C 0x42', reset: 'GPIO18', boot: 'GPIO28', target: { kind: 'i2c', addr: 0x42 } },
-    { id: 'watch', no: 3, name: 'ウォッチ', role: 'node', product: 'M5StopWatch', mcu: 'ESP32-S3', mcuId: 'esp32s3', via: 'UART 115200', reset: null, boot: null, target: { kind: 'uart', addr: 0 } },
+    { id: 'hub', no: 1, name: 'メイン', role: 'hub', product: 'Waveshare RP2040-Touch-LCD-1.28', mcu: 'RP2040', mcuId: 'rp2040', via: '', reset: null, boot: null },
+    { id: 'seg', no: 2, name: '7セグ', role: 'node', product: 'NUCLEO-F401RE', mcu: 'STM32F401RE', mcuId: 'stm32f401re', via: 'I2C 0x42', reset: 'GPIO18', boot: 'GPIO28' },
+    { id: 'watch', no: 3, name: 'ウォッチ', role: 'node', product: 'M5StopWatch', mcu: 'ESP32-S3', mcuId: 'esp32s3', via: 'UART 115200', reset: null, boot: null },
   ],
   links: [
     {
@@ -116,8 +109,3 @@ export const SAMPLE_CONFIG: Config = {
   order: ['seg', 'watch', 'hub'],
   reach: ['hub', 'seg', 'watch'],
 };
-
-/** dagon-host target key of a node, as the mock and discovery name it. */
-export function targetKey(t: Target): string {
-  return t.kind === 'i2c' ? `i2c:${t.addr}` : t.kind;
-}

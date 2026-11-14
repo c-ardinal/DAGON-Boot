@@ -108,26 +108,77 @@ pub struct WasmHost {
     watch: Rc<RefCell<Watch>>,
 }
 
-/// `kind` is `hub`, `i2c` (with the 7-bit `addr`) or `uart`.
-fn target(kind: &str, addr: u8) -> Result<Target, JsValue> {
-    match kind {
-        "hub" => Ok(Target::Hub),
-        "i2c" => Ok(Target::I2c(addr)),
-        "uart" => Ok(Target::Uart),
-        _ => Err(JsError::new("unknown target").into()),
+#[wasm_bindgen(typescript_custom_section)]
+const TARGET_TS: &str = r#"
+/** Where a request goes: the node the PC is connected to, or a node RELAY
+ * reaches (dagon-host's `Target`). The page takes these from `setTimings`
+ * and passes them back as they are. */
+export type Target =
+  | { kind: 'local' }
+  | { kind: 'linked'; link: number; addr: number; maxPayload: number };
+"#;
+
+/// A `Target` object from the page (as [`target_js`] makes it).
+fn target(v: &JsValue) -> Result<Target, JsValue> {
+    let field = |k: &str| Reflect::get(v, &k.into()).ok();
+    let num = |k: &str| field(k).and_then(|x| x.as_f64());
+    let byte = |k: &str| num(k).and_then(|x| u8::try_from(x as u32).ok());
+    match field("kind").and_then(|k| k.as_string()).as_deref() {
+        Some("local") => Ok(Target::Local),
+        Some("linked") => match (byte("link"), byte("addr"), num("maxPayload")) {
+            (Some(link), Some(addr), Some(m)) => Ok(Target::Linked {
+                link,
+                addr,
+                max_payload: u16::try_from(m as u32).map_err(|_| bad_target())?,
+            }),
+            _ => Err(bad_target()),
+        },
+        _ => Err(bad_target()),
     }
 }
 
-/// How the host reaches each node of `topo`: from the node the PC is
-/// connected to, the 親機 the reachable part starts from.
-fn routes(
+fn bad_target() -> JsValue {
+    JsError::new("unknown target").into()
+}
+
+/// The node the PC is connected to (the 親機 the reachable part starts
+/// from) with its MCU's relay table, and each node's target from it.
+fn connected(
     reg: &dagon_topology::defs::Registry,
     topo: &dagon_topology::Topology,
-) -> dagon_host::Routes {
-    match dagon_topology::reach_root(topo) {
-        Some(local) => dagon_host::relay_routes(reg, topo, local),
-        None => dagon_host::Routes::failed(dagon_host::RouteError::Connected { nodes: Vec::new() }),
+) -> (
+    Result<dagon_host::LocalNode, dagon_host::RouteError>,
+    dagon_host::NodeTargets,
+) {
+    let Some(local) = dagon_topology::reach_root(topo) else {
+        let none = dagon_host::RouteError::Connected { nodes: Vec::new() };
+        return (Err(none), Vec::new());
+    };
+    let me = dagon_host::local_node(reg, topo, local);
+    let all = dagon_host::node_targets(reg, topo, local).unwrap_or_default();
+    (me, all)
+}
+
+/// `{ [id]: Target }` for each node a target reaches.
+fn targets_js(all: dagon_host::NodeTargets) -> JsValue {
+    let out = Object::new();
+    for (id, to) in all {
+        if let Ok(to) = to {
+            set(&out, &id, target_js(to));
+        }
     }
+    out.into()
+}
+
+/// Each node's `Target` by id in the topology `yaml`, from the node the PC
+/// is connected to with the definitions in use, as [`WasmHost::set_timings`]
+/// gives them; `{}` when the YAML does not parse.
+#[wasm_bindgen(unchecked_return_type = "Record<string, Target>")]
+pub fn topo_targets(yaml: &str) -> JsValue {
+    let Ok(topo) = dagon_topology::parse_str(yaml) else {
+        return Object::new().into();
+    };
+    targets_js(crate::defs::with_registry(|reg| connected(reg, &topo)).1)
 }
 
 fn busy() -> JsValue {
@@ -153,22 +204,24 @@ impl WasmHost {
     /// Each node of the topology `yaml` gets its own limits from its MCU's
     /// definition in use (`dagon_host::node_timings`): the wait for the
     /// request it erases on, and its trial, which also weighs in its one
-    /// progress number; and each linked node is reached by the topology
-    /// link joining it to the connected node and that node's MCU's relay
-    /// table (`dagon_host::relay_routes` from the 親機 the reachable part
-    /// starts from, `dagon_topology::reach_root`). Throws with the reason when
-    /// the topology does not parse or a definition breaks a timing rule.
-    #[wasm_bindgen(js_name = setTimings)]
-    pub fn set_timings(&self, yaml: &str) -> Result<(), JsValue> {
+    /// progress number; and the host gets the node the PC is connected to
+    /// (the 親機 the reachable part starts from, `dagon_topology::reach_root`)
+    /// with its MCU's relay table (`dagon_host::local_node`). Returns each
+    /// node's `Target` by id (`dagon_host::node_targets`), the node itself
+    /// as `local`; a node no target reaches is left out. Throws with the
+    /// reason when the topology does not parse or a definition breaks a
+    /// timing rule.
+    #[wasm_bindgen(js_name = setTimings, unchecked_return_type = "Record<string, Target>")]
+    pub fn set_timings(&self, yaml: &str) -> Result<JsValue, JsValue> {
         let topo = dagon_topology::parse_str(yaml).map_err(|e| JsError::new(&e.to_string()))?;
-        let (timings, links) = crate::defs::with_registry(|reg| {
-            dagon_host::node_timings(reg, &topo).map(|t| (t, routes(reg, &topo)))
+        let (timings, (local, all)) = crate::defs::with_registry(|reg| {
+            dagon_host::node_timings(reg, &topo).map(|t| (t, connected(reg, &topo)))
         })
         .map_err(|e| JsError::new(&e.to_string()))?;
         let mut h = self.host.try_borrow_mut().map_err(|_| busy())?;
         h.timings = timings;
-        h.routes = links;
-        Ok(())
+        h.local = local;
+        Ok(targets_js(all))
     }
 
     /// No configuration: every node gets the fallback limits, and only the
@@ -177,7 +230,7 @@ impl WasmHost {
     pub fn clear_timings(&self) -> Result<(), JsValue> {
         let mut h = self.host.try_borrow_mut().map_err(|_| busy())?;
         h.timings = Vec::new();
-        h.routes = dagon_host::Routes::default();
+        h.local = Err(dagon_host::RouteError::NoConfiguration);
         Ok(())
     }
 
@@ -200,8 +253,8 @@ impl WasmHost {
     }
 
     /// HELLO of one target. Resolves to the HELLO object.
-    pub fn hello(&self, kind: &str, addr: u8) -> Promise {
-        let to = target(kind, addr);
+    pub fn hello(&self, #[wasm_bindgen(unchecked_param_type = "Target")] to: JsValue) -> Promise {
+        let to = target(&to);
         self.run(|h, _| async move {
             let mut h = h.try_borrow_mut().map_err(|_| busy())?;
             h.hello(to?)
@@ -212,8 +265,8 @@ impl WasmHost {
     }
 
     /// HELLO and STATUS of one target: `{hello, status}`.
-    pub fn status(&self, kind: &str, addr: u8) -> Promise {
-        let to = target(kind, addr);
+    pub fn status(&self, #[wasm_bindgen(unchecked_param_type = "Target")] to: JsValue) -> Promise {
+        let to = target(&to);
         self.run(|h, _| async move {
             let mut h = h.try_borrow_mut().map_err(|_| busy())?;
             h.status(to?)
@@ -225,8 +278,11 @@ impl WasmHost {
 
     /// STATUS of one target's boot core slots (a STATUS object); rejects
     /// with the reason when the target keeps none.
-    pub fn boot_core_status(&self, kind: &str, addr: u8) -> Promise {
-        let to = target(kind, addr);
+    pub fn boot_core_status(
+        &self,
+        #[wasm_bindgen(unchecked_param_type = "Target")] to: JsValue,
+    ) -> Promise {
+        let to = target(&to);
         self.run(|h, _| async move {
             let mut h = h.try_borrow_mut().map_err(|_| busy())?;
             h.boot_core_status(to?)
@@ -239,8 +295,8 @@ impl WasmHost {
     /// VERSION of one target: `{wire, mcuId, stage0, bootCore, coreSlots,
     /// appSlots}`, each `null` when the node left it out; `null` for a node
     /// whose agent predates VERSION.
-    pub fn version(&self, kind: &str, addr: u8) -> Promise {
-        let to = target(kind, addr);
+    pub fn version(&self, #[wasm_bindgen(unchecked_param_type = "Target")] to: JsValue) -> Promise {
+        let to = target(&to);
         self.run(|h, _| async move {
             let mut h = h.try_borrow_mut().map_err(|_| busy())?;
             h.version(to?)
@@ -250,7 +306,8 @@ impl WasmHost {
         })
     }
 
-    /// Hub HELLO and every node that answers: `{hub, nodes: [{kind, addr, hello}]}`.
+    /// HELLO of the connected node and every node that answers over its
+    /// relay table: `{hub, nodes: [{target, hello}]}`.
     pub fn discover(&self) -> Promise {
         self.run(|h, _| async move {
             let mut h = h.try_borrow_mut().map_err(|_| busy())?;
@@ -276,8 +333,8 @@ impl WasmHost {
     /// One monitoring round for one target: HELLO with the round-trip time.
     /// Resolves to `{responding, rttMs, hello}`; `responding` turns false
     /// only after consecutive misses (see `watch_interval_ms`).
-    pub fn watch(&self, kind: &str, addr: u8) -> Promise {
-        let to = target(kind, addr);
+    pub fn watch(&self, #[wasm_bindgen(unchecked_param_type = "Target")] to: JsValue) -> Promise {
+        let to = target(&to);
         self.run(|h, w| async move {
             let to = to?;
             let mut h = h.try_borrow_mut().map_err(|_| busy())?;
@@ -425,7 +482,7 @@ pub fn check_bootcore_for(img: &[u8]) -> Result<(), JsError> {
 fn outcome_js(r: &NodeOutcome<JsValue>) -> JsValue {
     let o = Object::new();
     set(&o, "node", r.node.into());
-    target_js(&o, r.target);
+    set(&o, "target", target_js(r.target));
     let (kind, version, why) = match &r.outcome {
         Outcome::Done(v) => ("done", JsValue::from(v.raw()), JsValue::NULL),
         Outcome::Failed(e) => ("failed", JsValue::NULL, failure_js(e)),
@@ -483,7 +540,7 @@ impl WasmHost {
     /// last, reconnecting after its reboot, CONFIRM in the windows).
     /// `nodes` limits the run to these topology node indices. `on_event`
     /// gets `{node, phase, percent, version}`. Resolves to one
-    /// `{node, kind, addr, outcome, version, failure}` per planned node;
+    /// `{node, target, outcome, version, failure}` per planned node;
     /// rejects with the refusal kind when nothing was sent.
     pub fn apply(
         &self,
@@ -588,13 +645,12 @@ impl WasmHost {
     /// version to go back to).
     pub fn rollback(
         &self,
-        kind: &str,
-        addr: u8,
+        #[wasm_bindgen(unchecked_param_type = "Target")] to: JsValue,
         node: u8,
         slots: Vec<u8>,
         on_event: js_sys::Function,
     ) -> Promise {
-        let to = target(kind, addr);
+        let to = target(&to);
         self.run(|h, _| async move {
             let mut h = h.try_borrow_mut().map_err(|_| busy())?;
             let mut emit = |e: Event| {
@@ -610,8 +666,12 @@ impl WasmHost {
     /// The confirm rule after a manual reconnect: CONFIRM only when the
     /// target runs on trial the version this session applied (or `force`).
     /// Resolves to `{outcome: 'confirmed' | 'notOnTrial' | 'needsChoice', version}`.
-    pub fn confirm(&self, kind: &str, addr: u8, force: bool) -> Promise {
-        let to = target(kind, addr);
+    pub fn confirm(
+        &self,
+        #[wasm_bindgen(unchecked_param_type = "Target")] to: JsValue,
+        force: bool,
+    ) -> Promise {
+        let to = target(&to);
         self.run(|h, _| async move {
             let mut h = h.try_borrow_mut().map_err(|_| busy())?;
             let r = h.confirm(to?, force).await.map_err(|e| fail(&e))?;
@@ -706,14 +766,23 @@ fn state_js(s: &NodeState) -> JsValue {
     o.into()
 }
 
-fn target_js(o: &Object, t: Target) {
-    let (kind, addr) = match t {
-        Target::Hub => ("hub", 0),
-        Target::I2c(a) => ("i2c", a),
-        Target::Uart => ("uart", 0),
-    };
-    set(o, "kind", kind.into());
-    set(o, "addr", addr.into());
+/// A `Target` object for the page.
+fn target_js(t: Target) -> JsValue {
+    let o = Object::new();
+    match t {
+        Target::Local => set(&o, "kind", "local".into()),
+        Target::Linked {
+            link,
+            addr,
+            max_payload,
+        } => {
+            set(&o, "kind", "linked".into());
+            set(&o, "link", link.into());
+            set(&o, "addr", addr.into());
+            set(&o, "maxPayload", max_payload.into());
+        }
+    }
+    o.into()
 }
 
 fn discovery_js(d: &Discovery) -> JsValue {
@@ -724,7 +793,7 @@ fn discovery_js(d: &Discovery) -> JsValue {
         .iter()
         .map(|(t, h)| {
             let n = Object::new();
-            target_js(&n, *t);
+            set(&n, "target", target_js(*t));
             set(&n, "hello", hello_js(h));
             JsValue::from(n)
         })

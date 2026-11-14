@@ -196,7 +196,7 @@ Each node's `versions:` line names:
 
 ### Without `dagon flash`
 
-For boot images you built yourself, `dagon rescue hub` and `dagon provision <id>` make the same files. They read `[provision.<id>]` in `dagon.toml` (`stage0` for the hub, `bootcore`, `app`, `version`). The MCU definition READMEs show how to build the boot images.
+For boot images you built yourself, `dagon provision <id>` makes the files. They read `[provision.<id>]` in `dagon.toml` (`stage0` for the hub, `bootcore`, `app`, `version`). The MCU definition READMEs show how to build the boot images.
 
 ## 6. Write a new version, and go back
 

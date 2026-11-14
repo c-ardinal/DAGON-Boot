@@ -15,7 +15,10 @@ use std::path::{Path, PathBuf};
 use dagon_format::header::{image_kind, target_tag};
 use dagon_format::Version;
 use dagon_sign::image::{self, sign_image, ImageSpec};
-use dagon_sim::{demo_hub, watch_config, Layout, SimFlash, SimHub, SimLink, SimNode, TrialApp};
+use dagon_sim::{
+    demo_hub, watch_config, Layout, SimFlash, SimLink, SimNode, SimRelay, TrialApp, NODE_I2C_ADDR,
+    NODE_I2C_PORT, WATCH_UART_PORT,
+};
 use ed25519_compact::KeyPair;
 
 use dagon_sim::Medium;
@@ -96,14 +99,14 @@ fn img_of(
 
 /// The simulator on 1.0.0, verifying under `key`; `fail`'s next
 /// version crashes at boot.
-pub fn sim_hub(key: &KeyPair, fail: Option<&str>, seed: u64) -> Result<SimHub, String> {
+pub fn demo_sim(key: &KeyPair, fail: Option<&str>, seed: u64) -> Result<SimRelay, String> {
     let pk = *key.pk;
     let mut h = demo_hub(pk, seed);
     h.node
         .provision(&img(key, &HUB, 0, OLD, HUB_LEN)?, 0)
         .map_err(|e| format!("hub: {e:?}"))?;
     let seg = h
-        .i2c_node(dagon_sim::NODE_I2C_ADDR)
+        .i2c_node(NODE_I2C_PORT, NODE_I2C_ADDR)
         .ok_or("the sample has no seg")?;
     seg.provision(&img(key, &SEG, 0, OLD, SEG_LEN)?, 0)
         .map_err(|e| format!("seg: {e:?}"))?;
@@ -126,7 +129,7 @@ pub fn sim_hub(key: &KeyPair, fail: Option<&str>, seed: u64) -> Result<SimHub, S
     if fail == Some("watch") {
         watch.trial_app = TrialApp::CrashesAtBoot;
     }
-    h.set_uart(SimLink::new(seed ^ 3), watch);
+    h.set_uart(WATCH_UART_PORT, SimLink::new(seed ^ 3), watch);
     Ok(h)
 }
 
@@ -290,18 +293,18 @@ mod tests {
     }
 
     use dagon_host::{Host, Outcome};
-    use dagon_sim::TimedHub;
+    use dagon_sim::TimedRelay;
     use std::cell::RefCell;
     use std::rc::Rc;
 
     /// The simulator as dagon-host's transport and clock: answers arrive
     /// when the uplink would have carried them.
     #[derive(Clone)]
-    struct Link(Rc<RefCell<TimedHub>>, Vec<u8>);
+    struct Link(Rc<RefCell<TimedRelay>>, Vec<u8>);
 
     impl Link {
-        fn new(hub: SimHub, uplink: Medium) -> Link {
-            let mut t = TimedHub::new(hub);
+        fn new(relay: SimRelay, uplink: Medium) -> Link {
+            let mut t = TimedRelay::new(relay);
             t.set_medium(uplink);
             Link(Rc::new(RefCell::new(t)), Vec::new())
         }
@@ -344,8 +347,8 @@ mod tests {
         }
     }
 
-    fn host(hub: SimHub, uplink: Medium) -> Host<Link, Link> {
-        let link = Link::new(hub, uplink);
+    fn host(relay: SimRelay, uplink: Medium) -> Host<Link, Link> {
+        let link = Link::new(relay, uplink);
         let mut h = Host::new(link.clone(), link);
         let t = dagon_topology::parse_str(&yaml(uplink)).unwrap();
         h.routes = crate::device::routes(dagon_topology::defs::Registry::builtin(), &t);
@@ -363,7 +366,7 @@ mod tests {
         let (_, key) = project(&dir, Medium::UsbCdc).unwrap();
         let bundle = std::fs::read(dir.join(format!("out/release/{RELEASE}.dgb"))).unwrap();
         let topo = dagon_topology::compile_str(&yaml(uplink)).unwrap();
-        let mut h = host(sim_hub(&key, fail, 1).unwrap(), uplink);
+        let mut h = host(demo_sim(&key, fail, 1).unwrap(), uplink);
         let out = dagon_sim::block_on(h.apply(&bundle, &topo, &key.pk, None, &mut |_| {})).unwrap();
         let _ = std::fs::remove_dir_all(&dir);
         out.into_iter()
@@ -429,7 +432,7 @@ mod tests {
         let cfg = crate::config::Config::load(Some(&config.to_string_lossy())).unwrap();
         let t = dagon_topology::parse_str(&yaml(Medium::UsbCdc)).unwrap();
         let topo = dagon_topology::compile_str(&yaml(Medium::UsbCdc)).unwrap();
-        let mut h = host(sim_hub(&key, None, 1).unwrap(), Medium::UsbCdc);
+        let mut h = host(demo_sim(&key, None, 1).unwrap(), Medium::UsbCdc);
         let new = std::fs::read(dir.join(format!("out/release/{RELEASE}.dgb"))).unwrap();
         let run = |h: &mut Host<Link, Link>, b: &[u8]| -> Vec<String> {
             dagon_sim::block_on(h.apply(b, &topo, &key.pk, None, &mut |_| {}))

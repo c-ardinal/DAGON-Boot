@@ -15,7 +15,7 @@ use dagon_port::Flash;
 use dagon_proto::payload::Relay;
 use dagon_proto::{flags, frame_len, max_payload, Cmd, Frame};
 use dagon_sign::image::{self, sign_image, ImageSpec};
-use dagon_sim::{demo_hub, f401_config, FrameCutter, Layout, SimFlash, SimHub, SimNode};
+use dagon_sim::{demo_hub, f401_config, FrameCutter, Layout, SimFlash, SimNode, SimRelay};
 use ed25519_compact::{KeyPair, Seed};
 
 use super::*;
@@ -115,15 +115,15 @@ fn is_conf_run(frame: &[u8], max: usize) -> bool {
     Frame::decode(frame, max).is_ok_and(|(f, _)| f.cmd == Cmd::ConfRun as u8)
 }
 
-/// The hub's USB stream, with RELAYed CONF_RUN served by the handler.
+/// The relaying node's USB stream, with RELAYed CONF_RUN served by the handler.
 #[derive(Clone)]
-struct HubSim {
-    hub: Rc<RefCell<SimHub>>,
+struct RelaySim {
+    relay: Rc<RefCell<SimRelay>>,
     cut: Rc<RefCell<FrameCutter>>,
     pending: Vec<u8>,
 }
 
-impl HubSim {
+impl RelaySim {
     fn relay_conf_run(&mut self, frame: &[u8]) -> Option<Vec<u8>> {
         let (f, _) = Frame::decode(frame, max_payload::USB).ok()?;
         if f.cmd != Cmd::Relay as u8 {
@@ -138,9 +138,10 @@ impl HubSim {
             "CONF_RUN relayed with {} ms",
             r.timeout_ms
         );
-        let mut hub = self.hub.borrow_mut();
-        hub.advance_ms(dagon_sim::hub::PC_ROUND_TRIP_MS);
-        let inner = conf_run(hub.i2c_node(r.addr)?, r.inner, max_payload::I2C);
+        let mut relay = self.relay.borrow_mut();
+        relay.advance_ms(dagon_sim::relay::PC_ROUND_TRIP_MS);
+        let port = relay.links().iter().find(|l| l.id == r.link)?.port;
+        let inner = conf_run(relay.bus.i2c_node(port, r.addr)?, r.inner, max_payload::I2C);
         let (status, body) = match &inner {
             Some(b) => (dagon_proto::Status::Ok, b.as_slice()),
             None => (dagon_proto::Status::Timeout, &[][..]),
@@ -153,7 +154,7 @@ impl HubSim {
     }
 }
 
-impl Transport for HubSim {
+impl Transport for RelaySim {
     type Error = ();
     fn max_payload(&self) -> usize {
         dagon_proto::max_payload::USB
@@ -166,13 +167,13 @@ impl Transport for HubSim {
         for f in frames {
             match self.relay_conf_run(&f) {
                 Some(r) => self.pending.extend(r),
-                None => self.hub.borrow_mut().usb_write(&f),
+                None => self.relay.borrow_mut().usb_write(&f),
             }
         }
         Ok(())
     }
     async fn read(&mut self, buf: &mut [u8]) -> Result<usize, ()> {
-        self.pending.extend(self.hub.borrow_mut().usb_read());
+        self.pending.extend(self.relay.borrow_mut().usb_read());
         let n = buf.len().min(self.pending.len());
         buf[..n].copy_from_slice(&self.pending[..n]);
         self.pending.drain(..n);
@@ -183,12 +184,12 @@ impl Transport for HubSim {
     }
 }
 
-impl HostClock for HubSim {
+impl HostClock for RelaySim {
     fn now_ms(&self) -> u64 {
-        self.hub.borrow().now_ms()
+        self.relay.borrow().now_ms()
     }
     async fn sleep_ms(&mut self, ms: u32) {
-        self.hub.borrow_mut().advance_ms(ms as u64);
+        self.relay.borrow_mut().advance_ms(ms as u64);
     }
 }
 
@@ -275,11 +276,13 @@ fn assert_all_pass(report: &Report) {
 #[test]
 fn twelve_of_twelve_through_the_hub() {
     let mut hub = demo_hub(*key().pk, 3);
-    let node = hub.i2c_node(dagon_sim::NODE_I2C_ADDR).unwrap();
+    let node = hub
+        .i2c_node(dagon_sim::NODE_I2C_PORT, dagon_sim::NODE_I2C_ADDR)
+        .unwrap();
     node.provision(&old_image(), 0).unwrap();
     node.trial_wdt_ms = TRIAL_WDT_MS;
-    let sim = HubSim {
-        hub: Rc::new(RefCell::new(hub)),
+    let sim = RelaySim {
+        relay: Rc::new(RefCell::new(hub)),
         cut: Rc::default(),
         pending: Vec::new(),
     };
@@ -340,8 +343,8 @@ fn twelve_of_twelve_on_usb_as_uart() {
 #[test]
 fn unreachable_node_gives_a_full_not_run_file() {
     let hub = demo_hub(*key().pk, 4);
-    let sim = HubSim {
-        hub: Rc::new(RefCell::new(hub)),
+    let sim = RelaySim {
+        relay: Rc::new(RefCell::new(hub)),
         cut: Rc::default(),
         pending: Vec::new(),
     };

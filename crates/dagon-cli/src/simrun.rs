@@ -13,7 +13,7 @@ use dagon_host::{Error, Host, HostClock, Outcome, RecoverAssets, RecoverPath, Ta
 use dagon_proto::payload::SlotState;
 use dagon_proto::Status;
 use dagon_sign::image::{self, sign_image, ImageSpec};
-use dagon_sim::{block_on, demo_hub, CutPoint, SimHub, TrialApp, NODE_I2C_ADDR};
+use dagon_sim::{block_on, demo_hub, CutPoint, SimRelay, TrialApp, NODE_I2C_ADDR, NODE_I2C_PORT};
 use ed25519_compact::{KeyPair, Seed};
 
 const YAML: &str = include_str!("../../../topology/sim-pair.yaml");
@@ -41,18 +41,18 @@ type R = Result<String, String>;
 /// ID, title, scenario.
 type Scenario = (&'static str, &'static str, fn() -> R);
 
-/// The simulated hub as dagon-host's transport and clock.
+/// The simulated relaying node as dagon-host's transport and clock.
 #[derive(Clone)]
 pub(crate) struct Sim {
-    hub: Rc<RefCell<SimHub>>,
+    relay: Rc<RefCell<SimRelay>>,
     pending: Vec<u8>,
 }
 
 impl Sim {
     #[cfg(test)]
-    pub(crate) fn new(hub: SimHub) -> Sim {
+    pub(crate) fn new(relay: SimRelay) -> Sim {
         Sim {
-            hub: Rc::new(RefCell::new(hub)),
+            relay: Rc::new(RefCell::new(relay)),
             pending: Vec::new(),
         }
     }
@@ -67,11 +67,11 @@ impl Transport for Sim {
         dagon_host::Reconnect::Reopen
     }
     async fn write(&mut self, bytes: &[u8]) -> Result<(), ()> {
-        self.hub.borrow_mut().usb_write(bytes);
+        self.relay.borrow_mut().usb_write(bytes);
         Ok(())
     }
     async fn read(&mut self, buf: &mut [u8]) -> Result<usize, ()> {
-        self.pending.extend(self.hub.borrow_mut().usb_read());
+        self.pending.extend(self.relay.borrow_mut().usb_read());
         let n = buf.len().min(self.pending.len());
         buf[..n].copy_from_slice(&self.pending[..n]);
         self.pending.drain(..n);
@@ -84,10 +84,10 @@ impl Transport for Sim {
 
 impl HostClock for Sim {
     fn now_ms(&self) -> u64 {
-        self.hub.borrow().now_ms()
+        self.relay.borrow().now_ms()
     }
     async fn sleep_ms(&mut self, ms: u32) {
-        self.hub.borrow_mut().advance_ms(ms as u64);
+        self.relay.borrow_mut().advance_ms(ms as u64);
     }
 }
 
@@ -178,7 +178,7 @@ fn world() -> Result<World, String> {
         .provision(&seg_img(&key, 0, OLD), 0)
         .map_err(|e| format!("{e:?}"))?;
     let sim = Sim {
-        hub: Rc::new(RefCell::new(hub)),
+        relay: Rc::new(RefCell::new(hub)),
         pending: Vec::new(),
     };
     Ok(World {
@@ -189,8 +189,10 @@ fn world() -> Result<World, String> {
     })
 }
 
-fn seg(hub: &mut SimHub) -> &mut dagon_sim::SimNode {
-    hub.i2c_node(NODE_I2C_ADDR).expect("demo hub has the F401")
+fn seg(relay: &mut SimRelay) -> &mut dagon_sim::SimNode {
+    relay
+        .i2c_node(NODE_I2C_PORT, NODE_I2C_ADDR)
+        .expect("the demo has the F401")
 }
 
 impl World {
@@ -236,8 +238,8 @@ fn all_done(out: &[Outcome<()>]) -> bool {
 fn s1() -> R {
     let w = world()?;
     {
-        let mut hub = w.sim.hub.borrow_mut();
-        let mut f = seg(&mut hub).flash();
+        let mut relay = w.sim.relay.borrow_mut();
+        let mut f = seg(&mut relay).flash();
         let at = f.ops().len() + 4;
         f.arm_cut(CutPoint::During(at));
     }
@@ -246,9 +248,9 @@ fn s1() -> R {
         return Err(format!("power cut not noticed: {out:?}"));
     }
     {
-        let mut hub = w.sim.hub.borrow_mut();
-        let now = hub.now_ms();
-        seg(&mut hub).power_on(now);
+        let mut relay = w.sim.relay.borrow_mut();
+        let now = relay.now_ms();
+        seg(&mut relay).power_on(now);
     }
     w.expect(SEG_AT, OLD)?;
     let out = w.apply(&w.release).map_err(|e| format!("{e:?}"))?;
@@ -263,14 +265,14 @@ fn s1() -> R {
 /// A new F401 app that never confirms rolls back.
 fn s2() -> R {
     let w = world()?;
-    seg(&mut w.sim.hub.borrow_mut()).trial_app = TrialApp::NeverConfirms;
+    seg(&mut w.sim.relay.borrow_mut()).trial_app = TrialApp::NeverConfirms;
     let out = w.apply(&w.release).map_err(|e| format!("{e:?}"))?;
     if !matches!(out.first(), Some(Outcome::Failed(_))) {
         return Err(format!("apply did not stop: {out:?}"));
     }
     // One watchdog reset per boot attempt: advance a trial period at a time.
     for _ in 0..TRIAL_RUNOUT_MS / TRIAL_STEP_MS {
-        w.sim.hub.borrow_mut().advance_ms(TRIAL_STEP_MS);
+        w.sim.relay.borrow_mut().advance_ms(TRIAL_STEP_MS);
     }
     let st = block_on(w.host().status(SEG_AT))
         .map_err(|e| format!("{e:?}"))?
@@ -325,9 +327,9 @@ fn s3() -> R {
 fn s4() -> R {
     let w = world()?;
     {
-        let mut hub = w.sim.hub.borrow_mut();
-        let now = hub.now_ms();
-        let node = seg(&mut hub);
+        let mut relay = w.sim.relay.borrow_mut();
+        let now = relay.now_ms();
+        let node = seg(&mut relay);
         node.flash().erase_all().map_err(|e| format!("{e:?}"))?;
         node.reset(now);
     }
@@ -450,7 +452,7 @@ mod tests {
         dir
     }
 
-    /// The simulated hub, recording every command sent to it.
+    /// The simulated relaying node, recording every command sent to it.
     #[derive(Clone)]
     struct Recording(Sim, Rc<RefCell<Vec<u8>>>);
 
@@ -538,8 +540,8 @@ mod tests {
             "{asked:?}"
         );
         assert!(!wrote(&cmds), "{cmds:?}");
-        let mut hub = w.sim.hub.borrow_mut();
-        assert!(seg(&mut hub).flash().ops().is_empty(), "nothing erased");
+        let mut relay = w.sim.relay.borrow_mut();
+        assert!(seg(&mut relay).flash().ops().is_empty(), "nothing erased");
     }
 
     #[test]
@@ -555,9 +557,9 @@ mod tests {
     }
 
     fn wipe(w: &World) {
-        let mut hub = w.sim.hub.borrow_mut();
-        let now = hub.now_ms();
-        let node = seg(&mut hub);
+        let mut relay = w.sim.relay.borrow_mut();
+        let now = relay.now_ms();
+        let node = seg(&mut relay);
         node.flash().erase_all().unwrap();
         node.reset(now);
         node.flash().clear_ops();
@@ -588,8 +590,8 @@ mod tests {
         let e = write_seg(&w, &all_roms(), false, &mut asked).unwrap_err();
         assert!(e.contains("seg"), "{e}");
         assert_eq!(asked, 1);
-        let mut hub = w.sim.hub.borrow_mut();
-        let node = seg(&mut hub);
+        let mut relay = w.sim.relay.borrow_mut();
+        let node = seg(&mut relay);
         assert!(!node.boot0(), "BOOT0 stays low");
         assert!(node.flash().ops().is_empty(), "nothing erased");
     }
@@ -639,7 +641,7 @@ mod tests {
         assert!(lines[1].ends_with("mcu 0x0002"), "{lines:?}");
         assert_eq!(lines[2], "far: not reachable through the hub");
 
-        seg(&mut w.sim.hub.borrow_mut()).predates = vec![dagon_proto::Cmd::Version as u8];
+        seg(&mut w.sim.relay.borrow_mut()).predates = vec![dagon_proto::Cmd::Version as u8];
         let lines = crate::device::version_lines(&mut w.host(), &nodes);
         assert_eq!(
             lines[1],

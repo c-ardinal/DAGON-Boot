@@ -351,7 +351,7 @@ mod tests {
         let link = Link::new(relay, uplink);
         let mut h = Host::new(link.clone(), link);
         let t = dagon_topology::parse_str(&yaml(uplink)).unwrap();
-        h.routes = crate::device::routes(dagon_topology::defs::Registry::builtin(), &t);
+        h.local = crate::device::local(dagon_topology::defs::Registry::builtin(), &t);
         h
     }
 
@@ -447,7 +447,10 @@ mod tests {
         assert_eq!(run(&mut h, &new), ["done 1.1.0"; 3]);
         let core = |h: &mut Host<Link, Link>| {
             let cs = dagon_sim::block_on(
-                h.boot_core_status(dagon_host::Target::I2c(dagon_sim::NODE_I2C_ADDR)),
+                h.boot_core_status(
+                    crate::device::target_of(dagon_topology::defs::Registry::builtin(), &t, "seg")
+                        .unwrap(),
+                ),
             )
             .unwrap();
             cs.slots[usize::from(cs.active)].version

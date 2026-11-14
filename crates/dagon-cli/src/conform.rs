@@ -9,7 +9,7 @@ use dagon_conform::pc::{Channel, Images, NoAnswer, Runner, Signer, Timings};
 use dagon_conform::report::{CtResult, Progress, Report};
 use dagon_conform::{Label, CTS};
 use dagon_format::header::SIGN_DOMAIN;
-use dagon_host::{Error, Host, HostClock, HostTimings, Routes, Target, Transport};
+use dagon_host::{Error, Host, HostClock, HostTimings, Target, Transport};
 use dagon_port::timeout::NodeTimings;
 use dagon_port::LinkKind;
 use dagon_sim::block_on;
@@ -186,32 +186,32 @@ pub fn html(report: &Report, node: &str) -> String {
     s
 }
 
-fn link_of(to: Target) -> LinkKind {
-    match to {
-        Target::I2c(_) => LinkKind::I2c,
-        // Direct USB runs as the UART link (same payload limit and speed floor).
-        Target::Uart | Target::Hub => LinkKind::Uart,
-    }
-}
+/// The link kind a node plugged in directly (`--usb`) runs as: the UART
+/// link's payload limit and speed floor.
+const DIRECT: LinkKind = LinkKind::Uart;
 
-/// The relay target of topology node `node` (not the hub).
+/// The relay target of topology node `node` (not the node the PC is
+/// connected to) and the kind of the link it is reached over, from that
+/// node's relay table entry.
 pub(crate) fn node_target(
     reg: &dagon_topology::defs::Registry,
     t: &dagon_topology::Topology,
     node: &str,
-) -> Result<Target, String> {
-    let bin = dagon_topology::compile_with(reg, t).map_err(|e| e.to_string())?;
-    let view = dagon_format::TopologyView::parse(&bin).map_err(|e| format!("{e:?}"))?;
-    let i = t
-        .nodes
+) -> Result<(Target, LinkKind), String> {
+    let to = crate::device::target_of(reg, t, node)?;
+    let Target::Linked { link, .. } = to else {
+        return Err(format!(
+            "'{node}' is the node the PC is connected to; use --usb"
+        ));
+    };
+    let local = crate::device::local(reg, t).map_err(|e| e.to_string())?;
+    let kind = local
+        .links
         .iter()
-        .position(|n| n.id == node)
-        .ok_or_else(|| format!("no updatable node '{node}' in the topology"))?;
-    match Target::of_node(&view, i as u8) {
-        Some(Target::Hub) => Err(format!("'{node}' is the hub; use --usb")),
-        Some(to) => Ok(to),
-        None => Err(format!("'{node}' is not reachable through the hub")),
-    }
+        .find(|d| d.id == link)
+        .map(|d| d.kind)
+        .ok_or_else(|| format!("'{node}': link {link} is not in the relay table"))?;
+    Ok((to, kind))
 }
 
 /// Node `node`'s own limits from its MCU definition; the fallback for a
@@ -232,8 +232,7 @@ pub(crate) fn node_timings(
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn conform_files(
     node: &str,
-    to: Target,
-    routes: Routes,
+    (to, link): (Target, LinkKind),
     timings: &HostTimings,
     images_dir: &std::path::Path,
     out: &crate::genfs::Out,
@@ -244,15 +243,7 @@ pub(crate) fn conform_files(
     let images = conform_images(images_dir)?;
     let mut sign = |m: &[u8]| *key.sk.sign([SIGN_DOMAIN, m].concat(), None);
     let mut host = serial::host(port)?;
-    host.routes = routes;
-    let report = run(
-        &mut host,
-        to,
-        link_of(to),
-        &images,
-        &mut sign,
-        timings.borrowed(),
-    );
+    let report = run(&mut host, to, link, &images, &mut sign, timings.borrowed());
     crate::genfs::write_out(
         base,
         &out.join(RESULT_FILE)?,
@@ -276,22 +267,13 @@ pub fn command(a: &ConformArgs) -> Result<(), String> {
     let topology = cfg
         .topology_path(a.topology.as_deref())
         .and_then(|p| read_topology(&cfg, &p));
-    let (to, routes, timings) = match (usb, topology) {
+    let (to, timings) = match (usb, topology) {
         (false, t) => {
             let t = t?;
-            let to = node_target(&reg, &t, node)?;
-            (
-                to,
-                crate::device::routes(&reg, &t),
-                node_timings(&reg, &t, node)?,
-            )
+            (node_target(&reg, &t, node)?, node_timings(&reg, &t, node)?)
         }
-        (true, Ok(t)) => (
-            Target::Hub,
-            Routes::default(),
-            node_timings(&reg, &t, node)?,
-        ),
-        (true, Err(_)) => (Target::Hub, Routes::default(), NodeTimings::FALLBACK),
+        (true, Ok(t)) => ((Target::Local, DIRECT), node_timings(&reg, &t, node)?),
+        (true, Err(_)) => ((Target::Local, DIRECT), NodeTimings::FALLBACK),
     };
     let dir = a
         .images
@@ -310,7 +292,6 @@ pub fn command(a: &ConformArgs) -> Result<(), String> {
     let report = conform_files(
         node,
         to,
-        routes,
         &timings,
         &dir,
         &out,

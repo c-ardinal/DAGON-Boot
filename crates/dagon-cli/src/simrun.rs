@@ -29,7 +29,13 @@ const SEED: [u8; 32] = [
     0x44, 0x49, 0xc5, 0x69, 0x7b, 0x32, 0x69, 0x19, 0x70, 0x3b, 0xac, 0x03, 0x1c, 0xae, 0x7f, 0x60,
 ];
 const SEG: u8 = 1;
-const SEG_AT: Target = Target::I2c(NODE_I2C_ADDR);
+
+/// The seg's target in the sim topology, from the hub and its relay table.
+fn seg_at() -> Target {
+    let t = dagon_topology::parse_str(YAML).expect("sim topology parses");
+    crate::device::target_of(dagon_topology::defs::Registry::builtin(), &t, "seg")
+        .expect("the hub reaches the seg")
+}
 const OLD: Version = Version::new(1, 0, 0);
 const NEW: Version = Version::new(1, 1, 0);
 /// Long enough for the trial watchdog to use up every boot attempt.
@@ -203,7 +209,7 @@ impl World {
         let reg = dagon_topology::defs::Registry::builtin();
         h.timings = dagon_host::node_timings(reg, &t)
             .expect("the built-in definitions pass the timing rules");
-        h.routes = crate::device::routes(reg, &t);
+        h.local = crate::device::local(reg, &t);
         h
     }
 
@@ -252,13 +258,13 @@ fn s1() -> R {
         let now = relay.now_ms();
         seg(&mut relay).power_on(now);
     }
-    w.expect(SEG_AT, OLD)?;
+    w.expect(seg_at(), OLD)?;
     let out = w.apply(&w.release).map_err(|e| format!("{e:?}"))?;
     if !all_done(&out) {
         return Err(format!("second apply: {out:?}"));
     }
-    w.expect(SEG_AT, NEW)?;
-    w.expect(Target::Hub, NEW)?;
+    w.expect(seg_at(), NEW)?;
+    w.expect(Target::Local, NEW)?;
     Ok("cut kept 1.0.0; resent, hub and seg on 1.1.0".into())
 }
 
@@ -274,7 +280,7 @@ fn s2() -> R {
     for _ in 0..TRIAL_RUNOUT_MS / TRIAL_STEP_MS {
         w.sim.relay.borrow_mut().advance_ms(TRIAL_STEP_MS);
     }
-    let st = block_on(w.host().status(SEG_AT))
+    let st = block_on(w.host().status(seg_at()))
         .map_err(|e| format!("{e:?}"))?
         .status;
     let ok = st.active == 0
@@ -283,7 +289,7 @@ fn s2() -> R {
     if !ok {
         return Err(format!("not rolled back: {st:?}"));
     }
-    w.expect(SEG_AT, OLD)?;
+    w.expect(seg_at(), OLD)?;
     Ok("back on 1.0.0, TRIAL_EXHAUSTED".into())
 }
 
@@ -318,8 +324,8 @@ fn s3() -> R {
             o => return Err(format!("{what}: node did not answer {node_says:?}: {o:?}")),
         }
     }
-    w.expect(SEG_AT, OLD)?;
-    w.expect(Target::Hub, OLD)?;
+    w.expect(seg_at(), OLD)?;
+    w.expect(Target::Local, OLD)?;
     Ok("3 tampered releases refused by the PC, and by the F401 (E_SIGNATURE, E_DIGEST) with no host verify".into())
 }
 
@@ -362,7 +368,7 @@ fn s4() -> R {
     let RecoverPath::Rom(stats) = path else {
         return Err(format!("expected the ROM path, got {path:?}"));
     };
-    w.expect(SEG_AT, v)?;
+    w.expect(seg_at(), v)?;
     Ok(format!(
         "ROM path: {} frames, max round trip {} ms, {} ms simulated",
         stats.frames, stats.max_rtt_ms, stats.elapsed_ms
@@ -499,7 +505,7 @@ mod tests {
         let topology = dagon_topology::compile(&t).unwrap();
         let sent = Rc::new(RefCell::new(Vec::new()));
         let mut host = Host::new(Recording(w.sim.clone(), sent.clone()), w.sim.clone());
-        host.routes = crate::device::routes(dagon_topology::defs::Registry::builtin(), &t);
+        host.local = crate::device::local(dagon_topology::defs::Registry::builtin(), &t);
         let mut asked = Vec::new();
         let r = crate::device::write_silent_nodes(
             &mut host,
@@ -517,6 +523,34 @@ mod tests {
         );
         let cmds = sent.borrow().clone();
         (r, asked, cmds)
+    }
+
+    /// A node no target reaches stops a write before anything is sent.
+    #[test]
+    fn a_node_without_a_target_stops_the_write_before_anything_is_sent() {
+        let w = world().unwrap();
+        let t = dagon_topology::parse_str(YAML).unwrap();
+        let topology = dagon_topology::compile(&t).unwrap();
+        let sent = Rc::new(RefCell::new(Vec::new()));
+        let mut host = Host::new(Recording(w.sim.clone(), sent.clone()), w.sim.clone());
+        // The connected node's MCU relaying over no link.
+        host.local = Ok(dagon_host::LocalNode {
+            index: 0,
+            links: Vec::new(),
+        });
+        let r = crate::device::write_silent_nodes(
+            &mut host,
+            &t,
+            &topology,
+            &w.release,
+            &w.key.pk,
+            &["seg".to_string()],
+            &all_roms(),
+            &std::env::temp_dir(),
+            &mut |_| true,
+        );
+        assert!(sent.borrow().is_empty(), "sent {:?}", sent.borrow());
+        assert!(r.as_ref().is_err_and(|e| e.contains("seg")), "{r:?}");
     }
 
     fn wrote(cmds: &[u8]) -> bool {
@@ -579,7 +613,7 @@ mod tests {
             Vec::<u8>::new()
         );
         assert_eq!(asked, 1);
-        w.expect(SEG_AT, NEW).unwrap();
+        w.expect(seg_at(), NEW).unwrap();
     }
 
     #[test]
@@ -623,8 +657,12 @@ mod tests {
     fn version_lines_of_the_hub_and_its_nodes() {
         let w = world().unwrap();
         let nodes = [
-            ("seg".to_string(), Some(SEG_AT), None),
-            ("far".to_string(), None, None),
+            ("seg".to_string(), Ok(seg_at()), None),
+            (
+                "far".to_string(),
+                Err("updating does not reach it".to_string()),
+                None,
+            ),
         ];
         let lines = crate::device::version_lines(&mut w.host(), &nodes);
         let s0 = dagon_sim::store::STAGE0_VERSION;
@@ -639,7 +677,7 @@ mod tests {
             "{lines:?}"
         );
         assert!(lines[1].ends_with("mcu 0x0002"), "{lines:?}");
-        assert_eq!(lines[2], "far: not reachable through the hub");
+        assert_eq!(lines[2], "far: not reachable (updating does not reach it)");
 
         seg(&mut w.sim.relay.borrow_mut()).predates = vec![dagon_proto::Cmd::Version as u8];
         let lines = crate::device::version_lines(&mut w.host(), &nodes);
@@ -674,11 +712,11 @@ mod tests {
         )
         .unwrap();
         assert_eq!(v, OLD);
-        w.expect(SEG_AT, OLD).unwrap();
-        let st = block_on(w.host().status(SEG_AT)).unwrap().status;
+        w.expect(seg_at(), OLD).unwrap();
+        let st = block_on(w.host().status(seg_at())).unwrap().status;
         assert_eq!((st.active, st.confirmed), (0, 0));
         assert_eq!(st.slots[0].state, SlotState::Confirmed);
-        w.expect(Target::Hub, NEW).unwrap();
+        w.expect(Target::Local, NEW).unwrap();
         let unknown = crate::device::rollback_node(
             &mut w.host(),
             dagon_topology::defs::Registry::builtin(),
@@ -730,7 +768,7 @@ mod tests {
 
     /// The F401's running boot core: (version, digest16).
     fn running_core(w: &World) -> (Version, [u8; 16]) {
-        let cs = block_on(w.host().boot_core_status(SEG_AT)).unwrap();
+        let cs = block_on(w.host().boot_core_status(seg_at())).unwrap();
         let s = cs.slots[usize::from(cs.active)];
         (s.version, s.digest16)
     }

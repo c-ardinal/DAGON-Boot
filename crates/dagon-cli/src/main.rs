@@ -75,7 +75,6 @@ fn main() -> ExitCode {
         Command::Image(ImageCmd::Sign(a)) => run(commands::image_sign(&a)),
         Command::Release(ReleaseCmd::Build(a)) => run(commands::release_build(&a)),
         Command::Provision(a) => run(commands::provision(&a)),
-        Command::Rescue(a) => run(commands::rescue(&a)),
         Command::Status(a) => run(device::status(&a)),
         Command::Apply(a) => run(device::apply(&a)),
         Command::Conform(a) => run(conform::command(&a)),

@@ -1,7 +1,7 @@
 //! `dagon flash <id>`: the first write of a board, as its MCU definition
 //! says. Builds the definition's parts (the boot core, stage0, a board's
 //! recovery agent) and the app with the developer's key, makes the
-//! first-install files as `provision` / `rescue hub` do, then hands them to
+//! first-install files as `provision` does, then hands them to
 //! the definition's writer: a UF2 drive, probe-rs, or espflash (the bundled
 //! 2nd stage, the partition table, the agent, slot A and otadata).
 //! The plan is printed before anything is built; the device written to is

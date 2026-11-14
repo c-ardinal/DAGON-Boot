@@ -11,8 +11,8 @@ use dagon_format::header::HEADER_SIZE;
 use dagon_format::statelog::{FACE_HEADER_SIZE, RECORD_SIZE};
 
 use super::{
-    board_boot, dma, execution, isolation, slot_layout, Binding, BoardDef, ImageKind, McuDef,
-    Placement, Writer,
+    board_boot, clock, dma, execution, isolation, slot_layout, Binding, BoardDef, ImageKind,
+    McuDef, Placement, Writer,
 };
 
 /// Slot/header placement: an image header.
@@ -126,6 +126,24 @@ pub const MCU: &[Requirement<McuCheck>] = &[
         fields: &["stage0.region_bytes"],
         rule: "[stage0] exactly when layout.stage0; region_bytes = layout.stage0.size; key one of KEY_PLACES",
         check: stage0,
+    },
+    Requirement {
+        engine: "stage0 clock setup (its build)",
+        fields: &[
+            "stage0.clock[].in_hz",
+            "stage0.clock[].out_hz",
+            "stage0.clock[].pll.refdiv",
+            "stage0.clock[].pll.fbdiv",
+            "stage0.clock[].pll.postdiv1",
+            "stage0.clock[].pll.postdiv2",
+            "stage0.clock[].pll.m",
+            "stage0.clock[].pll.n",
+            "stage0.clock[].pll.p",
+            "stage0.clock[].pll.q",
+            "stage0.clock[].pll.flash_wait_states",
+        ],
+        rule: "exactly one internal setup (out_hz only); other setups with in_hz and pll fields that name a PLL_RULES row, whose rules they meet; frequencies above 0; no two setups of one source and in_hz with the same out_hz",
+        check: clock::check_mcu,
     },
     Requirement {
         engine: "log-face initialiser",
@@ -292,6 +310,12 @@ pub const BOARD: &[Requirement<BoardCheck>] = &[
         fields: &["format"],
         rule: "FORMAT (left out is 1); checked before the other fields are read",
         check: |_, _| Ok(()),
+    },
+    Requirement {
+        engine: "stage0 clock choice (its build)",
+        fields: &["clock.source.crystal_hz", "clock.source.external_hz"],
+        rule: "above 0; a source no stage0.clock setup of the MCU matches runs stage0 on the internal setup",
+        check: clock::check_board,
     },
     Requirement {
         engine: "erase planner (dagon_port::timeout, node and host), with the board's MCU",

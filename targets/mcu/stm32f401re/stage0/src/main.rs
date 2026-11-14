@@ -12,9 +12,21 @@
 //! diagnostic output (`BoardDiag`, generated from the board's `[boot]` LED
 //! and halt pattern; none without one) and stays here (recover through the
 //! ROM loader).
+//!
+//! It checks on the clock the definitions choose for the node (`clock`:
+//! the MCU's `[[stage0.clock]]` setup for its board's `[clock]`) and puts
+//! the clocks back as the chip starts them before it starts a core.
+//!
+//! With the `verify-time` feature it is built to measure: it times each
+//! signature check, shows the longest in tenths of a second on the
+//! diagnostic output (`dagon_mcu_common::verify_time`, which a debug probe
+//! reads in cycles) and starts no core.
 #![no_std]
 #![no_main]
+// The build to measure starts no core: the code that does is unused there.
+#![cfg_attr(feature = "verify-time", allow(dead_code, unused_imports))]
 
+mod clock;
 // Used by `BoardDiag` only when the node's board has a `[boot]` LED.
 #[allow(dead_code)]
 mod indicator;
@@ -56,12 +68,24 @@ mod diag {
 fn main() -> ! {
     // Keeps the mark in the image (nothing else reads it here).
     core::hint::black_box(&VERSION_MARK);
+    clock::start();
     // SAFETY: the flash is memory-mapped read-only from its base for
     // MIN_FLASH_SIZE bytes, and nothing writes it while stage0 runs.
     let mut flash = unsafe { Mapped::new(STAGE0 as *const u8, STAGE0, MIN_FLASH_SIZE) };
     let mut out = diag::BoardDiag::default();
-    match bootcore::decide(&mut flash, &AT, trial::read(), &VERIFIER, &mut out) {
+    #[cfg(feature = "verify-time")]
+    measure(&mut flash, &mut out);
+    #[cfg(not(feature = "verify-time"))]
+    start_core(&mut flash, &mut out);
+}
+
+/// Starts the core stage0's choice gives, on the clocks as the chip starts
+/// them; with none, stays.
+#[cfg(not(feature = "verify-time"))]
+fn start_core(flash: &mut Mapped, out: &mut diag::BoardDiag) -> ! {
+    match bootcore::decide(flash, &AT, trial::read(), &VERIFIER, out) {
         Ok(start) => {
+            clock::hand_back();
             trial::write(start.cell);
             if start.trial {
                 trial::arm_watchdog(TRIAL_WDT_MS);
@@ -72,6 +96,25 @@ fn main() -> ! {
         Err(_) => loop {
             cortex_m::asm::wfi();
         },
+    }
+}
+
+/// Runs stage0's choice with every signature check timed, shows the
+/// longest and stays.
+#[cfg(feature = "verify-time")]
+fn measure(flash: &mut Mapped, out: &mut diag::BoardDiag) -> ! {
+    use dagon_core::bootcore::{Diag, NoDiag};
+    use dagon_mcu_common::verify_time::{self, systick, Timed};
+    systick::start();
+    let timed = Timed {
+        verifier: &VERIFIER,
+        cycles: systick::cycles,
+    };
+    let _ = bootcore::decide(flash, &AT, trial::read(), &timed, &mut NoDiag);
+    let longest = verify_time::DAGON_VERIFY_CYCLES.load(core::sync::atomic::Ordering::Relaxed);
+    out.report(verify_time::tenths_of_a_second(longest, clock::OUT_HZ));
+    loop {
+        cortex_m::asm::wfi();
     }
 }
 

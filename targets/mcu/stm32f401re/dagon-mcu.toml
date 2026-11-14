@@ -34,6 +34,12 @@ bootcore_log = { faces = [0x0800_4000, 0x0800_8000], face_size = 0x4000 }
 key = "flash"
 region_bytes = 0x4000
 
+# The HSI stage0 starts on: 16 MHz from reset, no PLL, zero flash wait
+# states (RM0368, reset and clock control; FLASH_ACR LATENCY 0 at reset).
+[[stage0.clock]]
+source = "internal"
+out_hz = 16_000_000
+
 # Boot core A/B: the only erase units of at least 32 KiB besides the APP
 # slots (sector 4, 64 KiB; sector 7, 128 KiB).
 [[slot]]

@@ -9,17 +9,30 @@
 //! watchdog before a trial core and jumps. It never writes flash. Holds
 //! boot2 for the whole flash.
 //!
+//! It checks on the clock the definitions choose for the node (`clock`:
+//! the MCU's `[[stage0.clock]]` setup for its board's `[clock]`) and puts
+//! the clocks back as the chip starts them before it starts a core.
+//!
 //! Nothing to start: it tells the reason's code to the board's diagnostic
 //! output (`BoardDiag`, generated from the board's `[boot]` LED and halt
 //! pattern; none without one) and waits for recovery (BOOTSEL and the
 //! install UF2).
+//!
+//! With the `verify-time` feature it is built to measure: it times each
+//! signature check, shows the longest in tenths of a second on the
+//! diagnostic output (`dagon_mcu_common::verify_time`, which a debug probe
+//! reads in cycles) and starts no core.
 #![no_std]
 #![no_main]
+// The build to measure starts no core: the code that does is unused there.
+#![cfg_attr(feature = "verify-time", allow(dead_code, unused_imports))]
+
+mod clock;
 
 use cortex_m_rt::entry;
 use dagon_ed25519::Ed25519Small;
 use dagon_format::stage0;
-use dagon_mcu_rp2040::arm::{jump, trial, xip_flash};
+use dagon_mcu_rp2040::arm::{jump, led, trial, xip_flash};
 use dagon_mcu_rp2040::{bl, PUBKEY};
 use panic_halt as _;
 
@@ -45,14 +58,33 @@ mod diag {
     include!(concat!(env!("OUT_DIR"), "/diag.rs"));
 }
 
+/// Stage0's diagnostic output on the board's `[boot] led` (the generated
+/// `BoardDiag` calls it), timed on the clock stage0 runs on.
+#[allow(dead_code)]
+fn report(gpio: u8, active_high: bool, period_ms: u32, code: u8) -> ! {
+    led::report(gpio, active_high, period_ms, code, clock::CYCLES_PER_MS)
+}
+
 #[entry]
 fn main() -> ! {
     // Keeps the mark in the image (nothing else reads it here).
     core::hint::black_box(&VERSION_MARK);
+    clock::start();
     let mut flash = xip_flash();
     let mut out = diag::BoardDiag::default();
-    match bl::choose(&mut flash, trial::read(), &VERIFIER, &mut out) {
+    #[cfg(feature = "verify-time")]
+    measure(&mut flash, &mut out);
+    #[cfg(not(feature = "verify-time"))]
+    start_core(&mut flash, &mut out);
+}
+
+/// Starts the core stage0's choice gives, on the clocks as the chip starts
+/// them; with none, waits for recovery.
+#[cfg(not(feature = "verify-time"))]
+fn start_core(flash: &mut dagon_mcu_rp2040::mapped::Mapped, out: &mut diag::BoardDiag) -> ! {
+    match bl::choose(flash, trial::read(), &VERIFIER, out) {
         Ok(start) => {
+            clock::hand_back();
             trial::write(start.cell);
             if start.trial {
                 trial::arm_watchdog(dagon_mcu_rp2040::TRIAL_WDT_MS);
@@ -63,5 +95,24 @@ fn main() -> ! {
         Err(_) => loop {
             cortex_m::asm::wfi();
         },
+    }
+}
+
+/// Runs stage0's choice with every signature check timed, shows the
+/// longest and stays.
+#[cfg(feature = "verify-time")]
+fn measure(flash: &mut dagon_mcu_rp2040::mapped::Mapped, out: &mut diag::BoardDiag) -> ! {
+    use dagon_core::bootcore::{Diag, NoDiag};
+    use dagon_mcu_common::verify_time::{self, systick, Timed};
+    systick::start();
+    let timed = Timed {
+        verifier: &VERIFIER,
+        cycles: systick::cycles,
+    };
+    let _ = bl::choose(flash, trial::read(), &timed, &mut NoDiag);
+    let longest = verify_time::DAGON_VERIFY_CYCLES.load(core::sync::atomic::Ordering::Relaxed);
+    out.report(verify_time::tenths_of_a_second(longest, clock::OUT_HZ));
+    loop {
+        cortex_m::asm::wfi();
     }
 }

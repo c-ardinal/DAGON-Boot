@@ -238,6 +238,11 @@ jobs:
           for t in $(python scripts/stage0_size.py --targets); do
             cargo build -p dagon-ed25519 --target "$t" --locked
           done
+      # One verify built as the stage0s are, run on an ARMv6-M interpreter:
+      # it accepts only the valid signature, within the cycles the test
+      # allows (crates/dagon-ed25519/tests/m0_cycles.rs).
+      - name: Stage0 verifier cycles on a Cortex-M0+ (emulated)
+        run: cargo test -p dagon-ed25519 --test m0_cycles --locked -- --include-ignored --nocapture
 
   # `dagon new` and `dagon gen`, then each self-boot node's generated boot
   # crate built for both boot core slots and signed for each, as a release

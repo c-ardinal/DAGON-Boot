@@ -155,6 +155,7 @@ pub fn definition_rs(text: &str) -> String {
     }
 
     out += &stage0_key_place_rs(&t);
+    out += &stage0_internal_hz_rs(&t);
 
     let (masked, masked_known) = fact(required(&t, "execution", "masked_max_us"), "masked_max_us");
     out += "/// Longest DAGON's own code masks interrupts, us (`[execution]\n";
@@ -264,6 +265,71 @@ fn stage0_key_place_rs(t: &toml::Table) -> String {
      /// `PUBKEY` constant built into stage0's own flash.\n\
      pub const STAGE0_KEY_PLACE: &str = \"flash\";\n"
         .into()
+}
+
+/// `STAGE0_INTERNAL_HZ`, the `out_hz` of the internal `[[stage0.clock]]`
+/// setup (the MCU's own oscillator as it runs from reset), for a
+/// definition with `[stage0]`.
+fn stage0_internal_hz_rs(t: &toml::Table) -> String {
+    let Some(stage0) = t.get("stage0") else {
+        return String::new();
+    };
+    let hz = array_in(stage0, "clock")
+        .iter()
+        .find(|c| c.get("source").and_then(|s| s.as_str()) == Some("internal"))
+        .and_then(|c| c.get("out_hz"))
+        .unwrap_or_else(|| panic!("dagon-mcu.toml: [stage0] has no internal [[stage0.clock]]"));
+    format!(
+        "/// The MCU's own oscillator as it runs from reset, Hz (the internal\n\
+         /// `[[stage0.clock]]` setup's `out_hz`).\n\
+         pub const STAGE0_INTERNAL_HZ: u32 = {};\n",
+        int(hz, "[[stage0.clock]] out_hz")
+    )
+}
+
+fn array_in<'a>(v: &'a toml::Value, key: &str) -> &'a [toml::Value] {
+    v.get(key)
+        .and_then(|v| v.as_array())
+        .map_or(&[][..], |v| v.as_slice())
+}
+
+/// The source of `$OUT_DIR/clock.rs`: the clock setup stage0 runs on, as
+/// the definitions loader chose it for the node (`dagon_topology`'s
+/// `stage0_build`): `SOURCE` (`"internal"`, `"crystal"`, `"external"`),
+/// `IN_HZ`, `OUT_HZ` and `PLL`, a `Pll` with the setup's `pll` fields (the
+/// MCU's own; the stage0 that includes the file defines `Pll`).
+pub fn stage0_clock_rs(
+    source: &str,
+    in_hz: Option<u32>,
+    out_hz: u32,
+    pll: &[(&str, u32)],
+) -> String {
+    let pll = if pll.is_empty() {
+        "None".to_string()
+    } else {
+        let fields: Vec<String> = pll.iter().map(|(k, v)| format!("{k}: {v}")).collect();
+        format!("Some(Pll {{ {} }})", fields.join(", "))
+    };
+    format!(
+        "// Written by the stage0's build script from the node's definitions.\n\n\
+         /// What drives the clock stage0 runs on.\n\
+         pub const SOURCE: &str = {source:?};\n\
+         /// The frequency of that input, Hz (none for the internal oscillator).\n\
+         pub const IN_HZ: Option<u32> = {in_hz:?};\n\
+         /// The core clock stage0 runs at, Hz.\n\
+         pub const OUT_HZ: u32 = {out_hz};\n\
+         /// The PLL settings, when the setup has a PLL.\n\
+         pub const PLL: Option<Pll> = {pll};\n"
+    )
+}
+
+/// Writes `$OUT_DIR/clock.rs` ([`stage0_clock_rs`]).
+pub fn stage0_clock(source: &str, in_hz: Option<u32>, out_hz: u32, pll: &[(&str, u32)]) {
+    fs::write(
+        out_dir().join("clock.rs"),
+        stage0_clock_rs(source, in_hz, out_hz, pll),
+    )
+    .unwrap();
 }
 
 /// Lines of stage0's linker script that fail the link when the image (its
@@ -534,17 +600,63 @@ mod tests {
     #[test]
     fn stage0_key_place_comes_from_the_definition() {
         let want = "pub const STAGE0_KEY_PLACE: &str = \"flash\";\n";
+        let clock = "[[stage0.clock]]\nsource = \"internal\"\nout_hz = 6_500_000\n";
         for stage0 in [
             "[stage0]\nregion_bytes = 0x4000\n",
             "[stage0]\nkey = \"flash\"\n",
         ] {
-            let rs = definition_rs(&format!("{DEF}{stage0}"));
+            let rs = definition_rs(&format!("{DEF}{stage0}{clock}"));
             assert!(rs.contains(want), "{rs}");
         }
-        let otp =
-            std::panic::catch_unwind(|| definition_rs(&format!("{DEF}[stage0]\nkey = \"otp\"\n")));
+        let otp = std::panic::catch_unwind(|| {
+            definition_rs(&format!("{DEF}[stage0]\nkey = \"otp\"\n{clock}"))
+        });
         let msg = *otp.unwrap_err().downcast::<String>().unwrap();
         assert!(msg.contains("cannot read a key from that place"), "{msg}");
+    }
+
+    /// `STAGE0_INTERNAL_HZ` is the internal setup's `out_hz`; a stage0
+    /// without one does not build.
+    #[test]
+    fn stage0_internal_hz_comes_from_the_internal_setup() {
+        let rs = definition_rs(&format!(
+            "{DEF}[stage0]\n[[stage0.clock]]\nsource = \"crystal\"\nin_hz = 12\nout_hz = 125\n\
+             [[stage0.clock]]\nsource = \"internal\"\nout_hz = 6_500_000\n"
+        ));
+        assert!(
+            rs.contains("pub const STAGE0_INTERNAL_HZ: u32 = 6500000;\n"),
+            "{rs}"
+        );
+        assert!(!definition_rs(DEF).contains("STAGE0_INTERNAL_HZ"));
+        let none = std::panic::catch_unwind(|| definition_rs(&format!("{DEF}[stage0]\n")));
+        let msg = *none.unwrap_err().downcast::<&str>().unwrap();
+        assert!(msg.contains("no internal [[stage0.clock]]"), "{msg}");
+    }
+
+    /// `clock.rs` names the chosen setup, its PLL in the stage0's own
+    /// `Pll` type.
+    #[test]
+    fn stage0_clock_writes_the_chosen_setup() {
+        let rs = stage0_clock_rs(
+            "crystal",
+            Some(12_000_000),
+            125_000_000,
+            &[("fbdiv", 125), ("postdiv1", 6)],
+        );
+        for want in [
+            "pub const SOURCE: &str = \"crystal\";\n",
+            "pub const IN_HZ: Option<u32> = Some(12000000);\n",
+            "pub const OUT_HZ: u32 = 125000000;\n",
+            "pub const PLL: Option<Pll> = Some(Pll { fbdiv: 125, postdiv1: 6 });\n",
+        ] {
+            assert!(rs.contains(want), "{want} in {rs}");
+        }
+        let rs = stage0_clock_rs("internal", None, 16_000_000, &[]);
+        assert!(
+            rs.contains("pub const IN_HZ: Option<u32> = None;\n"),
+            "{rs}"
+        );
+        assert!(rs.contains("pub const PLL: Option<Pll> = None;\n"), "{rs}");
     }
 
     /// Stage0's linker script: the whole region as STAGE0, the head

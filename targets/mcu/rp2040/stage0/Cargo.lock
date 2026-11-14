@@ -234,6 +234,8 @@ dependencies = [
  "dagon-core",
  "dagon-ed25519",
  "dagon-format",
+ "dagon-mcu-build",
+ "dagon-mcu-common",
  "dagon-mcu-rp2040",
  "dagon-topology",
  "panic-halt",

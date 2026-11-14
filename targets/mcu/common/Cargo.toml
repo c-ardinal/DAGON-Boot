@@ -19,6 +19,11 @@ critical-section = "1"
 # SharedFlash: a lock taken without masking interrupts for the operation.
 embassy-sync = "0.8"
 
+[features]
+# verify_time: a stage0 built to measure its signature check (both the
+# records and, on a Cortex-M target, the SysTick cycle counter).
+verify-time = []
+
 [dev-dependencies]
 critical-section = { version = "1", features = ["std"] }
 dagon-sim = { path = "../../../crates/dagon-sim" }

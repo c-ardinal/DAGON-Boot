@@ -26,7 +26,6 @@ Commands:
   image      Sign firmware images
   release    Build a signed release package (.dgb)
   provision  Make the first-install files of a node from [provision.<node>] in dagon.toml
-  rescue     Make the hub's rescue UF2 (boot2, stage0, logs, boot core and app)
   status     Show HELLO, STATUS and VERSION of the hub and each topology node
   apply      Write a release package to the nodes
   conform    Run the 12 conformance tests on a node
@@ -326,36 +325,6 @@ Usage: dagon provision [OPTIONS] <NODE>
 Arguments:
   <NODE>
           Node id in the topology
-
-Options:
-      --out <DIR>
-          Output folder [default: <provision_dir>/<node>]
-
-      --topology <YAML>
-          Topology YAML [default: topology in dagon.toml]
-
-      --key <FILE>
-          Secret signing key file, outside any git work tree [default: $DAGON_SIGNING_KEY]
-
-      --config <FILE>
-          Project file the defaults come from [default: ./dagon.toml]
-
-  -h, --help
-          Print help
-```
-
-## dagon rescue
-
-```text
-Make the hub's rescue UF2 (boot2, stage0, logs, boot core and app)
-
-Usage: dagon rescue [OPTIONS] <TARGET>
-
-Arguments:
-  <TARGET>
-          What to rescue (the topology's coordinator)
-          
-          [possible values: hub]
 
 Options:
       --out <DIR>

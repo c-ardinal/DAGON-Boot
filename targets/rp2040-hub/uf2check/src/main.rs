@@ -1,4 +1,4 @@
-//! Reads a hub install UF2 (`dagon rescue hub`) the way the hub will boot
+//! Reads a hub install UF2 (`dagon provision hub`) the way the hub will boot
 //! it: stage0's choice and check of the boot core, then the boot core's
 //! dagon-core decision for the app. Exits non-zero if either would not start.
 //!

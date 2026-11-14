@@ -17,8 +17,7 @@ The hub and the boot:
 - There are no single-slot layouts.
 - The boot loader does not communicate and does not write the app.
 - The measured worst-case verify time of stage0 on the built-in MCUs is not recorded. [Stage0's clock and its verify time](/en/explanation/lifecycle-events/) gives an emulator's estimate for the Cortex-M0+; there is no estimate for the STM32F401's Cortex-M4.
-- The RP2040's stage0 takes its clock from a crystal or from its ring oscillator; it does not take an external clock driven into XIN.
-- Only stage0 takes its clock from the definitions. The boot loader and the app set up their clocks with their HAL settings: on the RP2040 a 12 MHz crystal to 125 MHz, on the STM32F401 the HSI to 84 MHz.
+- On the RP2040, stage0, the boot loader and the app take their clock from a crystal or from the ring oscillator; they do not take an external clock driven into XIN.
 - The ESP32-S3 uses the official ESP-IDF 2nd stage. If that 2nd stage itself is broken, DAGON cannot rescue the board; it has to be rewritten over USB with the vendor tools.
 
 Extension isolation:

@@ -29,6 +29,11 @@ i2c = [{ controller = "i2c0", sda = "GPIO16", scl = "GPIO17" }]
 i2c = { controller = "i2c0", sda = 16, scl = 17 }
 pio_uart = { tx = 26, rx = 27 }
 
+# X1, a 12 MHz crystal on XIN/XOUT (Waveshare RP2040-Touch-LCD-1.28
+# schematic, RP2040-Touch-LCD-1.28.pdf on the board's Waveshare wiki page).
+[clock]
+source = { crystal_hz = 12_000_000 }
+
 # The boot stage's LED is the display backlight, blinking at 1 Hz when
 # nothing can start.
 [boot]

@@ -197,14 +197,28 @@ pub struct LogFaces {
 pub struct Layout {
     /// boot2 + stage0 from the start of flash.
     pub stage0: Option<Region>,
-    /// Stage0 also checks a boot core header's signature under the
-    /// project key built into it (the one authentication rule), not only
-    /// the digest the log records; left out: digest only (a stage0 region
-    /// too small for the verifier).
-    #[serde(default)]
-    pub stage0_verifies: bool,
     pub bootcore_log: Option<LogFaces>,
     pub app_log: Option<LogFaces>,
+}
+
+/// `[stage0]`: the DAGON stage0 of a self-boot MCU, which checks a boot
+/// core's signature on every path that starts one.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Stage0Def {
+    /// Where stage0 reads its verifying key ([`KEY_PLACES`]).
+    #[serde(default = "flash_key")]
+    pub key: String,
+    /// Bytes of its region, `[layout] stage0` included (the same size).
+    pub region_bytes: u32,
+}
+
+/// The key places a DAGON stage0 reads its verifying key from: `flash`, a
+/// constant in stage0's own flash, written when stage0 is built.
+pub const KEY_PLACES: &[&str] = &["flash"];
+
+fn flash_key() -> String {
+    KEY_PLACES[0].into()
 }
 
 /// An image slot as written: `at` + `size`, or a `partition` of the MCU's
@@ -511,10 +525,15 @@ pub struct McuDef {
     pub partitions: Option<String>,
     /// Optional fixed regions: `stage0 = { at, size }`, `bootcore_log` / `app_log = { faces = [a,
     /// b], face_size }`; a `bootcore_log` equal to `app_log` is one log holding both the boot core
-    /// and the APP records; `stage0_verifies = true`: stage0 also checks a boot core's signature
-    /// (left out: digests only).
+    /// and the APP records.
     #[serde(default)]
     pub layout: Layout,
+    /// The MCU's DAGON stage0, exactly when `[layout]` has `stage0`: `key` (where stage0 reads
+    /// the key it checks a boot core's signature with: `"flash"`, the default and the only place,
+    /// a constant in stage0's own flash written when stage0 is built; any other place is refused)
+    /// and `region_bytes` (the whole region, equal to `[layout] stage0` size; stage0's image
+    /// leaves 1/16 of it free, which its link checks).
+    pub stage0: Option<Stage0Def>,
     /// `image` (`app`, `bootcore`, `agent`, `stage0`), `binding` (`a`, `b`, `any`), `header`
     /// (`inline`, `trailer`, `detached`); the region is `at` + `size` or `partition`; a detached
     /// header is at `header_at` or `header_partition` + `header_offset`.
@@ -767,7 +786,9 @@ pub struct BoardDef {
     #[serde(default, rename = "part")]
     pub parts: Vec<Part>,
     /// The boot stage's board values: `led` (a `[[pin]]`), `led_active` (`high`, `low`), `halt = {
-    /// pattern, period_ms }` (`blink`, `code`, `off`), `power_hold = { pin, level }`. Its boot
+    /// pattern, period_ms }` (`blink`, `code`, `off`; with `led` on an MCU with a DAGON stage0, a
+    /// `blink` period is at least 10 ms, since stage0 blinks its code in tenths of it),
+    /// `power_hold = { pin, level }`. Its boot
     /// action programs, `[[boot.action]]`: A boot action program (`boot-program` format 1): `on` (a
     /// boot event the event catalog marks action-capable) and `ops`: `{ op = "led", state }` (`on`,
     /// `off`, `toggle`), `{ op = "gpio", pin, level }` (a `[[pin]]` with `boot = true`; the power

@@ -47,8 +47,14 @@ fn run() -> Result<String, String> {
     let pubkey = load_pubkey(pubkey)?;
 
     // Stage0's own choice, as after power-up (an empty trial cell).
-    let start = bl::choose(&mut flash, dagon_core::bootcore::CLEARED)
-        .map_err(|r| format!("stage0 would not start a boot core ({r:?})"))?;
+    let verifier = Ed25519Compact::new(pubkey);
+    let start = bl::choose(
+        &mut flash,
+        dagon_core::bootcore::CLEARED,
+        &verifier,
+        &mut dagon_core::bootcore::NoDiag,
+    )
+    .map_err(|r| format!("stage0 would not start a boot core ({r:?})"))?;
     let s = start.slot;
 
     let mut log = Log::load(&mut flash, &APP_LOG_LAYOUT).map_err(|e| format!("app log: {e:?}"))?;
@@ -57,13 +63,7 @@ fn run() -> Result<String, String> {
         target_tag: target_tag(tag),
         max_attempts: dagon_mcu_rp2040::TRIAL_ATTEMPTS,
     };
-    match boot::decide(
-        &mut flash,
-        &mut log,
-        &APP_SLOTS,
-        &cfg,
-        &Ed25519Compact::new(pubkey),
-    ) {
+    match boot::decide(&mut flash, &mut log, &APP_SLOTS, &cfg, &verifier) {
         Decision::Boot { slot, trial, .. } => Ok(format!(
             "ok: boot core slot {s}, app slot {slot} (trial {trial}), log generation {}",
             log.generation

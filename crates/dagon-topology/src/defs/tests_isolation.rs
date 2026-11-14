@@ -512,6 +512,32 @@ fn board(text: &str) -> BoardDef {
     toml::from_str(text).unwrap()
 }
 
+/// Stage0 blinks its code in tenths of the board's halt period: on an MCU
+/// with a DAGON stage0, a blinking halt pattern on the boot LED needs at
+/// least 10 ms (9 is refused, 10 taken); without a stage0, or with the
+/// pattern off, any period stands.
+#[test]
+fn a_stage0_halt_blink_period_is_at_least_ten_ms() {
+    let mut m = parse_mcu_text(&isolated_mcu(), &[]).unwrap();
+    m.boot_capabilities = vec![super::isolation::BootCapability::I2c];
+    let at =
+        |ms: u32| board(&boot_board().replace("period_ms = 100", &format!("period_ms = {ms}")));
+    m.stage0 = Some(super::Stage0Def {
+        key: "flash".into(),
+        region_bytes: 0x4000,
+    });
+    let e = requirements::check_board(&at(9), &m).unwrap_err();
+    assert!(e.contains("at least 10 ms"), "{e}");
+    requirements::check_board(&at(10), &m).unwrap();
+    let off = boot_board().replace(
+        "{ pattern = \"blink\", period_ms = 100 }",
+        "{ pattern = \"off\", period_ms = 1 }",
+    );
+    requirements::check_board(&board(&off), &m).unwrap();
+    m.stage0 = None;
+    requirements::check_board(&at(9), &m).unwrap();
+}
+
 #[test]
 fn board_boot_tables_are_checked_against_board_and_mcu() {
     let mut m = parse_mcu_text(&isolated_mcu(), &[]).unwrap();

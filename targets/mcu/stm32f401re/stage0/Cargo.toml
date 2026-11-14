@@ -5,9 +5,11 @@ license = "MIT OR Apache-2.0"
 version = "0.1.0"
 publish = false
 
-# Firmware clippy runs in CI (scripts/ci_crates.py --firmware-lint).
+# Firmware clippy runs in CI (scripts/ci_crates.py --firmware-lint). The
+# boot folder (DAGON_BOOT_CRATE) only names the board, so the lint uses the
+# boot core's lint folder (a node without a board).
 [package.metadata.dagon]
-lint = { features = [""] }
+lint = { features = [""], env = { DAGON_BOOT_CRATE = "../bootcore/lint" } }
 
 # Standalone: built for thumbv7em only, so it stays out of the host workspace.
 # Its memory.x comes from dagon-mcu-stm32f401re (`image-stage0`).
@@ -22,6 +24,10 @@ dagon-format = { path = "../../../../crates/dagon-format" }
 cortex-m = { version = "0.7", features = ["critical-section-single-core"] }
 cortex-m-rt = "0.7"
 panic-halt = "1"
+
+[build-dependencies]
+# The diagnostic output from the board definition's boot LED and halt pattern.
+dagon-topology = { path = "../../../../crates/dagon-topology" }
 
 [profile.release]
 opt-level = "z"

@@ -4,29 +4,45 @@
 //! writes the boot core log (stage0 keeps the trial count in the trial
 //! cell, never in flash).
 
-use dagon_core::bootcore::{self, NoCore, Start};
+use dagon_core::bootcore::{self, CoreFail, Diag, NoCore, Stage0, Start};
 pub use dagon_core::bootcore::{MustReset, Settled};
-use dagon_core::log::SlotRef;
-use dagon_format::header::image_kind;
+use dagon_format::header::mcu_id;
+use dagon_format::SigVerifier;
 use dagon_port::Flash;
 
-use crate::image::{self, Fail};
 use crate::layout::{BL_LOG_LAYOUT, BL_SLOT, BL_SLOT_SIZE};
 use crate::TRIAL_ATTEMPTS;
 
-/// Stage0's choice from the boot core log and the trial cell `cell` read
-/// at reset (`dagon_core::bootcore::choose`). Reads flash only.
-pub fn choose<F: Flash>(flash: &mut F, cell: [u32; 2]) -> Result<Start<u32>, NoCore<Fail>> {
-    let st = bootcore::read_state(flash, &BL_LOG_LAYOUT).unwrap_or_default();
-    bootcore::choose(&st, cell, TRIAL_ATTEMPTS, BL_SLOT.len() as u8, |s, r| {
-        check(flash, s, r)
-    })
-}
+/// The boot core slots as `(base, size)`, slot A first.
+const CORE_SLOTS: [(u32, u32); BL_SLOT.len()] = {
+    let mut s = [(0, 0); BL_SLOT.len()];
+    let mut i = 0;
+    while i < s.len() {
+        s[i] = (BL_SLOT[i], BL_SLOT_SIZE);
+        i += 1;
+    }
+    s
+};
 
-/// The core image in slot `s`, against the record `r` when one names it.
-fn check<F: Flash>(flash: &mut F, s: u8, r: Option<&SlotRef>) -> Result<u32, Fail> {
-    let base = *BL_SLOT.get(usize::from(s)).ok_or(Fail::Kind)?;
-    image::check(flash, base, BL_SLOT_SIZE, s, r, image_kind::BOOTCORE)
+/// What stage0 knows of this MCU (`dagon_core::bootcore::decide`).
+pub const STAGE0: Stage0<'static> = Stage0 {
+    log: &BL_LOG_LAYOUT,
+    slots: &CORE_SLOTS,
+    max: TRIAL_ATTEMPTS,
+    mcu_id: mcu_id::RP2040,
+};
+
+/// Stage0's choice from the boot core log and the trial cell `cell` read
+/// at reset (`dagon_core::bootcore::decide`): every core it starts passes
+/// the shared check under `verifier`; with none, the reason goes to
+/// `diag`. Reads flash only.
+pub fn choose<F: Flash, V: SigVerifier + ?Sized, D: Diag>(
+    flash: &mut F,
+    cell: [u32; 2],
+    verifier: &V,
+    diag: &mut D,
+) -> Result<Start<u32>, NoCore<CoreFail>> {
+    bootcore::decide(flash, &STAGE0, cell, verifier, diag)
 }
 
 /// The boot core running from slot `running` settles the boot core trial
@@ -51,7 +67,8 @@ mod tests {
     extern crate std;
     use super::*;
     use crate::layout::BL_LOG;
-    use dagon_core::bootcore::CLEARED;
+    use dagon_core::bootcore::{NoDiag, CLEARED};
+    use dagon_ed25519::Ed25519Small;
     use dagon_format::statelog::{kind, target, FaceHeader, Record};
     use dagon_format::Version;
     use dagon_port::{FlashError, FlashRegion};
@@ -82,8 +99,9 @@ mod tests {
     #[test]
     fn an_empty_or_app_only_log_names_no_core() {
         let mut m = Mem(vec![0xFF; 0x4_8000]);
-        let e = choose(&mut m, CLEARED).unwrap_err();
-        assert_eq!((e.named, e.why), (false, Fail::Header));
+        let v = Ed25519Small::new([0; 32]);
+        let e = choose(&mut m, CLEARED, &v, &mut NoDiag).unwrap_err();
+        assert_eq!((e.named, e.why), (false, CoreFail::Header));
         let a = (BL_LOG[0] - crate::layout::XIP_BASE) as usize;
         m.0[a..a + 32].copy_from_slice(&FaceHeader { generation: 1 }.to_bytes());
         let r = Record {
@@ -96,6 +114,6 @@ mod tests {
             digest16: [7; 16],
         };
         m.0[a + 32..a + 64].copy_from_slice(&r.to_bytes());
-        assert!(!choose(&mut m, CLEARED).unwrap_err().named);
+        assert!(!choose(&mut m, CLEARED, &v, &mut NoDiag).unwrap_err().named);
     }
 }

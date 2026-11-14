@@ -154,14 +154,7 @@ pub fn definition_rs(text: &str) -> String {
         out += &format!("pub const {name}: u32 = {ms};\n");
     }
 
-    let verifies = t
-        .get("layout")
-        .and_then(|l| l.get("stage0_verifies"))
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false);
-    out += "/// Stage0 checks a boot core header's signature too (`[layout]\n";
-    out += "/// stage0_verifies`).\n";
-    out += &format!("pub const STAGE0_VERIFIES: bool = {verifies};\n");
+    out += &stage0_key_place_rs(&t);
 
     let (masked, masked_known) = fact(required(&t, "execution", "masked_max_us"), "masked_max_us");
     out += "/// Longest DAGON's own code masks interrupts, us (`[execution]\n";
@@ -250,6 +243,94 @@ fn relay_links_rs(t: &toml::Table) -> String {
     }
     out += "];\n";
     out + &ids
+}
+
+/// Where stage0 reads its verifying key (`[stage0] key`, `"flash"` when
+/// left out), for a definition with `[stage0]`: `"flash"`, the `PUBKEY`
+/// constant [`embed_pubkey`] writes into stage0's own flash, is the one
+/// place a DAGON stage0 reads; any other is refused.
+fn stage0_key_place_rs(t: &toml::Table) -> String {
+    let Some(stage0) = t.get("stage0") else {
+        return String::new();
+    };
+    let place = stage0.get("key").map_or(Some("flash"), |k| k.as_str());
+    assert!(
+        place == Some("flash"),
+        "dagon-mcu.toml: [stage0] key {:?}: this MCU's stage0 cannot read a key from that place \
+         (it reads one from: flash)",
+        place.unwrap_or("(not a string)")
+    );
+    "/// Where stage0 reads its verifying key (`[stage0] key`): `flash`, the\n\
+     /// `PUBKEY` constant built into stage0's own flash.\n\
+     pub const STAGE0_KEY_PLACE: &str = \"flash\";\n"
+        .into()
+}
+
+/// Lines of stage0's linker script that fail the link when the image (its
+/// code, read-only data and initial data image, from the start of the
+/// `STAGE0` region) leaves less than 1/16 of the region free. Stage0 is
+/// never updated in the field, yet it is rebuilt for every new node with
+/// that build's toolchain; the free part keeps such a build linking.
+pub const STAGE0_ASSERT: &str = "__stage0_image_end = LOADADDR(.data) + SIZEOF(.data);\n\
+ASSERT(__stage0_image_end - ORIGIN(STAGE0) <= LENGTH(STAGE0) - LENGTH(STAGE0) / 16, \
+\"stage0 does not leave 1/16 of its region free\");\n";
+
+/// `[layout] stage0` start and `[stage0] region_bytes` of the package's
+/// own MCU definition: stage0's whole region.
+pub fn stage0_region() -> (u32, u32) {
+    let dir = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"));
+    let path = dir.join("dagon-mcu.toml");
+    let text = fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+    stage0_region_of(&text)
+}
+
+fn stage0_region_of(text: &str) -> (u32, u32) {
+    let t: toml::Table = text.parse().expect("dagon-mcu.toml");
+    let at = t
+        .get("layout")
+        .and_then(|l| l.get("stage0"))
+        .and_then(|s| s.get("at"))
+        .unwrap_or_else(|| panic!("dagon-mcu.toml: [layout] stage0 is missing"));
+    let at = int(at, "[layout] stage0 at");
+    (
+        at,
+        int(required(&t, "stage0", "region_bytes"), "region_bytes"),
+    )
+}
+
+/// Writes `$OUT_DIR/memory.x` for stage0: `STAGE0` is its whole region
+/// ([`stage0_region`]); its first `head` bytes are the `HEAD` region (a
+/// block the boot ROM reads before stage0, such as the RP2040's boot2;
+/// 0: none) placed by `head_sections`, `FLASH` the rest; RAM at
+/// `ram`/`ram_len`; with [`STAGE0_ASSERT`].
+pub fn stage0_memory_x(head: u32, head_sections: &str, ram: u32, ram_len: u32) {
+    let region = stage0_region();
+    write_memory_x(&stage0_memory_text(
+        region,
+        head,
+        head_sections,
+        (ram, ram_len),
+    ));
+}
+
+fn stage0_memory_text(
+    (at, len): (u32, u32),
+    head: u32,
+    head_sections: &str,
+    (ram, ram_len): (u32, u32),
+) -> String {
+    let head_region = if head > 0 {
+        format!("  HEAD   : ORIGIN = {at:#010x}, LENGTH = {head:#x}\n")
+    } else {
+        String::new()
+    };
+    format!(
+        "MEMORY\n{{\n  STAGE0 : ORIGIN = {at:#010x}, LENGTH = {len:#x}\n{head_region}  \
+         FLASH  : ORIGIN = {:#010x}, LENGTH = {:#x}\n  \
+         RAM    : ORIGIN = {ram:#010x}, LENGTH = {ram_len:#x}\n}}\n\n{head_sections}{STAGE0_ASSERT}",
+        at + head,
+        len - head
+    )
 }
 
 /// `[execution] erase_regions` (the MCU's default regions) and
@@ -376,10 +457,7 @@ mod tests {
             rs.contains("pub const CONFIRMED_WDT_MS: u32 = 8000;\n"),
             "{rs}"
         );
-        assert!(
-            rs.contains("pub const STAGE0_VERIFIES: bool = false;\n"),
-            "{rs}"
-        );
+        assert!(!rs.contains("STAGE0_KEY_PLACE"), "no [stage0]: {rs}");
         assert!(
             rs.contains(
                 "EraseRegion { start: 0x4000, len: 0x8000, unit: 0x4000, unit_max_ms: 900 }"
@@ -448,6 +526,54 @@ mod tests {
         assert!(
             rs.contains("pub const RELAY_LINKS: [dagon_port::RelayLinkDef; 0] = [\n];\n"),
             "{rs}"
+        );
+    }
+
+    /// The key place stage0 reads comes from `[stage0] key` (flash when
+    /// left out); a place stage0 cannot read is refused.
+    #[test]
+    fn stage0_key_place_comes_from_the_definition() {
+        let want = "pub const STAGE0_KEY_PLACE: &str = \"flash\";\n";
+        for stage0 in [
+            "[stage0]\nregion_bytes = 0x4000\n",
+            "[stage0]\nkey = \"flash\"\n",
+        ] {
+            let rs = definition_rs(&format!("{DEF}{stage0}"));
+            assert!(rs.contains(want), "{rs}");
+        }
+        let otp =
+            std::panic::catch_unwind(|| definition_rs(&format!("{DEF}[stage0]\nkey = \"otp\"\n")));
+        let msg = *otp.unwrap_err().downcast::<String>().unwrap();
+        assert!(msg.contains("cannot read a key from that place"), "{msg}");
+    }
+
+    /// Stage0's linker script: the whole region as STAGE0, the head
+    /// block and the rest, and the assertion on the image's end.
+    #[test]
+    fn stage0_memory_holds_the_region_and_its_assertion() {
+        let def = "[layout]\nstage0 = { at = 0x1000_0000, size = 0x4000 }\n\
+                   [stage0]\nregion_bytes = 0x4000\n";
+        assert_eq!(stage0_region_of(def), (0x1000_0000, 0x4000));
+        let x = stage0_memory_text(
+            (0x1000_0000, 0x4000),
+            0x100,
+            "SECTIONS {}\n",
+            (0x2000_0000, 0x1000),
+        );
+        for want in [
+            "STAGE0 : ORIGIN = 0x10000000, LENGTH = 0x4000",
+            "HEAD   : ORIGIN = 0x10000000, LENGTH = 0x100",
+            "FLASH  : ORIGIN = 0x10000100, LENGTH = 0x3f00",
+            "SECTIONS {}\n__stage0_image_end = LOADADDR(.data) + SIZEOF(.data);",
+            "ASSERT(__stage0_image_end - ORIGIN(STAGE0) <= LENGTH(STAGE0) - LENGTH(STAGE0) / 16,",
+        ] {
+            assert!(x.contains(want), "{want} in\n{x}");
+        }
+        let x = stage0_memory_text((0x0800_0000, 0x4000), 0, "", (0x2000_0000, 0x1000));
+        assert!(!x.contains("HEAD"), "{x}");
+        assert!(
+            x.contains("FLASH  : ORIGIN = 0x08000000, LENGTH = 0x4000"),
+            "{x}"
         );
     }
 

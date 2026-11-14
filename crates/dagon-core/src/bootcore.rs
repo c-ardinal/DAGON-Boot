@@ -185,45 +185,54 @@ pub fn read_state<F: Flash>(flash: &mut F, layout: &LogLayout) -> Option<LogStat
     Some(st)
 }
 
-/// Why [`check_inline`] refused a boot core image.
+/// Why [`check_inline`] refused a boot core image. Each reason has its own
+/// code ([`CoreFail::code`]), the one stage0 hands its diagnostic output.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
 pub enum CoreFail {
     /// Header unreadable or not a valid header.
-    Header,
+    Header = 1,
     /// Header digest is not the one the log record names.
-    Digest,
+    Digest = 2,
     /// Body larger than the slot.
-    Size,
+    Size = 3,
     /// Not a boot core for this MCU bound to this slot.
-    Kind,
+    Kind = 4,
     /// `load_addr` is not this slot's body.
-    LoadAddr,
+    LoadAddr = 5,
     /// Body digest differs from the header's.
-    Body,
+    Body = 6,
     /// The header's signature does not verify under stage0's verifier.
-    Signature,
+    Signature = 7,
+}
+
+impl CoreFail {
+    /// The reason's code (1 to 7).
+    pub const fn code(self) -> u8 {
+        self as u8
+    }
 }
 
 /// Stage0's check of the boot core in the slot at `base` (`size` bytes,
-/// header inline at the start) as slot `slot`: its header is the one
-/// `expect` names (when a record names one), its signature verifies under
-/// `verifier` (when stage0 carries one: the definition's `stage0_verifies`), it
-/// is a boot core for MCU `mcu_id` bound to this slot, linked for the
-/// slot's body, fitting, and its body hashes to the header's digest.
-/// Returns the body address.
+/// header inline at the start) as slot `slot`: its header parses and its
+/// signature verifies under `verifier` (stage0's, holding the key at the
+/// place its MCU definition names), it is the header `expect` names (when a
+/// record names one), it is a boot core for MCU `mcu_id` bound to this
+/// slot, linked for the slot's body, fitting, and its body hashes to the
+/// header's digest. Returns the body address.
 pub fn check_inline<F: Flash, V: SigVerifier + ?Sized>(
     flash: &mut F,
     (base, size): (u32, u32),
     slot: u8,
-    (expect, verifier): (Option<&SlotRef>, Option<&V>),
+    (expect, verifier): (Option<&SlotRef>, &V),
     mcu_id: u16,
 ) -> Result<u32, CoreFail> {
     let mut raw = [0u8; HEADER_SIZE];
     flash.read(base, &mut raw).map_err(|_| CoreFail::Header)?;
-    let h = match verifier {
-        Some(v) => verify_header(&raw, v).map_err(|_| CoreFail::Signature)?,
-        None => ImageHeader::parse(&raw).map_err(|_| CoreFail::Header)?,
-    };
+    // Parsed first, so a slot holding no core reads as one, not as a
+    // signature that does not verify.
+    ImageHeader::parse(&raw).map_err(|_| CoreFail::Header)?;
+    let h = verify_header(&raw, verifier).map_err(|_| CoreFail::Signature)?;
     if expect.is_some_and(|r| r.digest16 != header_digest16(&raw)) {
         return Err(CoreFail::Digest);
     }
@@ -367,6 +376,84 @@ pub fn choose<B, E>(
         named: run.is_some(),
         why,
     })
+}
+
+/// Where stage0 tells why it started no core: an output the board may
+/// give (an indicator) or not. Stage0 decides the same whether it is there
+/// or not; it hears only the reason's code ([`CoreFail::code`]) once the
+/// decision is made. An output that shows the code until the next reset
+/// need not return.
+pub trait Diag {
+    fn report(&mut self, code: u8);
+}
+
+/// No diagnostic output: a node whose board gives none, or a node without
+/// a board.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct NoDiag;
+
+impl Diag for NoDiag {
+    fn report(&mut self, _: u8) {}
+}
+
+/// Shows `code` on an indicator until reset, for a board whose halt pattern
+/// blinks every `period_ms`: `code` blinks five times faster than that
+/// pattern, so a stage0 halt is told from the boot core's, then dark for
+/// one period, and again. `set` lights or darkens the indicator; `wait_ms`
+/// waits. A period below 10 ms would make each step no delay: the
+/// definition loader refuses such a board for an MCU with a stage0.
+pub fn blink_code(
+    code: u8,
+    period_ms: u32,
+    mut set: impl FnMut(bool),
+    mut wait_ms: impl FnMut(u32),
+) -> ! {
+    let half = period_ms / 10;
+    loop {
+        for _ in 0..code {
+            set(true);
+            wait_ms(half);
+            set(false);
+            wait_ms(half);
+        }
+        wait_ms(period_ms);
+    }
+}
+
+/// What stage0 knows of its MCU: the boot core log, the boot core slots
+/// (`(base, size)`, slot A first), the starts a pending core gets
+/// (`trial_attempts`) and the MCU id a core's header names.
+#[derive(Clone, Copy, Debug)]
+pub struct Stage0<'a> {
+    pub log: &'a LogLayout,
+    pub slots: &'a [(u32, u32)],
+    pub max: u8,
+    pub mcu_id: u16,
+}
+
+/// Stage0's decision, the same on every MCU: [`choose`] over the boot core
+/// log at `at.log` and the trial cell `cell` read at reset, where every
+/// core it may start, on whichever path, passes [`check_inline`] under
+/// `verifier`; a core whose signature does not verify never starts. When
+/// no core passes, it reports the reason to `diag` and returns it: the
+/// caller starts nothing and waits for recovery.
+pub fn decide<F: Flash, V: SigVerifier + ?Sized, D: Diag>(
+    flash: &mut F,
+    at: &Stage0<'_>,
+    cell: [u32; 2],
+    verifier: &V,
+    diag: &mut D,
+) -> Result<Start<u32>, NoCore<CoreFail>> {
+    let st = read_state(flash, at.log).unwrap_or_default();
+    let slots = u8::try_from(at.slots.len()).unwrap_or(u8::MAX);
+    let chosen = choose(&st, cell, at.max, slots, |s, r| {
+        let slot = *at.slots.get(usize::from(s)).ok_or(CoreFail::Kind)?;
+        check_inline(flash, slot, s, (r, verifier), at.mcu_id)
+    });
+    if let Err(no) = &chosen {
+        diag.report(no.why.code());
+    }
+    chosen
 }
 
 /// The slots [`choose`] has checked, as bits by slot number.

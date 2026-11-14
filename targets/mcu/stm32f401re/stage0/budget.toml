@@ -1,0 +1,48 @@
+# The parts of this stage0's image and the most bytes each may take
+# (scripts/stage0_size.py). A section belongs to the first part one of
+# whose `match` prefixes starts its symbol's demangled path, its section
+# name or its output section's name; the rest, and alignment padding, are
+# `other`. Fat LTO inlines code into its caller, so a change can move
+# bytes between parts; the image's total against its region less 1/16 is
+# the hard limit (the linker script's assertion).
+
+[[part]]
+name = "verifier"
+match = ["dagon_ed25519"]
+max_bytes = 1280
+
+[[part]]
+name = "sha2"
+match = ["sha2", "digest", "hybrid_array", "block_buffer"]
+max_bytes = 2048
+
+[[part]]
+name = "dagon-core"
+match = ["dagon_core"]
+max_bytes = 2560
+
+[[part]]
+name = "dagon-format"
+match = ["dagon_format"]
+max_bytes = 768
+
+[[part]]
+name = "mcu-package"
+match = [
+    "dagon_stm32f401re_stage0",
+    "dagon_mcu_stm32f401re",
+    "dagon_mcu_common",
+    "dagon_port",
+    "cortex_m",
+    ".vector_table",
+    "Reset",
+    "main",
+    "DefaultHandler",
+    "HardFault",
+    "DefaultPreInit",
+]
+max_bytes = 4096
+
+[[part]]
+name = "other"
+max_bytes = 4352

@@ -1,7 +1,10 @@
-//! `hal`: embeds the verifying key (`DAGON_PUBKEY`). For a target build,
-//! writes the final binary's memory.x from the flash layout (src/layout.rs,
-//! shared):
-//! - `image-stage0`: all of sector 0 (stage0 sits at the reset vector);
+//! `hal` and `image-stage0`: embeds the verifying key (`DAGON_PUBKEY`).
+//! For a target build, writes the final binary's memory.x from the flash
+//! layout (src/layout.rs, shared):
+//! - `image-stage0`: the region the MCU definition gives (`[layout]
+//!   stage0`, `[stage0] region_bytes`: all of sector 0, where stage0 sits at
+//!   the reset vector), with the link-time check that the image leaves 1/16
+//!   of it free;
 //! - `image-bootcore`: body of boot core slot A (B with `slot-b`), after
 //!   the 512-byte header;
 //! - otherwise an app: body of APP slot A (B with `slot-b`), after the
@@ -32,7 +35,7 @@ fn main() {
         "enable at most one of image-stage0, image-bootcore"
     );
     if feature("IMAGE_STAGE0") {
-        dagon_mcu_build::memory_x(STAGE0, STAGE0_SIZE, RAM, RAM_LEN);
+        dagon_mcu_build::stage0_memory_x(0, "", RAM, RAM_LEN);
     } else if feature("IMAGE_BOOTCORE") {
         let (start, len) = CORE_SLOTS[usize::from(feature("SLOT_B"))];
         dagon_mcu_build::memory_x(start + HEADER_LEN, len - HEADER_LEN, RAM, RAM_LEN);

@@ -500,6 +500,70 @@ pub fn boot_build(hal: Option<&Hal<'_>>) -> Option<BoardDef> {
     Some(l.board)
 }
 
+/// How an MCU package's stage0 drives a board's `[boot]` indicator.
+pub struct DiagHal<'a> {
+    /// Path of its `fn(pin, active_high: bool, period_ms: u32, code: u8)`
+    /// that shows `code` on the indicator for a board whose halt pattern
+    /// blinks every `period_ms` (it need not return).
+    pub report: &'a str,
+    /// That function's `pin` argument for a definition pin (`GPIO25` → `25`);
+    /// `None`: a pin it cannot drive.
+    pub pin: &'a dyn Fn(&str) -> Option<String>,
+}
+
+/// Stage0's diagnostic output for a node on `board` (`None`: no board), for
+/// `include!` beside [`board_rs`]: `BoardDiag`, implementing
+/// `dagon_core::bootcore::Diag` on the board's `[boot] led` when its halt
+/// pattern blinks; `type BoardDiag = NoDiag` when the board has no LED or
+/// its halt pattern is off, and for a node without a board. Refused: a
+/// halt pattern `code` (stage0 shows its own code in the blink pattern) and
+/// an LED pin the package cannot drive.
+pub fn diag_rs(board: Option<&BoardDef>, hal: &DiagHal<'_>) -> Result<String, String> {
+    const NONE: &str = "/// Stage0's diagnostic output: none, so stage0 reports nothing.\n\
+                        pub type BoardDiag = ::dagon_core::bootcore::NoDiag;\n";
+    let Some(b) = board else {
+        return Ok(NONE.into());
+    };
+    let boot = b.boot.clone().unwrap_or_default();
+    let (Some(led), Some(halt)) = (boot.led.as_deref(), boot.halt) else {
+        return Ok(NONE.into());
+    };
+    let period = match halt.pattern {
+        HaltPattern::Off => return Ok(NONE.into()),
+        HaltPattern::Code => {
+            return Err(format!(
+                "board {}: stage0 shows a halt as blink or off, not code",
+                b.id
+            ))
+        }
+        HaltPattern::Blink => halt.period_ms,
+    };
+    let pin = (hal.pin)(led)
+        .ok_or_else(|| format!("board {}: stage0 cannot drive [boot] led {led}", b.id))?;
+    Ok(format!(
+        "/// Stage0's diagnostic output (`dagon_core::bootcore::Diag`): board `{}`'s\n\
+         /// `[boot] led` {led}, showing the code with the halt pattern's blink.\n\
+         #[derive(Clone, Copy, Debug, Default)]\n\
+         pub struct BoardDiag;\n\n\
+         impl ::dagon_core::bootcore::Diag for BoardDiag {{\n    \
+         fn report(&mut self, code: u8) {{\n        \
+         {}({pin}, {}, {period}, code)\n    }}\n}}\n",
+        b.id,
+        hal.report,
+        boot.led_active == Active::High,
+    ))
+}
+
+/// A stage0's build script: [`boot_build`] without a HAL, and `diag.rs`
+/// ([`diag_rs`]) into `OUT_DIR`; a board whose indicator stage0 cannot use
+/// fails the build. Returns the node's board.
+pub fn stage0_build(hal: &DiagHal<'_>) -> Option<BoardDef> {
+    let board = boot_build(None);
+    let rs = diag_rs(board.as_ref(), hal).unwrap_or_else(|e| panic!("{e}"));
+    write(&out_dir().join("diag.rs"), &rs);
+    board
+}
+
 /// A boot core library's build script: [`BootFolder::verify_stamp`] for
 /// the node's boot folder, so the build refuses a boot crate whose
 /// dependency graph the host check (`dagon gen`) did not pass for exactly
@@ -604,6 +668,54 @@ mod tests {
         ] {
             assert!(rs.contains(want), "{want} in\n{rs}");
         }
+    }
+
+    /// Stage0's diagnostic output comes from the board's `[boot]` LED and
+    /// blinking halt pattern; without either (or without a board) it is
+    /// `NoDiag`, and a pin the package cannot drive is refused.
+    #[test]
+    fn stage0_diag_is_the_boards_indicator_or_none() {
+        let reg = Registry::builtin();
+        let gpio = |p: &str| p.strip_prefix("GPIO").map(str::to_string);
+        let hal = DiagHal {
+            report: "mcu::led::report",
+            pin: &gpio,
+        };
+        let b = reg.board("waveshare-rp2040-touch-lcd-1.28").unwrap();
+        let rs = diag_rs(Some(b), &hal).unwrap();
+        assert!(rs.contains("pub struct BoardDiag;"), "{rs}");
+        assert!(
+            rs.contains("impl ::dagon_core::bootcore::Diag for BoardDiag"),
+            "{rs}"
+        );
+        assert!(
+            rs.contains("mcu::led::report(25, true, 1000, code)"),
+            "{rs}"
+        );
+        let none = "pub type BoardDiag = ::dagon_core::bootcore::NoDiag;";
+        assert!(diag_rs(None, &hal).unwrap().contains(none));
+        let mut dark = b.clone();
+        dark.boot.as_mut().unwrap().halt = Some(super::super::board_boot::Halt {
+            pattern: HaltPattern::Off,
+            period_ms: 0,
+        });
+        assert!(diag_rs(Some(&dark), &hal).unwrap().contains(none));
+        let mut no_led = b.clone();
+        no_led.boot.as_mut().unwrap().led = None;
+        assert!(diag_rs(Some(&no_led), &hal).unwrap().contains(none));
+        let mut no_boot = b.clone();
+        no_boot.boot = None;
+        assert!(diag_rs(Some(&no_boot), &hal).unwrap().contains(none));
+        let nucleo = reg.board("nucleo-f401re").unwrap();
+        assert!(diag_rs(Some(nucleo), &hal)
+            .unwrap_err()
+            .contains("cannot drive [boot] led PA5"));
+        let mut code = b.clone();
+        code.boot.as_mut().unwrap().halt = Some(super::super::board_boot::Halt {
+            pattern: HaltPattern::Code,
+            period_ms: 0,
+        });
+        assert!(diag_rs(Some(&code), &hal).is_err());
     }
 
     #[test]

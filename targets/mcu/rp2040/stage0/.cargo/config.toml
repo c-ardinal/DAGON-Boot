@@ -15,6 +15,5 @@ target = "thumbv6m-none-eabi"
 # stage0-only difference, not a found fault. CI checks these compact rounds
 # against an independent implementation over block edges and a full slot
 # (crates/dagon-format/tests/sha256_backends.rs); emulating this image
-# also hashed a full slot to the host's digest. The diag build still
-# blinks 7 when SHA-256 fails its own test vector on the board.
+# also hashed a full slot to the host's digest.
 rustflags = ["-C", "link-arg=--nmagic", "-C", "link-arg=-Tlink.x", "--cfg", 'sha2_backend_soft="compact"']

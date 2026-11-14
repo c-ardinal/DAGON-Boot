@@ -122,6 +122,12 @@ pub const MCU: &[Requirement<McuCheck>] = &[
         check: placement,
     },
     Requirement {
+        engine: "stage0 (its build and its key)",
+        fields: &["stage0.region_bytes"],
+        rule: "[stage0] exactly when layout.stage0; region_bytes = layout.stage0.size; key one of KEY_PLACES",
+        check: stage0,
+    },
+    Requirement {
         engine: "log-face initialiser",
         fields: &["layout.bootcore_log.face_size", "layout.app_log.face_size"],
         rule: "face_size >= LOG_FACE_MIN (96)",
@@ -372,7 +378,7 @@ pub const BOARD: &[Requirement<BoardCheck>] = &[
             "boot.action[].ops[].reg",
             "boot.action[].ops[].bytes[]",
         ],
-        rule: "pins declared (gpio: boot = true, allowed level, the hold level on the power hold pin); 1..=32 ops; delay 1..=20 ms; bus_write only with the MCU's i2c boot capability, to a writable register, 1..=8 bytes; <= 50 ms per event",
+        rule: "pins declared (gpio: boot = true, allowed level, the hold level on the power hold pin); a blinking halt period >= 10 ms on the boot LED of an MCU with a stage0; 1..=32 ops; delay 1..=20 ms; bus_write only with the MCU's i2c boot capability, to a writable register, 1..=8 bytes; <= 50 ms per event",
         check: board_boot::boot,
     },
 ];
@@ -582,6 +588,32 @@ fn placement(m: &McuDef) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+/// `[stage0]` describes the stage0 `[layout]` places, and names a key
+/// place a DAGON stage0 can read.
+fn stage0(m: &McuDef) -> Result<(), String> {
+    let s = match (&m.stage0, m.layout.stage0) {
+        (None, None) => return Ok(()),
+        (Some(s), Some(r)) => {
+            fail(s.region_bytes != r.size, || {
+                format!(
+                    "stage0.region_bytes {:#x} is not the {:#x} bytes of layout.stage0",
+                    s.region_bytes, r.size
+                )
+            })?;
+            s
+        }
+        (None, Some(_)) => return Err("layout.stage0 needs a [stage0] table".into()),
+        (Some(_), None) => return Err("[stage0] needs layout.stage0, its region".into()),
+    };
+    fail(!super::KEY_PLACES.contains(&s.key.as_str()), || {
+        format!(
+            "stage0.key {:?}: this MCU's stage0 cannot read a key from that place (it reads one              from: {})",
+            s.key,
+            super::KEY_PLACES.join(", ")
+        )
+    })
 }
 
 fn log_faces(m: &McuDef) -> Result<(), String> {

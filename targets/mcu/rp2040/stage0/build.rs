@@ -1,28 +1,18 @@
-//! The boot LED and halt pattern come from the board of the node whose
-//! boot folder `DAGON_BOOT_CRATE` names (`board.rs`, written by `dagon
-//! gen` in `boot/<id>/`); the build fails without it.
+//! Stage0's diagnostic output comes from the board of the node whose boot
+//! folder `DAGON_BOOT_CRATE` names (`diag.rs`: `BoardDiag` on its `[boot]`
+//! LED, or none; `dagon gen` writes the folder in `boot/<id>/`); the build
+//! fails without it.
 
-use dagon_topology::defs::board_boot::HaltPattern;
-use dagon_topology::defs::codegen::boot_build;
+use dagon_topology::defs::codegen::{stage0_build, DiagHal};
 
 fn main() {
-    let Some(b) = boot_build(None) else {
-        return;
+    let gpio = |pin: &str| {
+        pin.strip_prefix("GPIO")
+            .and_then(|n| n.parse::<u8>().ok())
+            .map(|n| n.to_string())
     };
-    let boot = b.boot.unwrap_or_default();
-    assert!(
-        boot.halt.map(|h| h.pattern) != Some(HaltPattern::Code),
-        "board {}: this boot image shows a halt as blink or off, not code",
-        b.id
-    );
-    assert!(
-        boot.led.is_none()
-            || boot
-                .led
-                .as_deref()
-                .and_then(|p| p.strip_prefix("GPIO"))
-                .is_some(),
-        "board {}: [boot] led must be a GPIOn pin",
-        b.id
-    );
+    stage0_build(&DiagHal {
+        report: "dagon_mcu_rp2040::arm::led::report",
+        pin: &gpio,
+    });
 }

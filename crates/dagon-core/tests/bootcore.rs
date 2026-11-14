@@ -129,11 +129,9 @@ fn the_trial_cell_counts_only_for_the_image_it_names() {
     assert_eq!(tried([w ^ 0x100, w ^ 0x100], &b), 0, "digest bits differ");
 }
 
-/// With a verifier (a stage0 whose definition sets `stage0_verifies`), the
-/// check also refuses a core not signed by its key; without one it takes
-/// the digest-consistent image.
+/// The check refuses a core not signed by the key stage0's verifier holds.
 #[test]
-fn check_inline_verifies_the_signature_when_stage0_has_a_key() {
+fn check_inline_verifies_the_signature() {
     use dagon_core::bootcore::{check_inline, CoreFail};
     use dagon_ed25519::Ed25519Small;
     use dagon_format::header::*;
@@ -167,15 +165,10 @@ fn check_inline_verifies_the_signature_when_stage0_has_a_key() {
     m.write(0, &h.to_bytes()).unwrap();
     m.write(0x200, &body).unwrap();
     let slot = (0, 0x1000);
-    let none: Option<&Ed25519Small> = None;
-    assert_eq!(check_inline(&mut m, slot, 0, (None, none), 2), Ok(0x200));
     let (mine, theirs) = (Ed25519Small::new(*signer.pk), Ed25519Small::new(*other.pk));
-    assert_eq!(
-        check_inline(&mut m, slot, 0, (None, Some(&mine)), 2),
-        Ok(0x200)
-    );
+    assert_eq!(check_inline(&mut m, slot, 0, (None, &mine), 2), Ok(0x200));
     assert!(matches!(
-        check_inline(&mut m, slot, 0, (None, Some(&theirs)), 2),
+        check_inline(&mut m, slot, 0, (None, &theirs), 2),
         Err(CoreFail::Signature)
     ));
 }

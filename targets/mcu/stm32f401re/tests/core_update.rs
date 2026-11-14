@@ -1,8 +1,8 @@
 //! Boot core A/B self-update over the F401 layout: the slot store
 //! (`KindSStore` with the boot core slots, one log for both targets) takes
 //! a new core into the idle core slot in the agent's order (erase, body,
-//! header last, SLOT_PENDING); stage0's choice (`bootcore::choose` with
-//! `check_inline`) and the started core's settle (`bootcore::settle_log`)
+//! header last, SLOT_PENDING); stage0's choice (`bootcore::decide`, the
+//! signature included) and the started core's settle (`bootcore::settle_log`)
 //! run over the same flash; a power cut lands at every flash operation of
 //! the whole update. After any cut a boot core starts, the app's records
 //! are intact, and the log ends with one confirmed core and nothing pending.
@@ -250,23 +250,15 @@ fn boot(f: &mut Cut, cell: &mut [u32; 2]) -> u8 {
         if !f.powered() {
             return 0xFF;
         }
-        let st = bootcore::read_state(f, &LOG).unwrap_or_default();
-        let start = bootcore::choose(
-            &st,
-            *cell,
-            TRIAL_ATTEMPTS,
-            CORE_SLOTS.len() as u8,
-            |s, r| {
-                bootcore::check_inline(
-                    &mut f.clone(),
-                    CORE_SLOTS[usize::from(s)],
-                    s,
-                    (r, None::<&Ed25519Small>),
-                    MCU_ID,
-                )
-            },
-        )
-        .expect("a boot core starts");
+        let at = bootcore::Stage0 {
+            log: &LOG,
+            slots: &CORE_SLOTS,
+            max: TRIAL_ATTEMPTS,
+            mcu_id: MCU_ID,
+        };
+        let verifier = Ed25519Small::new(*KeyPair::from_seed(Seed::new(SEED)).pk);
+        let start = bootcore::decide(&mut f.clone(), &at, *cell, &verifier, &mut bootcore::NoDiag)
+            .expect("a boot core starts");
         *cell = start.cell;
         let ok = healthy(f, start.slot);
         match bootcore::settle_log(

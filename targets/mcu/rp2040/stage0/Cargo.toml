@@ -16,21 +16,18 @@ lint = { features = [""], env = { DAGON_BOOT_CRATE = "../bootcore/lint" } }
 # Its memory.x comes from dagon-mcu-rp2040 (`image-stage0`).
 [workspace]
 
-[features]
-# Backlight patterns at each step and on panic (bring-up diagnostics).
-diag = ["dagon-mcu-rp2040/diag-panic"]
-
 [dependencies]
 dagon-mcu-rp2040 = { path = "..", default-features = false, features = ["image-stage0"] }
+dagon-core = { path = "../../../../crates/dagon-core" }
+dagon-ed25519 = { path = "../../../../crates/dagon-ed25519" }
 dagon-format = { path = "../../../../crates/dagon-format" }
-dagon-port = { path = "../../../../crates/dagon-port" }
 cortex-m = "0.7"
 cortex-m-rt = "0.7"
 rp2040-boot2 = "0.3"
 panic-halt = "1"
 
 [build-dependencies]
-# The boot LED and halt pattern from the board definition.
+# The diagnostic output from the board definition's boot LED and halt pattern.
 dagon-topology = { path = "../../../../crates/dagon-topology" }
 
 [profile.release]

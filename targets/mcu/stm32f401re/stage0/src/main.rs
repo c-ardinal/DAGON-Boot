@@ -1,33 +1,56 @@
 //! STM32F401RE stage0 (never updated; all of sector 0, at the reset
 //! vector): picks the boot core slot from the boot core records of the
-//! state log and the trial cell (`dagon_core::bootcore::choose`): the
-//! pending core on trial while its starts last, else the confirmed one
-//! (slot A while the log names none). It checks the core's header against
-//! the record and its body's SHA-256 (`check_inline`), leaves the trial
-//! cell for the next reset, starts the independent watchdog before a core
-//! on trial and jumps. It never writes flash and has no signature check: a
-//! core is recorded only after the agent verified its signature, and stage0
-//! starts only the bytes that record names. With nothing to start it stays
-//! here (recover through the ROM loader).
+//! state log and the trial cell (the shared
+//! `dagon_core::bootcore::decide`): the pending core on trial while its
+//! starts last, else the confirmed one (slot A while the log names none),
+//! else any other slot's core. Every core it may start passes the shared
+//! check: its header's signature under the key built into stage0's flash
+//! (the MCU definition's `[stage0] key`), the record, and its body's
+//! SHA-256. It leaves the trial cell for the next reset, starts the
+//! independent watchdog before a core on trial and jumps. It never writes
+//! flash. With nothing to start it tells the reason's code to the board's
+//! diagnostic output (`BoardDiag`, generated from the board's `[boot]` LED
+//! and halt pattern; none without one) and stays here (recover through the
+//! ROM loader).
 #![no_std]
 #![no_main]
 
+// Used by `BoardDiag` only when the node's board has a `[boot]` LED.
+#[allow(dead_code)]
+mod indicator;
+
 use cortex_m::peripheral::{NVIC, SCB};
 use cortex_m_rt::entry;
-use dagon_core::bootcore;
+use dagon_core::bootcore::{self, Stage0};
 use dagon_ed25519::Ed25519Small;
 use dagon_format::stage0;
 use dagon_mcu_common::mapped::Mapped;
 use dagon_mcu_stm32f401re::layout::{CORE_SLOTS, LOG, MCU_ID, MIN_FLASH_SIZE, STAGE0};
-use dagon_mcu_stm32f401re::{trial, PUBKEY, STAGE0_VERIFIES, TRIAL_ATTEMPTS, TRIAL_WDT_MS};
+use dagon_mcu_stm32f401re::{trial, PUBKEY, STAGE0_KEY_PLACE, TRIAL_ATTEMPTS, TRIAL_WDT_MS};
 use panic_halt as _;
 
-/// Stage0's signature verifier, under the key built into it.
+// Stage0 reads its key from its own flash only.
+const _: () = assert!(matches!(STAGE0_KEY_PLACE.as_bytes(), b"flash"));
+
+/// Stage0's signature verifier, under the key built into its flash.
 const VERIFIER: Ed25519Small = Ed25519Small::new(PUBKEY);
+
+/// What stage0 knows of this MCU.
+const AT: Stage0<'static> = Stage0 {
+    log: &LOG,
+    slots: &CORE_SLOTS,
+    max: TRIAL_ATTEMPTS,
+    mcu_id: MCU_ID,
+};
 
 /// The version mark the agent's VERSION reads (`dagon_format::stage0`):
 /// this package's Cargo.toml version.
 static VERSION_MARK: stage0::Mark = stage0::Mark::of(stage0::version(env!("CARGO_PKG_VERSION")));
+
+/// The board's diagnostic output (build.rs).
+mod diag {
+    include!(concat!(env!("OUT_DIR"), "/diag.rs"));
+}
 
 #[entry]
 fn main() -> ! {
@@ -36,21 +59,8 @@ fn main() -> ! {
     // SAFETY: the flash is memory-mapped read-only from its base for
     // MIN_FLASH_SIZE bytes, and nothing writes it while stage0 runs.
     let mut flash = unsafe { Mapped::new(STAGE0 as *const u8, STAGE0, MIN_FLASH_SIZE) };
-    let st = bootcore::read_state(&mut flash, &LOG).unwrap_or_default();
-    let chosen = bootcore::choose(
-        &st,
-        trial::read(),
-        TRIAL_ATTEMPTS,
-        CORE_SLOTS.len() as u8,
-        |s, r| {
-            let slot = *CORE_SLOTS
-                .get(usize::from(s))
-                .ok_or(bootcore::CoreFail::Kind)?;
-            let verifier = STAGE0_VERIFIES.then_some(&VERIFIER);
-            bootcore::check_inline(&mut flash, slot, s, (r, verifier), MCU_ID)
-        },
-    );
-    match chosen {
+    let mut out = diag::BoardDiag::default();
+    match bootcore::decide(&mut flash, &AT, trial::read(), &VERIFIER, &mut out) {
         Ok(start) => {
             trial::write(start.cell);
             if start.trial {
@@ -58,6 +68,7 @@ fn main() -> ! {
             }
             jump(start.body)
         }
+        // Reported: wait for recovery.
         Err(_) => loop {
             cortex_m::asm::wfi();
         },

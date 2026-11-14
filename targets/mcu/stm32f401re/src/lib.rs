@@ -4,8 +4,10 @@
 //!   behind dagon-agent ([`KindSStore`]), the I2C target [`mailbox`], and
 //!   the conformance scratch.
 //! - `hal` (embassy-stm32): clocks ([`clocks`]), the flash port
-//!   ([`flash`]), the liveness-gated IWDG ([`watchdog`]); the verifying key
-//!   embedded at build time ([`PUBKEY`], [`TEST_KEY`]).
+//!   ([`flash`]), the liveness-gated IWDG ([`watchdog`]).
+//! - `hal` and `image-stage0`: the verifying key embedded at build time
+//!   ([`PUBKEY`], [`TEST_KEY`]); stage0 holds it in its own flash
+//!   ([`STAGE0_KEY_PLACE`]).
 //! - `node`: the board definition and node start-up ([`node`],
 //!   [`BoardDef`]) with DAGON's high-priority executor ([`exec`]); logs
 //!   through defmt.

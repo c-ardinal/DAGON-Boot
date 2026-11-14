@@ -21,14 +21,24 @@ dagon-mcu-rp2040 = { path = "..", default-features = false, features = ["image-s
 dagon-core = { path = "../../../../crates/dagon-core" }
 dagon-ed25519 = { path = "../../../../crates/dagon-ed25519" }
 dagon-format = { path = "../../../../crates/dagon-format" }
+dagon-mcu-common = { path = "../../common" }
 cortex-m = "0.7"
 cortex-m-rt = "0.7"
 rp2040-boot2 = "0.3"
 panic-halt = "1"
 
+[features]
+# Built to measure: stage0 times each signature check, shows the longest on
+# the board's diagnostic output in tenths of a second and starts no core
+# (lifecycle-events, "Stage0's clock and its verify time").
+verify-time = ["dagon-mcu-common/verify-time"]
+
 [build-dependencies]
-# The diagnostic output from the board definition's boot LED and halt pattern.
+# The diagnostic output from the board definition's boot LED and halt
+# pattern, and the clock setup the definitions choose for the node.
 dagon-topology = { path = "../../../../crates/dagon-topology" }
+# Writes that clock setup for stage0 (clock.rs).
+dagon-mcu-build = { path = "../../build" }
 
 [profile.release]
 opt-level = "z"

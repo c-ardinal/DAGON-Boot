@@ -70,7 +70,8 @@ const CONFIRM: Confirm = if cfg!(feature = "confirm") {
 
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
-    let (dagon, io) = Board::split(embassy_stm32::init(dagon_mcu_stm32f401re::clocks()));
+    let clock = dagon_mcu_stm32f401re::clock_setup!(board::def::app_clock);
+    let (dagon, io) = Board::split(embassy_stm32::init(clock.hal_config()));
     let led = Output::new(io.led, Level::Low, Speed::Low);
     let version = display::running_version();
     info!("app {} slot {}", Display2Format(&version), node::ACTIVE);

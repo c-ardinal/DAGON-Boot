@@ -223,7 +223,7 @@ fn receive_pads_the_last_unit_and_erases_the_header_sector_first() {
     s.read_header(SLOT_B, &mut back).unwrap();
     assert_eq!(back, h);
     // Header sector of B only: A's and factory's stay erased.
-    let a = header_addr(SLOT_A).unwrap() as usize;
+    let a = header_addr(APP, SLOT_A).unwrap() as usize;
     assert!(s.flash.0[a..a + HEADER_SECTOR as usize]
         .iter()
         .all(|&b| b == 0xFF));
@@ -495,8 +495,8 @@ fn the_readme_link_matrix_is_generated_from_link_kinds() {
 fn the_conformance_scratch_holds_no_header_or_image() {
     let (at, size) = crate::CONFORM_SCRATCH.unwrap();
     assert_eq!(region_for(at, size), Some(&REGIONS[2]));
-    for s in [SLOT_A, SLOT_B, SLOT_FACTORY] {
-        assert!(header_addr(s).unwrap() + HEADER_SECTOR <= at);
+    for l in crate::SLOT_LAYOUTS.iter() {
+        assert!(header_addr(l.target, l.slot).unwrap() + HEADER_SECTOR <= at);
     }
     assert!(at.is_multiple_of(crate::layout::ERASE_UNIT));
 }
@@ -539,7 +539,7 @@ fn a_cut_erase_never_boots_a_partial_image() {
                     s.ota.entries[sectors[step]] = [0xFF; ENTRY_LEN];
                 } else if step == sectors.len() {
                     s.flash
-                        .erase(header_addr(SLOT_B).unwrap(), HEADER_SECTOR)
+                        .erase(header_addr(APP, SLOT_B).unwrap(), HEADER_SECTOR)
                         .unwrap();
                 } else {
                     s.flash
@@ -577,6 +577,73 @@ fn a_plain_board_has_no_bring_up() {
     assert!(b.id().zip(b.bring_up_port()).is_none());
 }
 
+/// The store puts bodies and headers where the slot layouts it is given
+/// say, with their capacities: here app A, app B and the agent each moved
+/// inside their partitions, with headers elsewhere in the dagon partition.
+#[test]
+fn bodies_and_headers_follow_the_slot_layouts_given() {
+    use crate::layout::{DAGON, FACTORY};
+    use dagon_port::timeout::{HeaderPlace, SlotLayout};
+    use dagon_proto::payload::target::AGENT;
+    const fn moved(t: u8, slot: u8, start: u32, capacity: u32, header: u32) -> SlotLayout {
+        SlotLayout {
+            target: t,
+            slot,
+            start,
+            capacity,
+            header: HeaderPlace::Detached { at: header },
+        }
+    }
+    static MOVED: [SlotLayout; 3] = [
+        moved(
+            APP,
+            SLOT_A,
+            OTA_0.offset + 0x1_0000,
+            0x2_0000,
+            DAGON.offset + 0x4000,
+        ),
+        moved(
+            APP,
+            SLOT_B,
+            OTA_1.offset + 0x2_0000,
+            0x1_0000,
+            DAGON.offset + 0x5000,
+        ),
+        moved(
+            AGENT,
+            SLOT_FACTORY,
+            FACTORY.offset + 0x1_0000,
+            0x8000,
+            DAGON.offset + 0x6000,
+        ),
+    ];
+    let mut s = store().with_slots(&MOVED);
+    // Running app A: the agent and app B are free to write.
+    s.ota.running = SLOT_A;
+    assert_eq!(s.capacity(APP, SLOT_A), 0x2_0000);
+    assert_eq!(s.capacity(APP, SLOT_B), 0x1_0000);
+    assert_eq!(s.capacity(AGENT, SLOT_FACTORY), 0x8000);
+    assert_eq!(s.erase(APP, SLOT_B, 0x1_0001, &t()), Err(StoreError::Range));
+    let h = receive(&mut s, SLOT_B, 1);
+    let at = (OTA_1.offset + 0x2_0000) as usize;
+    assert_eq!(s.flash.0[at..at + 5003], body(5003, 1)[..]);
+    assert!(s.flash.0[OTA_1.offset as usize..at]
+        .iter()
+        .all(|&b| b == 0xFF));
+    let hat = (DAGON.offset + 0x5000) as usize;
+    assert_eq!(s.flash.0[hat..hat + HEADER_SIZE], h[..]);
+    assert_eq!(s.status().slots[SLOT_B as usize].state, SlotState::Written);
+    // The agent goes to its moved place, its header to its own sector.
+    s.erase(AGENT, SLOT_FACTORY, 8, &t()).unwrap();
+    s.write(AGENT, SLOT_FACTORY, 0, &[7; 8], &t()).unwrap();
+    s.write_target_header(AGENT, SLOT_FACTORY, &h, &t())
+        .unwrap();
+    let f = (FACTORY.offset + 0x1_0000) as usize;
+    assert_eq!(s.flash.0[f..f + 8], [7; 8]);
+    let fh = (DAGON.offset + 0x6000) as usize;
+    assert_eq!(s.flash.0[fh..fh + HEADER_SIZE], h[..]);
+}
+
 /// Every target and slot the store receives into has the definition's one
 /// planner layout, with the store's capacity.
 #[test]
@@ -595,7 +662,7 @@ fn every_slot_the_store_takes_has_one_planner_layout() {
                     assert_eq!(l.capacity, cap, "{t}/{slot}");
                     let body = crate::layout::app_partition(slot).unwrap().offset;
                     let header = dagon_port::timeout::HeaderPlace::Detached {
-                        at: header_addr(slot).unwrap(),
+                        at: header_addr(t, slot).unwrap(),
                     };
                     assert_eq!((l.start, l.header), (body, header), "{t}/{slot}");
                 }

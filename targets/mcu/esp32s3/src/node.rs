@@ -43,7 +43,7 @@ use crate::{
     links::{self, Kind},
     otadata::ENTRY_LEN,
     sys::{EspClock, EspReset, RtcWatchdog},
-    TRIAL_WDT_MS,
+    CONFIRMED_WDT_MS, TRIAL_WDT_MS,
 };
 use dagon_agent::{
     reply_status, Agent, SlotStore, StoreError, TrialPolicy, IDLE_TIMEOUT_MS, NO_ADDR,
@@ -131,11 +131,12 @@ impl NodeConfig {
 /// Proof that the RTC WDT runs; [`start`] requires it.
 pub struct WatchdogArmed(());
 
-/// Starts the RTC WDT (4 s) right away. Call it first, right after
-/// `esp_hal::init` (which stops every watchdog), so an image that stalls
-/// before [`start`] still resets and, on trial, rolls back. This is the only
-/// start: the link task never restarts it and feeds it only once it knows
-/// the image is confirmed.
+/// Starts the RTC WDT with the trial period (`[watchdog] trial_ms`) right
+/// away. Call it first, right after `esp_hal::init` (which stops every
+/// watchdog), so an image that stalls before [`start`] still resets and, on
+/// trial, rolls back. The link task restarts it only once, with the
+/// confirmed period, when it knows the image is confirmed, and feeds it
+/// only from then on.
 pub fn arm_watchdog(rtc_timer: RTC_TIMER<'_>) -> WatchdogArmed {
     RtcWatchdog::new(Rtc::new(rtc_timer).rwdt).start(TRIAL_WDT_MS);
     WatchdogArmed(())
@@ -212,7 +213,7 @@ pub fn start(
         use dagon_events::Clock;
         EspClock.now_us()
     };
-    let periods = Periods::new(TRIAL_WDT_MS, TRIAL_WDT_MS);
+    let periods = Periods::new(TRIAL_WDT_MS, CONFIRMED_WDT_MS);
     let events = EVENTS.init(Published::new());
     let board = p.board_extension.take();
     let (chain, events) = node_chain(
@@ -347,7 +348,7 @@ impl Link {
         let storage = STORAGE.init(RefCell::new(FlashStorage::new(p.flash)));
         let boot = EspBootSelect::new(storage).ok()?;
         let wdt = WDT.init(RefCell::new(
-            TrialWatchdog::new(rwdt, EspClock).with_liveness(liveness),
+            TrialWatchdog::new(rwdt, EspClock, CONFIRMED_WDT_MS).with_liveness(liveness),
         ));
         let regions = p.board.erase_regions();
         let mut store = EspStore::new(EspFlash::new(storage), boot, SharedWdt(wdt), regions);
@@ -363,8 +364,14 @@ impl Link {
             store,
             start.chain,
         );
-        // The trial watchdog never feeds while on trial.
-        agent.watchdog_taken(TRIAL_WDT_MS, TrialPolicy::NeverFeed);
+        // The trial watchdog never feeds while on trial; a confirmed image
+        // runs the confirmed period.
+        let period = if trial {
+            TRIAL_WDT_MS
+        } else {
+            CONFIRMED_WDT_MS
+        };
+        agent.watchdog_taken(period, TrialPolicy::NeverFeed);
         // Board bring-up, once, before the links open and anything is
         // served; then the app's own confirm, if it asked.
         let id = p.board.id();

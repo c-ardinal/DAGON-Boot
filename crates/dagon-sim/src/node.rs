@@ -133,7 +133,8 @@ pub struct SimNode {
 impl SimNode {
     /// Powers up and boots whatever the flash holds.
     pub fn new(cfg: Config, flash: SimFlash, layout: Layout) -> Self {
-        let store = SimStore::new(flash, layout, cfg.pubkey);
+        let mut store = SimStore::new(flash, layout, cfg.pubkey);
+        store.stage0_node = Some((cfg.mcu_id, cfg.target_tag));
         let check = SimCheck::default();
         let app = chain(check.clone());
         let events = app.reader();

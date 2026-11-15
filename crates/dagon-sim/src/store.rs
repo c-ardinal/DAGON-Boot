@@ -10,7 +10,9 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use crate::flash::SimFlash;
 use dagon_agent::{SlotStore, StoreError, Transition};
-use dagon_core::bootcore::{choose, read_state, settle_log, Cell, MustReset, Settled, CLEARED};
+use dagon_core::bootcore::{
+    choose, confirmed_app, read_state, settle_log, Apps, Cell, MustReset, Settled, CLEARED,
+};
 use dagon_core::log::{trial_room, Log, LogLayout, LogState, SlotRef};
 use dagon_ed25519::Ed25519Compact;
 use dagon_format::header::{
@@ -205,6 +207,10 @@ pub struct SimStore {
     /// A boot core of this version fails its own check (cannot start the
     /// app), as a broken new core does.
     pub broken_core: Option<Version>,
+    /// The MCU id and node tag stage0 is built with, for the app it starts
+    /// when no boot core may; `None`: it starts none (a stage0 built
+    /// without a node tag).
+    pub stage0_node: Option<(u16, [u8; 16])>,
 }
 
 impl Default for SimStore {
@@ -221,6 +227,7 @@ impl SimStore {
             pubkey,
             cell: Arc::new(Mutex::new(CLEARED)),
             broken_core: None,
+            stage0_node: None,
         }
     }
 
@@ -236,7 +243,10 @@ impl SimStore {
     /// A store over a copy of this one's flash (a second, independent
     /// device in the same state).
     pub fn snapshot(&self) -> SimStore {
-        SimStore::new(self.flash().clone(), self.layout, self.pubkey)
+        SimStore {
+            stage0_node: self.stage0_node,
+            ..SimStore::new(self.flash().clone(), self.layout, self.pubkey)
+        }
     }
 
     /// The flash, shared with every clone of this store.
@@ -582,14 +592,16 @@ impl SimStore {
     /// image on trial (its header the one the log names, signature and
     /// body verified, attempts left) after a BOOT_ATTEMPT; otherwise roll
     /// it back with a ROLLBACK naming the confirmed slot the boot returns
-    /// to; then start the confirmed slot while it holds its image.
+    /// to; then start the confirmed slot while it holds its image. Behind
+    /// a stage0 with no boot core to start, stage0 starts the confirmed
+    /// app itself ([`SimStore::confirmed_app`]).
     pub fn boot(&mut self) -> Boot {
         if !self.bootcore_present() {
             return Boot::Nothing;
         }
         if let Some(c) = self.layout.cores {
             if self.boot_core(c).is_none() {
-                return Boot::Nothing;
+                return self.confirmed_app();
             }
         }
         let (ls, _) = self.log_state();
@@ -617,6 +629,36 @@ impl SimStore {
 }
 
 impl SimStore {
+    /// Stage0's start of the confirmed app when no boot core may start:
+    /// stage0's own decision (`dagon_core::bootcore::confirmed_app`) over
+    /// the log face and APP slots, for the node [`SimStore::stage0_node`]
+    /// names; a simulated app's entry point is its body's start. Nothing
+    /// is recorded.
+    fn confirmed_app(&mut self) -> Boot {
+        let Some((mcu_id, target_tag)) = self.stage0_node else {
+            return Boot::Nothing;
+        };
+        if !self.flash().is_powered() {
+            return Boot::Nothing;
+        }
+        let (base, len) = self.layout.log;
+        let log = LogLayout {
+            faces: [base, base],
+            face_len: len,
+        };
+        let apps = Apps {
+            log: &log,
+            slots: self.layout.slots,
+            target_tag,
+            entry: |_, body| body,
+        };
+        let verifier = Ed25519Compact::new(self.pubkey);
+        match confirmed_app(&mut Paged(self.flash()), &apps, mcu_id, &verifier) {
+            Some((slot, _)) => Boot::Run(slot),
+            None => Boot::Nothing,
+        }
+    }
+
     fn erase_body(&mut self, t: u8, slot: u8, len: u32) -> Result<(), StoreError> {
         let (body, cap) = self.region(t, slot)?;
         if len > cap {

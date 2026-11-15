@@ -7,7 +7,9 @@ use dagon_agent::image::State as Image;
 use dagon_agent::{Agent, SlotStore};
 use dagon_events::{compose, Bounds, Composed, Layer, Nop, Published, Watchdog};
 use dagon_format::header::*;
+use dagon_format::statelog::{kind, Record};
 use dagon_format::{key_id, sha256, Version};
+use dagon_port::Flash;
 use dagon_proto::payload::*;
 use dagon_proto::{flags, max_payload, split_status, Cmd, Frame, Status};
 use dagon_sim::store::{Boot, Cores};
@@ -138,4 +140,42 @@ fn the_agent_over_a_one_slot_store_knows_no_slot_b() {
     let (f, _) = Frame::decode(reply.frame, max_payload::USB).unwrap();
     assert_eq!(f.flags, flags::RESP);
     assert_eq!(split_status(f.payload).unwrap().0, Status::Unsupported);
+}
+
+/// With its only boot core slot erased (a new core's write cut by a power
+/// loss), stage0 has no core to start and starts the confirmed app, which
+/// can write the core again; with an app on trial it starts nothing.
+#[test]
+fn with_no_core_to_start_stage0_starts_the_confirmed_app() {
+    let (base, len) = ONE.cores.unwrap().slots[0];
+    let tag = f401_config(*kp().pk).target_tag;
+    let mut store = node();
+    store.flash().erase(base, len).unwrap();
+    assert_eq!(store.boot(), Boot::Nothing, "a stage0 with no node tag");
+    store.stage0_node = Some((mcu_id::STM32F401XE, tag));
+    assert_eq!(store.boot(), Boot::Run(0));
+    // An app built for another node is not started.
+    store.stage0_node = Some((mcu_id::STM32F401XE, target_tag("another-node")));
+    assert_eq!(store.boot(), Boot::Nothing);
+
+    // An app on trial: the log says the trial image runs, so stage0 does
+    // not start the confirmed one under it.
+    let mut store = node();
+    store.stage0_node = Some((mcu_id::STM32F401XE, tag));
+    store.flash().erase(base, len).unwrap();
+    let hdr: [u8; HEADER_SIZE] = image(0, 0)[..HEADER_SIZE].try_into().unwrap();
+    for k in [kind::SLOT_PENDING, kind::BOOT_ATTEMPT] {
+        store
+            .append(Record {
+                kind: k,
+                target: target::APP,
+                slot: 0,
+                reason: 0,
+                seq: 0,
+                version: Version::new(1, 0, 0),
+                digest16: header_digest16(&hdr),
+            })
+            .unwrap();
+    }
+    assert_eq!(store.boot(), Boot::Nothing);
 }

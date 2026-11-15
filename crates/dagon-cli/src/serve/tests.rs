@@ -252,6 +252,71 @@ fn definitions_are_served_behind_the_same_guards_with_the_projects_boards() {
     }
 }
 
+// The project fixture each consumer's parity test reads, here and in
+// serve's tests.
+#[allow(clippy::duplicate_mod)]
+#[path = "../../../dagon-topology/tests/parity/mod.rs"]
+mod parity;
+
+/// The definitions sent to the page are the project's, its overrides of a
+/// built-in MCU and board and of a synthetic pair (in its DAGON source)
+/// merged: the text the Console loads into dagon-wasm.
+#[test]
+fn definitions_carry_the_projects_overrides() {
+    use parity::*;
+    let p = project("serve");
+    let web = p.dir.join("web");
+    std::fs::create_dir_all(&web).unwrap();
+    let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let server = Server::new(
+        "0123456789abcdef0123456789abcdef".into(),
+        port,
+        Some(p.toml.clone()),
+        web,
+    );
+    let s = server.clone();
+    std::thread::spawn(move || super::serve(listener, s));
+    let a = Area {
+        dir: p.dir.join("area"),
+        server,
+    };
+    let (st, body) = http(
+        &a,
+        "GET",
+        "/v1/definitions",
+        &[("Authorization", &auth(&a))],
+        b"",
+    );
+    assert_eq!(st, 200, "{body}");
+    let cfg = crate::config::Config::load(Some(&p.toml.display().to_string())).unwrap();
+    assert_eq!(body, crate::defs::registry(&cfg).unwrap().to_json());
+    let reg = dagon_topology::defs::Registry::from_json(&body).unwrap();
+    for (mcu, board, _) in OVERRIDDEN {
+        let m = reg.mcu(mcu).unwrap();
+        let w = m.watchdog.as_ref().unwrap();
+        assert_eq!(
+            (w.trial_ms, w.confirmed_ms),
+            (TRIAL_MS, CONFIRMED_MS),
+            "{mcu}"
+        );
+        let rom = m.rom_i2c.as_ref().unwrap();
+        assert_eq!(
+            (rom.addr, &rom.erase_sectors[..]),
+            (ROM_ADDR, &ROM_ERASE[..])
+        );
+        use dagon_format::header::{image_kind, slot_binding};
+        let b = reg.slot(mcu, image_kind::APP, slot_binding::B).unwrap();
+        assert_eq!(
+            (b.start, b.size, b.max_payload),
+            (APP_B.0, APP_B.1, APP_B_CAPACITY)
+        );
+        let b = reg.board(board).unwrap();
+        assert_eq!(b.product, PRODUCT);
+        assert!(b.pins.iter().any(|x| x.pin == PIN.0), "{board}");
+    }
+}
+
 #[test]
 fn hello_reports_keys_without_their_values() {
     let a = start("hello");

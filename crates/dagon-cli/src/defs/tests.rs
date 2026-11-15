@@ -349,3 +349,85 @@ fn a_project_defined_mcu_and_board_go_through_every_command() {
     );
     std::fs::remove_dir_all(&dir).unwrap();
 }
+
+// The project fixture each consumer's parity test reads, here and in
+// serve's tests.
+#[allow(clippy::duplicate_mod)]
+#[path = "../../../dagon-topology/tests/parity/mod.rs"]
+mod parity;
+
+/// One project's overrides of a built-in MCU and board and of a synthetic
+/// pair in its DAGON source (`[dagon] path`) reach the commands: the
+/// definitions they load, topology check and compile, image signing, and
+/// the node timings and ROM maps `dagon deploy` gives the host.
+#[test]
+fn a_projects_overrides_reach_every_command() {
+    use parity::*;
+    let p = project("cli");
+    let cfg_arg = s(&p.toml);
+    let cfg = Config::load(Some(&cfg_arg)).unwrap();
+    let reg = super::registry(&cfg).unwrap();
+    let topo = p.toml.with_file_name("t.yaml");
+    let t = read_topology(&cfg, &topo).unwrap();
+    let report = dagon_topology::check_with(&reg, &t);
+    assert_eq!(report.errors().count(), 0, "{}", report.to_json());
+    let bin = p.dir.join("t.bin");
+    crate::commands::topo_compile(&crate::cli::args(&[
+        &s(&topo),
+        "--config",
+        &cfg_arg,
+        "--out",
+        &s(&bin),
+    ]))
+    .unwrap();
+    assert!(!std::fs::read(&bin).unwrap().is_empty());
+
+    let key = dagon_sign::generate_to_dir(&p.dir.join("keys")).unwrap();
+    let key_arg = s(&key.secret_path);
+    let timings = crate::device::node_timings(&reg, &t).unwrap();
+    let roms = dagon_host::rom::rom_maps(&reg);
+    for (mcu, _, node) in OVERRIDDEN {
+        // Slot B takes what its overridden capacity holds, and no more.
+        for (len, fits) in [(APP_B_CAPACITY, true), (APP_B_CAPACITY + 1, false)] {
+            let input = p.dir.join(format!("{node}-{len}.bin"));
+            write(&input, &vec![0xA5; len as usize]);
+            let out = p.dir.join(format!("{node}-{len}.img"));
+            let r = crate::commands::image_sign(&crate::cli::args(&[
+                &s(&input),
+                "--node",
+                node,
+                "--slot",
+                "b",
+                "--version",
+                "1.0.0",
+                "--config",
+                &cfg_arg,
+                "--key",
+                &key_arg,
+                "--out",
+                &s(&out),
+            ]));
+            assert_eq!(r.is_ok(), fits, "{node} {len}: {r:?}");
+        }
+        let i = t.nodes.iter().position(|n| n.id == node).unwrap();
+        let (_, nt) = timings
+            .iter()
+            .find(|(at, _)| usize::from(*at) == i)
+            .unwrap();
+        assert_eq!(nt.trial_ms, TRIAL_MS, "{node}");
+        let erase = nt.erase.as_ref().unwrap();
+        let r = erase
+            .regions
+            .iter()
+            .find(|r| r.start == ERASE_START)
+            .unwrap();
+        assert_eq!(r.unit_max_ms, ERASE_MAX_MS, "{node}");
+        let wire = reg.mcu(mcu).unwrap().wire_id;
+        let map = roms.iter().find(|m| m.wire_id == wire).unwrap();
+        assert_eq!(
+            (map.addr, &map.erase[..]),
+            (ROM_ADDR, &ROM_ERASE[..]),
+            "{node}"
+        );
+    }
+}

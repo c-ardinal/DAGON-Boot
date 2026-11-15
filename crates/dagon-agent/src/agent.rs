@@ -336,7 +336,12 @@ impl<S: SlotStore, X: AppChain> Agent<S, X> {
             wire: Some(dagon_proto::PROTO_VERSION),
             mcu_id: Some(self.cfg.mcu_id),
             stage0: self.images.stage0_version(),
-            boot_core: core.and_then(|c| c.running()),
+            // Only a core the log confirms and its slot holds runs: none
+            // while stage0 started the app for want of one.
+            boot_core: core.and_then(|c| {
+                let running = c.slots.get(usize::from(c.active))?;
+                (running.state == SlotState::Confirmed).then_some(running.version)
+            }),
             core_slots: core,
             app_slots: Some(VersionSlots::of(&self.images.status())),
         };
@@ -408,11 +413,40 @@ impl<S: SlotStore, X: AppChain> Agent<S, X> {
                 .images
                 .target_status(req.target)
                 .ok_or(Status::Unsupported)?;
-            if req.slot == st.active || req.slot == st.confirmed {
+            if self.keeps(req.target) && (req.slot == st.active || req.slot == st.confirmed) {
+                return Err(Status::State);
+            }
+            if self.only_core_on_trial(req.target) {
                 return Err(Status::State);
             }
         }
         Ok(body_len)
+    }
+
+    /// `t` is the MCU's one boot core slot and the running app is on
+    /// trial: the slot is not written or set pending then. Stage0 starts
+    /// no app while an APP trial is open, so a write of the only core cut
+    /// by a power loss would leave nothing to start; the app is confirmed
+    /// or rolled back first.
+    fn only_core_on_trial(&mut self, t: u8) -> bool {
+        if self.keeps(t) {
+            return false;
+        }
+        let st = self.images.status();
+        st.slots
+            .get(usize::from(st.active))
+            .is_some_and(|s| s.state == SlotState::Trying)
+    }
+
+    /// Whether the running and the confirmed slot of `t` are kept
+    /// from being written and set pending. An APP slot: always, as the app
+    /// runs from it and goes back to the confirmed one. A boot core slot:
+    /// while the MCU has another boot core slot, which takes the new core
+    /// so the old one stays for stage0 to fall back to; the only boot core
+    /// slot is written in place (this agent runs from an APP slot, and
+    /// stage0 starts the confirmed app when no core may start).
+    fn keeps(&self, t: u8) -> bool {
+        t != target::BOOTCORE || self.images.slot_count(t) > 1
     }
 
     /// Erases the slot (image `erase`) and opens the session's body.
@@ -575,7 +609,7 @@ impl<S: SlotStore, X: AppChain> Agent<S, X> {
         }
         self.end_session(AbortCause::NewRequest);
         let st = self.images.target_status(t).ok_or(Status::Unsupported)?;
-        if req.slot == st.active {
+        if (self.keeps(t) && req.slot == st.active) || self.only_core_on_trial(t) {
             return Err(Status::State);
         }
         self.images.read_header(t, req.slot, &mut self.hdr)?;

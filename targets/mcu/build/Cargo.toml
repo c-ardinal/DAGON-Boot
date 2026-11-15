@@ -11,3 +11,6 @@ publish = false
 [dependencies]
 # Reads the MCU definition the build is given (`definition`).
 toml = { version = "0.8", default-features = false, features = ["parse"] }
+# Checks the node's definitions against the hashes `dagon gen` wrote
+# (`defs.sha256`).
+sha2 = { version = "0.11", default-features = false }

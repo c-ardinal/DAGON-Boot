@@ -144,8 +144,103 @@ fn node_definition_text() -> String {
             path.display()
         )
     });
+    check_defs(&folder, &mut |f| {
+        println!("cargo:rerun-if-changed={}", f.display())
+    })
+    .unwrap_or_else(|e| panic!("{e}"));
     same_mcu(&own, &text).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
     text
+}
+
+/// The node's board definition in its boot folder, for a node that names
+/// a board (`dagon gen` writes it beside [`NODE_DEFINITION`]).
+pub const NODE_BOARD: &str = "board.toml";
+
+/// The hashes `dagon gen` writes beside the node's definitions: one
+/// `<SHA-256, 64 lowercase hex digits>  <file name>` line per file, as
+/// `sha256sum` writes them ([`defs_text`]). Every build that reads a
+/// node's definitions checks them with [`check_defs`], this crate's build
+/// helpers and DAGON's board and boot stage builds alike.
+pub const DEFS_FILE: &str = "defs.sha256";
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    sha2::Digest::finalize(<sha2::Sha256 as sha2::Digest>::new_with_prefix(bytes))
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
+}
+
+/// The text of [`DEFS_FILE`] for `files` (file name, text).
+pub fn defs_text(files: &[(&str, &str)]) -> String {
+    files
+        .iter()
+        .map(|(name, text)| format!("{}  {name}\n", sha256_hex(text.as_bytes())))
+        .collect()
+}
+
+/// Checks the boot folder `folder` against its [`DEFS_FILE`]: every file
+/// it lists hashes to its line, and the node's [`NODE_DEFINITION`] and
+/// [`NODE_BOARD`], where present, are listed. `read` is told each file
+/// read (a build script reruns when one changes). A folder without
+/// [`DEFS_FILE`] is refused: `dagon gen` did not write it, or not all of
+/// it. The source tree's own boot folders (the lint and stage0 size
+/// folders) carry their hashes like any other.
+pub fn check_defs(folder: &Path, read: &mut dyn FnMut(&Path)) -> Result<(), String> {
+    let path = folder.join(DEFS_FILE);
+    read(&path);
+    let text = match fs::read_to_string(&path) {
+        Ok(t) => t,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return Err(format!(
+                "{}: no {DEFS_FILE} beside the node's definitions; run `dagon gen` first",
+                folder.display()
+            ))
+        }
+        Err(e) => return Err(format!("{}: {e}", path.display())),
+    };
+    let gen = "the project's overrides in dagon.toml say what to change; run `dagon gen`";
+    let mut listed = Vec::new();
+    for (i, line) in text.lines().enumerate() {
+        let parsed = line.split_once("  ").filter(|(h, name)| {
+            h.len() == 64
+                && h.bytes()
+                    .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+                && !name.is_empty()
+                && !name.contains(['/', '\\', ':'])
+                && *name != ".."
+        });
+        let Some((want, name)) = parsed else {
+            return Err(format!(
+                "{}: line {} is not `<sha256>  <file>`; {gen}",
+                path.display(),
+                i + 1
+            ));
+        };
+        let file = folder.join(name);
+        read(&file);
+        let bytes = fs::read(&file).map_err(|e| {
+            format!(
+                "{}: {e}, though {DEFS_FILE} lists it; {gen}",
+                file.display()
+            )
+        })?;
+        if sha256_hex(&bytes) != want {
+            return Err(format!(
+                "{}: changed since `dagon gen` wrote it (it no longer matches its line in {DEFS_FILE}); {gen}",
+                file.display()
+            ));
+        }
+        listed.push(name);
+    }
+    for f in [NODE_DEFINITION, NODE_BOARD] {
+        if folder.join(f).is_file() && !listed.contains(&f) {
+            return Err(format!(
+                "{}: no line in {DEFS_FILE} for it; {gen}",
+                folder.join(f).display()
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn read(path: &Path) -> String {
@@ -899,6 +994,59 @@ fn slot_layout_rs(l: &toml::Value) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A node's boot folder `dagon gen` wrote holds `defs.sha256`
+    /// (`sha256sum` lines, [`defs_text`]): a definition edited after gen, a
+    /// listed file that is gone, a definition it does not list and a line
+    /// that is not one are refused, naming the file, and so is a folder
+    /// without it. Every file it reads is reported.
+    #[test]
+    fn the_node_definitions_must_match_their_hashes() {
+        let d = std::env::temp_dir().join(format!("dagon-mcu-build-defs-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&d);
+        fs::create_dir_all(&d).unwrap();
+        let check = |d: &Path| check_defs(d, &mut |_| {});
+        let e = check(&d).unwrap_err();
+        assert!(
+            e.contains("no defs.sha256") && e.contains("dagon gen"),
+            "{e}"
+        );
+        let (mcu, board) = ("id = \"m\"\n", "id = \"b\"\n");
+        let text = defs_text(&[(NODE_DEFINITION, mcu), (NODE_BOARD, board)]);
+        // `printf 'id = "m"\n' | sha256sum`.
+        let line = "f9c09336d64fe06078bfb5f10af086c7f5f2604c7416c3e6d91a4f67e778f923  mcu.toml\n";
+        assert!(text.starts_with(line), "{text}");
+        assert!(text.ends_with("  board.toml\n") && text.lines().count() == 2);
+        fs::write(d.join(NODE_DEFINITION), mcu).unwrap();
+        fs::write(d.join(NODE_BOARD), board).unwrap();
+        fs::write(d.join(DEFS_FILE), &text).unwrap();
+        let mut read = Vec::new();
+        check_defs(&d, &mut |f| read.push(f.to_path_buf())).unwrap();
+        for f in [DEFS_FILE, NODE_DEFINITION, NODE_BOARD] {
+            assert!(read.contains(&d.join(f)), "{f}: {read:?}");
+        }
+        fs::write(d.join(NODE_BOARD), "id = \"c\"\n").unwrap();
+        let e = check(&d).unwrap_err();
+        assert!(
+            e.contains("board.toml") && e.contains(DEFS_FILE) && e.contains("dagon gen"),
+            "{e}"
+        );
+        fs::remove_file(d.join(NODE_BOARD)).unwrap();
+        let e = check(&d).unwrap_err();
+        assert!(e.contains("board.toml"), "{e}");
+        // A definition the hashes do not name.
+        fs::write(d.join(DEFS_FILE), line).unwrap();
+        check(&d).unwrap();
+        fs::write(d.join(NODE_BOARD), board).unwrap();
+        let e = check(&d).unwrap_err();
+        assert!(e.contains("board.toml") && e.contains("no line"), "{e}");
+        fs::write(d.join(DEFS_FILE), "").unwrap();
+        let e = check(&d).unwrap_err();
+        assert!(e.contains("no line"), "{e}");
+        fs::write(d.join(DEFS_FILE), "not a line\n").unwrap();
+        assert!(check(&d).is_err());
+        fs::remove_dir_all(&d).unwrap();
+    }
 
     const DEF: &str = "[watchdog]\ntrial_attempts = 3\ntrial_ms = 4000\nconfirmed_ms = 8000\n\
                        range_ms = { min = 1, max = 9000 }\n\

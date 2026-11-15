@@ -101,13 +101,13 @@ DAGONの状態の変化は、どれも状態機械の遷移で、遷移はどれ
 
 ### 状態機械`core_image`
 
-stage0のあるself-bootのマイコンの、ブートローダのスロット1つのライフサイクル（定義の`bootcore`のスロット）。状態ログのブートローダの記録に持つ。エージェントが新しいコアを空いているスロットに書いて待機にし、stage0がそれを試し、コアが自分で試行を決着させる。新しいコアが自分の検査の後で`confirmed`、stage0が新しいコアをあきらめたときは古いコアが`rolled_back`。アプリは次の起動でそれらを見る。
+stage0のあるself-bootのマイコンの、ブートローダのスロット1つのライフサイクル（定義の`bootcore`のスロット）。状態ログのブートローダの記録に持つ。エージェントが新しいコアを空いているスロット（マイコンにスロットが1つだけのときはそのスロット）に書いて待機にし、stage0がそれを試し、コアが自分で試行を決着させる。新しいコアが自分の検査の後で`confirmed`、stage0が新しいコアをあきらめたときは古いコアが`rolled_back`。アプリは次の起動でそれらを見る。
 
 状態: `Empty` (最初の状態), `Written`, `Pending`, `Confirmed`, `Reverted`。
 
 | 種類 | コード | 遷移 | ペイロード | 受け取り | 備考 | 説明 |
 |---|---|---|---|---|---|---|
-| `app.core_transfer_started` | 0x40 | `erase`: Empty \| Written \| Pending \| Reverted → Empty | `slot: u8` (1 B), `len: u32` (4 B) | live, host |  | 新しいコアのために空いているブートローダのスロットを消去した（動いているコアや確定したコアのスロットは消さない）。 |
+| `app.core_transfer_started` | 0x40 | `erase`: Empty \| Written \| Pending \| Confirmed \| Reverted → Empty | `slot: u8` (1 B), `len: u32` (4 B) | live, host |  | 新しいコアのために空いているブートローダのスロットを消去した。動いているコアや確定したコアのスロットは、それがマイコンのただ1つのブートローダのスロットのときだけ消す。 |
 | `app.core_written` | 0x41 | `written`: Empty → Written | `slot: u8` (1 B), `version: Version` (4 B) | live, host |  | コアの本体を検証し、そのヘッダを書いて読み返した。 |
 | `app.core_pending_set` | 0x42 | `pending_set`: Written \| Pending \| Reverted → Pending | `slot: u8` (1 B), `version: Version` (4 B) | live, host |  | 次のリセットでstage0が試すコアになった。 |
 | `app.core_confirmed` | 0x43 | `confirmed`: Pending → Confirmed | `slot: u8` (1 B), `version: Version` (4 B) | host |  | 新しいコアが自分の検査を通り、自分を確定した。 |

@@ -50,8 +50,8 @@ use critical_section as _;
 compile_error!("`store-tests` lets any code change image state; it is for host tests only");
 
 dagon_events::state_machine! {
-    /// The lifecycle of one image slot (the two APP slots, and the hub's
-    /// topology copy). The slot store's mutators run only inside these
+    /// The lifecycle of one image slot (each APP slot the MCU definition
+    /// gives, and the hub's topology copy). The slot store's mutators run only inside these
     /// transitions. `trial_started` and `rolled_back` are the boot core's
     /// changes, replayed at start from the slot store.
     pub machine image in App {

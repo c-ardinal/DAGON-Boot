@@ -22,6 +22,12 @@ Node: `$ARGUMENTS` (ask for the node id if none was given; the ids are in
    - Error in `src/main.rs`: if the developer edited it, show the
      difference; `dagon gen <id> --force-main` writes the start-up again
      (app.rs is never touched).
+   - A build that refuses the node's definitions in `boot/<id>/` (a file
+     that no longer matches `defs.sha256`, or no `defs.sha256`): run
+     `dagon gen <id>`; never edit those files. A definition value to
+     change goes in `[mcu_override.<mcu id>]` or
+     `[board_override.<board id>]` of `dagon.toml`, after the developer
+     agrees.
    - Error inside a `dagon-board-*` / `dagon-mcu-*` crate, a missing
      toolchain or target: do not edit those crates. Report what is missing
      (for example a Rust target from `rustup target add`, or the ESP32-S3

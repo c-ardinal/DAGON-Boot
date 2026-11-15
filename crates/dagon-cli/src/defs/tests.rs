@@ -278,13 +278,10 @@ fn a_project_defined_mcu_and_board_go_through_every_command() {
     assert!(!page.contains(&*dir.to_string_lossy()), "{page}");
     // Every part builds from the node's MCU definition, which `dagon gen`
     // writes into the node's folder.
-    let folder = cfg.base.join("boot/seg");
-    std::fs::create_dir_all(&folder).unwrap();
-    std::fs::write(
-        folder.join("mcu.toml"),
-        dagon_topology::defs::boot_folder::mcu_file_text(&reg, "fake-m0").unwrap(),
-    )
-    .unwrap();
+    crate::nodebuild::write_definitions(
+        &cfg.base.join("boot/seg"),
+        &dagon_topology::defs::boot_folder::mcu_file_text(&reg, "fake-m0").unwrap(),
+    );
     let mut log = Vec::new();
     let built = crate::flash::build_parts(
         &cfg,

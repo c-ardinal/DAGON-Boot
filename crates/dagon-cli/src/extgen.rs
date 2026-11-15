@@ -24,7 +24,9 @@ use std::path::{Path, PathBuf};
 
 use dagon_extension::node::{self, Ext, Image, ImagePlan};
 use dagon_extension::{gen, Known, Manifest, MANIFEST_FILE};
-use dagon_topology::defs::boot_folder::{mcu_file_text, source_sha256, MCU_FILE};
+use dagon_topology::defs::boot_folder::{
+    board_file_text, defs_text, mcu_file_text, source_sha256, BOARD_FILE, DEFS_FILE, MCU_FILE,
+};
 use dagon_topology::defs::{ImageKind, McuDef, PortKind, Registry};
 use dagon_topology::schema::{Node, Role};
 use serde::Deserialize;
@@ -451,10 +453,21 @@ fn plan_files(
         format!("{dir}/protection.toml"),
         gen::protection_map(&n.id, def, &plans),
     ));
-    // The definition the node's firmware builds from: the app's, and the
-    // boot core's and stage0's where the MCU has them.
+    // The definitions the node's firmware builds from: the app's, and the
+    // boot core's and stage0's where the MCU has them; the board package's
+    // for a node with a board. Their hashes tie every build to this run.
     let mcu = mcu_file_text(reg, &n.mcu).ok_or_else(|| format!("unknown MCU {}", n.mcu))?;
-    files.push((format!("{BOOT_CRATES}/{}/{MCU_FILE}", n.id), mcu));
+    let mut defs = vec![(MCU_FILE, mcu)];
+    if let Some(b) = n.board.as_deref() {
+        let text = board_file_text(reg, b).ok_or_else(|| format!("unknown board {b}"))?;
+        defs.push((BOARD_FILE, text));
+    }
+    let named: Vec<(&str, &str)> = defs.iter().map(|(f, t)| (*f, t.as_str())).collect();
+    let hashes = defs_text(&named);
+    for (f, text) in defs {
+        files.push((format!("{BOOT_CRATES}/{}/{f}", n.id), text));
+    }
+    files.push((format!("{BOOT_CRATES}/{}/{DEFS_FILE}", n.id), hashes));
     Ok((files, notes))
 }
 
@@ -482,7 +495,9 @@ fn prune(base: &Path, rel: &str, keep: &[String]) -> Result<Vec<String>, String>
     names.sort();
     let mut out = Vec::new();
     for name in names {
-        if !generated(&dir.join(&name)) {
+        // The hashes carry no mark (one line per file); gen owns them by name.
+        let hashes = rel.starts_with(&format!("{BOOT_CRATES}/")) && name == DEFS_FILE;
+        if !hashes && !generated(&dir.join(&name)) {
             out.push(format!(
                 "{:<10} {rel}/{name} (not written by dagon gen)",
                 "kept"
@@ -711,6 +726,55 @@ mod tests {
         cfg_with(base, boot, &[])
     }
 
+    /// Every node's folder gets the definitions its firmware builds from:
+    /// its MCU's and, for a node with a board, its board's, each as the
+    /// project resolves it, and `defs.sha256` with one line per file
+    /// written. A node without a board has no `board.toml` and no board
+    /// line; a node that no longer names its board loses its `board.toml`.
+    #[test]
+    fn gen_writes_each_node_s_definitions_and_their_hashes() {
+        use dagon_topology::defs::boot_folder::{
+            board_file_text, check_defs, defs_text, BOARD_FILE, DEFS_FILE,
+        };
+        let base = scratch("defs");
+        let reg = Registry::builtin();
+        let lone = || {
+            serde_json::from_value::<Node>(serde_json::json!({
+                "id": "lone", "mcu": "rp2040", "role": "node", "port": "self-boot", "tag": "lone",
+            }))
+            .unwrap()
+        };
+        let nodes = [node("seg", "stm32f401re", "nucleo-f401re", "node"), lone()];
+        let cfg = Extensions::default();
+        write(&base, &nodes, &[], &[], &cfg).unwrap();
+        let read = |rel: &str| std::fs::read_to_string(base.join(rel)).ok();
+        let mcu = mcu_file_text(reg, "stm32f401re").unwrap();
+        let board = board_file_text(reg, "nucleo-f401re").unwrap();
+        assert_eq!(read("boot/seg/board.toml").as_ref(), Some(&board));
+        assert_eq!(
+            read(&format!("boot/seg/{DEFS_FILE}")),
+            Some(defs_text(&[(MCU_FILE, &mcu), (BOARD_FILE, &board)]))
+        );
+        check_defs(&base.join("boot/seg")).unwrap();
+        let mcu = mcu_file_text(reg, "rp2040").unwrap();
+        assert_eq!(read("boot/lone/board.toml"), None);
+        assert_eq!(
+            read(&format!("boot/lone/{DEFS_FILE}")),
+            Some(defs_text(&[(MCU_FILE, &mcu)]))
+        );
+        // seg no longer names its board.
+        let mut seg = node("seg", "stm32f401re", "nucleo-f401re", "node");
+        seg.board = None;
+        let lines = write(&base, &[seg, lone()], &[], &[], &cfg).unwrap();
+        assert_eq!(read("boot/seg/board.toml"), None, "{lines:?}");
+        let mcu = mcu_file_text(reg, "stm32f401re").unwrap();
+        assert_eq!(
+            read(&format!("boot/seg/{DEFS_FILE}")),
+            Some(defs_text(&[(MCU_FILE, &mcu)]))
+        );
+        std::fs::remove_dir_all(&base).unwrap();
+    }
+
     #[test]
     fn gen_writes_the_boot_crate_wiring_fragments_and_the_map_per_node() {
         let base = scratch("ok");
@@ -759,9 +823,10 @@ mod tests {
         // No boot stage, no RAM in the definition: no boot crate, no
         // wiring, no fragments.
         assert!(!has("nodes/watch/dagon/boot_wiring.rs"));
-        assert!(!lines
-            .iter()
-            .any(|l| l.contains("boot/watch") && !l.ends_with("boot/watch/mcu.toml")));
+        assert!(!lines.iter().any(|l| l.contains("boot/watch")
+            && !["mcu.toml", "board.toml", "defs.sha256"]
+                .iter()
+                .any(|f| l.ends_with(&format!("boot/watch/{f}")))));
         assert!(!lines
             .iter()
             .any(|l| l.contains("nodes/watch/dagon/memory-")));

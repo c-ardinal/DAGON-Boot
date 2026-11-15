@@ -1,19 +1,24 @@
 //! Hub stage0 (never updated): picks the boot core slot from the boot core
 //! log and the trial cell (`dagon_mcu_rp2040::bl::choose`, the shared
 //! `dagon_core::bootcore::decide`): the pending core on trial while its
-//! starts last, else the confirmed one (slot A while the log is empty),
-//! else any other slot's core. Every core it may start passes the shared
+//! starts last, else the confirmed one; never a core no record names.
+//! Every core it may start passes the shared
 //! check: its header's signature under the key built into stage0's flash
 //! (the MCU definition's `[stage0] key`), the log record, and its body's
 //! SHA-256. It leaves the trial cell for the next reset, starts the
 //! watchdog before a trial core and jumps. It never writes flash. Holds
 //! boot2 for the whole flash.
 //!
+//! No core to start (one boot core slot, its new core cut or failed): it
+//! starts the app the app log confirms after the same checks and more
+//! (`dagon_core::bootcore::start`), under the confirmed watchdog period,
+//! and leaves the trial cell alone; that app writes the core again.
+//!
 //! It checks on the clock the definitions choose for the node (`clock`:
 //! the MCU's `[[stage0.clock]]` setup for its board's `[clock]`) and puts
 //! the clocks back as the chip starts them before it starts a core.
 //!
-//! Nothing to start: it tells the reason's code to the board's diagnostic
+//! Neither to start: it tells the reason's code to the board's diagnostic
 //! output (`BoardDiag`, generated from the board's `[boot]` LED and halt
 //! pattern; none without one) and waits for recovery (BOOTSEL and the
 //! install UF2).
@@ -30,6 +35,7 @@
 mod clock;
 
 use cortex_m_rt::entry;
+use dagon_core::bootcore::Boot;
 use dagon_ed25519::Ed25519Small;
 use dagon_format::stage0;
 use dagon_mcu_rp2040::arm::{jump, led, trial, xip_flash};
@@ -78,18 +84,25 @@ fn main() -> ! {
     start_core(&mut flash, &mut out);
 }
 
-/// Starts the core stage0's choice gives, on the clocks as the chip starts
-/// them; with none, waits for recovery.
+/// Starts the core (or the app) stage0's choice gives, on the clocks as
+/// the chip starts them; with neither, waits for recovery.
 #[cfg(not(feature = "verify-time"))]
 fn start_core(flash: &mut dagon_mcu_rp2040::mapped::Mapped, out: &mut diag::BoardDiag) -> ! {
-    match bl::choose(flash, trial::read(), &VERIFIER, out) {
-        Ok(start) => {
+    match bl::start(flash, trial::read(), &VERIFIER, out) {
+        Ok(Boot::Core(start)) => {
             clock::hand_back();
             trial::write(start.cell);
             if start.trial {
                 trial::arm_watchdog(dagon_mcu_rp2040::TRIAL_WDT_MS);
             }
             jump(start.body)
+        }
+        // The confirmed app, as the boot core starts it: on the confirmed
+        // period; the trial cell stays as it is.
+        Ok(Boot::App { body, .. }) => {
+            clock::hand_back();
+            trial::arm_watchdog(dagon_mcu_rp2040::CONFIRMED_WDT_MS);
+            jump(body)
         }
         // Reported: wait for recovery.
         Err(_) => loop {

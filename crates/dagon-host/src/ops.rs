@@ -6,7 +6,7 @@ use alloc::vec;
 use alloc::vec::Vec;
 use dagon_ed25519::Ed25519Compact;
 use dagon_format::bundle::BundleView;
-use dagon_format::header::{image_kind, slot_binding, HEADER_SIZE};
+use dagon_format::header::{header_digest16, image_kind, slot_binding, HEADER_SIZE};
 use dagon_format::topology::{self, TopologyView};
 use dagon_format::{sha256, ImageHeader, Version};
 use dagon_port::timeout::{
@@ -327,8 +327,7 @@ impl<T: Transport, C: HostClock> Host<T, C> {
         rewrite: bool,
         on_event: &mut dyn FnMut(Event),
     ) -> Result<Version, T::Error> {
-        let running = st.hello.active_version;
-        let core = self.update_core(b, node, to, running, on_event).await;
+        let core = self.update_core(b, node, to, st, on_event).await;
         self.core_write = false;
         let core = core?;
         let agent = self.update_agent(b, node, to, on_event).await?;
@@ -394,9 +393,10 @@ impl<T: Transport, C: HostClock> Host<T, C> {
         b: &BundleView<'_>,
         node: u8,
         to: Target,
-        app: Version,
+        st: &NodeState,
         on_event: &mut dyn FnMut(Event),
     ) -> Result<bool, T::Error> {
+        let app = st.hello.active_version;
         let core_slots = slots_of(b, node, image_kind::BOOTCORE);
         let cores: Vec<&[u8]> = core_slots
             .iter()
@@ -418,6 +418,11 @@ impl<T: Transport, C: HostClock> Host<T, C> {
             });
         if installed {
             return Ok(false);
+        }
+        // The only core is not rewritten under an app trial (the node
+        // refuses too): the user confirms or rolls the app back first.
+        if core_slots.len() == 1 && st.hello.trial {
+            return Err(Error::AppOnTrial { running: app });
         }
         let slot = free_slot(&core_slots, &cs).ok_or(Error::NoImage { node })?;
         let img = image_of(b, node, image_kind::BOOTCORE, slot).ok_or(Error::NoImage { node })?;
@@ -464,8 +469,19 @@ impl<T: Transport, C: HostClock> Host<T, C> {
         }
         self.await_version(to, app).await?;
         let after = self.boot_core_status(to).await?;
-        if after.confirmed != slot {
-            let back = after.slots.get(usize::from(after.active)).copied();
+        // The new core itself, confirmed: with one boot core slot the
+        // record naming that slot may still be the old core's.
+        let digest = header_digest16(raw);
+        let took_over = after.confirmed == slot
+            && after
+                .slots
+                .get(usize::from(slot))
+                .is_some_and(|s| s.state == SlotState::Confirmed && s.digest16 == digest);
+        if !took_over {
+            // The core that runs instead; none when stage0 started the app.
+            let back = (after.slots.get(usize::from(after.active)))
+                .filter(|s| s.state == SlotState::Confirmed)
+                .copied();
             return Err(Error::BootCoreRolledBack {
                 expected: v,
                 running: back.map(|s| s.version).unwrap_or_default(),
@@ -1121,6 +1137,7 @@ pub fn reason<E>(e: &Error<E>) -> &'static str {
         Error::WrongVersion { .. } => "ROLLED BACK",
         Error::BootCoreRolledBack { .. } => "BOOT CORE ROLLED BACK",
         Error::BootCoreRefused => "NO BOOT CORE TRIAL",
+        Error::AppOnTrial { .. } => "APP ON TRIAL",
         Error::DigestMismatch => "E_DIGEST",
         Error::NoImage { .. } => "NO IMAGE",
         Error::RomNotConfirmed { .. } => "ROM NOT CONFIRMED",

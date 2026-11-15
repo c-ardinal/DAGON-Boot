@@ -192,7 +192,7 @@ impl<S: SlotStore> ImageStore<S> {
 
     /// How many slots of target `t` the store has: slot A, then B, each
     /// while the store can receive into it.
-    fn slot_count(&self, t: u8) -> u8 {
+    pub(crate) fn slot_count(&self, t: u8) -> u8 {
         (0..ROOM as u8)
             .take_while(|&s| self.store.capacity(t, s) > 0)
             .count() as u8
@@ -484,7 +484,7 @@ impl<S: SlotStore> ImageStore<S> {
     }
 
     /// `pending_set` of a boot core slot: stage0 tries it at the next reset.
-    /// The other slot is the running core, which the agent never sets
+    /// Any other slot holds the running core, which the agent never sets
     /// pending, so nothing else moves.
     pub(crate) fn set_core_pending(
         &mut self,

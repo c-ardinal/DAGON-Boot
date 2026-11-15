@@ -106,17 +106,19 @@ dagon_events::state_machine! {
     /// The lifecycle of one boot core slot of a self-boot MCU with a
     /// stage0 (its definition's `bootcore` slots), kept in the boot core
     /// records of the state log. The agent writes a new core into the idle
-    /// slot and sets it pending; stage0 tries it and the core settles the
-    /// trial itself: `confirmed` by the new core after its own check,
-    /// `rolled_back` by the old one when stage0 gave the new one up. The
-    /// app sees those at its next start.
+    /// slot (into the only one when the MCU has one) and sets it pending;
+    /// stage0 tries it and the core settles the trial itself: `confirmed`
+    /// by the new core after its own check, `rolled_back` by the old one
+    /// when stage0 gave the new one up. The app sees those at its next
+    /// start.
     pub machine core_image in App {
         initial Empty;
         states { Empty, Written, Pending, Confirmed, Reverted }
         transitions {
-            /// The idle boot core slot was erased for a new core (never the
-            /// running or the confirmed core's slot).
-            erase(slot: u8, len: u32): Empty | Written | Pending | Reverted => Empty
+            /// The idle boot core slot was erased for a new core; the
+            /// running and confirmed core's slot only when it is the MCU's
+            /// one boot core slot.
+            erase(slot: u8, len: u32): Empty | Written | Pending | Confirmed | Reverted => Empty
                 emits CoreTransferStarted = 0x40 { slot: u8, len: u32 }
                 observe(live, host);
             /// The core's body verified and its header written and read

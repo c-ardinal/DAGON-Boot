@@ -69,20 +69,23 @@ fn stage0_tries_the_pending_core_until_the_attempts_run_out() {
         );
     }
     assert_eq!(plan(&st, MAX, MAX), Plan::Run(Some(a)));
-    // Nothing pending: the confirmed core; an empty log: slot A unchecked.
+    // Nothing pending: the confirmed core; an empty log: none.
     let only_a = core_fold(&[rec(kind::PROVISION, target::BOOTCORE, a, 0)]);
     assert_eq!(plan(&only_a, 0, MAX), Plan::Run(Some(a)));
     assert_eq!(plan(&LogState::default(), 0, MAX), Plan::Run(None));
 }
 
-/// A log naming a slot whose core does not check out (corrupt, or a
-/// forged record) never strands a node whose other slot holds a good core;
-/// only when no slot checks out is there nothing to start.
+/// Stage0 starts only a core a record names, as the trial rules allow:
+/// the confirmed one, or the pending one while its starts last. A core no
+/// record names, a merely written one, or a pending one whose starts ran
+/// out never starts, whatever else fails (the caller then falls back to
+/// the confirmed app).
 #[test]
-fn stage0_tries_every_slot_before_it_gives_up() {
+fn stage0_starts_only_a_recorded_core_under_the_trial_rules() {
     let (a, b) = (r(0, 0), r(1, 1));
     let only = |good: &'static [u8]| {
-        move |s: u8, _: Option<&SlotRef>| {
+        move |s: u8, r: Option<&SlotRef>| {
+            assert!(r.is_some_and(|r| r.slot == s), "checked against its record");
             if good.contains(&s) {
                 Ok(s)
             } else {
@@ -90,26 +93,28 @@ fn stage0_tries_every_slot_before_it_gives_up() {
             }
         }
     };
-    // Confirmed B is corrupt: A (no record names it) starts.
+    // Confirmed B is corrupt; A holds a good core no record names.
     let st = core_fold(&[rec(kind::PROVISION, target::BOOTCORE, b, 0)]);
-    let start = choose(&st, CLEARED, MAX, 2, only(&[0])).unwrap();
-    assert_eq!((start.slot, start.trial), (0, false));
-    // An empty log and a blank slot A: B.
-    let start = choose(&LogState::default(), CLEARED, MAX, 2, only(&[1])).unwrap();
-    assert_eq!(start.slot, 1);
-    // Pending B fails its check, confirmed A is corrupt too: nothing but B
-    // is left, and it fails; no slot checks out.
+    let e = choose(&st, CLEARED, MAX, 2, only(&[0])).unwrap_err();
+    assert_eq!((e.named, e.why), (true, Some(1)));
+    // An empty log: nothing is checked, nothing starts.
+    let e = choose(&LogState::default(), CLEARED, MAX, 2, only(&[0, 1])).unwrap_err();
+    assert_eq!((e.named, e.why), (false, None));
+    // Pending B fails its check and confirmed A is corrupt: nothing starts.
     let st = core_fold(&[
         rec(kind::PROVISION, target::BOOTCORE, a, 0),
         rec(kind::SLOT_PENDING, target::BOOTCORE, b, 0),
     ]);
     let e = choose(&st, CLEARED, MAX, 2, only(&[])).unwrap_err();
-    assert!(e.named);
-    // Pending B ran out of starts and confirmed A is corrupt: B runs as the
-    // last resort, not on trial, the count kept.
+    assert_eq!((e.named, e.why), (true, Some(0)));
+    // Pending B ran out of starts and confirmed A is corrupt: B, which
+    // checks out, does not start without its trial.
     let cell = trial_cell(&b, MAX);
-    let start = choose(&st, cell, MAX, 2, only(&[1])).unwrap();
-    assert_eq!((start.slot, start.trial, start.cell), (1, false, cell));
+    let e = choose(&st, cell, MAX, 2, only(&[1])).unwrap_err();
+    assert_eq!((e.named, e.why), (true, Some(0)));
+    // While its starts last, B starts on trial.
+    let start = choose(&st, CLEARED, MAX, 2, only(&[1])).unwrap();
+    assert_eq!((start.slot, start.trial), (1, true));
 }
 
 #[test]

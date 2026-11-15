@@ -243,10 +243,11 @@ pub mod trial {
     /// The counter runs down twice per tick (erratum RP2040-E1).
     const COUNTS_PER_US: u32 = 2;
 
-    /// Starts the watchdog for `ms` (the definition's trial period; about,
-    /// as the ring oscillator varies) before stage0 jumps to a core on
+    /// Starts the watchdog for `ms` (about, as the ring oscillator varies)
+    /// before stage0 jumps: the definition's trial period before a core on
     /// trial, so a core that hangs before it takes the watchdog over is
-    /// reset and its start counted.
+    /// reset and its start counted; its confirmed period before the
+    /// confirmed app it starts when no core may.
     pub fn arm_watchdog(ms: u32) {
         let load = ms.saturating_mul(1000 * COUNTS_PER_US).min(LOAD_MAX);
         // SAFETY: fixed RP2040 watchdog registers; the started core takes

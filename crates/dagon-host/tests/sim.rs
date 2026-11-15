@@ -119,6 +119,11 @@ fn sim() -> Sim {
         .unwrap()
         .provision(&seg_img(0, v), 0)
         .unwrap();
+    sim_of(hub)
+}
+
+/// The host's side of the link to `hub`.
+fn sim_of(hub: SimRelay) -> Sim {
     Sim {
         relay: Rc::new(RefCell::new(hub)),
         pending: Vec::new(),
@@ -1782,6 +1787,301 @@ fn a_core_that_fails_its_own_check_is_rolled_back_and_the_run_stops() {
     );
     let hello = block_on(host(&s).status(Target::Local)).unwrap().hello;
     assert_eq!(hello.active_version, Version::new(1, 0, 0), "app untouched");
+}
+
+// A hub whose MCU definition gives the boot core one slot: its app writes
+// that slot, and stage0 starts the confirmed app when no core may start.
+
+/// Its APP slots and its boot core slot where the RP2040 definition puts
+/// them (stage0 checks that an image is linked for its slot), the log and
+/// the boot core log after them, in 4 MiB of flash.
+fn one_core_layout() -> dagon_sim::Layout {
+    let hub = dagon_sim::Layout::RP2040_HUB;
+    let mut cores = hub.cores.unwrap();
+    cores.slots = &[(0x1000_8000, 0x2_0000)];
+    cores.log.faces = [0x1032_0000, 0x1032_1000];
+    dagon_sim::Layout {
+        bootcore: (0x1000_0000, 0x8000),
+        log: (0x1030_0000, 0x1000),
+        slots: &[(0x1004_8000, 0x10_0000), (0x1014_8000, 0x10_0000)],
+        topology: Some((0x1031_0000, 0x1_0000)),
+        cores: Some(cores),
+        ..hub
+    }
+}
+
+/// The hub alone, one boot core slot, its app 1.0.0 in slot A.
+fn one_core_sim() -> Sim {
+    let flash = dagon_sim::SimFlash::new(
+        &[dagon_port::FlashRegion {
+            start: 0x1000_0000,
+            len: 0x40_0000,
+            erase_size: 0x1000,
+            write_size: 256,
+            erased_value: 0xFF,
+        }],
+        7,
+    );
+    let mut hub =
+        dagon_sim::SimNode::new(dagon_sim::hub_config(*key().pk), flash, one_core_layout());
+    hub.provision(&hub_img(0, Version::new(1, 0, 0)), 0)
+        .unwrap();
+    sim_of(SimRelay::new(hub))
+}
+
+/// The built-in definitions with the RP2040's boot core slot B left out,
+/// as a project overrides them.
+fn one_core_defs() -> dagon_topology::defs::Registry {
+    use dagon_topology::defs::{Registry, Source};
+    static CALLS: AtomicUsize = AtomicUsize::new(0);
+    let call = CALLS.fetch_add(1, Ordering::Relaxed);
+    let dir =
+        std::env::temp_dir().join(format!("dagon-host-one-core-{}-{call}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let toml = dir.join("dagon.toml");
+    let over = "format = 1
+        [[mcu_override.rp2040.slot]]
+image = \"bootcore\"
+binding = \"b\"
+dagon-remove = true
+        [[mcu_override.rp2040.slot_layout]]
+target = \"bootcore\"
+slot = \"b\"
+dagon-remove = true
+";
+    std::fs::write(&toml, over).unwrap();
+    let r = Registry::load(&[Source::Project(&toml)]);
+    std::fs::remove_dir_all(dir).unwrap();
+    r.unwrap()
+}
+
+/// A release for the hub: app A/B and the boot core for slot A, each `v`.
+fn one_core_release(v: Version) -> Vec<u8> {
+    let t = dagon_topology::parse_str(&yaml()).unwrap();
+    let images = [hub_img(0, v), hub_img(1, v), hub_core(0, v)];
+    dagon_sign::release::build(
+        &one_core_defs(),
+        &t,
+        &topology(&yaml()),
+        &images,
+        "r",
+        &key(),
+    )
+    .unwrap()
+    .bundle
+}
+
+fn apply_one_core(s: &Sim, v: Version) -> Outcome<()> {
+    let mut h = host(s);
+    block_on(h.apply(
+        &one_core_release(v),
+        &topology(&yaml()),
+        &key().pk,
+        Some(&[0]),
+        &mut |_| {},
+    ))
+    .unwrap()
+    .remove(0)
+    .outcome
+}
+
+#[test]
+fn the_only_boot_core_slot_is_written_and_the_new_core_takes_over() {
+    let s = one_core_sim();
+    let v = Version::new(1, 1, 0);
+    let out = apply_one_core(&s, v);
+    assert!(matches!(out, Outcome::Done(x) if x == v), "{out:?}");
+    let core = core_status(&s);
+    assert_eq!((core.active, core.confirmed), (0, 0));
+    assert_eq!(
+        (core.slots[0].state, core.slots[0].version),
+        (SlotState::Confirmed, v)
+    );
+    assert_eq!(core.slots[1].state, SlotState::Empty, "no slot B");
+}
+
+/// A new core that fails in the only slot leaves no core to start: stage0
+/// starts the confirmed app, the run reports that the core did not take
+/// over and that none runs, and the next release writes the core again.
+#[test]
+fn a_failing_core_in_the_only_slot_leaves_the_app_to_write_it_again() {
+    let s = one_core_sim();
+    let bad = Version::new(1, 1, 0);
+    s.relay.borrow_mut().node.store().broken_core = Some(bad);
+    let out = apply_one_core(&s, bad);
+    assert!(
+        matches!(
+            out,
+            Outcome::Failed(Error::BootCoreRolledBack { expected, running, .. })
+                if expected == bad && running == Version::default()
+        ),
+        "{out:?}"
+    );
+    let hello = block_on(host(&s).status(Target::Local)).unwrap().hello;
+    assert_eq!(
+        hello.active_version,
+        Version::new(1, 0, 0),
+        "the confirmed app runs"
+    );
+    let good = Version::new(1, 2, 0);
+    let out = apply_one_core(&s, good);
+    assert!(matches!(out, Outcome::Done(x) if x == good), "{out:?}");
+    let core = core_status(&s);
+    assert_eq!(
+        (core.confirmed, core.slots[0].state, core.slots[0].version),
+        (0, SlotState::Confirmed, good)
+    );
+}
+
+/// The one-core hub with its app 1.1.0 on trial (its self-check refuses
+/// CONFIRM), its boot core untouched (the release's core is the one it
+/// runs). The host that applied it.
+fn one_core_on_trial() -> (Sim, Host<Sim, Sim>) {
+    let s = one_core_sim();
+    s.relay.borrow_mut().node.trial_app = TrialApp::NeverConfirms;
+    let mut h = host(&s);
+    let t = dagon_topology::parse_str(&yaml()).unwrap();
+    let v = Version::new(1, 1, 0);
+    let images = [
+        hub_img(0, v),
+        hub_img(1, v),
+        hub_core(0, Version::new(1, 0, 0)),
+    ];
+    let rel = dagon_sign::release::build(
+        &one_core_defs(),
+        &t,
+        &topology(&yaml()),
+        &images,
+        "r",
+        &key(),
+    )
+    .unwrap()
+    .bundle;
+    let out =
+        block_on(h.apply(&rel, &topology(&yaml()), &key().pk, Some(&[0]), &mut |_| {})).unwrap();
+    assert!(
+        matches!(
+            out[0].outcome,
+            Outcome::Failed(Error::Rejected {
+                cmd: Cmd::Confirm,
+                ..
+            })
+        ),
+        "{:?}",
+        out[0].outcome
+    );
+    let hello = block_on(h.hello(Target::Local)).unwrap();
+    assert_eq!((hello.active_version, hello.trial), (v, true));
+    s.relay.borrow_mut().node.trial_app = TrialApp::Confirms;
+    (s, h)
+}
+
+/// While the app runs on trial, a new core for the only boot core slot is
+/// not written: the run stops before any flash operation with the choice
+/// to confirm or roll back the app; a power cut then leaves the node
+/// running its core and its app. Once the app is confirmed the core is
+/// written and takes over.
+#[test]
+fn the_only_boot_core_is_not_rewritten_during_an_app_trial() {
+    let (s, mut h) = one_core_on_trial();
+    let before = core_status(&s);
+    s.relay.borrow().node.flash().clear_ops();
+    let out = apply_one_core(&s, Version::new(1, 2, 0));
+    assert!(
+        matches!(out, Outcome::Failed(Error::AppOnTrial { running }) if running == Version::new(1, 1, 0)),
+        "{out:?}"
+    );
+    // Only the hub's display copy of the topology is written: nothing of
+    // the boot core slot or its log.
+    let core_area = 0x1000_8000..0x1002_8000;
+    let core_log = 0x1032_0000..0x1032_2000;
+    let ops = s.relay.borrow().node.flash().ops().to_vec();
+    assert!(
+        ops.iter()
+            .all(|o| !core_area.contains(&o.addr) && !core_log.contains(&o.addr)),
+        "{ops:x?}"
+    );
+    // The power goes and comes back: the hub starts its core and its app.
+    {
+        let mut hub = s.relay.borrow_mut();
+        let now = hub.now_ms();
+        hub.node.power_on(now);
+    }
+    let after = core_status(&s);
+    assert_eq!(
+        (after.confirmed, after.slots[0]),
+        (before.confirmed, before.slots[0])
+    );
+    block_on(host(&s).status(Target::Local)).expect("the hub answers");
+
+    // Confirmed, the app lets the core be written.
+    let r = block_on(h.confirm(Target::Local, true)).unwrap();
+    assert!(matches!(r, ConfirmOutcome::Confirmed(_)), "{r:?}");
+    let good = Version::new(1, 2, 0);
+    let out = apply_one_core(&s, good);
+    assert!(matches!(out, Outcome::Done(x) if x == good), "{out:?}");
+    let core = core_status(&s);
+    assert_eq!(
+        (core.slots[0].state, core.slots[0].version),
+        (SlotState::Confirmed, good)
+    );
+}
+
+/// A power cut at every flash operation of a run started while the
+/// one-core hub's app is on trial: the hub always comes back on its
+/// confirmed core and its app, and once the app is confirmed the core is
+/// written.
+#[test]
+fn a_power_cut_while_the_app_is_on_trial_leaves_the_one_core_hub_recoverable() {
+    let ops = {
+        let (s, _) = one_core_on_trial();
+        s.relay.borrow().node.flash().clear_ops();
+        apply_one_core(&s, Version::new(1, 2, 0));
+        let n = s.relay.borrow().node.flash().ops().len();
+        n
+    };
+    for i in 0..ops {
+        for cut in [
+            dagon_sim::CutPoint::During(i),
+            dagon_sim::CutPoint::After(i),
+        ] {
+            let (s, mut h) = one_core_on_trial();
+            let before = core_status(&s);
+            {
+                let hub = s.relay.borrow();
+                let mut f = hub.node.flash();
+                f.clear_ops();
+                f.arm_cut(cut);
+            }
+            // Cut, the run may end without an outcome.
+            let _ = block_on(host(&s).apply(
+                &one_core_release(Version::new(1, 2, 0)),
+                &topology(&yaml()),
+                &key().pk,
+                Some(&[0]),
+                &mut |_| {},
+            ));
+            {
+                let mut hub = s.relay.borrow_mut();
+                let now = hub.now_ms();
+                hub.node.power_on(now);
+            }
+            let after = core_status(&s);
+            assert_eq!(
+                (after.confirmed, after.slots[0]),
+                (before.confirmed, before.slots[0]),
+                "{cut:?}"
+            );
+            let r = block_on(h.confirm(Target::Local, true)).unwrap();
+            assert!(matches!(r, ConfirmOutcome::Confirmed(_)), "{cut:?}: {r:?}");
+            let good = Version::new(1, 2, 0);
+            let out = apply_one_core(&s, good);
+            assert!(
+                matches!(out, Outcome::Done(x) if x == good),
+                "{cut:?}: {out:?}"
+            );
+        }
+    }
 }
 
 fn seg_core(slot: u8, v: Version) -> Vec<u8> {

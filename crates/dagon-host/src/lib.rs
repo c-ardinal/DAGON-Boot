@@ -120,17 +120,28 @@ pub enum Error<E> {
     },
     /// The ROM loader session failed (after its retries).
     Rom(dagon_romlink::RomError),
-    /// The new boot core did not take over: stage0 fell back to the core
-    /// running `running` (the new one failed its own check or its image
-    /// check; `reason` is the boot core log's state log reason code).
     /// The node takes no boot core: it refused XFER_BEGIN with target
     /// BOOTCORE as unsupported (its trial cell does not hold, so stage0
     /// could not count a new core's starts).
     BootCoreRefused,
+    /// The new boot core did not take over: stage0 fell back to the core
+    /// running `running` (the new one failed its own check or its image
+    /// check; `reason` is the boot core log's state log reason code).
+    /// `running` is 0.0.0 when no core runs: on an MCU with one boot core
+    /// slot stage0 then starts the confirmed app, which can write the core
+    /// again.
     BootCoreRolledBack {
         expected: Version,
         running: Version,
         reason: u8,
+    },
+    /// The node's app (`running`) is on trial and its MCU has one boot
+    /// core slot: its boot core is not written until the app is confirmed
+    /// ([`Host::confirm`]) or rolled back ([`Host::rollback`]), since a
+    /// power loss while the only core is rewritten during an app trial
+    /// leaves nothing to start. Nothing was written.
+    AppOnTrial {
+        running: Version,
     },
     Unsupported,
 }

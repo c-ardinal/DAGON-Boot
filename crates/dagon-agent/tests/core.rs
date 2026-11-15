@@ -102,6 +102,10 @@ impl Flash for Mem {
 struct Store {
     flash: Mem,
     cores: bool,
+    /// How many of the boot core slots the board keeps (A first).
+    core_slots: u8,
+    /// The app in slot A runs on trial.
+    app_trial: bool,
     /// The boot core slot that started this app.
     running: u8,
 }
@@ -122,22 +126,26 @@ impl Store {
     }
 }
 
-fn app_status() -> StatusResp {
+fn app_status(trial: bool) -> StatusResp {
     let mut st = StatusResp {
         active: 0,
         confirmed: 0,
         ..Default::default()
     };
-    st.slots[0].state = SlotState::Confirmed;
+    st.slots[0].state = if trial {
+        SlotState::Trying
+    } else {
+        SlotState::Confirmed
+    };
     st
 }
 
 impl SlotStore for Store {
     fn status(&mut self) -> StatusResp {
-        app_status()
+        app_status(self.app_trial)
     }
-    fn capacity(&self, t: u8, _: u8) -> u32 {
-        if t == target::BOOTCORE && self.cores {
+    fn capacity(&self, t: u8, slot: u8) -> u32 {
+        if t == target::BOOTCORE && self.cores && slot < self.core_slots {
             CORE_LEN - HEADER_SIZE as u32
         } else {
             0
@@ -191,11 +199,12 @@ impl SlotStore for Store {
     }
     fn target_status(&mut self, t: u8) -> Option<StatusResp> {
         match t {
-            target::APP => Some(app_status()),
+            target::APP => Some(app_status(self.app_trial)),
             target::BOOTCORE if self.cores => {
                 let log = self.log();
                 let heads = [self.head(0), self.head(1)];
-                Some(log.core.status(&heads, self.running, log.generation))
+                let heads = &heads[..usize::from(self.core_slots)];
+                Some(log.core.status(heads, self.running, log.generation))
             }
             _ => None,
         }
@@ -247,6 +256,8 @@ fn installed(cores: bool) -> Store {
     let mut s = Store {
         flash: Mem(vec![0xFF; 0x2800]),
         cores,
+        core_slots: 2,
+        app_trial: false,
         running: 0,
     };
     let a = bootcore(0, 0);
@@ -505,6 +516,96 @@ fn the_running_and_the_confirmed_core_slots_are_never_written() {
     );
 }
 
+/// With one boot core slot the app's agent writes that slot, the one the
+/// running core came from: the app runs from an APP slot, not from it.
+/// The new core is tried and, confirmed, is the only core again.
+#[test]
+fn the_only_boot_core_slot_is_written_by_the_app() {
+    let mut n = Node::new(Store {
+        core_slots: 1,
+        ..installed(true)
+    });
+    let s = n.core_status().1.unwrap();
+    assert_eq!(
+        (s.active, s.confirmed, s.slots[0].state),
+        (0, 0, SlotState::Confirmed)
+    );
+    assert_eq!(
+        n.transfer(target::BOOTCORE, 1, &bootcore(1, 1)),
+        Status::Unsupported,
+        "no slot B"
+    );
+    assert_eq!(n.transfer(target::BOOTCORE, 0, &bootcore(0, 1)), Status::Ok);
+    assert_eq!(n.agent.core_state(0), Some(core_image::State::Written));
+    // The confirmed core is gone from its slot: no core version runs.
+    assert_eq!(version(&mut n).boot_core, None);
+    assert_eq!(
+        n.call(Cmd::SetPending, &[target::BOOTCORE, 0]).0,
+        Status::Ok
+    );
+    let s = n.core_status().1.unwrap();
+    assert_eq!(
+        (s.slots[0].state, s.slots[0].version),
+        (SlotState::Pending, Version::new(1, 1, 0))
+    );
+    // The new core confirmed itself after stage0 tried it.
+    n.reset(|s| {
+        let p = s.log().core.pending.unwrap();
+        let mut log = s.log();
+        log.append_core(&mut s.flash, kind::CONFIRMED, p, 0)
+            .unwrap();
+    });
+    let s = n.core_status().1.unwrap();
+    assert_eq!(
+        (s.confirmed, s.slots[0].state, s.slots[0].version),
+        (0, SlotState::Confirmed, Version::new(1, 1, 0))
+    );
+    // And it can be written again.
+    assert_eq!(n.transfer(target::BOOTCORE, 0, &bootcore(0, 2)), Status::Ok);
+}
+
+/// With one boot core slot, neither a transfer into it nor its pending
+/// setting is taken while the running app is on trial (stage0 starts no
+/// app then, so a cut write would leave nothing to start); with two, the
+/// idle slot is written as before.
+#[test]
+fn the_only_boot_core_slot_is_left_alone_while_the_app_is_on_trial() {
+    let mut n = Node::new(Store {
+        core_slots: 1,
+        app_trial: true,
+        ..installed(true)
+    });
+    assert_eq!(
+        n.transfer(target::BOOTCORE, 0, &bootcore(0, 1)),
+        Status::State
+    );
+    assert_eq!(n.store.borrow_mut().log().core.pending, None);
+
+    // Written before the trial, it is not set pending during it.
+    let mut n = Node::new(Store {
+        core_slots: 1,
+        ..installed(true)
+    });
+    assert_eq!(n.transfer(target::BOOTCORE, 0, &bootcore(0, 1)), Status::Ok);
+    n.reset(|s| s.app_trial = true);
+    assert_eq!(
+        n.call(Cmd::SetPending, &[target::BOOTCORE, 0]).0,
+        Status::State
+    );
+    // Confirmed (off trial), it is.
+    n.reset(|s| s.app_trial = false);
+    assert_eq!(
+        n.call(Cmd::SetPending, &[target::BOOTCORE, 0]).0,
+        Status::Ok
+    );
+
+    let mut n = Node::new(Store {
+        app_trial: true,
+        ..installed(true)
+    });
+    assert_eq!(n.transfer(target::BOOTCORE, 1, &bootcore(1, 1)), Status::Ok);
+}
+
 #[test]
 fn only_a_verifying_boot_core_for_this_node_is_taken() {
     let mut n = Node::new(installed(true));
@@ -573,7 +674,7 @@ fn version_names_stage0_the_boot_core_slots_and_the_app() {
     assert_eq!(core.active, 0);
     assert_eq!(v.boot_core, Some(Version::new(1, 0, 0)));
     assert_eq!(core.slots[1].state, SlotState::Empty);
-    assert_eq!(v.app_slots, Some(VersionSlots::of(&app_status())));
+    assert_eq!(v.app_slots, Some(VersionSlots::of(&app_status(false))));
     assert_eq!(
         n.call(Cmd::Version, &[0x21, 0, 0, 8]).0,
         Status::Unsupported

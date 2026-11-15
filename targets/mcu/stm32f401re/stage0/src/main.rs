@@ -2,13 +2,17 @@
 //! vector): picks the boot core slot from the boot core records of the
 //! state log and the trial cell (the shared
 //! `dagon_core::bootcore::decide`): the pending core on trial while its
-//! starts last, else the confirmed one (slot A while the log names none),
-//! else any other slot's core. Every core it may start passes the shared
+//! starts last, else the confirmed one; never a core no record names.
+//! Every core it may start passes the shared
 //! check: its header's signature under the key built into stage0's flash
 //! (the MCU definition's `[stage0] key`), the record, and its body's
 //! SHA-256. It leaves the trial cell for the next reset, starts the
 //! independent watchdog before a core on trial and jumps. It never writes
-//! flash. With nothing to start it tells the reason's code to the board's
+//! flash. With no core to start (one boot core slot, its new core cut or
+//! failed) it starts the app the log confirms after the same checks and
+//! more (`dagon_core::bootcore::start`), under the confirmed watchdog
+//! period, and leaves the trial cell alone; that app writes the core
+//! again. With neither to start it tells the reason's code to the board's
 //! diagnostic output (`BoardDiag`, generated from the board's `[boot]` LED
 //! and halt pattern; none without one) and stays here (recover through the
 //! ROM loader).
@@ -33,12 +37,12 @@ mod indicator;
 
 use cortex_m::peripheral::{NVIC, SCB};
 use cortex_m_rt::entry;
-use dagon_core::bootcore::{self, Stage0};
+use dagon_core::bootcore::{self, Boot};
 use dagon_ed25519::Ed25519Small;
 use dagon_format::stage0;
 use dagon_mcu_common::mapped::Mapped;
-use dagon_mcu_stm32f401re::layout::{CORE_SLOTS, LOG, MCU_ID, MIN_FLASH_SIZE, STAGE0};
-use dagon_mcu_stm32f401re::{trial, PUBKEY, STAGE0_KEY_PLACE, TRIAL_ATTEMPTS, TRIAL_WDT_MS};
+use dagon_mcu_stm32f401re::layout::{MIN_FLASH_SIZE, STAGE0, STAGE0_APPS, STAGE0_AT};
+use dagon_mcu_stm32f401re::{trial, CONFIRMED_WDT_MS, PUBKEY, STAGE0_KEY_PLACE, TRIAL_WDT_MS};
 use panic_halt as _;
 
 // Stage0 reads its key from its own flash only.
@@ -46,14 +50,6 @@ const _: () = assert!(matches!(STAGE0_KEY_PLACE.as_bytes(), b"flash"));
 
 /// Stage0's signature verifier, under the key built into its flash.
 const VERIFIER: Ed25519Small = Ed25519Small::new(PUBKEY);
-
-/// What stage0 knows of this MCU.
-const AT: Stage0<'static> = Stage0 {
-    log: &LOG,
-    slots: &CORE_SLOTS,
-    max: TRIAL_ATTEMPTS,
-    mcu_id: MCU_ID,
-};
 
 /// The version mark the agent's VERSION reads (`dagon_format::stage0`):
 /// this package's Cargo.toml version.
@@ -79,18 +75,32 @@ fn main() -> ! {
     start_core(&mut flash, &mut out);
 }
 
-/// Starts the core stage0's choice gives, on the clocks as the chip starts
-/// them; with none, stays.
+/// Starts the core (or the app) stage0's choice gives, on the clocks as
+/// the chip starts them; with neither, stays.
 #[cfg(not(feature = "verify-time"))]
 fn start_core(flash: &mut Mapped, out: &mut diag::BoardDiag) -> ! {
-    match bootcore::decide(flash, &AT, trial::read(), &VERIFIER, out) {
-        Ok(start) => {
+    match bootcore::start(
+        flash,
+        &STAGE0_AT,
+        &STAGE0_APPS,
+        trial::read(),
+        &VERIFIER,
+        out,
+    ) {
+        Ok(Boot::Core(start)) => {
             clock::hand_back();
             trial::write(start.cell);
             if start.trial {
                 trial::arm_watchdog(TRIAL_WDT_MS);
             }
             jump(start.body)
+        }
+        // The confirmed app, as the boot core starts it: on the confirmed
+        // period; the trial cell stays as it is.
+        Ok(Boot::App { body, .. }) => {
+            clock::hand_back();
+            trial::arm_watchdog(CONFIRMED_WDT_MS);
+            jump(body)
         }
         // Reported: wait for recovery.
         Err(_) => loop {
@@ -110,7 +120,7 @@ fn measure(flash: &mut Mapped, out: &mut diag::BoardDiag) -> ! {
         verifier: &VERIFIER,
         cycles: systick::cycles,
     };
-    let _ = bootcore::decide(flash, &AT, trial::read(), &timed, &mut NoDiag);
+    let _ = bootcore::decide(flash, &STAGE0_AT, trial::read(), &timed, &mut NoDiag);
     let longest = verify_time::DAGON_VERIFY_CYCLES.load(core::sync::atomic::Ordering::Relaxed);
     out.report(verify_time::tenths_of_a_second(longest, clock::OUT_HZ));
     loop {
@@ -122,7 +132,7 @@ fn measure(flash: &mut Mapped, out: &mut diag::BoardDiag) -> ! {
 fn jump(body: u32) -> ! {
     // SAFETY: stage0 enables no interrupts, so clearing NVIC enables and
     // pending bits leaves nothing to fire mid-handover; `body` is a checked
-    // core's body, linked for that 512-byte aligned address (VTOR).
+    // core's or app's body, linked for that 512-byte aligned address (VTOR).
     unsafe {
         let nvic = &*NVIC::PTR;
         for i in 0..8 {

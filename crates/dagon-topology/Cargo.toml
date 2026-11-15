@@ -18,6 +18,9 @@ toml = { version = "0.8", default-features = false, features = ["parse", "displa
 # The definitions' JSON form for the browser (Registry::to_json); already in
 # the lock file through dagon-cli.
 serde_json = "1"
+# The node folder's definition hashes (defs.sha256): one format and one
+# check for the MCU packages' builds and this crate's.
+dagon-mcu-build = { path = "../../targets/mcu/build" }
 
 [build-dependencies]
 # Reads which text files a builtin MCU definition names (build.rs).
@@ -29,3 +32,7 @@ toml = { version = "0.8", default-features = false, features = ["parse"] }
 dagon-host = { path = "../dagon-host", features = ["defs"] }
 dagon-romlink = { path = "../dagon-romlink" }
 dagon-sign = { path = "../dagon-sign" }
+# tests/defs_layout.rs compiles the MCU packages' build helper
+# (targets/mcu/build), which hashes the node's definitions; already in the
+# lock file through dagon-format.
+sha2 = { version = "0.11", default-features = false }

@@ -11,7 +11,8 @@ An MCU whose definition (targets/mcu/<id>/dagon-mcu.toml) has `[stage0]`
 stage0's firmware lint boot folder, `bootcore/lint`) and once for every
 board whose definition (targets/boards/<id>/dagon-board.toml) names that
 MCU: the board puts its diagnostic output into stage0, so each is a
-different image. Each is measured: the bytes its loadable segments put
+different image, built from that board's boot folder `stage0/size/<board>`
+(`size_folder`). Each is measured: the bytes its loadable segments put
 into flash (code, read-only data and the initial data image) must leave
 `margin(size)` bytes of the region free. Stage0's linker script refuses an
 image that does not (`dagon_mcu_build::STAGE0_ASSERT`); this names the
@@ -211,15 +212,13 @@ def configurations(mcu_id: str) -> list[str | None]:
     return [None, *boards]
 
 
-def boot_folder_toml(mcu_id: str, board: str) -> str:
-    """A boot folder (`DAGON_BOOT_CRATE`) for a node named `size` on
-    `board`: all a stage0 build reads of it."""
-    return (
-        "[package]\nname = \"dagon-stage0-size\"\nversion = \"0.0.0\"\n"
-        "edition = \"2021\"\npublish = false\n\n"
-        "[package.metadata.dagon.boot]\n"
-        f"node = \"size\"\nmcu = \"{mcu_id}\"\nboard = \"{board}\"\n"
-    )
+def size_folder(mcu_id: str, board: str) -> pathlib.Path:
+    """The boot folder (`DAGON_BOOT_CRATE`) of a node named `size` on
+    `board`, as `dagon gen` writes a node's: its boot crate manifest, the
+    MCU and board definitions and their hashes. The source tree carries
+    one per board (`stage0/size/<board>/`; dagon-topology's tests check
+    them and DAGON_BLESS=1 rewrites them)."""
+    return MCU / mcu_id / "stage0" / "size" / board
 
 
 def stage0_mcus() -> list[str]:
@@ -246,13 +245,7 @@ def build_all() -> None:
             if board is None:
                 folder, out = MCU / mcu / "bootcore" / "lint", pkg / "target"
             else:
-                folder = pkg / "target" / "stage0-size" / board
-                folder.mkdir(parents=True, exist_ok=True)
-                (folder / "Cargo.toml").write_text(boot_folder_toml(mcu, board), encoding="utf-8")
-                # The node's MCU definition, as `dagon gen` writes it: here
-                # the built-in one.
-                (folder / "mcu.toml").write_bytes((MCU / mcu / "dagon-mcu.toml").read_bytes())
-                out = folder / "target"
+                folder, out = size_folder(mcu, board), pkg / "target" / "stage0-size" / board
             env = dict(os.environ, DAGON_BOOT_CRATE=str(folder), CARGO_TARGET_DIR=str(out))
             env.setdefault("DAGON_ALLOW_TEST_KEY", "1")
             label = f" ({board or 'no board'})"

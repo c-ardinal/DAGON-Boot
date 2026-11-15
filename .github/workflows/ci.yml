@@ -255,7 +255,8 @@ jobs:
   # boot crate's raised versions reaching the package after `dagon gen` and
   # the build (crates/dagon-cli/src/serve/api.rs); a project's override of
   # an MCU's slots and watchdog periods reaching every image of an RP2040
-  # and an STM32F401RE node; and a node with no board named, generated from
+  # and an STM32F401RE node, and of a slot and a board's pins reaching an
+  # RP2040 node's app, whose hand-edited definitions are refused; and a node with no board named, generated from
   # its MCU package's template, built.
   boot-crates:
     runs-on: ubuntu-24.04
@@ -281,6 +282,7 @@ jobs:
         run: |
           cargo test -p dagon-cli --bin dagon --locked -- --ignored a_project_slot_override_reaches_the_firmware
           cargo test -p dagon-cli --bin dagon --locked -- --ignored a_project_override_of_unequal_f401_slots_reaches_the_firmware
+          cargo test -p dagon-cli --bin dagon --locked -- --ignored a_project_slot_and_board_pin_override_reaches_the_firmware
       - name: Build each MCU package's template
         run: |
           cargo test -p dagon-cli --bin dagon --locked -- --ignored new_gen_build_rp2040_hub_by_mcu

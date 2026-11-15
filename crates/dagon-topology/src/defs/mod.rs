@@ -996,6 +996,13 @@ impl Origin {
     }
 }
 
+/// `text`'s TOML table serialised by the `toml` crate: keys sorted,
+/// comments dropped, LF line endings and a trailing newline.
+fn canonical_toml(text: &str) -> Option<String> {
+    let t: toml::Table = toml::from_str(text).ok()?;
+    toml::to_string(&t).ok()
+}
+
 /// Every MCU and board known: builtin, a DAGON source tree, project
 /// definitions, in definition order, which carries no meaning: an MCU's
 /// default board is data ([`Registry::default_board`]).
@@ -1058,8 +1065,15 @@ impl Registry {
     /// (`boot_folder::mcu_file_text`).
     pub fn merged_mcu_toml(&self, id: &str) -> Option<String> {
         let i = self.mcus.iter().position(|m| m.id == id)?;
-        let t: toml::Table = toml::from_str(&self.mcu_sources.get(i)?.toml).ok()?;
-        toml::to_string(&t).ok()
+        canonical_toml(&self.mcu_sources.get(i)?.toml)
+    }
+
+    /// Board `id`'s definition as one text, as [`Registry::merged_mcu_toml`]
+    /// gives an MCU's: the board package of a node builds from it
+    /// (`boot_folder::board_file_text`).
+    pub fn merged_board_toml(&self, id: &str) -> Option<String> {
+        let i = self.boards.iter().position(|b| b.id == id)?;
+        canonical_toml(&self.board_sources.get(i)?.toml)
     }
 
     /// Where MCU `id`'s definition was read from.

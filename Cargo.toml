@@ -3,7 +3,9 @@ resolver = "2"
 # Firmware packages (targets/, samples/) are standalone; the MCU packages
 # under targets/mcu/ run their host tests on their own.
 members = ["crates/*"]
-exclude = ["targets/esp32s3-*"]
+# targets/mcu/build is its own workspace (the MCU packages' build helper,
+# which dagon-topology also uses for the node folders' hashes).
+exclude = ["targets/esp32s3-*", "targets/mcu/build"]
 
 [workspace.package]
 edition = "2021"

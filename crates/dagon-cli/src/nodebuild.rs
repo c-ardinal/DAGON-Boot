@@ -313,6 +313,13 @@ pub(crate) fn definition_folder(base: &Path, id: &str) -> Result<PathBuf, String
     Ok(dir)
 }
 
+/// Refuses a node folder whose definitions are not the ones `dagon gen`
+/// wrote: a file that no longer matches its line in `defs.sha256`, or no
+/// `defs.sha256` at all.
+fn node_definitions(dir: &Path) -> Result<(), String> {
+    dagon_topology::defs::boot_folder::check_defs(dir)
+}
+
 /// The node tag a boot core or stage0 build embeds (apps take theirs from
 /// their own `.cargo/config.toml`).
 pub const TARGET_TAG_ENV: &str = "DAGON_TARGET_TAG";
@@ -376,6 +383,9 @@ pub(crate) fn cargo_build(
     log: &mut dyn FnMut(&str),
     cancel: &AtomicBool,
 ) -> Result<PathBuf, String> {
+    if let Some(d) = fw.boot_crate {
+        node_definitions(d)?;
+    }
     let mut cmd = Command::new("cargo");
     scrub(&mut cmd);
     firmware_env(&mut cmd, fw);
@@ -487,11 +497,20 @@ pub(crate) mod test_definition {
             mcu,
         )
         .unwrap();
-        std::fs::write(dir.join(dagon_topology::defs::boot_folder::MCU_FILE), text).unwrap();
+        write_definitions(&dir, &text);
+    }
+
+    /// Writes `text` as the MCU definition into the node folder `dir`, with
+    /// its hashes, as `dagon gen` does for a node without a board.
+    pub(crate) fn write_definitions(dir: &Path, text: &str) {
+        use dagon_topology::defs::boot_folder::{defs_text, DEFS_FILE, MCU_FILE};
+        std::fs::create_dir_all(dir).unwrap();
+        std::fs::write(dir.join(MCU_FILE), text).unwrap();
+        std::fs::write(dir.join(DEFS_FILE), defs_text(&[(MCU_FILE, text)])).unwrap();
     }
 }
 #[cfg(test)]
-pub(crate) use test_definition::write_test_definition;
+pub(crate) use test_definition::{write_definitions, write_test_definition};
 
 #[cfg(test)]
 // Tests set up and inspect their own scratch folders directly.
@@ -541,6 +560,32 @@ mod tests {
         );
         assert!(!lines.iter().any(|l| l.contains("Compiling")), "{lines:?}");
         super::write_test_definition(&base, "nodef", "rp2040");
+        // A definition edited after gen, or a folder without the hashes gen
+        // writes, stops the build before cargo runs.
+        let folder = base.join("boot/nodef");
+        let mcu = folder.join(dagon_topology::defs::boot_folder::MCU_FILE);
+        let defs = folder.join(dagon_topology::defs::boot_folder::DEFS_FILE);
+        let good = std::fs::read_to_string(&mcu).unwrap();
+        std::fs::write(&mcu, format!("{good}# edited\n")).unwrap();
+        let mut lines = Vec::new();
+        let e = build_nodes(
+            &cfg,
+            &[],
+            &mut |l| lines.push(l.to_string()),
+            &AtomicBool::new(false),
+        )
+        .unwrap_err();
+        assert!(
+            e.contains("mcu.toml") && e.contains("defs.sha256") && e.contains("dagon gen"),
+            "{e}"
+        );
+        assert!(!lines.iter().any(|l| l.contains("Compiling")), "{lines:?}");
+        std::fs::write(&mcu, &good).unwrap();
+        let hashes = std::fs::read(&defs).unwrap();
+        std::fs::remove_file(&defs).unwrap();
+        let e = build_nodes(&cfg, &[], &mut |_| {}, &AtomicBool::new(false)).unwrap_err();
+        assert!(e.contains("defs.sha256") && e.contains("dagon gen"), "{e}");
+        std::fs::write(&defs, hashes).unwrap();
         build_nodes(&cfg, &[], &mut |_| {}, &AtomicBool::new(false)).unwrap();
         let _ = std::fs::remove_dir_all(&base);
     }

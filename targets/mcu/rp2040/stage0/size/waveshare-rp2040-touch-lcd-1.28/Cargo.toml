@@ -1,0 +1,13 @@
+# The stage0 size check's boot folder (scripts/stage0_size.py): a node
+# named `size` on board waveshare-rp2040-touch-lcd-1.28, without overrides. Written by
+# dagon-topology's tests (DAGON_BLESS=1).
+[package]
+name = "dagon-stage0-size"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[package.metadata.dagon.boot]
+node = "size"
+mcu = "rp2040"
+board = "waveshare-rp2040-touch-lcd-1.28"

@@ -1253,8 +1253,13 @@ fn a_project_slot_override_reaches_the_firmware() {
     }
     every_build_generated(&dir.join("out"), &overridden);
 
-    // A node definition of another MCU or format is refused.
+    // A node definition of another MCU or format is refused, even with
+    // hashes that match it.
+    use dagon_topology::defs::boot_folder::{defs_text, BOARD_FILE, DEFS_FILE, MCU_FILE};
     let good = std::fs::read_to_string(&mcu_toml).unwrap();
+    let board = std::fs::read_to_string(dir.join("boot/hub").join(BOARD_FILE)).unwrap();
+    let defs = dir.join("boot/hub").join(DEFS_FILE);
+    let good_defs = std::fs::read_to_string(&defs).unwrap();
     for (bad, says) in [
         (
             good.replace("id = \"rp2040\"", "id = \"stm32f401re\""),
@@ -1266,6 +1271,7 @@ fn a_project_slot_override_reaches_the_firmware() {
         ),
     ] {
         assert_ne!(bad, good);
+        std::fs::write(&defs, defs_text(&[(MCU_FILE, &bad), (BOARD_FILE, &board)])).unwrap();
         std::fs::write(&mcu_toml, bad).unwrap();
         let mut log = Vec::new();
         let r = crate::nodebuild::build_nodes(
@@ -1278,6 +1284,7 @@ fn a_project_slot_override_reaches_the_firmware() {
         assert!(log.join("\n").contains(says), "{says}\n{}", log.join("\n"));
     }
     std::fs::write(&mcu_toml, good).unwrap();
+    std::fs::write(&defs, good_defs).unwrap();
     let _ = std::fs::remove_dir_all(&d);
 }
 
@@ -1360,6 +1367,165 @@ fn a_project_override_of_unequal_f401_slots_reaches_the_firmware() {
     )
     .unwrap_or_else(|e| panic!("{e}\n{}", log.join("\n")));
     every_build_generated(&dir.join("out"), &overridden);
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+/// The hub's app slot B, shorter, and the resets of its touch controller
+/// and its display swapped (touch on GPIO13, display on GPIO22), by a
+/// project's overrides of the RP2040 and of the hub's board.
+const HUB_SLOT_AND_PIN: &str = "
+[[mcu_override.rp2040.slot]]
+image = \"app\"
+binding = \"b\"
+size = 0x8_0000
+
+[[mcu_override.rp2040.slot_layout]]
+target = \"app\"
+slot = \"b\"
+capacity = 0x7_FE00
+
+[[board_override.\"waveshare-rp2040-touch-lcd-1.28\".pin]]
+pin = \"GPIO22\"
+name = \"lcd_rst\"
+
+[[board_override.\"waveshare-rp2040-touch-lcd-1.28\".pin]]
+pin = \"GPIO13\"
+name = \"touch_rst\"
+";
+
+/// The files named `name` each build of package `package` generated below
+/// `target` (in its `OUT_DIR`).
+fn generated_by(target: &Path, package: &str, name: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut todo = vec![target.to_path_buf()];
+    while let Some(dir) = todo.pop() {
+        for e in std::fs::read_dir(&dir).into_iter().flatten().flatten() {
+            let path = e.path();
+            if path.is_dir() {
+                todo.push(path);
+            } else if path.file_name().is_some_and(|n| n == name)
+                && path.to_string_lossy().contains(package)
+            {
+                out.push(std::fs::read_to_string(&path).unwrap());
+            }
+        }
+    }
+    out
+}
+
+/// A project that overrides an MCU slot and a board pin gets an app built
+/// for both: `dagon gen` writes the merged MCU and board definitions and
+/// their hashes into the node's folder; the MCU package builds the
+/// shorter slot B and the board package takes the two resets at their
+/// swapped pins, which the board's code takes by name. A `board.toml` or `mcu.toml`
+/// edited by hand after gen is refused, by `dagon build` before cargo
+/// runs and by the packages' builds themselves (real firmware builds: run
+/// with --ignored).
+#[test]
+#[ignore = "builds firmware for the RP2040"]
+fn a_project_slot_and_board_pin_override_reaches_the_firmware() {
+    use dagon_topology::defs::boot_folder::{BOARD_FILE, DEFS_FILE, MCU_FILE};
+    let d = tmp("pin");
+    let dir = d.join("p");
+    new_project(&dir, "proj", SAMPLE, &d.join("keys"), &dev()).unwrap();
+    let config = dir.join(crate::config::CONFIG_FILE);
+    let mut text = std::fs::read_to_string(&config).unwrap();
+    text.push_str(HUB_SLOT_AND_PIN);
+    std::fs::write(&config, text).unwrap();
+    let lines = gen_project(&config, &["hub".to_string()], false).unwrap();
+    assert!(!lines.iter().any(|l| l.starts_with("skipped")), "{lines:?}");
+    let boot = dir.join("boot/hub");
+    for f in [MCU_FILE, BOARD_FILE, DEFS_FILE] {
+        assert!(boot.join(f).is_file(), "{f}: {lines:?}");
+    }
+    let cfg = Config::load(Some(&config.to_string_lossy())).unwrap();
+    let cancel = std::sync::atomic::AtomicBool::new(false);
+    let build = |log: &mut Vec<String>| {
+        crate::nodebuild::build_nodes(
+            &cfg,
+            &["hub".to_string()],
+            &mut |l| log.push(l.to_string()),
+            &cancel,
+        )
+    };
+    let mut log = Vec::new();
+    build(&mut log).unwrap_or_else(|e| panic!("{e}\n{}", log.join("\n")));
+    let target = dir.join("nodes/hub/target");
+    every_build_generated(
+        &target,
+        &["pub const APP: [(u32, u32); 2] = [(0x10048000, 0x100000), (0x10148000, 0x80000)];"],
+    );
+    let board_pkg = "dagon-board-waveshare-rp2040-touch-lcd-1-28";
+    let pins = generated_by(&target, board_pkg, "pins.rs");
+    assert!(!pins.is_empty(), "no pins.rs of {board_pkg}");
+    for p in &pins {
+        for want in [
+            "pub type TouchRst = embassy_rp::peripherals::PIN_13;",
+            "pub type LcdRst = embassy_rp::peripherals::PIN_22;",
+        ] {
+            assert!(p.contains(want), "{want} in\n{p}");
+        }
+    }
+
+    // Edited by hand after gen: refused by the build command, and by the
+    // package builds when cargo is run without it.
+    let app = dir.join("nodes/hub");
+    let bin = crate::nodebuild::package_name(&app).unwrap();
+    let key = ed25519_compact::KeyPair::from_seed(ed25519_compact::Seed::new([9; 32]));
+    let hex = dagon_sign::to_hex(&key.pk[..]);
+    for (file, from, to) in [
+        (BOARD_FILE, "\"GPIO13\"", "\"GPIO12\""),
+        (MCU_FILE, "size = 524288", "size = 589824"),
+    ] {
+        let path = boot.join(file);
+        let good = std::fs::read_to_string(&path).unwrap();
+        let bad = good.replacen(from, to, 1);
+        assert_ne!(bad, good, "{file}");
+        std::fs::write(&path, bad).unwrap();
+        let mut log = Vec::new();
+        let e = build(&mut log).unwrap_err();
+        assert!(e.contains(file) && e.contains(DEFS_FILE), "{file}: {e}");
+        assert!(!log.iter().any(|l| l.contains("Compiling")), "{log:?}");
+        let mut log = Vec::new();
+        let r = crate::nodebuild::cargo_build(
+            &app,
+            &bin,
+            &[],
+            None,
+            crate::nodebuild::FirmwareEnv {
+                pubkey_hex: Some(&hex),
+                ..Default::default()
+            },
+            &mut |l| log.push(l.to_string()),
+            &cancel,
+        );
+        let log = log.join("\n");
+        assert!(r.is_err(), "{file}: built\n{log}");
+        assert!(
+            log.contains(file) && log.contains(DEFS_FILE),
+            "{file}:\n{log}"
+        );
+        std::fs::write(&path, good).unwrap();
+    }
+    // Without its hashes (an older folder, or one deleted): the packages'
+    // own builds refuse it too.
+    std::fs::remove_file(boot.join(DEFS_FILE)).unwrap();
+    let mut log = Vec::new();
+    let r = crate::nodebuild::cargo_build(
+        &app,
+        &bin,
+        &[],
+        None,
+        crate::nodebuild::FirmwareEnv {
+            pubkey_hex: Some(&hex),
+            ..Default::default()
+        },
+        &mut |l| log.push(l.to_string()),
+        &cancel,
+    );
+    let log = log.join("\n");
+    assert!(r.is_err(), "built without hashes\n{log}");
+    assert!(log.contains("no defs.sha256"), "{log}");
     let _ = std::fs::remove_dir_all(&d);
 }
 

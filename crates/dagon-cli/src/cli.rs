@@ -78,7 +78,9 @@ pub enum Command {
     Conform(ConformArgs),
     /// Go back to the node's previously confirmed version
     ///
-    /// Boots the node's other slot and confirms it there.
+    /// Boots the app slot that holds the previously confirmed version and
+    /// confirms it there. A node whose MCU definition gives the app one slot
+    /// has no previous version to go back to.
     Rollback(RollbackArgs),
     /// Make a project folder
     ///
@@ -94,7 +96,8 @@ pub enum Command {
     Gen(GenArgs),
     /// Build each node of [build.<id>] in dagon.toml
     ///
-    /// Writes out/build/<id>/app-a.elf (and app-b.elf).
+    /// Writes out/build/<id>/app-a.elf, and app-b.elf when the node's MCU
+    /// definition gives the app slot B.
     Build(BuildArgs),
     /// Build, sign, package and write the nodes in one go
     ///

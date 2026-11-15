@@ -16,7 +16,9 @@ validates them into a `Registry`:
   no meaning.
 - `Registry::load(&[Source::Tree(root), Source::Project(dagon_toml)])`: a
   DAGON source tree's definitions replace the builtin set; a project adds its
-  own. A project definition may not reuse an existing MCU or board id.
+  own. A project definition may not reuse an existing MCU or board id. A
+  project may override just the fields it changes of an existing
+  definition (Project definitions, below).
 
 Numbers are TOML integers (`0x0800_8000`, `400_000`). Unknown fields are
 errors; kind fields accept only the values listed below.
@@ -195,8 +197,11 @@ generated from (pin names, bus ids and their signals, device ids, with `-`
 read as `_`) appears once. On a board that declares buses, the
 `[coordinator]` pins are those of its `dagon = true` I2C and UART buses.
 
-A board package's build script reads its own definition
-(`dagon_topology::defs::codegen::package_build`) and includes the result:
+A board package's build script reads the board's definition
+(`dagon_topology::defs::codegen::package_build`) and includes the result.
+With `DAGON_BOOT_CRATE` set it reads `board.toml` in that folder (the
+board definition with the project's overrides applied, which `dagon gen`
+writes; below), else the source tree's board definition. It includes
 the board id, flash size, default link, boot LED and halt pattern, bus
 speeds and devices as constants (`def.rs`), and every named pin, bus and
 bus pin as a HAL type with a `take!(p.<name>)` macro (`pins.rs`), and each
@@ -217,7 +222,15 @@ every slot's address and length per image kind, the stage0 region, the
 logs, the erase regions and slot layouts, and the watchdog and trial
 values. That definition is `boot/<id>/mcu.toml`, which `dagon gen` writes
 for every node: the built-in definition with the project's overrides
-applied. The app's `.cargo/config.toml` and the boot crate's both set
+applied. For a node with a board it also writes `board.toml`, the board
+definition with the project's overrides applied the same way. `dagon gen`
+then writes one line per written file to `defs.sha256`: the file's
+SHA-256 (64 lowercase hex digits), two spaces and the file name, in UTF-8
+with LF line endings. Every build that reads a node's definitions (the
+MCU and board build scripts, `dagon build`, `deploy` and `flash`) refuses
+a file that no longer matches its line and a folder without
+`defs.sha256`. To change a node's definitions, change the overrides in
+`dagon.toml` and run `dagon gen` again. The app's `.cargo/config.toml` and the boot crate's both set
 `DAGON_BOOT_CRATE` to that folder, and `dagon build`, `deploy` and
 `flash` give it to every image they build for the node, a board's own
 parts (such as a recovery agent) included. So every image of one node
@@ -239,7 +252,18 @@ shown as `project-text`.
 
 ## Project definitions
 
-A project's `dagon.toml` may define boards inline as `[board.<id>]` tables
+A project's `dagon.toml` starts with `format = 1`, the number of the
+`dagon.toml` format (`project` in
+[Contracts and components](/en/reference/contracts/)). A file without
+`format`, or with another number, is refused with the number this dagon
+reads. These are the only top-level keys of `dagon.toml`; any other key
+is refused:
+
+<!-- generated from dagon-topology's project KEYS: python site/scripts/gen.py -->
+`format`, `topology`, `release`, `provision_dir`, `pubkey`, `signing_key`, `provision`, `build`, `dagon`, `extensions`, `board`, `mcu_files`, `mcu_override`, `board_override`
+<!-- end of generated table -->
+
+`dagon.toml` may define boards inline as `[board.<id>]` tables
 (the board schema without `id`) and register MCU files with
 `mcu_files = ["defs/my-mcu/dagon-mcu.toml"]`; files a definition references
 resolve inside its own folder.
@@ -248,6 +272,209 @@ The `<id>` of `[board.<id>]` is a board id, the id a node's `board:` names;
 a `[board.<id>]` table of `dagon.toml` is always a board definition. A node
 on such a board has no board package: `dagon gen` makes it from its MCU
 package and writes the board's `flash_bytes` into its `wiring.rs`.
+
+### Overriding a definition
+
+To change part of an existing definition (a built-in one, or one of a
+DAGON source tree), write only the fields that change in `dagon.toml`
+instead of copying the definition. `[mcu_override.<id>]` overrides an MCU
+definition and `[board_override.<id>]` a board definition; each is written
+in the schema of that definition and holds only the fields that change.
+An override is per id for the whole project: every node on that MCU or
+board gets the merged definition. Fields not written stay as the original
+definition has them, so they change when a new DAGON release changes the
+original. Nodes that need a different variant use a definition
+registered under a new id (`mcu_files`, `[board.<id>]`). A project's own
+definition is not overridden but changed in place. An override of an id
+that does not exist is refused.
+
+Example: one boot loader slot on the RP2040, and the 128 KiB it frees
+added to app slot A. Add to `dagon.toml`:
+
+```toml
+[[mcu_override.rp2040.slot]]
+image = "bootcore"
+binding = "b"
+dagon-remove = true
+
+[[mcu_override.rp2040.slot]]
+image = "app"
+binding = "a"
+at = 0x1002_8000
+size = 0x12_0000
+
+[[mcu_override.rp2040.slot_layout]]
+target = "bootcore"
+slot = "b"
+dagon-remove = true
+
+[[mcu_override.rp2040.slot_layout]]
+target = "app"
+slot = "a"
+start = 0x1002_8000
+capacity = 0x11_FE00
+```
+
+Slots are found by their key (`image` and `binding`), slot layouts by
+theirs (`target` and `slot`). App slot A changes only in the fields
+written; the others, such as `header`, stay as the original definition
+has them. One boot loader slot loads because `[writers]` has the app
+write the boot loader. What one slot cannot do is in
+[Limitations](/en/explanation/limitations/).
+
+Merge rules:
+
+- Tables merge key by key, nested ones included; a key written replaces
+  the original value.
+- A table whose shape follows its kind (`writer` by `kind`, a boot
+  operation by `op`, `expect`, a slot layout's `header`) and a fact value
+  are replaced whole when written.
+- Arrays of plain values (strings, integers) are replaced whole when
+  written.
+- Arrays of tables follow the table below. In an array merged by key, an
+  override entry changes only the fields it writes of the original entry
+  with the same key; an entry with a new key is added after the original
+  entries. In an array whose entries are added or removed whole, an
+  existing entry cannot be changed in part: remove it and write the whole
+  new entry (both in the same override).
+
+An array whose order carries meaning (`flash_map`, whose first entry is
+the default; `core`, whose first entry DAGON runs on;
+`boot.record.rings`, in boot order) takes its order from
+`dagon-order.<array> = [<key>, ...]` in the override's table, listing
+every key of the merged array exactly once; a list that misses or repeats
+a key, or names a key the array does not have, is refused. A nested
+array is named by its path (`dagon-order.boot.record.rings`). For example,
+a project whose RP2040 boards carry 16 MiB of flash adds a flash map and
+makes it the default:
+
+```toml
+[mcu_override.rp2040]
+dagon-order.flash_map = ["rp2040-16m", "rp2040-4m"]
+
+[[mcu_override.rp2040.flash_map]]
+name = "rp2040-16m"
+base = 0x1000_0000
+bytes = 0x100_0000
+xip = true
+```
+
+Removing: an entry of an array merged by key, or of one whose entries are
+added or removed whole, is removed by writing its key fields and
+`dagon-remove = true` and nothing else; an optional table is removed by
+writing `dagon-remove = true` alone. A whole definition cannot be
+removed. An override that removes an entry or table the original
+definition does not have is refused with the override named.
+
+Unsetting: an entry or table may carry `dagon-unset = ["<field>", ...]`,
+which removes those optional fields before the override's own fields
+apply, to swap one optional field for another (a slot from `partition` to
+`at` and `size`, a bus from `hz` to `baud`). Key fields, fields the
+original definition does not have, and fields that may not be overridden
+cannot be unset.
+
+```toml
+[[mcu_override.esp32s3.slot]]
+image = "app"
+binding = "any"
+dagon-unset = ["partition"]
+at = 0x11_0000
+size = 0x30_0000
+```
+
+Removing a required table or unsetting a required field is refused by
+the merged definition's normal loading and checks, the error naming the
+override. `dagon-remove`, `dagon-unset` and `dagon-order` are read by the
+merge only and never reach the merged definition.
+
+Fields that may not change: `id`, `wire_id`, a board's `mcu`, `format`,
+`port`, `partitions`, the write tool's files (`writer.bootloader`,
+`writer.checksums`) and part folders (`part.sub`) are the definition's
+identity or name files of its folder, so an override that changes one is
+refused with the field named. A part an override adds may name only a
+`sub` a part of the original definition names. `[[doctor]]` may not be
+overridden. For something else, register a definition under a new id.
+
+A board's `[flash]`: overrides are first merged into each definition on
+its own (`[mcu_override]` into the MCU, `[board_override]` into the
+board). Then, when the merged board has `[flash]` `erase_regions`, they
+replace the merged MCU's erase regions whole for nodes on that board.
+`[flash]` merges as a table, its `erase_regions` replaced whole when
+written. An override that changes `flash.part` writes the whole `[flash]`
+table, since erase times belong to the part and a new part must not
+inherit the old part's; otherwise it is refused with the override named.
+
+The merged definition is made from the override in `dagon.toml` before
+the definition's format check and its loading, and then goes through the
+same loading and checks as any definition; an error names `dagon.toml`
+and the override's table (`[mcu_override.<id>]`). The merged definition
+counts as project text (how its names are shown, and the confirmation
+before its commands run: What leaves this machine, above, and
+Validation, below). The original definition's folder stays its folder,
+so firmware and parts are found where they were. The CLI, DAGON Console,
+the host, signing and the firmware builds (`boot/<id>/`, above) all use
+the merged definition.
+
+The rules of the arrays and of the tables whose shape follows their kind,
+and the fields that may not change:
+
+<!-- generated from dagon-topology's merge ROWS: python site/scripts/gen.py -->
+| Definition | Path | Rule |
+|---|---|---|
+| MCU | `flash_map` | merged entry by entry by key (`name`); `dagon-order` gives its order |
+| MCU | `slot` | merged entry by entry by key (`image`, `binding`) |
+| MCU | `part` | whole entries added or removed by key (`name`) |
+| MCU | `doctor` | may not be overridden |
+| MCU | `peripheral` | merged entry by entry by key (`id`) |
+| MCU | `peripheral.dma_requests` | replaced whole when given |
+| MCU | `peripheral.privileged_why` | replaced whole when given |
+| MCU | `core` | whole entries added or removed by key (`id`); `dagon-order` gives its order |
+| MCU | `rom_i2c.pairs` | merged entry by entry by key (`sda`, `scl`) |
+| MCU | `link_port` | merged entry by entry by key (`name`) |
+| MCU | `relay_link` | merged entry by entry by key (`port`) |
+| MCU | `relay_link.addressing` | replaced whole when given |
+| MCU | `boot.record.rings` | merged entry by entry by key (`writer`); `dagon-order` gives its order |
+| MCU | `boot.record.fuse.cells` | merged entry by entry by key (`image`) |
+| MCU | `boot.record.entropy.min_bits` | replaced whole when given |
+| MCU | `isolation.capabilities.idau` | replaced whole when given |
+| MCU | `isolation.tcm` | replaced whole when given |
+| MCU | `slot_layout` | merged entry by entry by key (`target`, `slot`) |
+| MCU | `slot_layout.header` | replaced whole when given |
+| MCU | `execution.erase_regions` | merged entry by entry by key (`start`) |
+| MCU | `execution.erase_regions.unit_max_ms` | replaced whole when given |
+| MCU | `execution.masked_max_us` | replaced whole when given |
+| MCU | `watchdog.flag` | replaced whole when given |
+| MCU | `writer` | replaced whole when given |
+| MCU | `stage0.clock` | replaced whole when given |
+| MCU | `bootcore.clock` | replaced whole when given |
+| MCU | `app.clock` | replaced whole when given |
+| MCU | `id` | may not change (the definition's identity or a file of its package) |
+| MCU | `wire_id` | may not change (the definition's identity or a file of its package) |
+| MCU | `format` | may not change (the definition's identity or a file of its package) |
+| MCU | `port` | may not change (the definition's identity or a file of its package) |
+| MCU | `partitions` | may not change (the definition's identity or a file of its package) |
+| MCU | `writer.bootloader` | may not change (the definition's identity or a file of its package) |
+| MCU | `writer.checksums` | may not change (the definition's identity or a file of its package) |
+| MCU | `part.sub` | may not change (the definition's identity or a file of its package) |
+| board | `header` | merged entry by entry by key (`pin`) |
+| board | `i2c` | merged entry by entry by key (`sda`, `scl`) |
+| board | `part` | whole entries added or removed by key (`name`) |
+| board | `pin` | merged entry by entry by key (`pin`) |
+| board | `bus` | merged entry by entry by key (`id`) |
+| board | `peripheral` | merged entry by entry by key (`id`) |
+| board | `device` | merged entry by entry by key (`id`) |
+| board | `device.regs` | merged entry by entry by key (`name`) |
+| board | `device.writable` | replaced whole when given |
+| board | `boot.action` | replaced whole when given |
+| board | `boot.action.ops` | replaced whole when given |
+| board | `flash` | merged key by key; a new `part` comes with the whole table |
+| board | `flash.erase_regions` | replaced whole when given |
+| board | `clock.source` | replaced whole when given |
+| board | `id` | may not change (the definition's identity or a file of its package) |
+| board | `mcu` | may not change (the definition's identity or a file of its package) |
+| board | `format` | may not change (the definition's identity or a file of its package) |
+| board | `part.sub` | may not change (the definition's identity or a file of its package) |
+<!-- end of generated table -->
 
 ## Validation
 
@@ -259,7 +486,7 @@ header; every region inside every flash map, none overlapping; and so on).
 A numeric field without a declared requirement fails the tests.
 
 Also on load: unknown fields; unique MCU ids, wire ids, flash map names and board
-ids; a board's MCU exists; every slot, detached header and layout region
+ids; unique keys in each array the override table gives a key; a board's MCU exists; every slot, detached header and layout region
 lies inside every flash map of the MCU and none overlap; one slot per image
 and binding; detached headers inside their partition; referenced files are
 relative, stay inside the package and (when loaded from disk) exist; so do

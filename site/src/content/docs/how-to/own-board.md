@@ -39,3 +39,11 @@ i2c = [{ controller = "i2c3", sda = "PB4", scl = "PA8" }]
 足りないものは、検査と`dagon gen`が知らせます。
 
 Claude Codeと一緒に進めるときは`add-a-board-by-mcu`スキルを使います。
+
+## 一覧にあるボードと一部だけ違うボード
+
+一覧にあるボードと一部だけ違うボード（ピンの割り当てが違う版など）は、ボードの定義を写さずに、違う欄だけを`dagon.toml`の`[board_override.<ボードのid>]`に書きます。書かない欄は一覧のボードの定義のままです。上書きはプロジェクト全体のもので、そのボードを使うすべてのノードに当たります。一部のノードだけが違うときは、`[board.<ボードのid>]`で新しいidのボードを定義します。
+
+例: 表示装置とタッチのコントローラのリセットのピンが入れ替わった版の、Waveshare RP2040 Touch LCD 1.28です。`[[board_override."waveshare-rp2040-touch-lcd-1.28".pin]]`のエントリを2つ書きます。1つは`pin = "GPIO22"`と`name = "lcd_rst"`、もう1つは`pin = "GPIO13"`と`name = "touch_rst"`です。`[[pin]]`のエントリは`pin`で見つけ、書いた`name`だけを変えます。
+
+`dagon gen`は、上書きを当てたボードの定義を、ノードごとに`boot/<id>/board.toml`に書きます。ボードのcrateとブートローダは、そのファイルからビルドします。上書きを変えたら、`dagon gen`をもう一度実行します。マイコンの定義も同じように`[mcu_override.<マイコンのid>]`で上書きできます。合成の規則、消すこと（`dagon-remove`）、欄を外すこと（`dagon-unset`）、順（`dagon-order`）、変えられない欄は、[マイコンとボードの定義](/reference/definitions/)の「プロジェクトの定義」にあります。

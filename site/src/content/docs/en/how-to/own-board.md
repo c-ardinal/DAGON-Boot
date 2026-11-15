@@ -39,3 +39,11 @@ The link's end at the child names a `[[link_port]]` of its MCU (`port`); for an 
 The check and `dagon gen` tell you what is still missing.
 
 To go through it with Claude Code, use the `add-a-board-by-mcu` skill.
+
+## A board that differs from a listed one in part
+
+For a board that differs from a listed one in part (a revision with other pin assignments, for example), write only the fields that differ in `[board_override.<board id>]` of `dagon.toml` instead of copying the board's definition. Fields not written stay as the listed board's definition has them. An override is for the whole project: it applies to every node on that board. When only some nodes differ, define a board under a new id with `[board.<board id>]`.
+
+Example: a revision of the Waveshare RP2040 Touch LCD 1.28 whose display and touch controller reset pins are swapped. Write two `[[board_override."waveshare-rp2040-touch-lcd-1.28".pin]]` entries, one with `pin = "GPIO22"` and `name = "lcd_rst"`, the other with `pin = "GPIO13"` and `name = "touch_rst"`. Each `[[pin]]` entry is found by its `pin`, and only the `name` written changes.
+
+`dagon gen` writes the board definition with the override applied to `boot/<id>/board.toml` for each node; the board package and the boot loader build from that file. After changing an override, run `dagon gen` again. An MCU definition is overridden the same way with `[mcu_override.<mcu id>]`. The merge rules, removing (`dagon-remove`), unsetting (`dagon-unset`), order (`dagon-order`) and the fields that may not change are under Project definitions in [MCU and board definitions](/en/reference/definitions/).

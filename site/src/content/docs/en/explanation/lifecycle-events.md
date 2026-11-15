@@ -22,7 +22,7 @@ display, a different storage), not for a fixed list.
 The words of this document:
 
 - *boot loader*: the image DAGON runs before the app (stage0 and the boot loader on a self-boot MCU; the vendor 2nd stage on a vendor-stage2 MCU).
-- *stage0*: the small program that runs first after a reset. It picks the boot loader slot to start.
+- *stage0*: the small program that runs first after a reset. It picks the boot loader slot to start, and starts the confirmed app when no boot loader may start.
 - *agent*: `dagon-agent` inside the app.
 - *relay*: the hub's PC link and sub-node links.
 - *host*: `dagon-host` driven by the CLI and `dagon serve`.
@@ -123,12 +123,22 @@ and the records to append); `commit` performs the image-lifecycle
 transitions `attempt`, `rolled_back`, `chosen` or `no_image`. Stage0
 has only `Entry`, `CoreChosen` and `Halted`: it picks the boot loader slot
 from the boot loader records of the state log and the trial cell
-(`dagon_core::bootcore::decide`; retained-formats.md 7): the pending core
+(`dagon_core::bootcore::start`; retained-formats.md 7): the pending core
 while fewer than `trial_attempts` starts are counted for it, else the
-confirmed one. It checks that the core's header signature verifies, that
+confirmed one. A core starts only as a record names it: neither a core no
+record names nor a pending core whose starts ran out starts. It checks that the core's header signature verifies, that
 the header is the one the record names and that its body matches the
 header's digest (4.7) before `core_slot_chosen`, starts the watchdog before a core on trial, and runs
-no extension. Stage0 never writes flash. The started boot loader settles
+no extension. Stage0 never writes flash. When no core may start (on an MCU
+with one boot loader slot, a new core cut by a power loss or one that
+failed its trial), stage0 starts the app the state log's confirmed APP
+record names, after checking the record's header digest, the signature
+(4.7), the image kind, MCU, target tag, slot binding, placement and load
+range, the body digest and that the entry point lies inside the body. It
+starts no app while an APP trial is open, and no pending app; it leaves
+the trial cell as it is and records nothing, and that app writes the boot
+loader again. Only when there is no such app does stage0 start nothing
+and wait for recovery (4.7). The started boot loader settles
 the boot loader trial before its own boot decision is acted on
 (`settle_log`): the pending core appends CONFIRMED (target BOOTCORE) only
 after its own check (an app is startable and that app's header verifies
@@ -140,7 +150,10 @@ The boot loader image lifecycle (the agent's `core_image` machine) follows
 the app image lifecycle of 1.1 with the transitions the boot loader path
 has: `erase`, `written` and `pending_set` by the agent (XFER and
 SET_PENDING with target BOOTCORE into the idle boot loader slot, never the
-running or the confirmed core's), `confirmed` and `demoted` by the new
+running or the confirmed core's; when the MCU definition gives one boot
+loader slot, into that one, and the agent refuses that transfer and its
+pending setting while the app is on trial, so the host asks to confirm or
+roll back the app first), `confirmed` and `demoted` by the new
 core's own CONFIRMED, `rolled_back` by the old core's ROLLBACK (replayed
 at the app's start). There is no `Trial` state the app can see: a core
 settles its trial before any app runs. STATUS with the target byte
@@ -148,7 +161,8 @@ settles its trial before any app runs. STATUS with the target byte
 and confirmed core); a board whose MCU definition declares no boot loader
 slots answers `Unsupported`. The number and placement of the boot loader
 slots come from the MCU definition's `[[slot]] image = "bootcore"`
-entries (two for every MCU that has them).
+entries (one or two; what one slot cannot do is in
+[Limitations](/en/explanation/limitations/)).
 
 Boot-stage extensions (2) and the boot action program (5.2) run only
 from `WatchdogArmed` on: every event before it is recorded and replayed
@@ -1273,9 +1287,9 @@ The one authentication rule, applied by every verifier in the chain
   header's signature, under the project key at the place its MCU
   definition names (`[stage0] key`: `flash`, a constant built into
   stage0's own flash, is the one place), as well as the digests, on
-  every path that may start a core: the pending core, the confirmed
-  core, slot A while the log names none, and each other slot it tries
-  on its own. A core whose signature does not verify never starts, so
+  every path that may start a core: the pending core and the confirmed
+  core. The confirmed app it starts when no core may start is checked
+  under the same key (1.2). A core whose signature does not verify never starts, so
   code that can write flash without the signing key cannot make stage0
   start a core of its own. Stage0's verifier (`Ed25519Small`) accepts
   exactly what the host's and the agent's accept. The key is part of
@@ -1283,14 +1297,18 @@ The one authentication rule, applied by every verifier in the chain
   signing key means rebuilding stage0 with the new key and writing it
   through the MCU's ROM loader.
 
-  When the log's choice does not check out (a corrupt slot, a record
-  naming a slot without a core, or a signature that does not verify),
-  stage0 tries the other slots on their own. When none checks out, it
-  starts nothing and waits for recovery through the ROM loader, and it
+  Stage0 starts only a core the log names: a pending core with starts
+  left, else the confirmed core. When the pending core does not check
+  out (a corrupt slot, a record naming a slot without a core, or a
+  signature that does not verify), it takes the confirmed core; when that
+  does not check out either, or the log names no core that may start, it
+  starts the confirmed app (1.2). It never tries a slot no record names.
+  When there is no such app either, it starts nothing and waits for recovery through the ROM loader, and it
   tells why to the node's diagnostic output: on a board whose
   definition's `[boot]` has an LED and a blinking halt pattern, the LED
   blinks the reason's code (1 header, 2 header digest, 3 size, 4 image
-  kind, MCU or slot, 5 load address, 6 body digest, 7 signature) five
+  kind, MCU or slot, 5 load address, 6 body digest, 7 signature, 8 the
+  log names no core that may start) five
   times faster than that pattern, then stays dark for one period, and
   again (such a pattern blinks every 10 ms or slower; a board with a
   shorter one is refused when it loads). A node without a board, or on a board without that LED or with

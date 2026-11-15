@@ -139,7 +139,8 @@ pub enum Error<E> {
     /// core slot: its boot core is not written until the app is confirmed
     /// ([`Host::confirm`]) or rolled back ([`Host::rollback`]), since a
     /// power loss while the only core is rewritten during an app trial
-    /// leaves nothing to start. Nothing was written.
+    /// leaves nothing to start. Neither a boot core slot nor the boot core
+    /// log was written.
     AppOnTrial {
         running: Version,
     },

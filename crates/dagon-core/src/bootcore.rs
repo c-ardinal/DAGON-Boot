@@ -1,6 +1,7 @@
-//! Boot core A/B on a self-boot MCU with a stage0.
+//! Boot core slots on a self-boot MCU with a stage0.
 //!
-//! The app's agent writes a new boot core into the idle boot core slot and
+//! The app's agent writes a new boot core into the idle boot core slot (the
+//! only one when the MCU definition gives one) and
 //! records it pending (SLOT_PENDING, target BOOTCORE) after verifying its
 //! signature. Stage0, which is never updated and never writes flash, starts
 //! the pending core on trial while the trial cell (two words of retained
@@ -13,7 +14,8 @@
 //!
 //! The count lives in retained memory, not in the log, so stage0 needs no
 //! flash writer: a reset keeps it, a power loss clears it and the trial
-//! starts over, which always ends at a core that runs.
+//! starts over, which always ends at a core that runs, or at the confirmed
+//! app when no core may start.
 //!
 //! When no core may start (an MCU with one boot core slot whose new core
 //! was cut by a power loss or failed its trial), stage0 starts the app the

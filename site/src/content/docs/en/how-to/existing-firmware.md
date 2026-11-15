@@ -9,7 +9,7 @@ These steps are for firmware that is not a `dagon new` project.
 2. Prepare the MCU and board definitions.
 
    - On a supported MCU: use the MCU definition (`targets/mcu/<mcu>`: flash layout, linker map, boot images, watchdog, links). For the board, use a board definition (`targets/boards/<board id>`), or implement `BoardCore` (`targets/mcu/common`: board id, flash size, bring-up, extension) and the MCU definition's `BoardDef` (the peripheral split) for your own board. The MCU definition READMEs show a complete app in about 20 lines.
-   - On another MCU: lay out the flash the same way: a boot loader, two state log faces, and slots A and B. Each slot starts with the 512-byte signed image header, and the body is at slot start + 0x200.
+   - On another MCU: lay out the flash the same way: a boot loader, two state log faces, and the slots of each image kind (A and B, or A alone for a kind another image writes: `[[slot]]` and `[writers]` in [MCU and board definitions](/en/reference/definitions/)). Each slot starts with the 512-byte signed image header, and the body is at slot start + 0x200.
 
 3. Implement the `dagon-port` traits for your board (`Flash`, `Link`, `Reset`, `Watchdog`, and `BootSelectS` or `BootSelectV`) and a `dagon_agent::SlotStore`.
 4. Compose the app layer's chain with `dagon_events::compose`, and create the agent by passing a `dagon_agent::Config` and your `SlotStore` to `dagon_agent::Agent::new`. Your extensions answer the decision points and observe the events (see [Events](/en/reference/events/)).
@@ -100,5 +100,5 @@ These steps are for firmware that is not a `dagon new` project.
    }
    ```
 
-6. Feed the watchdog: all the time while confirmed, and only for a limited time while on trial. An image that is never confirmed is then reset and goes back to the previous version.
+6. Feed the watchdog: all the time while confirmed, and only for a limited time while on trial. An image that is never confirmed is then reset and, with two slots, goes back to the previous version.
 7. Check the port with `dagon conform`.

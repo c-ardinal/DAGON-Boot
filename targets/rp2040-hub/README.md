@@ -22,7 +22,8 @@ Each slot starts with the 512-byte signed image header; the body (vector
 table) follows at +0x200. The app is linked per slot: default A,
 `--features slot-b` for B.
 
-stage0 picks the boot core slot from its log (slot A while empty) and checks
+stage0 picks the boot core its log names (the pending one with starts left,
+else the confirmed one; never a slot no record names) and checks
 its signature (under the key built into stage0) and its SHA-256; it starts no
 core whose signature does not verify. The boot core runs dagon-core's boot decision over the app log
 and slots: a pending slot is tried up to 3 times (signature + SHA-256, BOOT_ATTEMPT before the jump) and then rolled

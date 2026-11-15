@@ -6,6 +6,14 @@ description: "Where the code differs from the design and what DAGON does not do,
 ## By design
 
 - How to protect the signing key is the user's choice. DAGON does not decide it. Whether to use a hardware root of trust (secure boot fuses, key storage in hardware) is part of that choice.
+- An MCU definition gives each image kind one slot or two (`[[slot]]`), and one slot loads only when `[writers]` names another kind that writes it. A kind with one slot cannot do this:
+
+| Image kind | Previous version | A power cut during a write | What recovers it |
+|---|---|---|---|
+| `app` | None. A new version that fails its trial has none to go back to; `dagon rollback` answers that there is no previous version, and DAGON Console offers no rollback for the node. | No app is left to start in the slot. | The kind that writes the app (`[writers] app`) starts and receives the app again; on the ESP32-S3 the 2nd stage starts the factory recovery agent. |
+| `bootcore` | None. A new boot loader that fails its trial has no previous one to go back to. | Stage0 has no boot loader it may start and starts the app the state log's confirmed APP record names, after checking it. While the app is on trial, its agent refuses a boot loader transfer and its pending setting, so this cut never meets an app trial. | That confirmed app (`[writers] bootcore`) writes the boot loader again. Only without a confirmed app does stage0 start nothing and wait for recovery through the ROM loader. |
+| `agent` | None. | The confirmed app keeps running; the recovery agent cannot be used until it is written again. | The confirmed app (`[writers] agent`) writes it again. |
+| `stage0` | None: DAGON never writes stage0 in the field. | Does not arise: stage0 is not written in the field. | The MCU's ROM loader (`dagon flash`). |
 
 ## Planned
 
@@ -14,8 +22,7 @@ The hub and the boot:
 - The relay (`dagon-relay`) does not depend on the MCU, and the `[coordinator]` section of an MCU definition decides whether that MCU may relay. A node relays over the links its MCU definition lists in `[[relay_link]]`, and the topology routes each node to one of them. The RP2040 is the only MCU with both that section and the code that runs the relay.
 - DAGON writes the hub and the children beyond it. Nothing beyond a child can be written.
 - Through some USB hubs, the PC does not see the hub again after it updates itself and restarts. Connect the hub directly to a USB port of the PC.
-- There are no single-slot layouts.
-- The boot loader does not communicate and does not write the app.
+- The boot loader does not communicate and does not write the app, so on an MCU with a stage0 only the app writes the app (`[writers] app = ["app"]`) and a definition with one app slot does not load there.
 - The measured worst-case verify time of stage0 on the built-in MCUs is not recorded. [Stage0's clock and its verify time](/en/explanation/lifecycle-events/) gives an emulator's estimate for the Cortex-M0+; there is no estimate for the STM32F401's Cortex-M4.
 - On the RP2040, stage0, the boot loader and the app take their clock from a crystal or from the ring oscillator; they do not take an external clock driven into XIN.
 - The ESP32-S3 uses the official ESP-IDF 2nd stage. If that 2nd stage itself is broken, DAGON cannot rescue the board; it has to be rewritten over USB with the vendor tools.

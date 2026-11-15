@@ -11,12 +11,13 @@ DAGON is the boot stage and the write path of every node in a 構成.
 A 親機 (hub) on your PC's USB passes each new version on to the 子機 (children) over I2C or UART.
 A node writes the new image to a different slot from the running image and starts it on trial.
 It keeps it only once the new version confirms itself.
-Otherwise it goes back to the previous version by itself.
+Otherwise it goes back by itself to the previous version, where a slot holds one.
+An MCU definition gives each image kind one slot or two: with two, the previous version stays; with one, there is no previous version and an image of another kind writes that slot. What one slot cannot do is in [Limitations](/en/explanation/limitations/).
 
 A normal write leaves the app out when all of this holds.
 The package's app has the running app's digest, the running slot is the confirmed one, and no slot is waiting for the next boot or on trial.
 A boot loader is left out alike: only at the same version, with none waiting for the next boot or on trial.
-When only the boot loader or the recovery agent differs, the previous version stays in the other slot, and the node can go back to it.
+When only the boot loader or the recovery agent differs and the app has two slots, the previous version stays in the other slot, and the node can go back to it.
 An app with another digest is written, even at the same version.
 Only a recovery chosen by the user rewrites the same app.
 

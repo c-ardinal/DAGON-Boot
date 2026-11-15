@@ -68,6 +68,18 @@ payload after it; `trailer` puts the payload at the slot start and the
 header in the last 512 bytes; `detached` puts the header elsewhere and the
 payload fills the slot. `any` slots answer for slot A.
 
+Slot count: each image kind has the slots its `[[slot]]` entries list,
+one (`a`) or two (`a` and `b`); a `b` without an `a` does not load. With
+two, a new image goes to the slot the kind is not running from and the
+previous version stays in the other. One slot loads only when
+`[writers]` lists a kind other than itself that writes it, since an
+image cannot rewrite the slot it runs from; otherwise the definition
+does not load, and the message names the kind and says no other image
+on this MCU can write it. Each writer kind has a slot of its own here.
+What one slot cannot do (the previous version, a power cut during a
+write, the image that recovers it) is in
+[Limitations](/en/explanation/limitations/).
+
 Writer kinds:
 
 - `uf2-drive`: `family`, `sector`, `info_file`, `info_header`, `board_id`

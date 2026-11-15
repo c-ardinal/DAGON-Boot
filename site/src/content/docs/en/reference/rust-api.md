@@ -18,7 +18,7 @@ published with these pages; each name below opens its crate.
 | [`dagon-catalog`](/api/dagon_catalog/) | Every DAGON state machine's catalog in one registry, and the generated Events and Ports pages of the documentation |
 | [`dagon-cli`](/api/dagon/) | DAGON Boot command line tool |
 | [`dagon-conform`](/api/dagon_conform/) | DAGON conformance tests: the 12 normal-path checks a port must pass. |
-| [`dagon-core`](/api/dagon_core/) | Board-independent DAGON logic over the port contract: the state log (fold, load, append, compaction), the kind S boot decision (verify, trial, rollback), the boot core A/B rules of a stage0 MCU and build-time key helpers. |
+| [`dagon-core`](/api/dagon_core/) | Board-independent DAGON logic over the port contract: the state log (fold, load, append, compaction), the kind S boot decision (verify, trial, rollback), the boot core slot rules of a stage0 MCU and build-time key helpers. |
 | [`dagon-ed25519`](/api/dagon_ed25519/) | Ed25519 signature verification (RFC 8032) for DAGON's signed structures, as `SigVerifier` implementations. Verify only: nothing here signs or holds a secret. |
 | [`dagon-events`](/api/dagon_events/) | DAGON lifecycle events: state machines whose transitions emit events, extensions, ports and the published event state |
 | [`dagon-extension`](/api/dagon_extension/) | DAGON extension manifests (dagon-extension.toml), their validation against the port and event catalogs and the node's definitions, the protection-kind map generators, and the files dagon gen writes from them |

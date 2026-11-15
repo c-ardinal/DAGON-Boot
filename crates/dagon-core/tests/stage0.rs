@@ -1,17 +1,17 @@
-//! Stage0's decision (`bootcore::decide`) over real boot core images: every
-//! path that may start a core (the confirmed core, the pending core on
-//! trial, an empty log, the other slots no record names, the pending core
-//! that ran out of starts) with a validly signed core, a core signed by
-//! another key and a well-formed core with no signature; and no core at
-//! all. Only a validly signed core ever starts, and the decision is the
-//! same with and without a diagnostic output.
+//! Stage0's decision (`bootcore::decide`) over real boot core images: the
+//! two paths that may start a core (the confirmed core, the pending core on
+//! trial) with a validly signed core, a core signed by another key and a
+//! well-formed core with no signature, and the cores no path starts (an
+//! empty log, a slot no record names, the pending core that ran out of
+//! starts) whatever their signature; and no core at all. Only a validly
+//! signed core a record names ever starts, and the decision is the same
+//! with and without a diagnostic output.
 
 mod bench;
 
 use bench::*;
 use dagon_core::bootcore::{
-    check_inline, choose, decide, read_state, trial_cell, CoreFail, Diag, NoCore, NoDiag, Stage0,
-    Start, CLEARED,
+    decide, trial_cell, CoreFail, Diag, NoCore, NoDiag, Stage0, Start, CLEARED,
 };
 use dagon_ed25519::Ed25519Small;
 
@@ -183,91 +183,43 @@ fn a_bad_pending_core_falls_back_to_the_valid_confirmed_one() {
     }
 }
 
+/// A core no record names never starts, however it is signed: an empty
+/// log starts nothing.
 #[test]
-fn with_an_empty_log_slot_a_starts_only_when_validly_signed() {
+fn with_an_empty_log_no_core_starts() {
     for sig in SIGS {
         let mut m = Mem::new();
         put_core(&mut m, A, 0, sig);
-        only_valid_starts(
-            decided(&mut m, CLEARED),
-            sig,
-            (A, false),
-            CoreFail::Signature,
-        );
+        let e = decided(&mut m, CLEARED).unwrap_err();
+        assert_eq!((e.named, e.why), (false, CoreFail::Unnamed), "{sig:?}");
     }
 }
 
+/// The log names A, whose slot is blank; B holds a core no record names:
+/// B never starts, however it is signed.
 #[test]
-fn a_slot_no_record_names_starts_only_when_validly_signed() {
+fn a_slot_no_record_names_never_starts() {
     for sig in SIGS {
         let mut m = Mem::new();
-        // The log names A, whose slot is blank; B holds a core no record
-        // names.
         let a = slot_ref(A, &core(A, 0, Sig::Valid).0);
         core_log(&mut m, &[(kind::PROVISION, a), (kind::CONFIRMED, a)]);
         put_core(&mut m, B, 1, sig);
-        match decided(&mut m, CLEARED) {
-            Err(e) if sig != Sig::Valid => {
-                // The reason is the named core's (a blank slot A).
-                assert_eq!((e.named, e.why), (true, CoreFail::Header));
-            }
-            chosen => only_valid_starts(chosen, sig, (B, false), CoreFail::Header),
-        }
+        let e = decided(&mut m, CLEARED).unwrap_err();
+        assert_eq!((e.named, e.why), (true, CoreFail::Header), "{sig:?}");
     }
 }
 
+/// A pending core whose starts ran out never starts again outside its
+/// trial, however it is signed, even with the confirmed core gone.
 #[test]
-fn a_pending_core_out_of_starts_starts_only_when_validly_signed() {
+fn a_pending_core_out_of_starts_never_starts() {
     for sig in SIGS {
         let mut m = Mem::new();
         let a = slot_ref(A, &core(A, 0, Sig::Valid).0);
         let b = put_core(&mut m, B, 1, sig);
         core_log(&mut m, &[(kind::PROVISION, a), (kind::SLOT_PENDING, b)]);
-        let cell = trial_cell(&b, MAX);
-        match decided(&mut m, cell) {
-            Ok(s) => {
-                assert_eq!(sig, Sig::Valid, "a {sig:?} core started");
-                assert_eq!((s.slot, s.trial, s.cell), (B, false, cell));
-            }
-            Err(e) => {
-                assert_ne!(sig, Sig::Valid, "a validly signed core did not start");
-                assert_eq!((e.named, e.why), (true, CoreFail::Header));
-            }
-        }
-    }
-}
-
-/// `choose`'s last resort (the pending core that ran out of starts, checked
-/// against its record after every other slot refused) reached with stage0's
-/// own check, here behind a check that refuses any core no record names:
-/// it starts only a validly signed core.
-#[test]
-fn the_last_resort_starts_only_a_validly_signed_core() {
-    for sig in SIGS {
-        let mut m = Mem::new();
-        let a = slot_ref(A, &core(A, 0, Sig::Valid).0);
-        let b = put_core(&mut m, B, 1, sig);
-        core_log(&mut m, &[(kind::PROVISION, a), (kind::SLOT_PENDING, b)]);
-        let st = read_state(&mut m, &LOG).unwrap();
-        let v = stage0_verifier();
-        let mut checked = Vec::new();
-        let chosen = choose(&st, trial_cell(&b, MAX), MAX, 2, |s, r| {
-            checked.push((s, r.is_some()));
-            if r.is_none() {
-                return Err(CoreFail::Digest);
-            }
-            let slot = CORE_SLOTS[usize::from(s)];
-            check_inline(&mut m, slot, s, (r, &v), mcu_id::STM32F401XE)
-        });
-        assert_eq!(
-            checked,
-            [(A, true), (B, false), (B, true)],
-            "the last resort ran"
-        );
-        match chosen {
-            Ok(s) => assert_eq!((sig, s.slot, s.trial), (Sig::Valid, B, false)),
-            Err(_) => assert_ne!(sig, Sig::Valid),
-        }
+        let e = decided(&mut m, trial_cell(&b, MAX)).unwrap_err();
+        assert_eq!((e.named, e.why), (true, CoreFail::Header), "{sig:?}");
     }
 }
 
@@ -275,7 +227,7 @@ fn the_last_resort_starts_only_a_validly_signed_core() {
 fn with_no_core_at_all_nothing_starts_and_the_reason_is_reported() {
     let mut m = Mem::new();
     let e = decided(&mut m, CLEARED).unwrap_err();
-    assert_eq!((e.named, e.why), (false, CoreFail::Header));
+    assert_eq!((e.named, e.why), (false, CoreFail::Unnamed));
 }
 
 /// An indicator shows the code as that many blinks five times faster than
@@ -307,7 +259,7 @@ fn an_indicator_blinks_the_code_then_pauses() {
 }
 
 /// The reason codes a diagnostic output shows: one per reason, from 1,
-/// the signature's added after the others.
+/// each added reason after the others.
 #[test]
 fn every_reason_has_its_own_code() {
     let all = [
@@ -318,7 +270,8 @@ fn every_reason_has_its_own_code() {
         CoreFail::LoadAddr,
         CoreFail::Body,
         CoreFail::Signature,
+        CoreFail::Unnamed,
     ];
     let codes: Vec<u8> = all.iter().map(|f| f.code()).collect();
-    assert_eq!(codes, [1, 2, 3, 4, 5, 6, 7]);
+    assert_eq!(codes, [1, 2, 3, 4, 5, 6, 7, 8]);
 }

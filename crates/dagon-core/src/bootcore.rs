@@ -14,11 +14,19 @@
 //! The count lives in retained memory, not in the log, so stage0 needs no
 //! flash writer: a reset keeps it, a power loss clears it and the trial
 //! starts over, which always ends at a core that runs.
+//!
+//! When no core may start (an MCU with one boot core slot whose new core
+//! was cut by a power loss or failed its trial), stage0 starts the app the
+//! log's confirmed APP record names, after the checks the boot core makes
+//! and more ([`start`]); that app writes the boot core again. It halts
+//! only when there is no such app.
 
 use crate::log::{Log, LogError, LogLayout, LogState, SlotRef};
-use dagon_format::header::{header_digest16, image_kind, verify_header, ImageHeader, HEADER_SIZE};
+use dagon_format::header::{
+    header_digest16, image_kind, placement, verify_header, ImageHeader, HEADER_SIZE,
+};
 use dagon_format::statelog::{
-    kind, reason, slot, target, FaceHeader, Record, FACE_HEADER_SIZE, RECORD_SIZE,
+    kind, reason, target, FaceHeader, Record, FACE_HEADER_SIZE, RECORD_SIZE,
 };
 use dagon_format::{Sha256, SigVerifier};
 use dagon_port::Flash;
@@ -33,8 +41,8 @@ pub enum Plan {
         attempt: u8,
         fallback: Option<SlotRef>,
     },
-    /// The confirmed core; `None`: the log names none (slot A, unchecked
-    /// against a record).
+    /// The confirmed core; `None`: the log names none (stage0 starts no
+    /// core).
     Run(Option<SlotRef>),
 }
 
@@ -162,6 +170,15 @@ pub fn cell_holds(read: impl Fn() -> [u32; 2], mut write: impl FnMut(usize, u32)
 /// corrupt one), without the writer's state: the part of `Log` a stage0
 /// with a tight size budget needs. `None`: no valid face.
 pub fn read_state<F: Flash>(flash: &mut F, layout: &LogLayout) -> Option<LogState> {
+    read_fold(flash, layout, LogState::apply_core)
+}
+
+/// The records of the log at `layout` folded by `apply`, as [`read_state`].
+fn read_fold<F: Flash>(
+    flash: &mut F,
+    layout: &LogLayout,
+    apply: fn(LogState, &Record) -> LogState,
+) -> Option<LogState> {
     let mut best: Option<(u32, u32)> = None;
     for face in layout.faces {
         let mut h = [0u8; FACE_HEADER_SIZE];
@@ -179,14 +196,15 @@ pub fn read_state<F: Flash>(flash: &mut F, layout: &LogLayout) -> Option<LogStat
         let mut b = [0u8; RECORD_SIZE];
         flash.read(at, &mut b).ok()?;
         let Ok(r) = Record::parse(&b) else { break };
-        st = st.apply_core(&r);
+        st = apply(st, &r);
         at += RECORD_SIZE as u32;
     }
     Some(st)
 }
 
-/// Why [`check_inline`] refused a boot core image. Each reason has its own
-/// code ([`CoreFail::code`]), the one stage0 hands its diagnostic output.
+/// Why stage0 started no boot core: why [`check_inline`] refused the
+/// image, or that the log names none. Each reason has its own code
+/// ([`CoreFail::code`]), the one stage0 hands its diagnostic output.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u8)]
 pub enum CoreFail {
@@ -204,10 +222,13 @@ pub enum CoreFail {
     Body = 6,
     /// The header's signature does not verify under stage0's verifier.
     Signature = 7,
+    /// The log names no boot core (no confirmed record, and no pending one
+    /// with starts left): stage0 starts no core no record names.
+    Unnamed = 8,
 }
 
 impl CoreFail {
-    /// The reason's code (1 to 7).
+    /// The reason's code (1 to 8).
     pub const fn code(self) -> u8 {
         self as u8
     }
@@ -222,11 +243,24 @@ impl CoreFail {
 /// header's digest. Returns the body address.
 pub fn check_inline<F: Flash, V: SigVerifier + ?Sized>(
     flash: &mut F,
-    (base, size): (u32, u32),
+    at: (u32, u32),
     slot: u8,
     (expect, verifier): (Option<&SlotRef>, &V),
     mcu_id: u16,
 ) -> Result<u32, CoreFail> {
+    let kind = (image_kind::BOOTCORE, mcu_id);
+    check_signed(flash, at, slot, (expect, verifier), kind).map(|(body, _)| body)
+}
+
+/// [`check_inline`] for an image of kind `kind` for MCU `mcu_id`: the
+/// body address and the header.
+fn check_signed<F: Flash, V: SigVerifier + ?Sized>(
+    flash: &mut F,
+    (base, size): (u32, u32),
+    slot: u8,
+    (expect, verifier): (Option<&SlotRef>, &V),
+    (kind, mcu_id): (u8, u16),
+) -> Result<(u32, ImageHeader), CoreFail> {
     let mut raw = [0u8; HEADER_SIZE];
     flash.read(base, &mut raw).map_err(|_| CoreFail::Header)?;
     // Parsed first, so a slot holding no core reads as one, not as a
@@ -240,7 +274,7 @@ pub fn check_inline<F: Flash, V: SigVerifier + ?Sized>(
     if h.payload_size > size - HEADER_SIZE as u32 {
         return Err(CoreFail::Size);
     }
-    if h.image_kind != image_kind::BOOTCORE || h.mcu_id != mcu_id || h.slot_binding != slot {
+    if h.image_kind != kind || h.mcu_id != mcu_id || h.slot_binding != slot {
         return Err(CoreFail::Kind);
     }
     if h.load_addr != body {
@@ -260,7 +294,7 @@ pub fn check_inline<F: Flash, V: SigVerifier + ?Sized>(
     if sha.finalize() != h.payload_sha256 {
         return Err(CoreFail::Body);
     }
-    Ok(body)
+    Ok((body, h))
 }
 
 /// The boot core stage0 starts.
@@ -285,24 +319,23 @@ pub struct NoCore<E> {
 
 /// Stage0's choice from the boot core fold `st` and the trial cell `cell`
 /// read at reset: the pending core while its starts last and `check`
-/// accepts its image, else the confirmed one (slot A, checked against no
-/// record, while the log names none). When that one does not check out
-/// either (a corrupt slot, or a log naming a slot that holds no core), the
-/// other slots are tried on their own (checked against no record), A
-/// before B: a core whose image checks out is always preferred to halting.
-/// Only when no slot checks out is there nothing to start. `check(slot,
-/// record)` is the MCU's image check of the core in `slot`, against the
-/// record when one names it. `slots` is how many boot core slots the MCU
+/// accepts its image, else the confirmed one when `check` accepts it.
+/// Nothing else starts: not a core no record names, nor a pending core
+/// whose starts ran out (it would run without the trial's watchdog), so a
+/// core starts only as its record and the trial rules allow. `check(slot,
+/// record)` is the MCU's image check of the core in `slot` against the
+/// record naming it. `slots` is how many boot core slots the MCU
 /// definition gives (slot A, then B; at least one): a record naming any
-/// other slot is left out as if the log did not hold it, and no other slot
-/// is ever checked.
+/// other slot is left out as if the log did not hold it. With nothing to
+/// start, the reason is the last check's, `None` when the log names no
+/// core to check.
 pub fn choose<B, E>(
     st: &LogState,
     cell: [u32; 2],
     max: u8,
     slots: u8,
     mut check: impl FnMut(u8, Option<&SlotRef>) -> Result<B, E>,
-) -> Result<Start<B>, NoCore<E>> {
+) -> Result<Start<B>, NoCore<Option<E>>> {
     let inside = |r: &SlotRef| r.slot < slots;
     let st = &LogState {
         pending: st.pending.filter(inside),
@@ -310,72 +343,45 @@ pub fn choose<B, E>(
         ..*st
     };
     let n = st.pending.map_or(0, |p| tried(cell, &p));
-    let mut tried_slot = Tried::default();
+    let mut why = None;
     let run = match plan(st, n, max) {
         Plan::Try {
             pending,
             attempt,
             fallback,
-        } => {
-            mark(&mut tried_slot, pending.slot);
-            match check(pending.slot, Some(&pending)) {
-                Ok(body) => {
-                    return Ok(Start {
-                        slot: pending.slot,
-                        body,
-                        trial: true,
-                        cell: trial_cell(&pending, attempt),
-                    })
-                }
-                Err(_) => fallback,
+        } => match check(pending.slot, Some(&pending)) {
+            Ok(body) => {
+                return Ok(Start {
+                    slot: pending.slot,
+                    body,
+                    trial: true,
+                    cell: trial_cell(&pending, attempt),
+                })
             }
-        }
+            Err(e) => {
+                why = Some(e);
+                fallback
+            }
+        },
         Plan::Run(c) => c,
     };
-    // The count stays while a core is pending, so the core that runs can
-    // tell why stage0 gave the pending one up.
-    let kept = if st.pending.is_some() { cell } else { CLEARED };
-    let first = run.map_or(slot::A, |c| c.slot);
-    mark(&mut tried_slot, first);
-    let why = match check(first, run.as_ref()) {
-        Ok(body) => {
-            return Ok(Start {
-                slot: first,
-                body,
-                trial: false,
-                cell: kept,
-            })
-        }
-        Err(why) => why,
+    let Some(c) = run else {
+        return Err(NoCore { named: false, why });
     };
-    for s in 0..slots {
-        if tried_slot.has(s) {
-            continue;
-        }
-        if let Ok(body) = check(s, None) {
-            return Ok(Start {
-                slot: s,
-                body,
-                trial: false,
-                cell: kept,
-            });
-        }
+    match check(c.slot, Some(&c)) {
+        // The count stays while a core is pending, so the core that runs
+        // can tell why stage0 gave the pending one up.
+        Ok(body) => Ok(Start {
+            slot: c.slot,
+            body,
+            trial: false,
+            cell: if st.pending.is_some() { cell } else { CLEARED },
+        }),
+        Err(e) => Err(NoCore {
+            named: true,
+            why: Some(e),
+        }),
     }
-    // The pending core that ran out of starts, as the very last resort.
-    if let Some(p) = st.pending.filter(|p| p.slot != first) {
-        if let Ok(body) = check(p.slot, Some(&p)) {
-            return Ok(Start {
-                slot: p.slot,
-                body,
-                trial: false,
-                cell: kept,
-            });
-        }
-    }
-    Err(NoCore {
-        named: run.is_some(),
-        why,
-    })
 }
 
 /// Where stage0 tells why it started no core: an output the board may
@@ -431,12 +437,43 @@ pub struct Stage0<'a> {
     pub mcu_id: u16,
 }
 
-/// Stage0's decision, the same on every MCU: [`choose`] over the boot core
-/// log at `at.log` and the trial cell `cell` read at reset, where every
-/// core it may start, on whichever path, passes [`check_inline`] under
-/// `verifier`; a core whose signature does not verify never starts. When
-/// no core passes, it reports the reason to `diag` and returns it: the
-/// caller starts nothing and waits for recovery.
+/// The apps stage0 may start when no boot core may ([`start`]): the log
+/// holding the APP records, the APP slots (`(base, size)`, slot A first),
+/// the node's image target tag ([`NO_TAG`]: none, so no app starts), and
+/// how an app's entry point is read from
+/// the first 8 bytes of its body at the body's address (`entry(head,
+/// body)`; the MCU's instruction set decides it).
+#[derive(Clone, Copy, Debug)]
+pub struct Apps<'a> {
+    pub log: &'a LogLayout,
+    pub slots: &'a [(u32, u32)],
+    pub target_tag: [u8; 16],
+    pub entry: fn([u8; 8], u32) -> u32,
+}
+
+/// The node tag of a stage0 built without one: it starts no app, whatever
+/// tag the app carries.
+pub const NO_TAG: [u8; 16] = [0; 16];
+
+/// What stage0 starts ([`start`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Boot {
+    /// A boot core.
+    Core(Start<u32>),
+    /// No boot core may start: the confirmed app in APP slot `slot`, its
+    /// body at `body`. The trial cell is left as it is and nothing is
+    /// recorded: the app runs as the confirmed one and can write the boot
+    /// core again.
+    App { slot: u8, body: u32 },
+}
+
+/// Stage0's choice of a boot core, the same on every MCU: [`choose`] over
+/// the boot core log at `at.log` and the trial cell `cell` read at reset,
+/// where every core it may start, on whichever path, passes
+/// [`check_inline`] under `verifier`; a core whose signature does not
+/// verify never starts. When no core passes, it reports the reason to
+/// `diag` and returns it. Stage0 itself decides through [`start`], which
+/// also starts the confirmed app when no core may.
 pub fn decide<F: Flash, V: SigVerifier + ?Sized, D: Diag>(
     flash: &mut F,
     at: &Stage0<'_>,
@@ -444,30 +481,86 @@ pub fn decide<F: Flash, V: SigVerifier + ?Sized, D: Diag>(
     verifier: &V,
     diag: &mut D,
 ) -> Result<Start<u32>, NoCore<CoreFail>> {
-    let st = read_state(flash, at.log).unwrap_or_default();
-    let slots = u8::try_from(at.slots.len()).unwrap_or(u8::MAX);
-    let chosen = choose(&st, cell, at.max, slots, |s, r| {
-        let slot = *at.slots.get(usize::from(s)).ok_or(CoreFail::Kind)?;
-        check_inline(flash, slot, s, (r, verifier), at.mcu_id)
-    });
+    let chosen = core_choice(flash, at, cell, verifier);
     if let Err(no) = &chosen {
         diag.report(no.why.code());
     }
     chosen
 }
 
-/// The slots [`choose`] has checked, as bits by slot number.
-#[derive(Default)]
-struct Tried(u32);
-
-impl Tried {
-    fn has(&self, s: u8) -> bool {
-        self.0.checked_shr(u32::from(s)).is_some_and(|b| b & 1 == 1)
+/// Stage0's decision, the same on every MCU: the boot core [`decide`]
+/// chooses; when none may start, the confirmed app of `apps`
+/// ([`confirmed_app`]). When there is neither, it reports the core's
+/// reason to `diag` and returns it: the caller starts nothing and waits
+/// for recovery.
+pub fn start<F: Flash, V: SigVerifier + ?Sized, D: Diag>(
+    flash: &mut F,
+    at: &Stage0<'_>,
+    apps: &Apps<'_>,
+    cell: [u32; 2],
+    verifier: &V,
+    diag: &mut D,
+) -> Result<Boot, NoCore<CoreFail>> {
+    match core_choice(flash, at, cell, verifier) {
+        Ok(s) => Ok(Boot::Core(s)),
+        Err(no) => match confirmed_app(flash, apps, at.mcu_id, verifier) {
+            Some((slot, body)) => Ok(Boot::App { slot, body }),
+            None => {
+                diag.report(no.why.code());
+                Err(no)
+            }
+        },
     }
 }
 
-fn mark(tried: &mut Tried, s: u8) {
-    tried.0 |= 1u32.checked_shl(u32::from(s)).unwrap_or(0);
+/// [`decide`] without the report.
+fn core_choice<F: Flash, V: SigVerifier + ?Sized>(
+    flash: &mut F,
+    at: &Stage0<'_>,
+    cell: [u32; 2],
+    verifier: &V,
+) -> Result<Start<u32>, NoCore<CoreFail>> {
+    let st = read_state(flash, at.log).unwrap_or_default();
+    let slots = u8::try_from(at.slots.len()).unwrap_or(u8::MAX);
+    choose(&st, cell, at.max, slots, |s, r| {
+        let slot = *at.slots.get(usize::from(s)).ok_or(CoreFail::Kind)?;
+        check_inline(flash, slot, s, (r, verifier), at.mcu_id)
+    })
+    .map_err(|no| NoCore {
+        named: no.named,
+        why: no.why.unwrap_or(CoreFail::Unnamed),
+    })
+}
+
+/// The app stage0 starts when no boot core may ([`start`]): the one the
+/// confirmed APP record of the log at `apps.log` names, while no APP trial is open and
+/// no record has that image pending (the app takes its own state from the
+/// log, so stage0 never starts it under an open trial). It passes the boot
+/// core's checks under `verifier` (the record's header digest, the
+/// signature, an APP for MCU `mcu_id` bound to its slot, linked for its
+/// body and fitting the slot, the body's SHA-256), is built for this
+/// node's tag and inline, and its entry point lies inside its body. Its
+/// slot and body address; `None` when there is no such app.
+pub fn confirmed_app<F: Flash, V: SigVerifier + ?Sized>(
+    flash: &mut F,
+    apps: &Apps<'_>,
+    mcu_id: u16,
+    verifier: &V,
+) -> Option<(u8, u32)> {
+    let st = read_fold(flash, apps.log, LogState::apply)?;
+    let c = st.confirmed?;
+    if st.on_trial() || st.pending == Some(c) {
+        return None;
+    }
+    let slot = *apps.slots.get(usize::from(c.slot))?;
+    let kind = (image_kind::APP, mcu_id);
+    let (body, h) = check_signed(flash, slot, c.slot, (Some(&c), verifier), kind).ok()?;
+    let mut head = [0u8; 8];
+    flash.read(body, &mut head).ok()?;
+    let entry = (apps.entry)(head, body);
+    let inside = entry >= body && entry - body < h.payload_size;
+    let tagged = apps.target_tag != NO_TAG && h.target_tag == apps.target_tag;
+    (inside && tagged && h.placement == placement::INLINE).then_some((c.slot, body))
 }
 
 /// The trial cell as the boot core sees it at start.
@@ -525,7 +618,7 @@ pub fn settle_log<F: Flash>(
     } = cell;
     let mut log = match Log::load(flash, layout) {
         Ok(l) => l,
-        // No boot core record at all: stage0 started slot A unchecked.
+        // No boot core record at all: nothing to settle.
         Err(LogError::NoValidFace) => return Ok(Settled::Nothing),
         Err(_) => return Err(MustReset),
     };

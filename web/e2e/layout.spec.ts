@@ -431,7 +431,7 @@ test('the longest sentence wraps and the band grows over the canvas, moving noth
     await openSample(page);
     const before = await canvasState(page);
     await page.locator('#band .sentence').evaluate((e) => {
-      e.textContent = '終わるまで電源と USB を抜かず、このページを開いたままにしてください。途中で止まっても、ノードは前のバージョンのまま動きます。'.repeat(3);
+      e.textContent = '終わるまで電源と USB を抜かず、このページを開いたままにしてください。途中で止まっても、ノードはもう一度書き込める状態で動きます。'.repeat(3);
     });
     await page.waitForTimeout(120);
     expect(await canvasState(page)).toEqual(before);

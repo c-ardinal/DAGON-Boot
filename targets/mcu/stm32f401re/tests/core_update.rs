@@ -6,9 +6,15 @@
 //! run over the same flash; a power cut lands at every flash operation of
 //! the whole update. After any cut a boot core starts, the app's records
 //! are intact, and the log ends with one confirmed core and nothing pending.
+//!
+//! With one boot core slot the app writes that slot in place: a power cut
+//! anywhere in the update, and a reset or power loss between the new
+//! core's starts, ends with the old core, the new core confirmed through
+//! its trial, or (no core left to start) stage0 starting the confirmed app,
+//! which writes the core again.
 
 use dagon_agent::{SlotStore, Transition};
-use dagon_core::bootcore::{self, MustReset, Settled, CLEARED};
+use dagon_core::bootcore::{self, Boot, MustReset, Settled, CLEARED};
 use dagon_core::log::{trial_room, Log, SlotRef};
 use dagon_ed25519::Ed25519Small;
 use dagon_format::header::*;
@@ -115,7 +121,10 @@ impl Flash for Cut {
 
 fn signed(kind_: u8, slot: u8, base: u32, minor: u8, len: usize) -> Vec<u8> {
     let kp = KeyPair::from_seed(Seed::new(SEED));
-    let body: Vec<u8> = (0..len as u32).map(|i| (i as u8) ^ minor).collect();
+    let mut body: Vec<u8> = (0..len as u32).map(|i| (i as u8) ^ minor).collect();
+    // A vector table: the stack top, then a reset vector inside the body.
+    body[..4].copy_from_slice(&RAM.to_le_bytes());
+    body[4..8].copy_from_slice(&((base + HEADER_LEN + 0x101) | 1).to_le_bytes());
     let (flags, caps) = if kind_ == image_kind::BOOTCORE {
         (build_flags::VERIFY_ENFORCED, capabilities::SIG_VERIFIER)
     } else {
@@ -455,4 +464,248 @@ fn the_store_plans_over_its_boards_regions() {
             op(0x0805_0000, 0x1_0000, 3_000)
         ]
     );
+}
+
+// One boot core slot, written in place by the app.
+
+static ONE_CORE: [(u32, u32); 1] = [CORE_SLOTS[0]];
+const TAG: [u8; 16] = target_tag("seg-f401-7seg");
+
+/// What a stage0 built for a node with one boot core slot and this tag
+/// knows (the package's, with its slot list and tag).
+const ONE: bootcore::Stage0<'static> = bootcore::Stage0 {
+    slots: &ONE_CORE,
+    ..STAGE0_AT
+};
+const APPS: bootcore::Apps<'static> = bootcore::Apps {
+    target_tag: TAG,
+    ..STAGE0_APPS
+};
+
+/// What runs once the resets end: the core whose minor version is given
+/// (it settled its trial, or there was none), or the app stage0 started
+/// for want of a core.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Ran {
+    Core(u8),
+    App,
+}
+
+/// The agent's XFER and SET_PENDING with target BOOTCORE into the only
+/// slot, through the store.
+fn write_only_core(f: &Cut, img: &[u8]) -> Option<()> {
+    let t = Transition::for_store_tests();
+    let mut s = KindSStore::load(f.clone(), &LOG, SLOTS, &ERASE_REGIONS)
+        .ok()?
+        .with_cores(&ONE_CORE, true);
+    assert_eq!(s.capacity(target::BOOTCORE, 1), 0, "one boot core slot");
+    let body = &img[HEADER_SIZE..];
+    let hdr: &[u8; HEADER_SIZE] = img[..HEADER_SIZE].try_into().unwrap();
+    s.erase(target::BOOTCORE, 0, body.len() as u32, &t).ok()?;
+    for (i, c) in body.chunks(256).enumerate() {
+        s.write(target::BOOTCORE, 0, (i * 256) as u32, c, &t).ok()?;
+    }
+    s.write_target_header(target::BOOTCORE, 0, hdr, &t).ok()?;
+    s.set_target_pending(target::BOOTCORE, 0, hdr, &t).ok()?;
+    Some(())
+}
+
+/// What the app's agent does at start, over the one-slot store.
+fn one_core_app_start(f: &Cut) {
+    if let Ok(s) = KindSStore::load(f.clone(), &LOG, SLOTS, &ERASE_REGIONS) {
+        let _ = s.with_cores(&ONE_CORE, true).keep_room();
+    }
+}
+
+/// Stage0 and the boot core through the resets a failing core causes
+/// (each keeps the trial cell; after `lose` of them the power goes and
+/// comes back, clearing it). `None`: the flash lost its power.
+fn one_core_boot(f: &mut Cut, cell: &mut [u32; 2], lose: Option<usize>) -> Option<Ran> {
+    let verifier = Ed25519Small::new(*KeyPair::from_seed(Seed::new(SEED)).pk);
+    for resets in 0..12 {
+        if !f.powered() {
+            return None;
+        }
+        if lose == Some(resets) {
+            *cell = CLEARED;
+        }
+        let before = *cell;
+        match bootcore::start(
+            &mut f.clone(),
+            &ONE,
+            &APPS,
+            *cell,
+            &verifier,
+            &mut bootcore::NoDiag,
+        ) {
+            Ok(Boot::App { slot, body }) => {
+                assert_eq!((slot, body), (0, SLOTS.slots[0].0 + HEADER_LEN));
+                assert_eq!(*cell, before, "the trial cell is left as it is");
+                return Some(Ran::App);
+            }
+            Ok(Boot::Core(start)) => {
+                *cell = start.cell;
+                let ok = healthy(f, start.slot);
+                let settled = bootcore::settle_log(
+                    f,
+                    &LOG,
+                    start.slot,
+                    bootcore::Cell {
+                        value: *cell,
+                        max: TRIAL_ATTEMPTS,
+                        holds: true,
+                    },
+                    ok,
+                );
+                match settled {
+                    Ok(s) => {
+                        if s != Settled::Nothing {
+                            *cell = CLEARED;
+                        }
+                        return Some(Ran::Core(core_minor(f)));
+                    }
+                    Err(MustReset) => continue,
+                }
+            }
+            Err(no) => panic!("stage0 halted: {no:?}"),
+        }
+    }
+    panic!("no core settled and no app started in 12 resets");
+}
+
+fn core_minor(f: &mut Cut) -> u8 {
+    let mut raw = [0u8; HEADER_SIZE];
+    f.read(ONE_CORE[0].0, &mut raw).unwrap();
+    ImageHeader::parse(&raw).unwrap().version.minor()
+}
+
+/// Boots, starts the app and reboots until the boot core trial is settled
+/// or stage0 started the app.
+fn one_core_settled(f: &mut Cut, lose: Option<usize>) -> Option<Ran> {
+    let mut cell = CLEARED;
+    for _ in 0..4 {
+        let ran = one_core_boot(f, &mut cell, lose)?;
+        one_core_app_start(f);
+        if !f.powered() {
+            return None;
+        }
+        if ran == Ran::App || !pending(f) {
+            return Some(ran);
+        }
+    }
+    panic!("the boot core trial stays open");
+}
+
+/// The update to core 1.`minor` in the only slot with the power cut at
+/// operation `cut` (or a power loss after `lose` starts); then the power
+/// comes back and the node boots. What runs then.
+fn one_core_update(
+    full: bool,
+    minor: u8,
+    cut: Option<(usize, bool)>,
+    lose: Option<usize>,
+) -> (Cut, Ran) {
+    let mut f = if full { installed_full() } else { installed() };
+    f.cut = cut;
+    let img = signed(image_kind::BOOTCORE, 0, ONE_CORE[0].0, minor, 3000);
+    if write_only_core(&f, &img).is_some() && f.powered() {
+        one_core_settled(&mut f, lose);
+    }
+    f.cut = None;
+    *f.ops.borrow_mut() = 0;
+    let ran = one_core_settled(&mut f, None).expect("powered");
+    (f, ran)
+}
+
+/// The confirmed boot core and app records.
+fn confirmed(f: &mut Cut) -> (Option<SlotRef>, Option<SlotRef>) {
+    let l = Log::load(f, &LOG).unwrap();
+    (l.core.confirmed, l.state.confirmed)
+}
+
+/// What every way the update ends must hold: the old core runs, or the new
+/// one confirmed through its trial, or stage0 started the confirmed app
+/// and that app writes a core that then runs; the app's record stays.
+fn ends_well(mut f: Cut, ran: Ran, minor: u8, what: &str) {
+    let app = signed(image_kind::APP, 0, SLOTS.slots[0].0, 0, 2000);
+    assert_eq!(
+        confirmed(&mut f).1,
+        Some(head(&app, 0)),
+        "{what}: app record"
+    );
+    match ran {
+        Ran::Core(0) => {}
+        Ran::Core(m) => {
+            assert_eq!(m, minor, "{what}");
+            assert_ne!(m, BROKEN, "{what}: a failing core was confirmed");
+            let new = signed(image_kind::BOOTCORE, 0, ONE_CORE[0].0, m, 3000);
+            assert_eq!(confirmed(&mut f).0, Some(head(&new, 0)), "{what}");
+            assert!(!pending(&mut f), "{what}: trial left open");
+        }
+        Ran::App => {
+            let again = signed(image_kind::BOOTCORE, 0, ONE_CORE[0].0, 2, 3000);
+            write_only_core(&f, &again).expect("the app writes the core again");
+            let ran = one_core_settled(&mut f, None).unwrap();
+            assert_eq!(ran, Ran::Core(2), "{what}: the rewritten core runs");
+            assert_eq!(confirmed(&mut f).0, Some(head(&again, 0)), "{what}");
+        }
+    }
+}
+
+#[test]
+fn the_app_writes_the_only_core_slot_and_the_new_core_is_tried() {
+    let (f, ran) = one_core_update(false, 1, None, None);
+    assert_eq!(ran, Ran::Core(1));
+    ends_well(f, ran, 1, "uncut");
+    let (f, ran) = one_core_update(false, BROKEN, None, None);
+    assert_eq!(ran, Ran::App, "no core left: stage0 starts the app");
+    ends_well(f, ran, BROKEN, "failing core");
+}
+
+#[test]
+fn a_power_cut_anywhere_in_a_one_slot_core_update_ends_in_a_core_or_the_app() {
+    for full in [false, true] {
+        for minor in [1, BROKEN] {
+            let ops = {
+                let mut f = if full { installed_full() } else { installed() };
+                let img = signed(image_kind::BOOTCORE, 0, ONE_CORE[0].0, minor, 3000);
+                write_only_core(&f, &img).unwrap();
+                one_core_settled(&mut f, None).unwrap();
+                let n = *f.ops.borrow();
+                n
+            };
+            assert!(ops > 10, "{ops}");
+            let mut seen = Vec::new();
+            for n in 0..=ops {
+                for half in [false, true] {
+                    let (f, ran) = one_core_update(full, minor, Some((n, half)), None);
+                    ends_well(
+                        f,
+                        ran,
+                        minor,
+                        &format!("full {full} 1.{minor} cut {n}/{half}"),
+                    );
+                    seen.push(ran);
+                }
+            }
+            // The cuts reach every way the update can end.
+            assert!(seen.contains(&Ran::App), "full {full} 1.{minor}");
+            assert!(seen.contains(&Ran::Core(0)), "full {full} 1.{minor}");
+            if minor != BROKEN {
+                assert!(seen.contains(&Ran::Core(minor)), "full {full}");
+            }
+        }
+    }
+}
+
+/// A power loss after each start of the new core (the trial cell lost)
+/// starts its trial over; it still ends in the new core or the app.
+#[test]
+fn a_power_loss_between_the_new_cores_starts_ends_in_a_core_or_the_app() {
+    for minor in [1, BROKEN] {
+        for lose in 1..=usize::from(TRIAL_ATTEMPTS) {
+            let (f, ran) = one_core_update(false, minor, None, Some(lose));
+            ends_well(f, ran, minor, &format!("1.{minor} lost after {lose}"));
+        }
+    }
 }

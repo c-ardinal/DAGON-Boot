@@ -15,6 +15,7 @@
 //! | 7 | 128 KiB | boot core slot B |
 
 use dagon_core::boot::SlotLayout;
+use dagon_core::bootcore::{Apps, Stage0};
 use dagon_core::log::LogLayout;
 use dagon_format::header::HEADER_SIZE;
 use dagon_port::FlashRegion;
@@ -49,6 +50,27 @@ pub const SLOTS: SlotLayout = SlotLayout {
 
 /// The MCU id in image headers (`wire_id`).
 pub const MCU_ID: u16 = crate::MCU_WIRE_ID;
+
+/// What stage0 knows of this MCU (`dagon_core::bootcore::decide`): the
+/// log, the boot core slots and the trial's starts.
+pub const STAGE0_AT: Stage0<'static> = Stage0 {
+    log: &LOG,
+    slots: &CORE_SLOTS,
+    max: crate::TRIAL_ATTEMPTS,
+    mcu_id: MCU_ID,
+};
+
+/// The apps stage0 starts the confirmed one of when no boot core may
+/// (`dagon_core::bootcore::start`): the log (the same one), the APP slots,
+/// this node's tag (`DAGON_TARGET_TAG` at build time) and the vector
+/// table's entry point.
+pub const STAGE0_APPS: Apps<'static> = Apps {
+    log: &LOG,
+    slots: SLOTS.slots,
+    target_tag: crate::tag::stage0_tag(crate::TARGET_TAG),
+    entry: dagon_mcu_common::vector::entry,
+};
+
 /// Smallest flash the layout fits: the default flash map.
 pub const MIN_FLASH_SIZE: usize = crate::DEFAULT_FLASH.1 as usize;
 /// RAM every image links against.

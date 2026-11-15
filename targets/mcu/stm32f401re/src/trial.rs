@@ -43,8 +43,9 @@ pub fn holds() -> bool {
 }
 
 /// Starts the independent watchdog with a period of `ms` before stage0
-/// jumps to a core on trial, so a core that hangs before it takes the
-/// watchdog over is reset and its start counted.
+/// jumps: the trial period before a core on trial, so a core that hangs
+/// before it takes the watchdog over is reset and its start counted; the
+/// confirmed period before the confirmed app it starts when no core may.
 pub fn arm_watchdog(ms: u32) {
     crate::iwdg::start(ms);
 }

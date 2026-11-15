@@ -10,7 +10,7 @@ use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
 use super::board_boot::{code_ident, code_names, type_name as camel, Active, HaltPattern};
-use super::boot_folder::{BootFolder, BOOT_FOLDER_ENV};
+use super::boot_folder::{self, BootFolder, BOOT_FOLDER_ENV};
 use super::execution::EraseRegionDef;
 use super::load::{self, BOARD_FILE, MCU_FILE};
 use super::{BoardDef, ClockSetup, ClockStage, DefError, McuDef, Registry, Source};
@@ -77,14 +77,102 @@ fn loaded(sources: &[Source<'_>], reg: &Registry, board: &BoardDef) -> Result<Lo
 /// A board package's own definition (`dir/dagon-board.toml`) and its MCU,
 /// validated with the source tree it sits in.
 pub fn package_board(dir: &Path) -> Result<Loaded, DefError> {
-    let sources = [Source::Tree(tree_root(dir)?)];
-    let reg = Registry::load(&sources)?;
+    package_board_in(dir, None)
+}
+
+/// [`package_board`], built for the node whose boot folder is `boot`
+/// ([`BOOT_FOLDER_ENV`]) when given: the node's board and MCU as `dagon
+/// gen` wrote them there ([`node_registry`]). A node without a board, or
+/// on another board than this package's, is refused.
+fn package_board_in(dir: &Path, boot: Option<&Path>) -> Result<Loaded, DefError> {
     let id = id_in(dir, BOARD_FILE)?;
-    loaded(
-        &sources,
-        &reg,
-        reg.board(&id).expect("loaded with the tree"),
-    )
+    let sources = [Source::Tree(tree_root(dir)?)];
+    let tree = Registry::load(&sources)?;
+    let Some(boot) = boot else {
+        return loaded(
+            &sources,
+            &tree,
+            tree.board(&id).expect("loaded with the tree"),
+        );
+    };
+    let on = tree.board(&id).expect("loaded with the tree").mcu.clone();
+    let board = boot.join(boot_folder::BOARD_FILE);
+    if !board.is_file() {
+        return Err(def_err(
+            board.display(),
+            format!("the node names no board; this package is board '{id}'"),
+        ));
+    }
+    let (reg, files) = node_registry(dir, boot, &on, Some((&id, Some(dir))))?;
+    Ok(Loaded {
+        board: reg.board(&id).expect("checked on load").clone(),
+        mcu: reg.mcu(&on).expect("checked on load").clone(),
+        files,
+    })
+}
+
+/// The source tree's definitions with the node's own in place of theirs:
+/// its MCU (`mcu`) and, when `board` names it, its board, as `dagon gen`
+/// wrote them into the node's boot folder `boot` (with the project's
+/// overrides), checked against its [`boot_folder::DEFS_FILE`] first; the
+/// board's parts are in `board`'s package when given. Never the project's
+/// dagon.toml, which may have changed since gen. Returns the registry and
+/// the files it read. `dir` is a folder of the source tree.
+fn node_registry(
+    dir: &Path,
+    boot: &Path,
+    mcu: &str,
+    board: Option<(&str, Option<&Path>)>,
+) -> Result<(Registry, Vec<PathBuf>), DefError> {
+    let sources = [Source::Tree(tree_root(dir)?)];
+    let mut reg = Registry::load(&sources)?;
+    let mut files = load::files(&sources)?;
+    let mcu_file = boot.join(boot_folder::MCU_FILE);
+    let board_file = boot.join(boot_folder::BOARD_FILE);
+    files.extend([
+        boot.join(boot_folder::DEFS_FILE),
+        mcu_file.clone(),
+        board_file.clone(),
+    ]);
+    boot_folder::check_defs(boot).map_err(|e| def_err(BOOT_FOLDER_ENV, e))?;
+    let gen = "run `dagon gen`";
+    if !mcu_file.is_file() {
+        return Err(def_err(mcu_file.display(), format!("missing; {gen}")));
+    }
+    let node_mcu = id_in(boot, boot_folder::MCU_FILE)?;
+    if node_mcu != mcu {
+        return Err(def_err(
+            mcu_file.display(),
+            format!("the definition of MCU '{node_mcu}'; this build is for MCU '{mcu}'"),
+        ));
+    }
+    let node_board = match board {
+        None => None,
+        Some((id, package)) => {
+            if !board_file.is_file() {
+                return Err(def_err(
+                    board_file.display(),
+                    format!("missing for board '{id}'; {gen}"),
+                ));
+            }
+            let found = id_in(boot, boot_folder::BOARD_FILE)?;
+            if found != id {
+                return Err(def_err(
+                    board_file.display(),
+                    format!("the node is on board '{found}'; this build is for board '{id}'"),
+                ));
+            }
+            Some((board_file.as_path(), package))
+        }
+    };
+    load::node_files(&mut reg, &mcu_file, node_board)?;
+    Ok((reg, files))
+}
+
+/// The boot folder a board package's build is given ([`BOOT_FOLDER_ENV`]).
+fn boot_folder_env() -> Option<PathBuf> {
+    println!("cargo:rerun-if-env-changed={BOOT_FOLDER_ENV}");
+    std::env::var_os(BOOT_FOLDER_ENV).map(PathBuf::from)
 }
 
 /// The board a boot stage of the MCU package at `mcu_dir` is built for,
@@ -359,10 +447,12 @@ pub fn dma_rs(b: &BoardDef, m: &McuDef, hal: &DmaHal<'_>) -> Result<String, DefE
 }
 
 /// A board package's build script, for a board with `dma = true` buses:
-/// writes `dma.rs` ([`dma_rs`]) into `OUT_DIR` from the package's own
-/// definition. Call it beside [`package_build`].
+/// writes `dma.rs` ([`dma_rs`]) into `OUT_DIR` from the board definition
+/// [`package_build`] reads. Call it beside [`package_build`].
 pub fn dma_build(hal: &DmaHal<'_>) {
-    let l = package_board(&manifest_dir()).unwrap_or_else(|e| panic!("{e}"));
+    let l = package_board_in(&manifest_dir(), boot_folder_env().as_deref())
+        .unwrap_or_else(|e| panic!("{e}"));
+    watch(&l.files);
     let rs = dma_rs(&l.board, &l.mcu, hal).unwrap_or_else(|e| panic!("{e}"));
     write(&out_dir().join("dma.rs"), &rs);
 }
@@ -429,11 +519,16 @@ pub fn link_baud_rs(b: &BoardDef, env: Option<&str>) -> Result<String, String> {
 /// an MCU with a DAGON boot loader `app_clock`, the setup an app on the
 /// board runs on, [`clock_rs`]),
 /// `pins.rs` ([`pins_rs`]) and `devices.rs` ([`devices_rs`]) into
-/// `OUT_DIR` from the package's own definition, and reruns when any
-/// definition the validation read changes; a definition that does not
-/// load fails the build with the loader's message.
+/// `OUT_DIR`, and reruns when any definition the validation read changes;
+/// a definition that does not load fails the build with the loader's
+/// message. The definition is the node's board and MCU in its boot folder
+/// when [`BOOT_FOLDER_ENV`] is set (an app built for a node: `dagon gen`
+/// wrote them there with the project's overrides, and a file that no
+/// longer matches its [`boot_folder::DEFS_FILE`] line fails the build),
+/// else the package's own and its MCU's in the source tree.
 pub fn package_build(hal: &Hal<'_>) {
-    let l = package_board(&manifest_dir()).unwrap_or_else(|e| panic!("{e}"));
+    let l = package_board_in(&manifest_dir(), boot_folder_env().as_deref())
+        .unwrap_or_else(|e| panic!("{e}"));
     watch(&l.files);
     println!("cargo:rerun-if-env-changed={LINK_BAUD_ENV}");
     let env = std::env::var(LINK_BAUD_ENV).ok();
@@ -485,27 +580,47 @@ fn boot_inputs() -> (PathBuf, BootFolder) {
 
 /// A boot stage's build script (in a folder of the MCU package): writes
 /// `board.rs` ([`board_rs`]) and, with a HAL, `pins.rs` into `OUT_DIR` for
-/// the board of the node whose boot folder [`BOOT_FOLDER_ENV`] names (a
-/// board of the source tree or of the node's project), and returns that
+/// the board of the node whose boot folder [`BOOT_FOLDER_ENV`] names (its
+/// `board.toml` as `dagon gen` wrote it, [`boot_node`]), and returns that
 /// board; a node without a board gets no LED and no halt pattern
 /// ([`no_board_rs`]). A build without the boot folder, or with one of a
 /// node on another MCU, fails.
 pub fn boot_build(hal: Option<&Hal<'_>>) -> Option<BoardDef> {
     let (mcu, f) = boot_inputs();
-    let Some(board) = f.meta.board.as_deref() else {
+    // Checked for every node, with or without a board.
+    let (_, b, files) = boot_node(&mcu, &f).unwrap_or_else(|e| panic!("{e}"));
+    watch(&files);
+    let Some(b) = b else {
         write(&out_dir().join("board.rs"), &no_board_rs(&f.meta.node));
         if hal.is_some() {
             write(&out_dir().join("pins.rs"), NO_PINS_RS);
         }
         return None;
     };
-    let l = boot_board(&mcu, Some(board), f.project().as_deref()).unwrap_or_else(|e| panic!("{e}"));
-    watch(&l.files);
-    write(&out_dir().join("board.rs"), &board_rs(&l.board));
+    write(&out_dir().join("board.rs"), &board_rs(&b));
     if let Some(hal) = hal {
-        write(&out_dir().join("pins.rs"), &pins_rs(&l.board, hal));
+        write(&out_dir().join("pins.rs"), &pins_rs(&b, hal));
     }
-    Some(l.board)
+    Some(b)
+}
+
+/// The MCU and board (none for a node without one) a boot stage of the
+/// MCU package at `mcu_dir` is built with, for the node of boot folder
+/// `f`: its `mcu.toml` and `board.toml` as `dagon gen` wrote them
+/// ([`node_registry`]), the same files its app builds from. Returns them
+/// and the files read.
+fn boot_node(
+    mcu_dir: &Path,
+    f: &BootFolder,
+) -> Result<(McuDef, Option<BoardDef>, Vec<PathBuf>), DefError> {
+    let mcu = id_in(mcu_dir, MCU_FILE)?;
+    let board = f.meta.board.as_deref();
+    let (reg, files) = node_registry(mcu_dir, &f.dir, &mcu, board.map(|b| (b, None)))?;
+    Ok((
+        reg.mcu(&mcu).expect("checked on load").clone(),
+        board.map(|b| reg.board(b).expect("checked on load").clone()),
+        files,
+    ))
 }
 
 /// How an MCU package's stage0 drives a board's `[boot]` indicator.
@@ -584,11 +699,13 @@ pub fn stage0_build(hal: &DiagHal<'_>) -> Stage0Build {
 }
 
 /// The setup `stage` runs on for the node whose boot folder
-/// [`BOOT_FOLDER_ENV`] names, on `board` (its MCU definition as the node's
-/// project sees it); the build fails for a stage its MCU does not have.
+/// [`BOOT_FOLDER_ENV`] names, on `board` (its MCU definition as `dagon gen`
+/// wrote it there, [`boot_node`]); the build fails for a stage its MCU
+/// does not have.
 fn boot_clock(stage: ClockStage, board: Option<&BoardDef>) -> ClockSetup {
     let (dir, f) = boot_inputs();
-    let mcu = boot_mcu(&dir, f.project().as_deref()).unwrap_or_else(|e| panic!("{e}"));
+    let (mcu, _, files) = boot_node(&dir, &f).unwrap_or_else(|e| panic!("{e}"));
+    watch(&files);
     mcu.clock_for(stage, board)
         .unwrap_or_else(|| panic!("MCU '{}' has no [{}] clock", mcu.id, stage.name()))
         .clone()
@@ -639,6 +756,7 @@ pub fn clock_rs(stage: ClockStage, c: &ClockSetup) -> String {
 
 /// The MCU definition of the package at `mcu_dir`, from the source tree
 /// plus, when given, a project's dagon.toml (its overrides).
+#[cfg(test)]
 fn boot_mcu(mcu_dir: &Path, project: Option<&Path>) -> Result<McuDef, DefError> {
     let mut sources = vec![Source::Tree(tree_root(mcu_dir)?)];
     sources.extend(project.map(Source::Project));
@@ -909,6 +1027,217 @@ mod tests {
             "{rs}"
         );
         assert!(boot_board(&mcu, Some("nope"), None).is_err());
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// A board package built for a node (`DAGON_BOOT_CRATE` set) reads the
+    /// node's board and MCU from its boot folder, as `dagon gen` wrote
+    /// them with the project's overrides, and watches them; a file that no
+    /// longer matches `defs.sha256`, a folder without a board, and the
+    /// board of another package are refused.
+    #[test]
+    fn a_board_package_built_for_a_node_reads_the_node_s_board() {
+        use super::super::boot_folder::{
+            board_file_text, defs_text, mcu_file_text, BOARD_FILE as NODE_BOARD, DEFS_FILE,
+            MCU_FILE as NODE_MCU,
+        };
+        let (dir, _) = tree("node", &[("pico-like", ""), ("other", "")]);
+        let pkg = dir.join("targets/boards/pico-like");
+        let project = dir.join("dagon.toml");
+        std::fs::write(
+            &project,
+            "format = 1\n[[board_override.pico-like.pin]]\npin = \"GPIO3\"\nname = \"button\"\n\n\
+             [mcu_override.rp2040.watchdog]\ntrial_ms = 6_000\n",
+        )
+        .unwrap();
+        let reg = Registry::load(&[Source::Tree(&dir), Source::Project(&project)]).unwrap();
+        let boot = dir.join("boot/n");
+        std::fs::create_dir_all(&boot).unwrap();
+        let gen = |board: &str| {
+            let mcu = mcu_file_text(&reg, "rp2040").unwrap();
+            let board = board_file_text(&reg, board).unwrap();
+            std::fs::write(boot.join(NODE_MCU), &mcu).unwrap();
+            std::fs::write(boot.join(NODE_BOARD), &board).unwrap();
+            std::fs::write(
+                boot.join(DEFS_FILE),
+                defs_text(&[(NODE_MCU, &mcu), (NODE_BOARD, &board)]),
+            )
+            .unwrap();
+        };
+        gen("pico-like");
+        let button = |l: &Loaded| l.board.pins.iter().any(|p| p.pin == "GPIO3");
+        assert!(!button(&package_board(&pkg).unwrap()));
+        let l = package_board_in(&pkg, Some(&boot)).unwrap();
+        assert!(button(&l));
+        assert_eq!(l.mcu.watchdog, reg.mcu("rp2040").unwrap().watchdog);
+        for f in [NODE_MCU, NODE_BOARD, DEFS_FILE] {
+            assert!(l.files.contains(&boot.join(f)), "{f}: {:?}", l.files);
+        }
+        // Edited by hand after gen.
+        let text = std::fs::read_to_string(boot.join(NODE_BOARD)).unwrap();
+        std::fs::write(boot.join(NODE_BOARD), text.replace("GPIO3", "GPIO4")).unwrap();
+        let e = package_board_in(&pkg, Some(&boot)).unwrap_err().to_string();
+        assert!(e.contains("board.toml") && e.contains(DEFS_FILE), "{e}");
+        // Another package's board.
+        gen("other");
+        let e = package_board_in(&pkg, Some(&boot)).unwrap_err().to_string();
+        assert!(e.contains("'other'") && e.contains("pico-like"), "{e}");
+        // A node that names no board.
+        std::fs::remove_file(boot.join(NODE_BOARD)).unwrap();
+        let mcu = std::fs::read_to_string(boot.join(NODE_MCU)).unwrap();
+        std::fs::write(boot.join(DEFS_FILE), defs_text(&[(NODE_MCU, &mcu)])).unwrap();
+        let e = package_board_in(&pkg, Some(&boot)).unwrap_err().to_string();
+        assert!(e.contains("names no board"), "{e}");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// A boot stage builds from the node's `mcu.toml` and `board.toml` as
+    /// `dagon gen` wrote them, the files its app builds from, never from
+    /// dagon.toml: an override changed there after gen does not reach it,
+    /// a file edited by hand is refused, and a project's inline board is
+    /// read from its `board.toml` like any other.
+    #[test]
+    fn a_boot_stage_builds_from_the_files_gen_wrote_never_dagon_toml() {
+        use super::super::boot_folder::{
+            board_file_text, defs_text, mcu_file_text, BOARD_FILE as NODE_BOARD, DEFS_FILE,
+            MCU_FILE as NODE_MCU,
+        };
+        let (dir, mcu_dir) = tree("boot-node", &[("pico-like", "")]);
+        let project = dir.join("dagon.toml");
+        let overrides = |pin: &str, trial: u32| {
+            format!(
+                "format = 1\n[[board_override.pico-like.pin]]\npin = \"{pin}\"\nname = \"button\"\n\n\
+                 [mcu_override.rp2040.watchdog]\ntrial_ms = {trial}\n\n\
+                 [board.mine]\nformat = 2\nproduct = \"Mine\"\nmcu = \"rp2040\"\nflash_bytes = 0x40_0000\n\
+                 drawing = \"x\"\n[board.mine.boot]\nled = \"{pin}\"\n[[board.mine.pin]]\npin = \"{pin}\"\n"
+            )
+        };
+        std::fs::write(&project, overrides("GPIO3", 6_000)).unwrap();
+        let reg = Registry::load(&[Source::Tree(&dir), Source::Project(&project)]).unwrap();
+        let boot = dir.join("boot/n");
+        std::fs::create_dir_all(&boot).unwrap();
+        let gen = |board: &str| {
+            std::fs::write(
+                boot.join("Cargo.toml"),
+                format!(
+                    "[package]\nname = \"n-boot\"\nversion = \"0.1.0\"\n\
+                     [package.metadata.dagon.boot]\nnode = \"n\"\nmcu = \"rp2040\"\nboard = \"{board}\"\n\
+                     project = \"../../dagon.toml\"\n"
+                ),
+            )
+            .unwrap();
+            let mcu = mcu_file_text(&reg, "rp2040").unwrap();
+            let b = board_file_text(&reg, board).unwrap();
+            std::fs::write(boot.join(NODE_MCU), &mcu).unwrap();
+            std::fs::write(boot.join(NODE_BOARD), &b).unwrap();
+            std::fs::write(
+                boot.join(DEFS_FILE),
+                defs_text(&[(NODE_MCU, &mcu), (NODE_BOARD, &b)]),
+            )
+            .unwrap();
+            BootFolder::read(&boot).unwrap()
+        };
+        let trial = |m: &McuDef| m.watchdog.as_ref().map(|w| w.trial_ms);
+        let pins = |b: &BoardDef| b.pins.iter().map(|p| p.pin.clone()).collect::<Vec<_>>();
+        let f = gen("pico-like");
+        // dagon.toml changes after gen: the boot stage still builds from
+        // what gen wrote.
+        std::fs::write(&project, overrides("GPIO4", 7_000)).unwrap();
+        let (m, b, files) = boot_node(&mcu_dir, &f).unwrap();
+        assert_eq!(trial(&m), trial(reg.mcu("rp2040").unwrap()));
+        let b = b.unwrap();
+        assert!(pins(&b).contains(&"GPIO3".to_string()), "{:?}", pins(&b));
+        assert!(!pins(&b).contains(&"GPIO4".to_string()));
+        assert!(!files.contains(&project), "{files:?}");
+        assert!(files.contains(&boot.join(NODE_BOARD)));
+        // Edited by hand after gen.
+        let text = std::fs::read_to_string(boot.join(NODE_BOARD)).unwrap();
+        std::fs::write(boot.join(NODE_BOARD), text.replace("GPIO3", "GPIO5")).unwrap();
+        let e = boot_node(&mcu_dir, &f).unwrap_err().to_string();
+        assert!(e.contains("board.toml") && e.contains(DEFS_FILE), "{e}");
+        // A project's inline board.
+        let f = gen("mine");
+        let (_, b, _) = boot_node(&mcu_dir, &f).unwrap();
+        assert_eq!(b.unwrap().boot.unwrap().led.as_deref(), Some("GPIO3"));
+        // The node's board file is required.
+        std::fs::remove_file(boot.join(NODE_BOARD)).unwrap();
+        let mcu = std::fs::read_to_string(boot.join(NODE_MCU)).unwrap();
+        std::fs::write(boot.join(DEFS_FILE), defs_text(&[(NODE_MCU, &mcu)])).unwrap();
+        let e = boot_node(&mcu_dir, &f).unwrap_err().to_string();
+        assert!(e.contains("board.toml") && e.contains("dagon gen"), "{e}");
+        // A node without a board: its MCU definition is checked all the
+        // same.
+        std::fs::write(
+            boot.join("Cargo.toml"),
+            "[package]\nname = \"n-boot\"\nversion = \"0.1.0\"\n\
+             [package.metadata.dagon.boot]\nnode = \"n\"\nmcu = \"rp2040\"\n",
+        )
+        .unwrap();
+        let f = BootFolder::read(&boot).unwrap();
+        let (_, b, _) = boot_node(&mcu_dir, &f).unwrap();
+        assert!(b.is_none());
+        std::fs::write(boot.join(NODE_MCU), format!("{mcu}# edited\n")).unwrap();
+        let e = boot_node(&mcu_dir, &f).unwrap_err().to_string();
+        assert!(e.contains("mcu.toml") && e.contains(DEFS_FILE), "{e}");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// A node folder without `defs.sha256` (an older one, or one whose
+    /// hashes were deleted) is refused by a board package's build and by
+    /// the boot stages', for a node with a board and for one without,
+    /// saying to run `dagon gen`.
+    #[test]
+    fn a_node_folder_without_its_hashes_is_refused_by_every_build() {
+        use super::super::boot_folder::{
+            board_file_text, defs_text, mcu_file_text, BOARD_FILE as NODE_BOARD, DEFS_FILE,
+            MCU_FILE as NODE_MCU,
+        };
+        let (dir, mcu_dir) = tree("no-hashes", &[("pico-like", "")]);
+        let pkg = dir.join("targets/boards/pico-like");
+        let reg = Registry::load(&[Source::Tree(&dir)]).unwrap();
+        let boot = dir.join("boot/n");
+        std::fs::create_dir_all(&boot).unwrap();
+        let mcu = mcu_file_text(&reg, "rp2040").unwrap();
+        let board = board_file_text(&reg, "pico-like").unwrap();
+        let folder = |board_line: &str| {
+            std::fs::write(
+                boot.join("Cargo.toml"),
+                format!(
+                    "[package]\nname = \"n-boot\"\nversion = \"0.1.0\"\n\
+                     [package.metadata.dagon.boot]\nnode = \"n\"\nmcu = \"rp2040\"\n{board_line}"
+                ),
+            )
+            .unwrap();
+            BootFolder::read(&boot).unwrap()
+        };
+        let refused = |e: DefError| {
+            let e = e.to_string();
+            assert!(
+                e.contains("no defs.sha256") && e.contains("dagon gen"),
+                "{e}"
+            );
+        };
+        // A node with a board: its board package and its boot stages.
+        std::fs::write(boot.join(NODE_MCU), &mcu).unwrap();
+        std::fs::write(boot.join(NODE_BOARD), &board).unwrap();
+        std::fs::write(
+            boot.join(DEFS_FILE),
+            defs_text(&[(NODE_MCU, &mcu), (NODE_BOARD, &board)]),
+        )
+        .unwrap();
+        let f = folder("board = \"pico-like\"\n");
+        package_board_in(&pkg, Some(&boot)).unwrap();
+        boot_node(&mcu_dir, &f).unwrap();
+        std::fs::remove_file(boot.join(DEFS_FILE)).unwrap();
+        refused(package_board_in(&pkg, Some(&boot)).unwrap_err());
+        refused(boot_node(&mcu_dir, &f).unwrap_err());
+        // A node without a board: its boot stages.
+        std::fs::remove_file(boot.join(NODE_BOARD)).unwrap();
+        std::fs::write(boot.join(DEFS_FILE), defs_text(&[(NODE_MCU, &mcu)])).unwrap();
+        let f = folder("");
+        boot_node(&mcu_dir, &f).unwrap();
+        std::fs::remove_file(boot.join(DEFS_FILE)).unwrap();
+        refused(boot_node(&mcu_dir, &f).unwrap_err());
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

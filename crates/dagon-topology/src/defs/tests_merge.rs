@@ -802,6 +802,49 @@ fn the_text_the_firmware_builds_from_is_the_merged_definition() {
     assert_eq!(builtin.merged_mcu_toml("no-such-mcu"), None);
 }
 
+/// A node's board as its firmware builds from it
+/// (`Registry::merged_board_toml`) is the merged board in the canonical
+/// form (keys sorted, LF line endings, one trailing newline), as the MCU's
+/// text is; a board no override names gives the built-in one.
+#[test]
+fn the_board_text_the_firmware_builds_from_is_the_merged_board() {
+    let id = "waveshare-rp2040-touch-lcd-1.28";
+    let r = load(
+        "firmware-board",
+        &format!(
+            "[[board_override.\"{id}\".pin]]\npin = \"GPIO22\"\ndagon-remove = true\n\n\
+             [[board_override.\"{id}\".pin]]\npin = \"GPIO21\"\nname = \"touch_rst\"\n"
+        ),
+    )
+    .unwrap();
+    let canonical = |text: &str| {
+        let t: toml::Table = text.parse().unwrap();
+        assert_eq!(toml::to_string(&t).unwrap(), text);
+        assert!(text.ends_with('\n') && !text.ends_with("\n\n") && !text.contains('\r'));
+    };
+    let text = r.merged_board_toml(id).unwrap();
+    canonical(&text);
+    canonical(&r.merged_mcu_toml("rp2040").unwrap());
+    let b: BoardDef = toml::from_str(&text).unwrap();
+    let pin = |b: &BoardDef, name: &str| {
+        b.pins
+            .iter()
+            .find(|p| p.name.as_deref() == Some(name))
+            .map(|p| p.pin.clone())
+    };
+    assert_eq!(pin(&b, "touch_rst").as_deref(), Some("GPIO21"));
+    assert_eq!(pin(&b, "backlight").as_deref(), Some("GPIO25"));
+    assert_eq!(b.pins, r.board(id).unwrap().pins);
+    let builtin = Registry::builtin();
+    let text = builtin.merged_board_toml("nucleo-f401re").unwrap();
+    canonical(&text);
+    assert_eq!(
+        &toml::from_str::<BoardDef>(&text).unwrap(),
+        builtin.board("nucleo-f401re").unwrap()
+    );
+    assert_eq!(builtin.merged_board_toml("no-such-board"), None);
+}
+
 #[test]
 fn a_new_uniqueness_check_refuses_a_header_pin_or_i2c_pair_given_twice() {
     for (name, extra) in [

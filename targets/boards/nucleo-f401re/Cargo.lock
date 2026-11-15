@@ -319,6 +319,7 @@ name = "dagon-topology"
 version = "0.1.0"
 dependencies = [
  "dagon-format",
+ "dagon-mcu-build",
  "dagon-port",
  "dagon-proto",
  "serde",

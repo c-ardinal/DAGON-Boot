@@ -647,6 +647,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "dagon-mcu-build"
+version = "0.1.0"
+dependencies = [
+ "sha2",
+ "toml",
+]
+
+[[package]]
 name = "dagon-port"
 version = "0.1.0"
 dependencies = [
@@ -725,12 +733,14 @@ version = "0.1.0"
 dependencies = [
  "dagon-format",
  "dagon-host",
+ "dagon-mcu-build",
  "dagon-port",
  "dagon-proto",
  "dagon-romlink",
  "dagon-sign",
  "serde",
  "serde_json",
+ "sha2",
  "toml",
  "yaml_serde",
 ]

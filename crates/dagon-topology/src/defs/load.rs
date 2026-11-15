@@ -489,6 +489,81 @@ fn tree(root: &Path) -> Result<Registry, DefError> {
     Ok(reg)
 }
 
+/// The `id` of definition `text` read from `path`.
+fn id_of(text: &str, path: &Path) -> Result<String, DefError> {
+    toml::from_str::<toml::Table>(text)
+        .ok()
+        .and_then(|t| t.get("id")?.as_str().map(str::to_string))
+        .map_or_else(|| err(path.display(), "no id"), Ok)
+}
+
+/// Puts a node's definitions, as `dagon gen` wrote them into its boot
+/// folder, in place of those of the same id in `reg`: the MCU's (`mcu`;
+/// the text files it names resolve as the replaced definition's did) and,
+/// when given, the board's (its file and, for a board package's build, the
+/// package its parts are in). A board the registry does not hold (a
+/// project's inline board) is added. The board must be on that MCU; the
+/// registry is then checked as on load.
+pub(super) fn node_files(
+    reg: &mut Registry,
+    mcu: &Path,
+    board: Option<(&Path, Option<&Path>)>,
+) -> Result<(), DefError> {
+    let text = read(mcu)?;
+    let mcu_id = id_of(&text, mcu)?;
+    let Some(i) = reg.mcus.iter().position(|m| m.id == mcu_id) else {
+        return err(mcu.display(), format!("MCU '{mcu_id}' is not defined"));
+    };
+    let label = mcu.display().to_string();
+    let files = reg.mcu_sources[i].files.clone();
+    let pkg = Pkg::Embedded {
+        label: &label,
+        files: &file_refs(&files),
+    };
+    let (m, source) = mcu_entry(&text, &pkg, false)?;
+    reg.mcus[i] = McuDef {
+        package: reg.mcus[i].package.take(),
+        ..m
+    };
+    reg.mcu_sources[i] = source;
+    if let Some((path, package)) = board {
+        let text = read(path)?;
+        let label = path.display().to_string();
+        let pkg = match package {
+            Some(dir) => Pkg::Dir(dir.to_path_buf()),
+            None => Pkg::Embedded {
+                label: &label,
+                files: &[],
+            },
+        };
+        let (b, source) = board_entry(&text, &pkg, false).map_err(|e| DefError {
+            at: format!("{label} ({})", e.at),
+            msg: e.msg,
+        })?;
+        if b.mcu != mcu_id {
+            return err(
+                &label,
+                format!(
+                    "board '{}' is on MCU '{}'; the node's MCU definition is '{mcu_id}'",
+                    b.id, b.mcu
+                ),
+            );
+        }
+        match reg.boards.iter().position(|x| x.id == b.id) {
+            Some(i) => {
+                reg.boards[i] = b;
+                reg.board_sources[i] = source;
+            }
+            None => {
+                reg.boards.push(b);
+                reg.board_sources.push(source);
+                reg.board_origins.push(Origin::Project);
+            }
+        }
+    }
+    validate(reg)
+}
+
 /// Every file [`load`] reads from disk for `sources`, found the way it
 /// finds them: a tree's MCU and board definitions and the text files the
 /// MCU definitions name, a project's dagon.toml and its MCU files with

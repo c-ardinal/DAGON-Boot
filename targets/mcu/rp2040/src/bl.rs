@@ -1,15 +1,15 @@
 //! Boot core A/B on the hub (`dagon_core::bootcore` over the hub layout):
-//! stage0's choice of the boot core slot, and what the started boot core
-//! records about the trial before it starts the app. Only the boot core
-//! writes the boot core log (stage0 keeps the trial count in the trial
-//! cell, never in flash).
+//! stage0's choice of the boot core slot (or, with no core to start, of
+//! the confirmed app), and what the started boot core records about the
+//! trial before it starts the app. Only the boot core writes the boot core
+//! log (stage0 keeps the trial count in the trial cell, never in flash).
 
-use dagon_core::bootcore::{self, CoreFail, Diag, NoCore, Stage0, Start};
+use dagon_core::bootcore::{self, Apps, Boot, CoreFail, Diag, NoCore, Stage0, Start};
 pub use dagon_core::bootcore::{MustReset, Settled};
 use dagon_format::SigVerifier;
 use dagon_port::Flash;
 
-use crate::layout::BL_LOG_LAYOUT;
+use crate::layout::{APP_LOG_LAYOUT, BL_LOG_LAYOUT};
 use crate::TRIAL_ATTEMPTS;
 
 /// What stage0 knows of this MCU (`dagon_core::bootcore::decide`): the boot
@@ -19,6 +19,17 @@ pub const STAGE0: Stage0<'static> = Stage0 {
     slots: &crate::slots::BOOTCORE,
     max: TRIAL_ATTEMPTS,
     mcu_id: crate::MCU_WIRE_ID,
+};
+
+/// The apps stage0 starts the confirmed one of when no boot core may
+/// (`dagon_core::bootcore::start`): the app log, the APP slots, this
+/// node's tag (`DAGON_TARGET_TAG` at build time) and the vector table's
+/// entry point.
+pub const APPS: Apps<'static> = Apps {
+    log: &APP_LOG_LAYOUT,
+    slots: &crate::slots::APP,
+    target_tag: crate::tag::stage0_tag(crate::TARGET_TAG),
+    entry: dagon_mcu_common::vector::entry,
 };
 
 /// Stage0's choice from the boot core log and the trial cell `cell` read
@@ -32,6 +43,19 @@ pub fn choose<F: Flash, V: SigVerifier + ?Sized, D: Diag>(
     diag: &mut D,
 ) -> Result<Start<u32>, NoCore<CoreFail>> {
     bootcore::decide(flash, &STAGE0, cell, verifier, diag)
+}
+
+/// What stage0 starts (`dagon_core::bootcore::start`): the core
+/// [`choose`] gives; with none, the confirmed app of [`APPS`] that passes
+/// the same check and more; with neither, the reason goes to `diag`.
+/// Reads flash only.
+pub fn start<F: Flash, V: SigVerifier + ?Sized, D: Diag>(
+    flash: &mut F,
+    cell: [u32; 2],
+    verifier: &V,
+    diag: &mut D,
+) -> Result<Boot, NoCore<CoreFail>> {
+    bootcore::start(flash, &STAGE0, &APPS, cell, verifier, diag)
 }
 
 /// The boot core running from slot `running` settles the boot core trial
@@ -83,14 +107,14 @@ mod tests {
         }
     }
 
-    /// An empty boot core log names nothing: stage0 checks slot A on its
-    /// own; APP records in the boot core log do not count.
+    /// An empty boot core log names nothing: stage0 starts no core; APP
+    /// records in the boot core log do not count.
     #[test]
     fn an_empty_or_app_only_log_names_no_core() {
         let mut m = Mem(vec![0xFF; 0x4_8000]);
         let v = Ed25519Small::new([0; 32]);
         let e = choose(&mut m, CLEARED, &v, &mut NoDiag).unwrap_err();
-        assert_eq!((e.named, e.why), (false, CoreFail::Header));
+        assert_eq!((e.named, e.why), (false, CoreFail::Unnamed));
         let a = (BL_LOG[0] - crate::layout::XIP_BASE) as usize;
         m.0[a..a + 32].copy_from_slice(&FaceHeader { generation: 1 }.to_bytes());
         let r = Record {

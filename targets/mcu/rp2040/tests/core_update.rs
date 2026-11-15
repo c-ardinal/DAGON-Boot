@@ -4,9 +4,10 @@
 //! (`bl::settle_core`), and a power cut at every flash operation of the
 //! whole update, for a new core that works and one that fails its own
 //! check. After any cut a boot core starts, and the log ends with one
-//! confirmed core and nothing pending.
+//! confirmed core and nothing pending. With one boot core slot and no core
+//! to start, stage0 starts the app the app log confirms.
 
-use dagon_core::bootcore::{CoreFail, NoDiag, CLEARED};
+use dagon_core::bootcore::{Apps, Boot, CoreFail, NoDiag, Stage0, CLEARED};
 use dagon_core::log::{trial_room, Log, SlotRef};
 use dagon_ed25519::Ed25519Small;
 use dagon_format::header::*;
@@ -267,12 +268,15 @@ fn a_core_whose_image_does_not_check_out_is_never_started() {
 }
 
 /// A face with a higher generation whose valid records name slot B, where
-/// no core (or a corrupt one) is: stage0 still starts core A.
+/// no core (or a corrupt one) is: stage0 starts no core (core A is named by
+/// no record of that face) and starts the confirmed app, which can write
+/// the boot core again.
 #[test]
-fn a_forged_newer_face_naming_a_bad_slot_does_not_strand_the_hub() {
+fn a_forged_newer_face_naming_a_bad_slot_leaves_the_app_to_recover() {
     use dagon_format::statelog::{target, Record};
     for corrupt_b in [false, true] {
         let mut f = installed();
+        app_installed(&mut f, &[]);
         if corrupt_b {
             let mut b = bootcore(1, 1);
             let last = b.len() - 1;
@@ -295,11 +299,19 @@ fn a_forged_newer_face_naming_a_bad_slot_does_not_strand_the_hub() {
             .unwrap();
         f.write(BL_LOG[1], &FaceHeader { generation: 99 }.to_bytes())
             .unwrap();
-        let start = bl::choose(&mut f, CLEARED, &verifier(), &mut NoDiag).expect("core A starts");
-        assert_eq!(
-            (start.slot, start.trial),
-            (0, false),
-            "corrupt B {corrupt_b}"
+        let e = bl::choose(&mut f, CLEARED, &verifier(), &mut NoDiag).unwrap_err();
+        assert!(e.named, "corrupt B {corrupt_b}");
+        let started = dagon_core::bootcore::start(
+            &mut f,
+            &bl::STAGE0,
+            &APPS,
+            CLEARED,
+            &verifier(),
+            &mut NoDiag,
+        );
+        assert!(
+            matches!(started, Ok(Boot::App { slot: 0, .. })),
+            "corrupt B {corrupt_b}: {started:?}"
         );
     }
     // Nothing anywhere: stage0 has nothing to start (it halts).
@@ -397,8 +409,9 @@ fn a_power_cut_at_every_flash_step_leaves_a_bootable_core() {
 }
 
 /// Stage0 never starts a core whose signature does not verify under its
-/// key, a recorded one or one alone in a slot: an unsigned core (every
-/// digest right) and one signed by another key are refused.
+/// key: a recorded unsigned core (every digest right) and one signed by
+/// another key are refused; alone in a slot, with an empty log, no core is
+/// even checked.
 #[test]
 fn stage0_starts_no_core_without_a_valid_signature() {
     let other = KeyPair::from_seed(Seed::new([5; 32]));
@@ -424,6 +437,108 @@ fn stage0_starts_no_core_without_a_valid_signature() {
         let mut f = flash();
         f.write(BL_SLOT[0], &bad).unwrap();
         let e = bl::choose(&mut f, CLEARED, &verifier(), &mut NoDiag).unwrap_err();
-        assert_eq!((e.named, e.why), (false, CoreFail::Signature));
+        assert_eq!((e.named, e.why), (false, CoreFail::Unnamed));
     }
+}
+
+/// A node whose definition gives the boot core one slot, built with the
+/// node's tag (the package's stage0 view otherwise).
+static ONE_CORE: [(u32, u32); 1] = [bl::STAGE0.slots[0]];
+const ONE: Stage0<'static> = Stage0 {
+    slots: &ONE_CORE,
+    ..bl::STAGE0
+};
+const APPS: Apps<'static> = Apps {
+    target_tag: target_tag("hub-rp2040-lcd"),
+    ..bl::APPS
+};
+
+/// An app for APP slot A whose body starts with a vector table.
+fn app_a() -> Vec<u8> {
+    let kp = KeyPair::from_seed(Seed::new(SEED));
+    let at = APP_SLOTS.slots[0].0 + HEADER_LEN;
+    let mut body: Vec<u8> = (0..2000u32).map(|i| i as u8).collect();
+    body[..4].copy_from_slice(&RAM.to_le_bytes());
+    body[4..8].copy_from_slice(&((at + 0x101) | 1).to_le_bytes());
+    let mut h = ImageHeader {
+        image_kind: image_kind::APP,
+        port_kind: port_kind::SELF_BOOT,
+        mcu_id: mcu_id::RP2040,
+        slot_binding: 0,
+        placement: placement::INLINE,
+        load_addr: at,
+        payload_size: body.len() as u32,
+        version: Version::new(1, 0, 0),
+        build_flags: 0,
+        release_seq: 1,
+        min_bootcore_version: Version::default(),
+        payload_sha256: sha256(&body),
+        key_id: key_id(&kp.pk),
+        target_tag: target_tag("hub-rp2040-lcd"),
+        proto_version: 1,
+        capabilities: capabilities::CONFIRM_BY_HUB,
+        signature: [0; 64],
+    };
+    let msg = [SIGN_DOMAIN, &h.to_bytes()[..SIGNED_LEN]].concat();
+    h.signature = *kp.sk.sign(msg, None);
+    [&h.to_bytes()[..], &body].concat()
+}
+
+/// The app log (its own faces on this MCU) confirms app A, then `more`.
+fn app_installed(f: &mut SimFlash, more: &[u8]) -> SlotRef {
+    let app = app_a();
+    f.write(APP_SLOTS.slots[0].0, &app).unwrap();
+    f.write(APP_LOG[0], &FaceHeader { generation: 1 }.to_bytes())
+        .unwrap();
+    let r = image::head_ref(f, APP_SLOTS.slots[0].0, 0).unwrap();
+    let mut log = Log::load(f, &APP_LOG_LAYOUT).unwrap();
+    for &k in [kind::PROVISION, kind::CONFIRMED].iter().chain(more) {
+        log.append(f, k, r, 0).unwrap();
+    }
+    r
+}
+
+/// The only boot core slot erased for a new core when the power went:
+/// stage0 has no core to start and starts the app the app log confirms,
+/// leaving the trial cell alone; with that app's trial open, or the app
+/// built for another node, it starts nothing.
+#[test]
+fn with_one_core_slot_and_no_core_stage0_starts_the_confirmed_app() {
+    let decide = |f: &mut SimFlash, apps: &Apps| {
+        dagon_core::bootcore::start(f, &ONE, apps, CLEARED, &verifier(), &mut NoDiag)
+    };
+    let mut f = installed();
+    app_installed(&mut f, &[]);
+    assert!(
+        matches!(decide(&mut f, &APPS), Ok(Boot::Core(_))),
+        "the core starts"
+    );
+    f.erase(BL_SLOT[0], SECTOR).unwrap();
+    assert_eq!(
+        decide(&mut f, &APPS),
+        Ok(Boot::App {
+            slot: 0,
+            body: APP_SLOTS.slots[0].0 + HEADER_LEN
+        })
+    );
+
+    let mut f = installed();
+    app_installed(&mut f, &[kind::SLOT_PENDING, kind::BOOT_ATTEMPT]);
+    f.erase(BL_SLOT[0], SECTOR).unwrap();
+    assert!(
+        decide(&mut f, &APPS).is_err(),
+        "an app on trial is not started"
+    );
+
+    let mut f = installed();
+    app_installed(&mut f, &[]);
+    f.erase(BL_SLOT[0], SECTOR).unwrap();
+    let other = Apps {
+        target_tag: target_tag("another-node"),
+        ..APPS
+    };
+    assert!(
+        decide(&mut f, &other).is_err(),
+        "an app for another node is not started"
+    );
 }

@@ -23,6 +23,18 @@ pub const fn checked_tag(tag: &str) -> [u8; 16] {
     out
 }
 
+/// The tag stage0 compares a fallback app's header with: [`checked_tag`]
+/// of `tag`, or all zeros (`dagon_core::bootcore::NO_TAG`) when the build
+/// names no tag (a stage0 built to check or measure it): such a stage0
+/// never starts an app.
+pub const fn stage0_tag(tag: &str) -> [u8; 16] {
+    if tag.is_empty() {
+        [0; 16]
+    } else {
+        checked_tag(tag)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -32,6 +44,12 @@ mod tests {
         let t = checked_tag("seg-f401-7seg");
         assert_eq!(&t[..13], b"seg-f401-7seg");
         assert_eq!(t[13..], [0, 0, 0]);
+    }
+
+    #[test]
+    fn a_stage0_without_a_tag_matches_no_image() {
+        assert_eq!(stage0_tag(""), [0; 16]);
+        assert_eq!(stage0_tag("seg"), checked_tag("seg"));
     }
 
     #[test]

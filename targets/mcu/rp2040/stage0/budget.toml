@@ -24,7 +24,7 @@ max_bytes = 2048
 [[part]]
 name = "dagon-core"
 match = ["dagon_core"]
-max_bytes = 2816
+max_bytes = 3968
 
 [[part]]
 name = "dagon-format"
@@ -46,7 +46,7 @@ match = [
     "HardFault",
     "DefaultPreInit",
 ]
-max_bytes = 3072
+max_bytes = 2432
 
 [[part]]
 name = "other"

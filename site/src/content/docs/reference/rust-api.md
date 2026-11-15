@@ -19,7 +19,7 @@ rustdocの本文は元のソースのままで、英語です。
 | [`dagon-catalog`](/api/dagon_catalog/) | DAGONのすべての状態機械のカタログを1つにまとめた登録簿と、文書のイベントとポートの生成ページ |
 | [`dagon-cli`](/api/dagon/) | DAGON Bootのコマンドラインツール |
 | [`dagon-conform`](/api/dagon_conform/) | DAGONの適合試験: ポートが通らなければならない、正常な経路の12の検査。 |
-| [`dagon-core`](/api/dagon_core/) | ポートの取り決めの上で動く、ボードに依存しないDAGONのロジック: 状態ログ（畳み込み、読み込み、追記、コンパクション）、kind Sのブートの判断（検証、試行、ロールバック）、stage0のあるマイコンのブートローダのA/Bのルール、ビルド時の鍵の補助。 |
+| [`dagon-core`](/api/dagon_core/) | ポートの取り決めの上で動く、ボードに依存しないDAGONのロジック: 状態ログ（畳み込み、読み込み、追記、コンパクション）、kind Sのブートの判断（検証、試行、ロールバック）、stage0のあるマイコンのブートローダのスロットのルール、ビルド時の鍵の補助。 |
 | [`dagon-ed25519`](/api/dagon_ed25519/) | DAGONの署名付きの構造を検証するEd25519（RFC 8032）の署名の検証。`SigVerifier`の実装です。検証だけを行い、署名はせず、秘密の値も持ちません。 |
 | [`dagon-events`](/api/dagon_events/) | DAGONのライフサイクルイベント: 遷移がイベントを出す状態機械、拡張、ポート、公開するイベントの状態 |
 | [`dagon-extension`](/api/dagon_extension/) | DAGONの拡張のマニフェスト（dagon-extension.toml）、ポートとイベントのカタログとノードの定義に照らした検証、保護の種類ごとのマップの生成器、そこからdagon genが書き出すファイル |

@@ -108,7 +108,7 @@ Once the topology is drawn, before building, `dagon doctor` checks the tools the
 dagon build            # or: dagon build seg
 ```
 
-Each node is built into `out/build/<id>/app-a.elf` and, for slot B, `app-b.elf`. An ESP32-S3 image serves both slots, so it has one. The public key from `dagon.toml` is embedded.
+Each node is built into `out/build/<id>/app-a.elf` and, when its MCU definition gives the app slot B, `app-b.elf` for slot B. An ESP32-S3 image serves both slots, so it has one. The public key from `dagon.toml` is embedded.
 
 ### Choosing the version
 
@@ -187,7 +187,7 @@ dagon status
 Each node's `versions:` line names:
 
 - Its stage0 (the small program that runs first after a reset)
-- Its boot loader slots A/B and the running one
+- Its boot loader slots (the one or two its MCU definition gives) and the running one
 - Its app slots
 - Its wire version
 - Its MCU id
@@ -210,7 +210,7 @@ dagon deploy                       # or: dagon deploy seg watch
 
 `dagon deploy` goes in this order:
 
-1. It builds slots A and B and signs them.
+1. It builds each slot the MCU definition gives and signs them.
 2. It makes the package.
 3. It lists each node with its current and new version and asks before writing. `--yes` skips the question.
 4. It writes.
@@ -241,7 +241,7 @@ Each card shows its current → new version and one % for the whole write, then 
 2. It checks that the package was built for this topology.
 3. It sends the topology to the hub.
 4. It writes the children and then the hub.
-5. A node runs the new version on trial. If it is not confirmed, its watchdog resets it and it boots the previous version again.
+5. A node runs the new version on trial. If it is not confirmed, its watchdog resets it and it boots the previous version again. A node whose app has one slot has no previous version; what happens then is in [Limitations](/en/explanation/limitations/).
 
 ### Going back
 
@@ -249,7 +249,7 @@ Every package written to nodes (by DAGON Console, `dagon apply` or `dagon deploy
 
 To go back, write a kept older version again. DAGON Console lists them, and `dagon apply out/deploy/v1.0.0.dgb` writes one from the command line.
 
-`dagon rollback` goes back to the previously confirmed version:
+`dagon rollback` goes back to the previously confirmed version; a node whose app has one slot has none, and `dagon rollback` says so:
 
 ```sh
 dagon rollback --node seg

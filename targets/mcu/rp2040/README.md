@@ -201,7 +201,11 @@ link on the board's pins; link types are constructed as
 | `image-stage0`, `image-bootcore` | link the boot images instead of an app |
 | `diag-panic` | a panic blinks the last `arm::step` code on the board's LED |
 
-## Flash layout (fixed; needs 4 MiB)
+## Flash layout (the built-in definition; needs 4 MiB)
+
+These are the built-in definition's slots. A project's definition may
+move them or give the boot core one slot; the app keeps two here,
+since only the app writes the app on this MCU (`[writers]`).
 
 XIP addresses (flash offset + 0x1000_0000). The board's flash size is
 check-only: a board with less than 4 MiB fails to build, a larger one keeps
@@ -225,6 +229,15 @@ the watchdog started before the jump; else the confirmed one. The new core
 confirms itself once it can start a verified app; one that cannot is reset
 and, after its starts run out, the old core runs again and records the
 rollback.
+Stage0 starts a core only as a record names it: never a core no record
+names, nor a pending one whose starts ran out. When no core may start
+(with one boot core slot, a new core cut by a power loss or one that
+failed its trial), stage0 starts the app of the state log's confirmed
+APP record after checking it as the boot core would (signature, kind,
+MCU, target tag, slot, load range, body digest, entry point inside the
+body); that app writes the boot core again. With one boot core slot the
+app's agent refuses a boot core transfer while the app is on trial.
+Stage0 halts only when there is no such app.
 
 ## Boot images
 
@@ -239,7 +252,7 @@ export DAGON_PUBKEY=/path/outside/the/repo/dagon-signing.pub
 ```
 
 `--features slot-b` links the boot core for boot core slot B; a release
-carries one for each slot.
+carries one for each boot core slot the node's MCU definition gives.
 
 `dagon gen` writes the node's boot crate into `boot/<node>/` of the
 project from `bootcore/template/`: it links `bootcore` (a library) with
@@ -256,7 +269,7 @@ trusted extensions with the source hash dagon.toml declares does not
 build. The boot core build takes `--features diag` for step blink codes
 (see the hub README). Stage0 checks a boot core's signature under the key
 built into its own flash and starts no core whose signature does not
-verify; with none to start, it blinks the reason's code on the board's
+verify; with neither a core nor a confirmed app to start, it blinks the reason's code on the board's
 `[boot] led` (a node without a board, or a board without the LED or with
 its halt pattern off, shows nothing).
 

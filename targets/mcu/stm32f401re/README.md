@@ -181,7 +181,11 @@ builds the link on the board's pins; link types are constructed as
 | `slot-b` | link the app for APP slot B (the boot core for boot core slot B) |
 | `image-stage0`, `image-bootcore` | link the boot images instead of an app |
 
-## Flash layout (fixed; needs 512 KiB)
+## Flash layout (the built-in definition; needs 512 KiB)
+
+These are the built-in definition's slots. A project's definition may
+move them or give the boot core one slot; the app keeps two here,
+since only the app writes the app on this MCU (`[writers]`).
 
 The board's flash size is check-only: a board with less fails to build.
 
@@ -200,7 +204,15 @@ agent from a release) on trial, up to 3 starts counted in the RTC backup
 registers BKP0R/BKP1R, else the confirmed one. The new core confirms
 itself once it can start a verified app; one that cannot is reset and,
 after its starts run out, the old core runs again and records the
-rollback. The boot core tries a pending APP slot up to 3 times (signature
+rollback. Stage0 starts a core only as a record names it: never a core no record
+names, nor a pending one whose starts ran out. When no core may start
+(with one boot core slot, a new core cut by a power loss or one that
+failed its trial), stage0 starts the app of the state log's confirmed
+APP record after checking it as the boot core would (signature, kind,
+MCU, target tag, slot, load range, body digest, entry point inside the
+body); that app writes the boot core again. With one boot core slot the
+app's agent refuses a boot core transfer while the app is on trial.
+Stage0 halts only when there is no such app. The boot core tries a pending APP slot up to 3 times (signature
 + SHA-256, BOOT_ATTEMPT before each start, 4 s watchdog) and then rolls
 back; otherwise it starts the confirmed slot (8 s watchdog). The boot core
 and the app run on the clock the definitions choose for the node: the
@@ -220,7 +232,7 @@ export DAGON_PUBKEY=/path/outside/the/repo/dagon-signing.pub
 ```
 
 `--features slot-b` links the boot core for boot core slot B; a release
-carries one for each slot.
+carries one for each boot core slot the node's MCU definition gives.
 
 `dagon gen` writes the node's boot crate into `boot/<node>/` of the
 project from `bootcore/template/`: it links `bootcore` (a library) with

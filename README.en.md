@@ -31,7 +31,7 @@ DAGON makes the distributed microcontroller designs that professionals and speci
 The first time only, you connect each microcontroller directly, one at a time, and write its factory image. After that, one connection is enough, and you do not need to connect them one at a time.
 Through one microcontroller connected to your PC, you write to the microcontrollers beyond it with a single operation. More microcontrollers take more time; the operation does not grow.
 
-Update images are all signed and written safely. A microcontroller starts a new version on trial and goes back to the previous version by itself if it does not work. If a write stops part-way, the running version stays.
+Update images are all signed and written safely. A microcontroller starts a new version on trial and goes back by itself to the previous version, where a slot holds one, if it does not work. If a write stops part-way, an image with two slots keeps its running version; for an image with one slot, the image that writes it stays and can receive it again. The MCU definition gives each kind of image one slot or two.
 
 DAGON handles mixed kinds of microcontroller once you draw the setup. As a developer you choose the boards, draw how they connect and write your application. DAGON takes care of start-up, flash layout, signing and the writing steps.
 
@@ -47,8 +47,8 @@ DAGON handles mixed kinds of microcontroller once you draw the setup. As a devel
 - **Draw the setup**: In DAGON Console, which runs in your browser, you draw the microcontrollers and their links as a graph. Wiring and pins are checked at every edit.
 - **Get a project that builds**: `dagon new` and `dagon gen` make a Rust crate for each microcontroller, with its start-up, its wiring and an empty `app.rs` for your code.
 - **Write in one go**: `dagon deploy` goes from building and signing through making the package to writing, all in one go. In DAGON Console you write while following each microcontroller's progress graphically.
-- **Go back when it fails**: Every image is signed. A microcontroller starts a new version on trial and goes back to the previous version when it cannot be confirmed. `dagon rollback` goes back by hand.
-- **Write the boot loader too**: The boot loader itself lives in two slots and is written like an app. If the new one does not work, the previous one comes back.
+- **Go back when it fails**: Every image is signed. A microcontroller starts a new version on trial, and an image with two slots goes back to the previous version when the new one cannot be confirmed. `dagon rollback` goes back by hand.
+- **Write the boot loader too**: The boot loader itself lives in slots and is written like an app. With two slots, the previous one comes back if the new one does not work; with one, the confirmed app starts and writes the boot loader again.
 - **Extend DAGON**: Without changing DAGON's source, add extensions that receive events, answer decisions and replace parts (ports).
 - **Get help from AI**: A new project comes with Claude Code instructions and skills. `dagon ai link` connects an agent with your consent. The API key stays in the OS credential store.
 
@@ -125,9 +125,9 @@ flowchart LR
 3. Through the hub, the PC sends each microcontroller its new image. Children come first and the hub last.
 4. A microcontroller writes the new image to a slot other than the running one.
 5. The microcontroller starts the new image on trial.
-6. When its self-check passes, it confirms the new version. Otherwise it resets and goes back to the previous version.
+6. When its self-check passes, it confirms the new version. Otherwise it resets and, with two slots, goes back to the previous version.
 
-What DAGON does not do is in [Limitations](https://c-ardinal.github.io/DAGON-Boot/doc/en/explanation/limitations/).
+What DAGON does not do, and what an image with one slot cannot do, are in [Limitations](https://c-ardinal.github.io/DAGON-Boot/doc/en/explanation/limitations/).
 
 ## DAGON's design information
 

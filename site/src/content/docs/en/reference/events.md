@@ -87,7 +87,7 @@ States: `Ready` (initial).
 
 ### Machine `image`
 
-The lifecycle of one image slot (each APP slot the MCU definition gives, and the hub's topology copy). The slot store's mutators run only inside these transitions. `trial_started` and `rolled_back` are the boot core's changes, replayed at start from the slot store.
+The lifecycle of one image slot (each APP slot the MCU definition gives). The slot store's mutators run only inside these transitions. `trial_started` and `rolled_back` are the boot core's changes, replayed at start from the slot store.
 
 States: `Empty` (initial), `Written`, `Pending`, `Trial`, `Confirmed`, `Reverted`.
 

@@ -558,6 +558,8 @@ fn a_parse_error_under_ai_key_never_shows_the_input() {
         "ai key set -- FAKE-NOT-A-KEY-123",
         "ai key set --FAKE-NOT-A-KEY-123",
         "ai key FAKE-NOT-A-KEY-123",
+        "help ai key FAKE-NOT-A-KEY-123",
+        "help ai key set FAKE-NOT-A-KEY-123",
     ] {
         let argv: Vec<String> = std::iter::once("dagon")
             .chain(line.split_whitespace())

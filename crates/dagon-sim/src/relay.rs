@@ -2,7 +2,8 @@
 //! table lists, each a port of its MCU definition: one simulated I2C bus of
 //! SimNodes per I2C port (absent addresses NACK), one node behind a SimLink
 //! per UART port, the NRST/BOOT0 lines of one I2C node, and the commands
-//! RELAY, SUBCTL, I2C_RAW and SHOW.
+//! RELAY, SUBCTL and I2C_RAW. Every other request, SHOW among them, goes to
+//! the node's own agent.
 //!
 //! Time is simulated: [`SimBus::now_ms`] only moves when something waits
 //! (mailbox polls, link delays, ROM work, [`SimRelay::advance_ms`]) and by
@@ -13,10 +14,9 @@ use std::collections::BTreeMap;
 use crate::link::SimLink;
 use crate::node::SimNode;
 use crate::rom::ROM_ADDR;
-use dagon_format::Version;
 use dagon_port::{BusError, LinkKind, Nrst, RelayLinkDef};
 use dagon_proto::mailbox::{State, STATE_LEN};
-use dagon_proto::payload::{boot0, nrst, I2cRaw, Relay, Show, SubCtl};
+use dagon_proto::payload::{boot0, nrst, I2cRaw, Relay, SubCtl};
 use dagon_proto::{find_sof, flags, frame_len, max_payload, Cmd, Frame, FrameError, Status};
 use dagon_topology::defs::{McuDef, PortDef};
 
@@ -26,17 +26,6 @@ pub const PC_ROUND_TRIP_MS: u64 = 2;
 pub const MAILBOX_POLL_MS: u64 = 2;
 /// Low time of SUBCTL `nrst = PULSE`.
 pub const NRST_PULSE_MS: u64 = 10;
-
-/// The last SHOW the node received. Nothing depends on it: a node with no
-/// display just keeps it.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Screen {
-    pub node: u8,
-    pub phase: u8,
-    pub percent: u8,
-    pub version: Version,
-    pub text: Vec<u8>,
-}
 
 /// Cuts complete frames out of a byte stream (SOF search, CRC check).
 #[derive(Default)]
@@ -314,7 +303,6 @@ pub struct SimRelay {
     /// The relaying node's own agent (HELLO, STATUS, XFER_* to itself).
     pub node: SimNode,
     pub bus: SimBus,
-    pub screen: Option<Screen>,
     usb_in: FrameCutter,
     usb_out: Vec<u8>,
     /// The id of the MCU definition it was given.
@@ -348,7 +336,6 @@ impl SimRelay {
         SimRelay {
             node,
             bus: SimBus::new(),
-            screen: None,
             usb_in: FrameCutter::default(),
             usb_out: Vec::new(),
             mcu: def.id.clone(),
@@ -446,7 +433,6 @@ impl SimRelay {
             Some(Cmd::Relay) => self.relay(f.payload),
             Some(Cmd::SubCtl) => self.subctl(f.payload),
             Some(Cmd::I2cRaw) => self.i2c_raw(f.payload),
-            Some(Cmd::Show) => self.show(f.payload),
             _ => return self.node.handle_frame(frame, self.bus.now_ms),
         };
         let mut out = vec![0u8; frame_len(1 + body.len())];
@@ -525,21 +511,5 @@ impl SimRelay {
             return (Status::Timeout, Vec::new());
         }
         (Status::Ok, buf)
-    }
-
-    fn show(&mut self, p: &[u8]) -> Answer {
-        match Show::parse(p) {
-            Ok(s) => {
-                self.screen = Some(Screen {
-                    node: s.node,
-                    phase: s.phase,
-                    percent: s.percent,
-                    version: s.version,
-                    text: s.text.to_vec(),
-                });
-                (Status::Ok, Vec::new())
-            }
-            Err(e) => (e, Vec::new()),
-        }
     }
 }

@@ -216,7 +216,6 @@ dependencies = [
 name = "dagon-relay"
 version = "0.1.0"
 dependencies = [
- "dagon-format",
  "dagon-port",
  "dagon-proto",
  "embassy-futures",

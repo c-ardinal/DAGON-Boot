@@ -4,9 +4,9 @@ use std::fmt::Write as _;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Severity {
-    /// Blocks `topo push`.
+    /// Blocks compiling the topology, and so building a release.
     Error,
-    /// Reported only; does not block `topo push`.
+    /// Reported only; blocks nothing.
     Warning,
     /// A valid shape told as it is (V-23: a part updating skips);
     /// never blocks.
@@ -49,7 +49,7 @@ impl Report {
             .filter(|i| i.severity == Severity::Warning)
     }
 
-    /// True when `topo push` may proceed (warnings never block).
+    /// True when the topology may be compiled (warnings never block).
     pub fn is_pushable(&self) -> bool {
         self.errors().next().is_none()
     }

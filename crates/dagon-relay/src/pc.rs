@@ -1,18 +1,16 @@
 //! Serving the PC: DAGON frames from the uplink. RELAY and I2C_RAW go to
 //! the worker of the link they name, SUBCTL to the recovery lines (owned
-//! here); everything else is this node's own agent (owned here, with the
-//! flash), SHOW included, which the [`State`] also notes. A link or
-//! recovery lines the node does not have answer E_UNSUPPORTED.
+//! here); everything else, SHOW included, is this node's own agent (owned
+//! here). A link or recovery lines the node does not have answer
+//! E_UNSUPPORTED.
 
-use dagon_port::{Flash, Link, Nrst, SubControl};
-use dagon_proto::payload::{boot0, nrst, HelloResp, Relay as RelayReq, Show, StatusResp, SubCtl};
+use dagon_port::{Link, Nrst, SubControl};
+use dagon_proto::payload::{boot0, nrst, Relay as RelayReq, SubCtl};
 use dagon_proto::{flags, Cmd, Frame, Status, HEADER_LEN, MAX_FRAME};
 use heapless::Vec;
 
-use crate::nodes::Identity;
 use crate::port::{Op, Port, Req};
-use crate::view::{Progress, Seen};
-use crate::{cmd, nodes, task, Config, LinkRoute, Liveness, OwnAgent, RelayClock, State};
+use crate::{cmd, task, Config, LinkRoute, Liveness, OwnAgent, RelayClock};
 
 /// The reset and boot-mode lines of a node, and the link its ROM boot
 /// loader answers I2C_RAW on.
@@ -22,29 +20,21 @@ pub struct Recovery<C> {
     pub link: u8,
 }
 
-/// What [`serve`] runs on: this node's agent and flash, its links, and the
-/// parts it shares with the link workers and a display.
-pub struct Relay<'a, A, F, C, W, T> {
+/// What [`serve`] runs on: this node's agent, its links and the parts it
+/// shares with the link workers.
+pub struct Relay<'a, A, C, W, T> {
     pub agent: A,
-    /// A handle on the flash the agent's store writes: the topology
-    /// display copy is read through it, after its write.
-    pub flash: F,
-    /// Flash address of the topology display copy.
-    pub topology: u32,
-    /// Who this node is in the topology.
-    pub identity: Identity<'a>,
     /// Every link the node relays over, one entry each (the MCU package's
     /// list), with the port of the link's worker where the board wires it.
     pub links: &'a [LinkRoute<'a>],
     pub recovery: Option<Recovery<C>>,
-    pub state: &'a State,
     pub watch: W,
     pub clock: T,
     pub config: Config,
 }
 
-struct Pc<'a, A, F, C, W, T> {
-    r: Relay<'a, A, F, C, W, T>,
+struct Pc<'a, A, C, W, T> {
+    r: Relay<'a, A, C, W, T>,
     resp: [u8; MAX_FRAME],
     next_id: u32,
     /// BOOT0 as last set successfully (I2C_RAW only while it is high).
@@ -54,11 +44,10 @@ struct Pc<'a, A, F, C, W, T> {
 /// Serves the PC over the uplink `up`, whatever its kind, for good. A
 /// reboot waits the delay `allow_reboot_now` asked for, idle under the
 /// guard, then resets.
-pub async fn serve<L, A, F, C, W, T>(relay: Relay<'_, A, F, C, W, T>, mut up: L) -> !
+pub async fn serve<L, A, C, W, T>(relay: Relay<'_, A, C, W, T>, mut up: L) -> !
 where
     L: Link,
     A: OwnAgent,
-    F: Flash,
     C: SubControl,
     W: Liveness,
     T: RelayClock,
@@ -69,7 +58,6 @@ where
         next_id: 1,
         boot0_high: false,
     };
-    pc.publish(true);
     let max = up.max_payload();
     let (via, addr) = (up.kind().code(), up.addr());
     let mut link_up = false;
@@ -114,32 +102,13 @@ where
     }
 }
 
-impl<'a, A, F, C, W, T> Pc<'a, A, F, C, W, T>
+impl<'a, A, C, W, T> Pc<'a, A, C, W, T>
 where
     A: OwnAgent,
-    F: Flash,
     C: SubControl,
     W: Liveness,
     T: RelayClock,
 {
-    /// Shares this node's own state and, if `linked`, the node list
-    /// (topology display copy) with the other tasks.
-    fn publish(&mut self, linked: bool) {
-        let r = &mut self.r;
-        r.state.set_own(Seen::from_status(r.agent.status()));
-        if linked {
-            let links = r.links.iter().map(|k| &k.link);
-            let nodes = nodes::load(
-                &mut r.flash,
-                r.topology,
-                r.identity,
-                links,
-                r.config.fallback,
-            );
-            r.state.set_nodes(nodes);
-        }
-    }
-
     /// Answers one request into `self.resp`; returns its length (0: no
     /// answer) and, when a reboot follows the reply, its delay in ms.
     async fn handle(&mut self, request: &[u8], max: usize) -> (usize, Option<u32>) {
@@ -148,21 +117,13 @@ where
         };
         let is_request = f.flags & (flags::RESP | flags::EVENT) == 0;
         let (status, body) = match Cmd::from_u8(f.cmd) {
-            Some(Cmd::Relay) if is_request => {
-                self.pc_active();
-                match RelayReq::parse(f.payload) {
-                    Ok(r) => self.relay(&r).await,
-                    Err(s) => (s, 0),
-                }
-            }
-            Some(Cmd::Show) if is_request => {
-                self.pc_active();
-                self.note_show(f.payload);
-                return self.own(request, f.cmd);
-            }
+            Some(Cmd::Relay) if is_request => match RelayReq::parse(f.payload) {
+                Ok(r) => self.relay(&r).await,
+                Err(s) => (s, 0),
+            },
             Some(Cmd::SubCtl) if is_request => (self.lines(f.payload).await, 0),
             Some(Cmd::I2cRaw) if is_request => self.i2c_raw(f.payload).await,
-            _ => return self.own(request, f.cmd),
+            _ => return self.own(request),
         };
         self.resp[HEADER_LEN] = status as u8;
         let n =
@@ -171,27 +132,15 @@ where
     }
 
     /// A request for this node's own agent.
-    fn own(&mut self, request: &[u8], cmd: u8) -> (usize, Option<u32>) {
-        let answer = match self.r.agent.handle(request) {
+    fn own(&mut self, request: &[u8]) -> (usize, Option<u32>) {
+        match self.r.agent.handle(request) {
             Some((frame, reboot_ms)) => {
                 let n = frame.len();
                 self.resp[..n].copy_from_slice(frame);
                 (n, reboot_ms)
             }
             None => (0, None),
-        };
-        let changes_self = [Cmd::SetPending, Cmd::Confirm, Cmd::XferEnd]
-            .iter()
-            .any(|c| *c as u8 == cmd);
-        if changes_self {
-            self.publish(cmd == Cmd::XferEnd as u8);
         }
-        answer
-    }
-
-    fn pc_active(&self) {
-        let now = self.r.clock.now_ms();
-        self.r.state.pc_active(now, self.r.config.quiet_ms);
     }
 
     /// Passes a request to the worker behind `port`; its answer body goes
@@ -241,16 +190,8 @@ where
         let Some(port) = route.port else {
             return (Status::Unsupported, 0);
         };
-        let (status, n) = self
-            .via(port, Op::Relay, r.addr, r.timeout_ms, 0, r.inner)
-            .await;
-        if status == Status::Ok {
-            let answer = &self.resp[HEADER_LEN + 1..HEADER_LEN + 1 + n];
-            if let Some(seen) = relayed_seen(answer, usize::from(route.link.max_payload)) {
-                self.r.state.set_seen_at(r.link, r.addr, seen);
-            }
-        }
-        (status, n)
+        self.via(port, Op::Relay, r.addr, r.timeout_ms, 0, r.inner)
+            .await
     }
 
     /// SUBCTL: BOOT0 first, then NRST (a pulse samples the new BOOT0).
@@ -294,27 +235,5 @@ where
         let (len, data) = (raw.read_len, raw.data);
         let (addr, timeout) = (self.r.config.rom_addr, self.r.config.raw_timeout_ms);
         self.via(port, Op::Raw, addr, timeout, len, data).await
-    }
-
-    /// SHOW is the agent's to answer; the [`State`] notes its progress.
-    fn note_show(&self, p: &[u8]) {
-        if let Ok(s) = Show::parse(p) {
-            self.r.state.set_progress(Progress::from(&s));
-        }
-    }
-}
-
-/// What a relayed HELLO or STATUS answer tells about its node.
-fn relayed_seen(frame: &[u8], max: usize) -> Option<Seen> {
-    let (f, _) = Frame::decode(frame, max).ok()?;
-    let (Status::Ok, body) = dagon_proto::split_status(f.payload)? else {
-        return None;
-    };
-    match Cmd::from_u8(f.cmd)? {
-        Cmd::Hello => Some(Seen::from_hello(HelloResp::parse(body).ok().as_ref())),
-        Cmd::Status => StatusResp::parse(body)
-            .ok()
-            .map(|st| Seen::from_status(&st)),
-        _ => None,
     }
 }

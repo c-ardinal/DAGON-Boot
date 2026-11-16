@@ -27,7 +27,8 @@ def cargo_workspaces():
     locks = [*(ROOT / "targets").glob("*/Cargo.lock"),
              *(ROOT / "targets").glob("*/*/Cargo.lock"),
              *(ROOT / "targets").glob("*/*/*/Cargo.lock"),
-             *(ROOT / "samples").glob("*/Cargo.lock")]
+             *(ROOT / "samples").glob("*/Cargo.lock"),
+             *(ROOT / "samples").glob("*/*/Cargo.lock")]
     for lock in sorted(locks):
         rel = lock.parent.relative_to(ROOT).as_posix()
         yield lock.parent, rel.removeprefix("targets/")

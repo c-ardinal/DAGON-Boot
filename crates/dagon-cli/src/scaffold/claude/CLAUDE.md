@@ -69,7 +69,7 @@ first write) and `dagon deploy`.
   keys or paths from outside this folder into project files.
 - Signing, building releases and anything that writes to hardware
   (`image sign`, `release build`, `deploy`, `apply`, `flash`,
-  `provision`, `rollback`, `topo push`) are the developer's steps. Suggest
+  `provision`, `rollback`) are the developer's steps. Suggest
   the command; run it only when the developer asks.
 - Ask for hardware facts (pins, I2C addresses, flash size, baud rate)
   instead of guessing, and say which board document each value came from.

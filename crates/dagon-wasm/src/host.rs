@@ -319,17 +319,6 @@ impl WasmHost {
         })
     }
 
-    /// Sends a topology canonical binary to the hub.
-    pub fn push_topology(&self, bin: Vec<u8>) -> Promise {
-        self.run(|h, _| async move {
-            let mut h = h.try_borrow_mut().map_err(|_| busy())?;
-            h.push_topology(&bin)
-                .await
-                .map(|_| JsValue::UNDEFINED)
-                .map_err(|e| fail(&e))
-        })
-    }
-
     /// One monitoring round for one target: HELLO with the round-trip time.
     /// Resolves to `{responding, rttMs, hello}`; `responding` turns false
     /// only after consecutive misses (see `watch_interval_ms`).

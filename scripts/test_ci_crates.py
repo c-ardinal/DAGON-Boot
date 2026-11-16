@@ -50,7 +50,10 @@ class CiCrates(unittest.TestCase):
         packages |= {c.parent for c in mcu.glob("*/*/Cargo.toml")
                      if (c.parent / "src").is_dir() and c.parent.name != "template"}
         want = {p.relative_to(ROOT).as_posix() for p in packages}
-        self.assertEqual({r["dir"] for r in runs}, want)
+        dirs = {r["dir"] for r in runs}
+        self.assertEqual(want - dirs, set(), "not linted")
+        # Beyond those, only sample firmware declares a lint run.
+        self.assertEqual({d for d in dirs - want if not d.startswith("samples/")}, set())
         for r in runs:
             self.assertIn(r["toolchain"], ("stable", "esp"), r)
             if not r["target"]:

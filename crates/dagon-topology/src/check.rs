@@ -2,7 +2,8 @@
 //!
 //! Errors V-01..V-21 (no V-19), V-25, V-26 and V-27; warnings V-22 and V-24
 //! (V-24 is an error for an uplink on a 子機); information V-23 (a valid part
-//! that updating skips). Errors block `topo push`; the others do not.
+//! that updating skips). Errors block compiling the topology; the others
+//! do not.
 //!
 //! A link has two ends and no direction: every rule reads it the same
 //! whichever end is listed first.

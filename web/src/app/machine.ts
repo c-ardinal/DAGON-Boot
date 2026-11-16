@@ -3,14 +3,14 @@
 // leads and `view` what the bottom band offers; nothing here touches the DOM.
 
 export type L =
-  | 'unsupported' | 'idle' | 'choosing' | 'notChosen' | 'portFailed' | 'checking' | 'silentHub' | 'scanning' | 'scanned' | 'sending'
-  | 'sendFailed' | 'ready' | 'nodesSilent' | 'reading' | 'verifying' | 'fileRefused' | 'otherTopology' | 'fileReady' | 'writing' | 'hubRestarting'
+  | 'unsupported' | 'idle' | 'choosing' | 'notChosen' | 'portFailed' | 'checking' | 'silentHub' | 'scanning'
+  | 'ready' | 'nodesSilent' | 'reading' | 'verifying' | 'fileRefused' | 'otherTopology' | 'fileReady' | 'writing' | 'hubRestarting'
   | 'reconnectNeeded' | 'stopped' | 'done' | 'recovering' | 'recoverFailed' | 'lost' | 'cliTurn';
 
 /** What a bottom-band button does. */
 export type Action =
   | 'connectDiscover' | 'connect' | 'reselect' | 'reload'
-  | 'push' | 'pushAgain' | 'scanAgain' | 'defineFix' | 'chooseFile' | 'useLatest'
+  | 'defineFix' | 'chooseFile' | 'useLatest'
   | 'recover' | 'updateResponding' | 'otherFile' | 'update'
   | 'reconnect' | 'recoverAgain';
 
@@ -19,7 +19,7 @@ export type Ev =
   | Exclude<Action, 'reload' | 'defineFix'>
   | 'placeSample'
   | 'dismissed' | 'openFailed' | 'wasmFailed' | 'chosen' | 'noAnswer'
-  | 'helloDiscover' | 'helloConfigured' | 'scanned' | 'pushed' | 'pushFailed'
+  | 'helloDiscover' | 'helloConfigured' | 'scanned'
   | 'watchAlarm' | 'watchOk' | 'read' | 'badSource' | 'topoDiff' | 'pass'
   | 'hubTurn' | 'nodeStuck' | 'doneNoHub' | 'confirmed' | 'autoFailed' | 'reconnected' | 'revertedOnReconnect'
   | 'fixedNoRest' | 'fixedRest' | 'gaveUp' | 'rollback' | 'cliClaim' | 'cliReturn' | 'lost'
@@ -71,16 +71,14 @@ export const MACHINE: Record<L, Spec> = {
     on: { noAnswer: 'silentHub', helloDiscover: 'scanning', helloConfigured: 'ready', ...leave },
   },
   silentHub: { step: 1, primary: 'reselect', on: { reselect: 'choosing' } },
-  scanning: { step: 2, on: { scanned: 'scanned', ...toLost } },
-  scanned: { step: 3, primary: 'push', secondary: ['scanAgain'], on: { push: 'sending', scanAgain: 'scanning', ...leave } },
-  sending: { step: 3, on: { pushed: 'ready', pushFailed: 'sendFailed', ...toLost } },
-  sendFailed: { step: 3, primary: 'pushAgain', on: { pushAgain: 'sending', ...leave } },
+  // What the scan found is the 構成 to write, as the project's YAML is.
+  scanning: { step: 2, on: { scanned: 'ready', ...toLost } },
   ready: {
     step: 4,
     primary: 'chooseFile',
     secondary: ['useLatest'],
     // rollback: M38's "前のバージョンに戻す" for a node left on trial.
-    on: { recover: 'recovering', push: 'sending', watchAlarm: 'nodesSilent', chooseFile: 'reading', useLatest: 'reading', cliClaim: 'cliTurn', rollback: 'recovering', ...leave },
+    on: { recover: 'recovering', watchAlarm: 'nodesSilent', chooseFile: 'reading', useLatest: 'reading', cliClaim: 'cliTurn', rollback: 'recovering', ...leave },
   },
   nodesSilent: {
     step: 4,
@@ -152,12 +150,12 @@ export function hubOf(s: L): HubState {
 
 /**
  * States in which the header's つなぐ / 切断 cannot be used:
- * choosing or scanning, sending, updating, reconnecting, recovering, and the
+ * choosing or scanning, updating, reconnecting, recovering, and the
  * CLI holding the hub.
  */
-export const HUB_LOCKED: ReadonlySet<L> = new Set(['choosing', 'scanning', 'sending', 'writing', 'hubRestarting', 'reconnectNeeded', 'recovering', 'cliTurn']);
+export const HUB_LOCKED: ReadonlySet<L> = new Set(['choosing', 'scanning', 'writing', 'hubRestarting', 'reconnectNeeded', 'recovering', 'cliTurn']);
 
 /** States in which nodes are watched every round (no transfer running). */
 /** States a write of one node can start in (the hub answers, nothing runs). */
 export const NODE_WRITE: ReadonlySet<L> = new Set(['ready', 'nodesSilent', 'fileReady', 'done', 'stopped', 'recoverFailed']);
-export const WATCHED: ReadonlySet<L> = new Set(['scanned', 'ready', 'nodesSilent', 'fileReady', 'done']);
+export const WATCHED: ReadonlySet<L> = new Set(['ready', 'nodesSilent', 'fileReady', 'done']);

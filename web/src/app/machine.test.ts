@@ -13,8 +13,8 @@ const CTXS: Ctx[] = [
 ];
 
 describe('operating-mode state machine', () => {
-  test('has the 27 states', () => {
-    expect(STATES).toHaveLength(27);
+  test('has the 24 states', () => {
+    expect(STATES).toHaveLength(24);
   });
 
   test.each(STATES)('%s: at most one main action and two side actions, never the same one twice', (s) => {
@@ -74,11 +74,7 @@ describe('operating-mode state machine', () => {
     ['checking', 'helloDiscover', 'scanning'],
     ['checking', 'helloConfigured', 'ready'],
     ['silentHub', 'reselect', 'choosing'],
-    ['scanning', 'scanned', 'scanned'],
-    ['scanned', 'push', 'sending'],
-    ['sending', 'pushed', 'ready'],
-    ['sending', 'pushFailed', 'sendFailed'],
-    ['sendFailed', 'pushAgain', 'sending'],
+    ['scanning', 'scanned', 'ready'],
     ['ready', 'watchAlarm', 'nodesSilent'],
     ['ready', 'chooseFile', 'reading'],
     ['nodesSilent', 'recover', 'recovering'],
@@ -103,8 +99,8 @@ describe('operating-mode state machine', () => {
       const want = connected && !HUB_LOCKED.has(s) ? 'idle' : s;
       expect(next(s, 'disconnect'), s).toBe(want);
     }
-    // Sending, updating, reconnecting, recovering and the CLI's turn.
-    for (const s of ['sending', 'writing', 'hubRestarting', 'reconnectNeeded', 'recovering', 'cliTurn'] as L[]) expect(HUB_LOCKED.has(s), s).toBe(true);
+    // Updating, reconnecting, recovering and the CLI's turn.
+    for (const s of ['writing', 'hubRestarting', 'reconnectNeeded', 'recovering', 'cliTurn'] as L[]) expect(HUB_LOCKED.has(s), s).toBe(true);
   });
 
   test('nodesSilent: the answering nodes are updated first; a silent one is written from its card', () => {
@@ -117,12 +113,11 @@ describe('operating-mode state machine', () => {
   });
 
   test('an event that does not apply keeps the state', () => {
-    expect(next('ready', 'pushed')).toBe('ready');
+    expect(next('ready', 'scanned')).toBe('ready');
   });
 
-  test('運用 never sends or replaces the 構成 from otherTopology: its side action leaves for 定義', () => {
+  test('運用 never replaces the 構成 from otherTopology: its side action leaves for 定義', () => {
     expect(view('otherTopology', { hasConfig: true }).secondary).toEqual(['defineFix']);
-    expect(Object.values(MACHINE.otherTopology.on)).not.toContain('sending');
   });
 
   test('empty canvas: find automatically; with a configuration: connect', () => {
@@ -137,6 +132,6 @@ describe('operating-mode state machine', () => {
 
   test('header steps follow the flow', () => {
     const step = (s: L) => view(s, { hasConfig: true }).step;
-    expect(['checking', 'scanned', 'ready', 'writing', 'done', 'recovering'].map((s) => step(s as L))).toEqual([1, 3, 4, 5, 6, 'recover']);
+    expect(['checking', 'scanning', 'ready', 'writing', 'done', 'recovering'].map((s) => step(s as L))).toEqual([1, 2, 4, 5, 6, 'recover']);
   });
 });

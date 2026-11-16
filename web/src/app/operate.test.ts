@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import { devHub } from '../serial/devHub.ts';
 import { MockTransport, type MockOptions } from '../serial/mock.ts';
-import { LOCAL, topo_compile, type Target } from '../wasm/dagon.ts';
+import { LOCAL, type Target } from '../wasm/dagon.ts';
 import { ConnectError } from './connect.ts';
 import { ANNOUNCE, BAND } from './copy.ts';
 import { Operate } from './operate.svelte.ts';
@@ -22,26 +22,21 @@ const settle = () => new Promise((r) => setTimeout(r, 0));
 
 // dagon-host (through dagon-wasm) against the in-memory hub.
 describe('operating mode against the in-memory hub', () => {
-  test('find automatically → found → send → watching, with every node answering', async () => {
-    const { t, op } = session();
+  test('find automatically → found → watching, with every node answering', async () => {
+    const { op } = session();
     await op.connect();
-    expect(op.state).toBe('scanned');
+    expect(op.state).toBe('ready');
     expect(op.config).toBe(SAMPLE_CONFIG);
     expect(op.found).toBe(3);
     expect(op.status).toBe(ANNOUNCE.A06(3));
     await settle();
     await op.round();
     expect(op.responding).toBe(3);
-
-    await op.push();
-    expect(op.state).toBe('ready');
-    expect(t.received).toEqual(topo_compile(SAMPLE_CONFIG.yaml));
   }, 20_000);
 
   test('a node that misses two rounds in a row is not answering; it comes back on the next reply', async () => {
     const { t, op } = session();
     await op.connect();
-    await op.push();
     await op.round();
     t.setQuiet('uart', true);
     await op.round();
@@ -96,17 +91,16 @@ describe('operating mode against the in-memory hub', () => {
       },
     });
     await op.connect();
-    expect(op.state).toBe('scanned');
+    expect(op.state).toBe('ready');
   }, 20_000);
 
   // The project's YAML is the one source of truth: connecting goes straight to watching.
-  test('a 構成 on the canvas, then connecting: watching at once, nothing to send first', async () => {
-    const { t, op } = session();
+  test('a 構成 on the canvas, then connecting: watching at once', async () => {
+    const { op } = session();
     op.useConfig(SAMPLE_CONFIG);
     expect(op.state).toBe('idle');
     await op.connect();
     expect(op.state).toBe('ready');
-    expect(t.received).toBeNull();
   }, 20_000);
 
   test('"最初からやり直す" drops the connection and the records and waits at idle', async () => {

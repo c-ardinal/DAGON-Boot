@@ -18,17 +18,13 @@ use dagon_ed25519::Ed25519Compact;
 use dagon_events::{compose, Bounds, Composed, Layer, Nop, Published, Reader, Watchdog};
 use dagon_format::Version;
 use dagon_port::{
-    hello_request, BusError, Flash, FlashError, FlashRegion, Link, LinkError, LinkKind, NodeLink,
-    Nrst, Reconnect, SubControl,
+    hello_request, BusError, Link, LinkError, LinkKind, NodeLink, Nrst, Reconnect, SubControl,
 };
 use dagon_port::{Addressing, RelayLinkDef};
-use dagon_proto::payload::{boot0, nrst, I2cRaw, Relay as RelayReq, Show, StatusResp, SubCtl};
+use dagon_proto::payload::{boot0, nrst, I2cRaw, Relay as RelayReq, Show, SubCtl};
 use dagon_proto::{finish, frame_len, max_payload, split_status, Cmd, Frame, Status};
-use dagon_relay::nodes::{named, Identity};
-use dagon_relay::view::Shade;
 use dagon_relay::{
-    run_link, serve, task, Config, LinkRoute, Liveness, OwnAgent, Port, Recovery, Relay,
-    RelayClock, State,
+    run_link, serve, task, Config, LinkRoute, Liveness, OwnAgent, Port, Recovery, Relay, RelayClock,
 };
 use dagon_sim::store::SimStore;
 use dagon_sim::{sample_hub, SimBus, NODE_I2C_ADDR, NODE_I2C_PORT, WATCH_UART_PORT};
@@ -66,17 +62,6 @@ const LINKS: [RelayLinkDef; 3] = [
         addressing: Addressing::Fixed(STREAM_ADDR),
         max_payload: max_payload::UART as u16,
     },
-];
-
-/// This node is node 3; more nodes are linked to it than a home screen
-/// has rows for (the last three answer nobody).
-const ME: u8 = 3;
-static FALLBACK: [dagon_relay::nodes::LinkedNode; 5] = [
-    named(1, "seg", BUS, NODE_I2C_ADDR),
-    named(2, "watch", STREAM, STREAM_ADDR),
-    named(4, "fourth", BUS, 0x51),
-    named(5, "fifth", BUS, 0x52),
-    named(6, "sixth", BUS, 0x53),
 ];
 
 // ---- virtual time and the executor ----
@@ -281,25 +266,6 @@ impl Liveness for NoWatchdog {
     }
 }
 
-/// A flash with no topology stored: the relay polls its fallback list.
-struct Erased;
-
-impl Flash for Erased {
-    fn geometry(&self) -> &[FlashRegion] {
-        &[]
-    }
-    fn read(&mut self, _: u32, buf: &mut [u8]) -> Result<(), FlashError> {
-        buf.fill(0xFF);
-        Ok(())
-    }
-    fn erase(&mut self, _: u32, _: u32) -> Result<(), FlashError> {
-        Err(FlashError::Hw)
-    }
-    fn write(&mut self, _: u32, _: &[u8]) -> Result<(), FlashError> {
-        Err(FlashError::Hw)
-    }
-}
-
 type Chain = Composed<&'static Published<AppSnapshot, 8>, Nop, Nop, fn() -> u64>;
 
 /// This node's agent: the agent crate's, over the simulator's store.
@@ -323,9 +289,6 @@ impl OwnAgent for NodeAgent {
     fn handle(&mut self, request: &[u8]) -> Option<(&[u8], Option<u32>)> {
         let r = self.0.handle(request)?;
         Some((r.frame, r.reboot.then_some(r.reboot_delay_ms)))
-    }
-    fn status(&self) -> &StatusResp {
-        self.0.images().status()
     }
     fn before_reboot(&mut self) {
         self.0.before_reboot()
@@ -486,11 +449,6 @@ fn hello_answered(status: Status, body: &[u8], max: usize) -> bool {
 fn the_relay_serves_the_pc_over_its_links() {
     let (bus, sim_ports) = sample_bus();
     let clock = VirtualClock::default();
-    let state = State::new();
-    let config = Config {
-        fallback: &FALLBACK,
-        ..Config::default()
-    };
     let ports = [Port::new(), Port::new()];
     let links = [
         LinkRoute {
@@ -519,21 +477,14 @@ fn the_relay_serves_the_pc_over_its_links() {
     let (own, app) = agent();
     let relay = Relay {
         agent: own,
-        flash: Erased,
-        topology: 0,
-        identity: Identity {
-            index: ME,
-            tag: "relay-rp2040",
-        },
         links: &links,
         recovery: Some(Recovery {
             lines: SimLines(&bus),
             link: BUS,
         }),
-        state: &state,
         watch: NoWatchdog,
         clock: clock.clone(),
-        config,
+        config: Config::default(),
     };
     let up = ScriptedPc {
         requests: &requests,
@@ -552,15 +503,6 @@ fn the_relay_serves_the_pc_over_its_links() {
         assert!(hello_answered(s, &body, max_payload::I2C), "{s:?}");
         let (s, body) = pc.hello(STREAM, STREAM_ADDR).await;
         assert!(hello_answered(s, &body, max_payload::UART), "{s:?}");
-        let home = state.home();
-        assert_eq!(home.own.node, named(ME, "relay", 0, 0));
-        assert_eq!(home.linked.len(), 3, "the screen's rows");
-        assert!(home.linked[..2].iter().all(|n| n.shade != Shade::Unknown));
-        assert_eq!(
-            state.linked().as_slice(),
-            FALLBACK,
-            "the relay keeps them all"
-        );
 
         // A link the node has but the board does not wire: E_UNSUPPORTED.
         assert_eq!(pc.hello(SPARE, STREAM_ADDR).await.0, Status::Unsupported);
@@ -600,30 +542,17 @@ fn the_relay_serves_the_pc_over_its_links() {
         assert_eq!(pc.lines(false, nrst::PULSE).await, Status::Ok);
         assert_eq!(pc.rom_get().await.0, Status::State);
 
-        // The PC quiet window: after a RELAY or SHOW the links do not poll
-        // and the progress stays for 10 s; then they poll again.
+        // SHOW is this node's own agent's: its app reads the progress the
+        // host told it.
         assert_eq!(pc.show().await, Status::Ok);
-        let shown = clock.now_ms();
-        let before = bus_asked.borrow().len();
-        assert!(state.home().progress.is_some());
-        // The SHOW reaches this node's own agent too: its app reads the
-        // progress the host told it.
         let told = app.latest().map(|l| l.state.percent);
         assert_eq!(told, Some(Some(10)), "the app's progress");
-        clock.wait_until(shown + 9_500).await;
-        assert_eq!(
-            bus_asked.borrow().len(),
-            before,
-            "no HELLO poll while the PC is busy"
-        );
-        assert!(!state.expire_progress(clock.now_ms()));
-        clock.wait_until(shown + 12_500).await;
-        let polled = bus_asked.borrow()[before..].to_vec();
-        for addr in [NODE_I2C_ADDR, 0x51, 0x52, 0x53] {
-            assert!(polled.contains(&addr), "{addr:#x} polled: {polled:x?}");
-        }
-        assert!(state.expire_progress(clock.now_ms()));
-        assert!(state.home().progress.is_none());
+
+        // The links carry only what the PC asks: however long the PC is
+        // quiet, the relay sends nothing to a node on its own.
+        let before = bus_asked.borrow().len();
+        clock.wait_until(clock.now_ms() + 60_000).await;
+        assert_eq!(bus_asked.borrow().len(), before, "nothing sent unasked");
     };
 
     let serving = async move {
@@ -631,29 +560,11 @@ fn the_relay_serves_the_pc_over_its_links() {
     };
     let on_bus = async {
         let mut l = link(0, bus_asked.clone());
-        run_link(
-            &mut l,
-            &ports[0],
-            clock.clone(),
-            NoWatchdog,
-            task::link(0),
-            &state,
-            &config,
-        )
-        .await;
+        run_link(&mut l, &ports[0], NoWatchdog, task::link(0)).await;
     };
     let on_stream = async {
         let mut l = link(1, Rc::new(RefCell::new(Vec::new())));
-        run_link(
-            &mut l,
-            &ports[1],
-            clock.clone(),
-            NoWatchdog,
-            task::link(1),
-            &state,
-            &config,
-        )
-        .await;
+        run_link(&mut l, &ports[1], NoWatchdog, task::link(1)).await;
     };
     let (mut serving, mut on_bus, mut on_stream, mut scenario) = (
         std::pin::pin!(serving),
@@ -670,166 +581,8 @@ fn the_relay_serves_the_pc_over_its_links() {
 fn the_defaults_are_the_relays_values() {
     let c = Config::default();
     assert_eq!(
-        (
-            c.rom_addr,
-            c.raw_timeout_ms,
-            c.hello_poll_ms,
-            c.quiet_ms,
-            c.port_margin_ms
-        ),
-        (0x39, 1_000, 2_000, 10_000, 1_000)
+        (c.rom_addr, c.raw_timeout_ms, c.port_margin_ms),
+        (0x39, 1_000, 1_000)
     );
-    assert!(c.fallback.is_empty());
     assert_eq!((task::PC, task::link(0), task::count(2)), (0, 1, 3));
-}
-
-/// A flash holding a topology display copy at address 0.
-struct Stored(Vec<u8>);
-
-impl Flash for Stored {
-    fn geometry(&self) -> &[FlashRegion] {
-        &[]
-    }
-    fn read(&mut self, addr: u32, buf: &mut [u8]) -> Result<(), FlashError> {
-        let at = addr as usize;
-        let src = self.0.get(at..at + buf.len()).ok_or(FlashError::Range)?;
-        buf.copy_from_slice(src);
-        Ok(())
-    }
-    fn erase(&mut self, _: u32, _: u32) -> Result<(), FlashError> {
-        Err(FlashError::Hw)
-    }
-    fn write(&mut self, _: u32, _: &[u8]) -> Result<(), FlashError> {
-        Err(FlashError::Hw)
-    }
-}
-
-/// Nodes 1 and 2 run images with the same tag; 2 drives the bus link to
-/// node 0 (address 0x40), 1 the bus link to node 3 (0x43).
-fn same_tag_topology() -> Stored {
-    use dagon_format::header::target_tag;
-    use dagon_format::topology::{encode, iface, TopoEnd, TopoLink, TopoNode, MAX_SIZE, NONE};
-    let tags = [
-        "seg-f401-7seg",
-        "relay-rp2040",
-        "relay-rp2040",
-        "watch-esp32",
-    ];
-    let nodes: Vec<TopoNode> = tags
-        .iter()
-        .enumerate()
-        .map(|(i, tag)| TopoNode {
-            index: i as u8,
-            target_tag: target_tag(tag),
-            ..TopoNode::default()
-        })
-        .collect();
-    // `from` drives the bus; `to` is reached at 0x40 + to.
-    let link = |from: u8, to: u8| {
-        let end = |node, addr| TopoEnd {
-            node,
-            port: 0,
-            addr,
-        };
-        let mut ends = [end(from, NONE), end(to, 0x40 + to)];
-        ends.sort_by_key(|e| e.node);
-        TopoLink {
-            ends,
-            iface: iface::I2C_BUS,
-            ..TopoLink::default()
-        }
-    };
-    let mut flash = vec![0xFF; MAX_SIZE];
-    encode(&nodes, &[link(2, 0), link(1, 3)], &[], &mut flash).unwrap();
-    Stored(flash)
-}
-
-/// The relay of node `index` (tag `relay-rp2040`) over
-/// [`same_tag_topology`]: the nodes it lists and the addresses its bus
-/// worker polls.
-fn serves(index: u8) -> (Vec<dagon_relay::nodes::LinkedNode>, Vec<u8>) {
-    let (bus, sim_ports) = sample_bus();
-    let clock = VirtualClock::default();
-    let state = State::new();
-    let config = Config::default();
-    let port = Port::new();
-    let links = [LinkRoute {
-        // The topology's links are on port 0 at both ends.
-        link: LINKS[0],
-        port: Some(&port),
-    }];
-    let (requests, replies) = (Frames::new(), Frames::new());
-    let asked = Rc::new(RefCell::new(Vec::new()));
-    let relay = Relay {
-        agent: agent().0,
-        flash: same_tag_topology(),
-        topology: 0,
-        identity: Identity {
-            index,
-            tag: "relay-rp2040",
-        },
-        links: &links,
-        recovery: None::<Recovery<SimLines>>,
-        state: &state,
-        watch: NoWatchdog,
-        clock: clock.clone(),
-        config,
-    };
-    let up = ScriptedPc {
-        requests: &requests,
-        replies: &replies,
-        frame: Vec::new(),
-    };
-    let serving = async move {
-        serve(relay, up).await;
-    };
-    let on_bus = async {
-        let mut l = SimNodeLink {
-            bus: &bus,
-            clock: clock.clone(),
-            id: BUS,
-            addressed: true,
-            port: sim_ports[0],
-            asked: asked.clone(),
-        };
-        run_link(
-            &mut l,
-            &port,
-            clock.clone(),
-            NoWatchdog,
-            task::link(0),
-            &state,
-            &config,
-        )
-        .await;
-    };
-    // Past the PC quiet window, then several HELLO polls.
-    let scenario =
-        clock.wait_until(u64::from(config.quiet_ms) + 3 * u64::from(config.hello_poll_ms));
-    let (mut serving, mut on_bus, mut scenario) = (
-        std::pin::pin!(serving),
-        std::pin::pin!(on_bus),
-        std::pin::pin!(scenario),
-    );
-    let workers: Vec<Pin<&mut dyn Future<Output = ()>>> = vec![serving.as_mut(), on_bus.as_mut()];
-    run(&clock, &bus, workers, scenario.as_mut());
-    let polled = asked.borrow().clone();
-    (state.linked().to_vec(), polled)
-}
-
-#[test]
-fn relays_of_nodes_with_the_same_tag_each_serve_only_their_own_links() {
-    let (linked, polled) = serves(1);
-    assert_eq!(linked, [named(3, "watch", BUS, 0x43)]);
-    assert!(
-        !polled.is_empty() && polled.iter().all(|&a| a == 0x43),
-        "{polled:x?}"
-    );
-
-    let (linked, polled) = serves(2);
-    assert_eq!(linked, [named(0, "seg", BUS, 0x40)]);
-    assert!(
-        !polled.is_empty() && polled.iter().all(|&a| a == 0x40),
-        "{polled:x?}"
-    );
 }

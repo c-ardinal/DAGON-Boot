@@ -64,8 +64,8 @@ pub enum Command {
     Status(StatusArgs),
     /// Write a release package to the nodes
     ///
-    /// Verifies the release, checks it matches the topology, sends the topology
-    /// to the hub, then updates the children and then the hub.
+    /// Verifies the release, checks it matches the topology, then writes the
+    /// nodes, the node the PC is connected to last.
     Apply(ApplyArgs),
     /// Run the 12 conformance tests on a node
     ///
@@ -158,8 +158,6 @@ pub enum TopoCmd {
     Check(TopoCheckArgs),
     /// Write the topology's canonical binary
     Compile(TopoCompileArgs),
-    /// Send the topology's canonical binary to the hub
-    Push(TopoPushArgs),
 }
 
 #[derive(Debug, Default, PartialEq, Args)]
@@ -178,16 +176,6 @@ pub struct TopoCompileArgs {
     /// Output file [default: the YAML's name with .bin]
     #[arg(long, value_name = "BIN")]
     pub out: Option<String>,
-    #[arg(long, value_name = "FILE", help = CONFIG)]
-    pub config: Option<String>,
-}
-
-#[derive(Debug, Default, PartialEq, Args)]
-pub struct TopoPushArgs {
-    #[arg(value_name = "YAML", help = TOPOLOGY)]
-    pub yaml: Option<String>,
-    #[arg(long, value_name = "NAME", help = HUB_PORT)]
-    pub port: Option<String>,
     #[arg(long, value_name = "FILE", help = CONFIG)]
     pub config: Option<String>,
 }
@@ -568,6 +556,50 @@ pub struct AiTopologyArgs {
     /// Model id to ask [default: the agent's]
     #[arg(long, value_name = "ID")]
     pub model: Option<String>,
+}
+
+/// The text printed for a command-line parse error. Under `ai key` none of
+/// clap's rendered text is reused, since it names the offending input, which
+/// may be a key typed by mistake; a fixed message and the usage of the
+/// matched command are printed instead.
+pub fn parse_error_text(argv: &[String], e: &clap::Error) -> String {
+    use clap::error::ErrorKind::{
+        DisplayHelp, DisplayHelpOnMissingArgumentOrSubcommand, DisplayVersion,
+    };
+    let shown = matches!(
+        e.kind(),
+        DisplayHelp | DisplayHelpOnMissingArgumentOrSubcommand | DisplayVersion
+    );
+    match ai_key_command(argv) {
+        Some(mut cmd) if !shown => format!(
+            "error: invalid input under `dagon ai key` (not shown, it may be a key)\n\n{}\n\n\
+             For more information, try 'dagon ai key --help'.\n",
+            cmd.render_usage()
+        ),
+        _ => e.to_string(),
+    }
+}
+
+/// The command `argv` resolves to when it is in the `ai key` subtree, found by
+/// walking the command tree the way clap does: options and a `help` word are
+/// skipped, and the walk stops at the first word that is not a subcommand of
+/// the current command.
+fn ai_key_command(argv: &[String]) -> Option<clap::Command> {
+    let mut cmd = Cli::command();
+    cmd.build();
+    let mut path = Vec::new();
+    for a in argv.iter().skip(1).filter(|a| !a.starts_with('-')) {
+        if a == "help" {
+            continue;
+        }
+        let Some(sub) = cmd.find_subcommand(a).cloned() else {
+            break;
+        };
+        path.push(sub.get_name().to_string());
+        cmd = sub;
+    }
+    path.starts_with(&["ai".to_string(), "key".to_string()])
+        .then_some(cmd)
 }
 
 /// Every visible command's full help, one Markdown section each.

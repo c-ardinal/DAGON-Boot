@@ -54,7 +54,6 @@ describe('the browser simulator takes the links and flash their real time', () =
       trialMs: (id) => trialMs(MCU[id] ?? ''),
     });
     await op.connect();
-    await op.push();
     op.takeFile('sample-full-1.1.0.dgb', RELEASE);
     await op.update();
     expect(op.state).toBe('done');
@@ -90,7 +89,6 @@ describe('a write the simulator sends back, the watch crashing at boot', () => {
       trialMs: (id) => trialMs(MCU[id] ?? ''),
     });
     await op.connect();
-    await op.push();
     op.takeFile('sample-full-1.1.0.dgb', RELEASE);
     await op.update();
     return op;

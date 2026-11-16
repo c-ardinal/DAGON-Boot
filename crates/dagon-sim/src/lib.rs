@@ -30,7 +30,7 @@ pub mod timing;
 pub use flash::{CutPoint, FlashOp, OpKind, SimFlash};
 pub use link::SimLink;
 pub use node::{Run, SimNode, TrialApp};
-pub use relay::{FrameCutter, Screen, SimBus, SimPort, SimRelay, SimStream};
+pub use relay::{FrameCutter, SimBus, SimPort, SimRelay, SimStream};
 pub use rng::SimRng;
 pub use rom::SimRom;
 pub use store::{Layout, SimStore};

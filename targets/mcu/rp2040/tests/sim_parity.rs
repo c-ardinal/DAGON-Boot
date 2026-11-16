@@ -2,6 +2,8 @@
 //! answering: a request the rules reject must get the same status from the
 //! sim; one they accept reaches the bus (and times out there).
 
+use std::sync::atomic::{AtomicU8, Ordering};
+
 use dagon_mcu_rp2040::{RELAY_LINKS, RELAY_LINK_I2C0 as I2C, RELAY_LINK_PIO_UART as UART};
 use dagon_proto::payload::link::UART_ADDR;
 use dagon_proto::payload::{boot0, nrst, I2cRaw, Relay, Show, SubCtl};
@@ -10,9 +12,13 @@ use dagon_relay::cmd;
 use dagon_sim::{demo_hub, SimRelay};
 
 fn ask(h: &mut SimRelay, c: Cmd, payload: &[u8]) -> Status {
+    // A new seq each time: a node's agent answers a repeated one with its
+    // stored reply.
+    static SEQ: AtomicU8 = AtomicU8::new(1);
+    let seq = SEQ.fetch_add(1, Ordering::Relaxed);
     let mut buf = vec![0u8; frame_len(payload.len())];
     buf[8..8 + payload.len()].copy_from_slice(payload);
-    finish(&mut buf, 0, 1, c as u8, payload.len()).unwrap();
+    finish(&mut buf, 0, seq, c as u8, payload.len()).unwrap();
     let resp = h.request(&buf).expect("the relaying node answers");
     let (f, _) = Frame::decode(&resp, max_payload::USB).unwrap();
     split_status(f.payload).unwrap().0
@@ -113,7 +119,8 @@ fn i2c_raw_and_subctl_rules_match_the_sim() {
     // Out-of-range SUBCTL values are refused by the shared parser.
     assert_eq!(SubCtl::parse(&[3, 0]), Err(Status::Arg));
     assert_eq!(ask(&mut h, Cmd::SubCtl, &[3, 0]), Status::Arg);
-    // SHOW: a text over 32 bytes is E_ARG in both.
+    // SHOW, which the relaying node's own agent answers: a text over 32
+    // bytes is E_ARG in both.
     let mut show = [0u8; 7 + 33];
     show[1] = 1;
     assert_eq!(Show::parse(&show).err(), Some(Status::Arg));

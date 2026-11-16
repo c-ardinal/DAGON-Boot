@@ -552,9 +552,9 @@ export class Operate {
     this.status = FAILURE_BAND[f].chip;
   }
 
-  /** "もう一度探す" and the scan after "つないで、自動で見つける". */
+  /** The scan after "つないで、自動で見つける". */
   async discover(my = this.session): Promise<void> {
-    this.go(this.state === 'scanned' ? 'scanAgain' : 'helloDiscover');
+    this.go('helloDiscover');
     this.stopWatching();
     this.found = 1;
     if (!this.config) this.placeSample();
@@ -579,22 +579,6 @@ export class Operate {
       this.startWatching();
     } catch {
       if (my === this.session) this.lose();
-    }
-  }
-
-  /** "親機へ送る" / "もう一度送る". */
-  async push(): Promise<void> {
-    if (!this.config || !this.host) return;
-    this.go(this.state === 'sendFailed' ? 'pushAgain' : 'push');
-    const my = this.session;
-    try {
-      const bin = topo_compile(this.config.yaml);
-      await this.call((h) => h.pushTopology(bin));
-      if (my !== this.session) return;
-      this.status = ANNOUNCE.A07;
-      this.go('pushed');
-    } catch {
-      if (my === this.session) this.go('pushFailed');
     }
   }
 

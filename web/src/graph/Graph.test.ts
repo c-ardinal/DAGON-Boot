@@ -6,7 +6,7 @@ import Graph from './Graph.svelte';
 
 const html = (props: Record<string, unknown> = {}) =>
   render(Graph, {
-    props: { config: SAMPLE_CONFIG, live: {}, connected: false, sending: false, selected: null, onselect: () => undefined, ...props },
+    props: { config: SAMPLE_CONFIG, live: {}, connected: false, selected: null, onselect: () => undefined, ...props },
   }).body;
 const checks = (b: string) => [...b.matchAll(/<button[^>]*role="checkbox"[^>]*>/g)].map((m) => m[0]);
 

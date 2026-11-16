@@ -322,9 +322,9 @@ fn a_nodes_target_comes_from_the_connected_node_the_host_is_given() {
     assert_eq!(s.relay.borrow().now_ms(), before, "nothing was sent");
 }
 
-/// An update or a topology push whose targets do not resolve sends nothing
-/// at all, not even the topology: a table without the node's port, no
-/// definition of the connected node's MCU, no configuration.
+/// An update whose targets do not resolve sends nothing at all: a table
+/// without the node's port, no definition of the connected node's MCU, no
+/// configuration.
 #[test]
 fn a_route_error_sends_nothing() {
     let topo = topology(&yaml());
@@ -349,10 +349,6 @@ fn a_route_error_sends_nothing() {
         assert!(matches!(r, Err(Error::Route(_))), "{local:?}: {r:?}");
         let r = block_on(h.apply(&bundle, &topo, &key().pk, Some(&[SEG]), &mut |_| {}));
         assert!(matches!(r, Err(Error::Route(_))), "{local:?}: {r:?}");
-        if local.is_err() {
-            let r = block_on(h.push_topology(&topo));
-            assert!(matches!(r, Err(Error::Route(_))), "{local:?}: {r:?}");
-        }
         let writes = s.faults.borrow().seen.len();
         assert_eq!(writes, 0, "{local:?}: nothing was written");
     }
@@ -439,21 +435,14 @@ fn version_of_a_stage0_without_its_mark_is_unknown() {
 }
 
 #[test]
-fn the_number_on_the_hubs_screen_is_the_number_every_caller_is_told() {
+fn every_caller_is_told_one_number_that_reaches_100_only_when_confirmed() {
     let s = sim();
     let mut h = host(&s);
-    let mut told: Option<u8> = None;
     let mut seen = 0;
     block_on(
         h.apply(&release(), &topology(&yaml()), &key().pk, None, &mut |e| {
-            // SHOW follows its event: the screen holds what the last event said.
-            if let (Some(n), Some(screen)) = (told, s.relay.borrow().screen.as_ref()) {
-                assert_eq!(screen.percent, n, "{e:?}");
-                seen += 1;
-            }
-            // The hub's own reboot clears its screen.
-            told = (e.phase != phase::REBOOT).then_some(e.shown);
             assert!(e.shown < 100 || e.phase == phase::CONFIRM, "{e:?}");
+            seen += 1;
         }),
     )
     .unwrap();
@@ -531,14 +520,10 @@ fn a_lost_tell_is_told_again_at_the_next_step_and_never_resent() {
     assert!(!armed);
     assert_eq!(f.drop_req, [(Cmd::Show as u8, 0)], "all three were lost");
     assert_eq!(f.number_at_end, Some(Some(last)), "the number froze");
-    // No extra resend: one SHOW to the hub per event, one to the node per step.
+    // No extra resend: at most one SHOW to the node per step.
     let shows: Vec<_> = f.seen.iter().filter(|x| x.0 == Cmd::Show as u8).collect();
     assert!(shows.iter().all(|x| !x.1), "a SHOW is never resent");
-    assert!(
-        shows.len() <= events + steps,
-        "{} {events} {steps}",
-        shows.len()
-    );
+    assert!(shows.len() <= steps, "{} {events} {steps}", shows.len());
 }
 
 #[test]
@@ -624,14 +609,17 @@ fn full_apply_then_rollback() {
     // request, so each phase is exactly its requests. Erase is the one
     // request the hub erases on (the last header chunk; the header's other
     // chunks and XFER_BEGIN are no phase), verify the one XFER_END, data one
-    // request per body chunk and one SHOW per progress step on the LCD.
+    // request per body chunk and one SHOW per new number the hub is told
+    // (the first goes before XFER_BEGIN).
     let rt = dagon_sim::relay::PC_ROUND_TRIP_MS as u32;
     let chunk = hub_max.min(s.max_payload()) - 4;
     let body = hub_img(1, v).len() - dagon_format::header::HEADER_SIZE;
-    let shows = events
+    let numbers: Vec<u8> = events
         .iter()
-        .filter(|e| e.node == 0 && e.phase == phase::TRANSFER && e.percent > 0)
-        .count();
+        .filter(|e| e.node == 0 && e.phase == phase::TRANSFER && !e.boot_core)
+        .map(|e| e.shown)
+        .collect();
+    let shows = numbers.windows(2).filter(|w| w[1] != w[0]).count();
     let t = timed.iter().find(|e| e.node == 0).unwrap().times.unwrap();
     assert_eq!(
         (t.erase_ms, t.data_ms, t.verify_ms),
@@ -642,8 +630,6 @@ fn full_apply_then_rollback() {
         .iter()
         .filter(|e| e.phase != phase::VERIFY)
         .all(|e| e.times.is_none()));
-    let screen = s.relay.borrow().screen.clone().unwrap();
-    assert_eq!((screen.node, screen.phase), (0, phase::CONFIRM));
 
     for to in [seg_at(), Target::Local] {
         let st = block_on(h.status(to)).unwrap();
@@ -690,7 +676,6 @@ fn topology_mismatch_refuses_before_sending() {
     let r = block_on(h.apply(&release(), &other, &key().pk, None, &mut |_| {}));
     assert!(matches!(r, Err(Error::TopologyMismatch { .. })));
     assert_eq!(s.relay.borrow().now_ms(), t0, "no request reached the hub");
-    assert!(s.relay.borrow().screen.is_none());
 }
 
 #[test]
@@ -710,11 +695,11 @@ fn without_host_verify_the_node_rejects_tampered_images() {
     use dagon_format::header::{HEADER_SIZE, SIGNED_LEN};
     use dagon_proto::Status;
     let cases = [
-        (0x18, Status::Signature, "E_SIGNATURE"),
-        (HEADER_SIZE + 100, Status::Digest, "E_DIGEST"),
-        (SIGNED_LEN + 5, Status::Signature, "E_SIGNATURE"),
+        (0x18, Status::Signature),
+        (HEADER_SIZE + 100, Status::Digest),
+        (SIGNED_LEN + 5, Status::Signature),
     ];
-    for (at, status, text) in cases {
+    for (at, status) in cases {
         let s = sim();
         let mut b = release();
         let seg_items: Vec<usize> = {
@@ -737,11 +722,6 @@ fn without_host_verify_the_node_rejects_tampered_images() {
             o => panic!("flip at {at:#x}: {o:?}"),
         }
         assert!(matches!(out[1].outcome, Outcome::NotStarted));
-        let screen = s.relay.borrow().screen.clone().unwrap();
-        assert_eq!(
-            (screen.phase, screen.text.as_slice()),
-            (phase::REJECTED, text.as_bytes())
-        );
         let st = block_on(h.status(seg_at())).unwrap();
         assert_eq!(
             (st.hello.active_version, st.status.active),
@@ -786,9 +766,6 @@ fn node_that_falls_back_stops_the_run_and_confirm_rule() {
         matches!(out[1].outcome, Outcome::NotStarted),
         "hub untouched"
     );
-    let screen = s.relay.borrow().screen.clone().unwrap();
-    assert_eq!((screen.node, screen.phase), (SEG, phase::FAILED));
-    assert_eq!(screen.text, b"E_STATE");
 
     // On trial with the version this session applied: CONFIRM is sent (and
     // refused by the node's self-check). A fresh session must ask first.
@@ -944,7 +921,6 @@ fn erased_f401_comes_back_through_the_rom_loader() {
         assert_eq!((st.hello.active_version, st.hello.trial), (v, false));
         assert_eq!((st.status.active, st.status.confirmed), (0, 0));
         let mut hub = s.relay.borrow_mut();
-        assert_eq!(hub.screen.as_ref().unwrap().phase, phase::CONFIRM);
         let rom = &hub.i2c_node(NODE_I2C_PORT, NODE_I2C_ADDR).unwrap().rom;
         assert_eq!((rom.timeouts, rom.over_reads), (0, over));
     }
@@ -1178,7 +1154,6 @@ fn rom_session_gives_up_after_three_attempts() {
         "{r:?}"
     );
     let mut hub = s.relay.borrow_mut();
-    assert_eq!(hub.screen.as_ref().unwrap().phase, phase::FAILED);
     assert!(
         !hub.i2c_node(NODE_I2C_PORT, NODE_I2C_ADDR).unwrap().boot0(),
         "BOOT0 left low"
@@ -1805,7 +1780,6 @@ fn one_core_layout() -> dagon_sim::Layout {
         bootcore: (0x1000_0000, 0x8000),
         log: (0x1030_0000, 0x1000),
         slots: &[(0x1004_8000, 0x10_0000), (0x1014_8000, 0x10_0000)],
-        topology: Some((0x1031_0000, 0x1_0000)),
         cores: Some(cores),
         ..hub
     }
@@ -1992,16 +1966,10 @@ fn the_only_boot_core_is_not_rewritten_during_an_app_trial() {
         matches!(out, Outcome::Failed(Error::AppOnTrial { running }) if running == Version::new(1, 1, 0)),
         "{out:?}"
     );
-    // Only the hub's display copy of the topology is written: nothing of
-    // the boot core slot or its log.
-    let core_area = 0x1000_8000..0x1002_8000;
-    let core_log = 0x1032_0000..0x1032_2000;
+    // Nothing of the hub's flash is written, its boot core slot and log
+    // among it.
     let ops = s.relay.borrow().node.flash().ops().to_vec();
-    assert!(
-        ops.iter()
-            .all(|o| !core_area.contains(&o.addr) && !core_log.contains(&o.addr)),
-        "{ops:x?}"
-    );
+    assert!(ops.is_empty(), "{ops:x?}");
     // The power goes and comes back: the hub starts its core and its app.
     {
         let mut hub = s.relay.borrow_mut();

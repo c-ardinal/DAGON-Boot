@@ -44,7 +44,6 @@ function session(opts: MockOptions, trial = TRIAL_MS) {
 async function written(opts: MockOptions, trial = TRIAL_MS) {
   const s = session(opts, trial);
   await s.op.connect();
-  await s.op.push();
   s.op.takeFile('sample-1.1.0.dgb', RELEASE);
   await s.op.update();
   return s;

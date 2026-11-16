@@ -379,7 +379,7 @@ macro_rules! __machine {
             pub const CATALOG: $crate::Catalog = $crate::Catalog {
                 machine: stringify!($name),
                 layer: $crate::Layer::$layer,
-                doc: concat!("" $(, $mdoc, "\n")*),
+                doc: $crate::__private::catalog_doc(concat!("" $(, $mdoc, "\n")*)),
                 initial: stringify!($initial),
                 states: &[$(stringify!($S)),+],
                 entries: &[$($ev::ENTRY),+],
@@ -445,7 +445,7 @@ macro_rules! __machine {
                         }),*],
                         observe: $crate::Observe { $($obs: true,)+ ..$crate::Observe::NONE },
                         flags: $crate::Flags { $($flag: true,)* ..$crate::Flags::NONE },
-                        doc: concat!("" $(, $tdoc, "\n")*),
+                        doc: $crate::__private::catalog_doc(concat!("" $(, $tdoc, "\n")*)),
                     };
                 }
 

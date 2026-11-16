@@ -77,13 +77,13 @@ On your own PC, you can also try it without hardware, using the simulator.
 Linux / macOS
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/c-ardinal/DAGON-Boot/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/c-ardinal/DAGON-Boot/main/setup.sh | sh
 ```
 
 Windows
 
 ```powershell
-irm https://raw.githubusercontent.com/c-ardinal/DAGON-Boot/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/c-ardinal/DAGON-Boot/main/setup.ps1 | iex
 ```
 
 #### Try it in the simulator

@@ -77,13 +77,13 @@ PCに繋いだ1つのマイコンを通してその先のマイコンにも、�
 Linux / macOS
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/c-ardinal/DAGON-Boot/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/c-ardinal/DAGON-Boot/main/setup.sh | sh
 ```
 
 Windows
 
 ```powershell
-irm https://raw.githubusercontent.com/c-ardinal/DAGON-Boot/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/c-ardinal/DAGON-Boot/main/setup.ps1 | iex
 ```
 
 #### シミュレータで試す

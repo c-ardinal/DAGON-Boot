@@ -1,6 +1,6 @@
 # Installs the dagon command from a GitHub release, for Windows.
 #
-#     irm https://raw.githubusercontent.com/c-ardinal/DAGON-Boot/main/install.ps1 | iex
+#     irm https://raw.githubusercontent.com/c-ardinal/DAGON-Boot/main/setup.ps1 | iex
 #
 # A version:      $env:DAGON_VERSION = "1.2.3"    (default: the latest)
 # The folder:     $env:DAGON_INSTALL_DIR          (default: %LOCALAPPDATA%\Programs\dagon)
@@ -20,7 +20,7 @@ function Install-Dagon {
     $repo = 'c-ardinal/DAGON-Boot'
 
     if ($PSVersionTable.PSEdition -eq 'Core' -and -not $IsWindows) {
-        throw 'dagon install: this script is for Windows; use install.sh'
+        throw 'dagon install: this script is for Windows; use setup.sh'
     }
     $machine = $env:PROCESSOR_ARCHITEW6432
     if (-not $machine) { $machine = $env:PROCESSOR_ARCHITECTURE }

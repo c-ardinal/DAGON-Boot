@@ -3,8 +3,8 @@
     python -m unittest discover -s scripts -p "test_*.py"
 
 Nothing in the scripts points at a test server: a fake `curl` and `uname` come
-first on PATH for install.sh, and a fake Invoke-WebRequest shadows the cmdlet for
-install.ps1, so the scripts run as they are and every URL they ask for is seen.
+first on PATH for setup.sh, and a fake Invoke-WebRequest shadows the cmdlet for
+setup.ps1, so the scripts run as they are and every URL they ask for is seen.
 """
 import hashlib
 import io
@@ -20,8 +20,8 @@ import unittest
 import zipfile
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-SH = ROOT / "install.sh"
-PS1 = ROOT / "install.ps1"
+SH = ROOT / "setup.sh"
+PS1 = ROOT / "setup.ps1"
 RELEASES = "https://github.com/c-ardinal/DAGON-Boot/releases/download/"
 API = "https://api.github.com/repos/c-ardinal/DAGON-Boot/releases?per_page=100&page="
 LINUX = "x86_64-unknown-linux-gnu"
@@ -559,8 +559,8 @@ class Scripts(unittest.TestCase):
     def test_the_one_liners_point_at_the_main_branch(self):
         for rel in ("README.md", "README.en.md", "site/src/content/docs/getting-started/install.md", "site/src/content/docs/en/getting-started/install.md"):
             text = (ROOT / rel).read_text(encoding="utf-8")
-            self.assertIn("curl -fsSL https://raw.githubusercontent.com/c-ardinal/DAGON-Boot/main/install.sh | sh", text, rel)
-            self.assertIn("irm https://raw.githubusercontent.com/c-ardinal/DAGON-Boot/main/install.ps1 | iex", text, rel)
+            self.assertIn("curl -fsSL https://raw.githubusercontent.com/c-ardinal/DAGON-Boot/main/setup.sh | sh", text, rel)
+            self.assertIn("irm https://raw.githubusercontent.com/c-ardinal/DAGON-Boot/main/setup.ps1 | iex", text, rel)
 
 
 if __name__ == "__main__":

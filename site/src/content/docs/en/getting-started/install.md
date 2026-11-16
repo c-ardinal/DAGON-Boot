@@ -8,13 +8,13 @@ description: "Installing the dagon command from a release, and building it yours
 Linux and macOS:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/c-ardinal/DAGON-Boot/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/c-ardinal/DAGON-Boot/main/setup.sh | sh
 ```
 
 Windows (PowerShell):
 
 ```powershell
-irm https://raw.githubusercontent.com/c-ardinal/DAGON-Boot/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/c-ardinal/DAGON-Boot/main/setup.ps1 | iex
 ```
 
 The script does this:
@@ -29,9 +29,9 @@ The script reads these environment variables:
 
 | Variable | Meaning |
 |---|---|
-| `DAGON_VERSION` | The version to install. `install.sh` also takes it as an argument (`sh -s -- <version>`). A pre-release (`<version>-rc.N`) is installed only when named this way |
+| `DAGON_VERSION` | The version to install. `setup.sh` also takes it as an argument (`sh -s -- <version>`). A pre-release (`<version>-rc.N`) is installed only when named this way |
 | `DAGON_INSTALL_DIR` | The folder to put it in |
-| `DAGON_NO_MODIFY_PATH` | With `install.ps1`, leaves PATH as it is and says how to add the folder |
+| `DAGON_NO_MODIFY_PATH` | With `setup.ps1`, leaves PATH as it is and says how to add the folder |
 
 `cargo binstall dagon-cli --git https://github.com/c-ardinal/DAGON-Boot` takes the same archive, and needs `cargo-binstall`.
 

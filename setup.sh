@@ -1,7 +1,7 @@
 #!/bin/sh
 # Installs the dagon command from a GitHub release, for Linux and macOS.
 #
-#     curl -fsSL https://raw.githubusercontent.com/c-ardinal/DAGON-Boot/main/install.sh | sh
+#     curl -fsSL https://raw.githubusercontent.com/c-ardinal/DAGON-Boot/main/setup.sh | sh
 #
 # A version:  ... | sh -s -- 1.2.3   or  DAGON_VERSION=1.2.3  (default: the latest)
 # The folder: DAGON_INSTALL_DIR      (default: ~/.local/bin)

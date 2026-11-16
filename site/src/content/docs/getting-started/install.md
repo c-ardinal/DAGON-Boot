@@ -8,13 +8,13 @@ description: "dagonコマンドをリリースから入れる方法と、自分�
 LinuxとmacOS:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/c-ardinal/DAGON-Boot/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/c-ardinal/DAGON-Boot/main/setup.sh | sh
 ```
 
 Windows（PowerShell）:
 
 ```powershell
-irm https://raw.githubusercontent.com/c-ardinal/DAGON-Boot/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/c-ardinal/DAGON-Boot/main/setup.ps1 | iex
 ```
 
 スクリプトは次のことをします。
@@ -29,9 +29,9 @@ irm https://raw.githubusercontent.com/c-ardinal/DAGON-Boot/main/install.ps1 | ie
 
 | 環境変数 | 意味 |
 |---|---|
-| `DAGON_VERSION` | 入れるバージョン。`install.sh`は引数でも受け取ります（`sh -s -- <version>`）。プレリリース（`<version>-rc.N`）は、こうして指定したときだけ入ります |
+| `DAGON_VERSION` | 入れるバージョン。`setup.sh`は引数でも受け取ります（`sh -s -- <version>`）。プレリリース（`<version>-rc.N`）は、こうして指定したときだけ入ります |
 | `DAGON_INSTALL_DIR` | 置くフォルダ |
-| `DAGON_NO_MODIFY_PATH` | `install.ps1`で、PATHを変えず足し方を表示します |
+| `DAGON_NO_MODIFY_PATH` | `setup.ps1`で、PATHを変えず足し方を表示します |
 
 `cargo binstall dagon-cli --git https://github.com/c-ardinal/DAGON-Boot`でも同じアーカイブを取得します。`cargo-binstall`が要ります。
 

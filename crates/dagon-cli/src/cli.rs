@@ -558,31 +558,35 @@ pub struct AiTopologyArgs {
     pub model: Option<String>,
 }
 
-/// The text printed for a command-line parse error. Under `ai key` the
-/// message that names the offending input is replaced, since the input may be
-/// a key typed by mistake; the usage and help hint clap prints stay.
+/// The text printed for a command-line parse error. Under `ai key` none of
+/// clap's rendered text is reused, since it names the offending input, which
+/// may be a key typed by mistake; a fixed message and the usage of the
+/// matched command are printed instead.
 pub fn parse_error_text(argv: &[String], e: &clap::Error) -> String {
     use clap::error::ErrorKind::{
         DisplayHelp, DisplayHelpOnMissingArgumentOrSubcommand, DisplayVersion,
     };
-    let text = e.to_string();
-    if !under_ai_key(argv)
-        || matches!(
-            e.kind(),
-            DisplayHelp | DisplayHelpOnMissingArgumentOrSubcommand | DisplayVersion
-        )
-    {
-        return text;
+    let shown = matches!(
+        e.kind(),
+        DisplayHelp | DisplayHelpOnMissingArgumentOrSubcommand | DisplayVersion
+    );
+    match ai_key_command(argv) {
+        Some(mut cmd) if !shown => format!(
+            "error: invalid input under `dagon ai key` (not shown, it may be a key)\n\n{}\n\n\
+             For more information, try 'dagon ai key --help'.\n",
+            cmd.render_usage()
+        ),
+        _ => e.to_string(),
     }
-    let rest = text.split_once("\n\n").map_or("", |(_, rest)| rest);
-    format!("error: invalid input under `dagon ai key` (not shown, it may be a key)\n\n{rest}")
 }
 
-/// Whether `argv` resolves to the `ai key` subtree, walking the command tree
-/// the way clap does: options and a leading `help` are skipped, and the walk
-/// stops at the first word that is not a subcommand of the current command.
-fn under_ai_key(argv: &[String]) -> bool {
+/// The command `argv` resolves to when it is in the `ai key` subtree, found by
+/// walking the command tree the way clap does: options and a `help` word are
+/// skipped, and the walk stops at the first word that is not a subcommand of
+/// the current command.
+fn ai_key_command(argv: &[String]) -> Option<clap::Command> {
     let mut cmd = Cli::command();
+    cmd.build();
     let mut path = Vec::new();
     for a in argv.iter().skip(1).filter(|a| !a.starts_with('-')) {
         if a == "help" {
@@ -595,6 +599,7 @@ fn under_ai_key(argv: &[String]) -> bool {
         cmd = sub;
     }
     path.starts_with(&["ai".to_string(), "key".to_string()])
+        .then_some(cmd)
 }
 
 /// Every visible command's full help, one Markdown section each.

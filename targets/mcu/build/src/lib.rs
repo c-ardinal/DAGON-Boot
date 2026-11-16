@@ -1161,9 +1161,13 @@ mod tests {
         assert!(msg.contains("cannot read a key from that place"), "{msg}");
     }
 
+    /// The repository root: the nearest folder above the compiling crate's
+    /// manifest that holds this crate (other crates include this file).
     fn repo_root() -> PathBuf {
         Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../..")
+            .ancestors()
+            .find(|d| d.join("targets/mcu/build/Cargo.toml").is_file())
+            .expect("repository root")
             .canonicalize()
             .unwrap()
     }

@@ -78,6 +78,11 @@ DAGONは1つのインターフェースでエージェントと話します。�
 
 OSの資格情報ストアだけです。Windows資格情報マネージャー、macOSのキーチェーン、LinuxのSecret Service（GNOME Keyring、KeePassXCなど）です。キーはそれぞれ、サービス`dagon`、アカウント`<agent id>/<way id>`（`claude/api`）の項目です。DAGONは環境変数からキーを読まず、ファイルにキーを置きません。ストアを使えない場所では、登録を受け付けません。キーがストアから出るのは、そのつなぎ方のリクエストのヘッダに入るときだけです。
 
+ストアを使えないときの`dagon ai key`です（serveのPUTとDELETEは、上のとおり503 `AGENT_KEY_STORE`です）。
+
+- `dagon ai key set`と`dagon ai key delete`は、`error: <store> cannot be used (<reason>); <how to install or start one>. DAGON keeps API keys nowhere else`（storeはストアの名前、reasonは理由）を表示して、終了コード1で終わります。`set`はキーを聞く前に断ります。
+- `dagon ai key status`は終了コード0で終わり、キーを取るつなぎ方をそれぞれ`未登録 (<reason>)`と表示します。終了コードでは、ストアが無いことと登録が無いことを区別しません。
+
 ## つなぐ前のAIのルート
 
 `/v1/ai/...`のルートはどれも、つなぐまで次の答えを返します。

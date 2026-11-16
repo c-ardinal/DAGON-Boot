@@ -354,8 +354,13 @@ pub fn watch_interval_ms() -> u32 {
     crate::watch::INTERVAL_MS
 }
 
-/// Release verification key of a standalone build (`DAGON_PUBKEY`, see build.rs).
-pub const PUBKEY: [u8; 32] = hex32(env!("DAGON_PUBKEY_HEX"));
+// `PUBKEY`, the release verification key of a standalone build
+// (`DAGON_PUBKEY`, see build.rs); the page does not read `TEST_KEY`.
+#[allow(dead_code)]
+mod embedded {
+    include!(concat!(env!("OUT_DIR"), "/pubkey.rs"));
+}
+pub use embedded::PUBKEY;
 
 std::thread_local! {
     /// The developer's key set at run time (the page served by `dagon serve` reads it from its
@@ -392,7 +397,7 @@ pub fn require_release_key() {
 }
 
 const fn hex32(s: &str) -> [u8; 32] {
-    // Only ever given 64 hex digits (checked by build.rs or set_release_key).
+    // Only ever given 64 hex digits (checked by set_release_key).
     const fn nib(c: u8) -> u8 {
         match c {
             b'0'..=b'9' => c - b'0',

@@ -32,6 +32,23 @@ class PageSources(unittest.TestCase):
         with mock.patch.object(type(target), "read_bytes", read_bytes):
             self.assertNotEqual(page.source_hash(), before)
 
+    def test_a_build_dependency_change_makes_the_page_stale(self):
+        target = ROOT / "targets" / "mcu" / "build" / "src" / "lib.rs"
+        self.assertIn(target, page.source_files())
+        before = page.source_hash()
+        real = type(target).read_bytes
+
+        def read_bytes(p):
+            data = real(p)
+            return data + b"\n// changed\n" if p == target else data
+
+        with mock.patch.object(type(target), "read_bytes", read_bytes):
+            self.assertNotEqual(page.source_hash(), before)
+
+    def test_the_page_embeds_its_key_through_the_shared_helper(self):
+        build = (ROOT / "crates" / "dagon-wasm" / "build.rs").read_text(encoding="utf-8")
+        self.assertIn("dagon_mcu_build::embed_pubkey()", build)
+
     def test_paths_sort_with_regard_to_case_on_every_system(self):
         names = ["web/a.ts", "web/README.md", "web/Z.ts", "web/e2e/b.ts"]
         order = page.in_order(ROOT / n for n in names)

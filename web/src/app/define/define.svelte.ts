@@ -193,7 +193,7 @@ export class Define {
     return null;
   }
 
-  /** "置く" by MCU: a node without a board; its flash size is the developer's to fill. */
+  /** "置く" by MCU: a node without a board; nothing is asked for it. */
   placeMcu(mcu: string, name: string): void {
     const r = placeMcu(this.doc, mcu);
     if (!r.id || !this.apply(r.doc)) return;
@@ -281,7 +281,7 @@ export class Define {
     this.source = text === undefined ? null : { text, as: toYaml(doc.topo) };
     this.past = [];
     this.future = [];
-    this.doc = doc;
+    this.doc = docWithDefaults(doc);
     this.selected = null;
     this.unreadable = false;
     this.notRead = false;
@@ -300,14 +300,14 @@ export class Define {
 
   /**
    * "ファイルの構成を取り込む": the 構成 a release was made for
-   * replaces this one, keeping the names and board fields of the nodes it
+   * replaces this one, keeping the names and names of the nodes it
    * shares; undoable.
    */
   importRelease(topo: Topo): boolean {
     const t = withDefaults(topo);
     const ids = new Set(t.nodes.map((n) => n.id));
-    const keep = <T>(r: Record<string, T> | undefined) => Object.fromEntries(Object.entries(r ?? {}).filter(([id]) => ids.has(id)));
-    if (!this.apply({ topo: t, names: keep(this.doc.names), boards: keep(this.doc.boards) })) return false;
+    const names = Object.fromEntries(Object.entries(this.doc.names).filter(([id]) => ids.has(id)));
+    if (!this.apply({ topo: t, names })) return false;
     this.selected = null;
     return true;
   }

@@ -73,8 +73,8 @@ use dagon_format::header::{mcu_id, port_kind};
 pub use dagon_format::Version;
 use dagon_proto::payload::role;
 
-/// Release public key the agent accepts (resolved by `build.rs`).
-pub const PUBKEY: [u8; 32] = hex32(env!("DAGON_PUBKEY_HEX"));
+// `PUBKEY`, the release public key the agent accepts, and `TEST_KEY`.
+include!(concat!(env!("OUT_DIR"), "/pubkey.rs"));
 
 /// `DAGON_TARGET_TAG` at build time, if set: it overrides the board's tag.
 pub const TARGET_TAG_OVERRIDE: Option<&str> = option_env!("DAGON_TARGET_TAG");
@@ -124,26 +124,6 @@ pub fn refuse_set_pending_on_trial(
     }
     out[HEADER_LEN] = Status::State as u8;
     dagon_proto::finish(out, flags::RESP, f.seq, f.cmd, 1).ok()
-}
-
-const fn hex32(s: &str) -> [u8; 32] {
-    const fn nib(c: u8) -> u8 {
-        match c {
-            b'0'..=b'9' => c - b'0',
-            b'a'..=b'f' => c - b'a' + 10,
-            b'A'..=b'F' => c - b'A' + 10,
-            _ => panic!("DAGON_PUBKEY: not hex"),
-        }
-    }
-    let b = s.as_bytes();
-    assert!(b.len() == 64, "DAGON_PUBKEY: need 64 hex digits");
-    let mut out = [0u8; 32];
-    let mut i = 0;
-    while i < 32 {
-        out[i] = nib(b[2 * i]) << 4 | nib(b[2 * i + 1]);
-        i += 1;
-    }
-    out
 }
 
 const fn tag16(s: &str) -> [u8; 16] {

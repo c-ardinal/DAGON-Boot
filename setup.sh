@@ -1,10 +1,11 @@
 #!/bin/sh
 # Installs the dagon command from a GitHub release, for Linux and macOS.
 #
-#     curl -fsSL https://raw.githubusercontent.com/c-ardinal/DAGON-Boot/main/install.sh | sh
+#     curl -fsSL https://raw.githubusercontent.com/c-ardinal/DAGON-Boot/main/setup.sh | sh
 #
 # A version:  ... | sh -s -- 1.2.3   or  DAGON_VERSION=1.2.3  (default: the latest)
 # The folder: DAGON_INSTALL_DIR      (default: ~/.local/bin)
+# Remove it:  ... | sh -s -- --uninstall   or  DAGON_UNINSTALL=1  (keeps ~/.dagon)
 #
 # It stops on any download or checksum error and leaves the folder as it was.
 # It needs no administrator rights.
@@ -67,8 +68,33 @@ sha256_of() {
     fi
 }
 
+install_dir() {
+    dir="${DAGON_INSTALL_DIR:-${HOME:?set HOME or DAGON_INSTALL_DIR}/.local/bin}"
+    case "$dir" in
+        /* | [A-Za-z]:[\\/]*) ;;
+        *) dir="$PWD/$dir" ;;
+    esac
+    printf '%s\n' "$dir"
+}
+
+uninstall() {
+    dir="$(install_dir)"
+    if [ -e "$dir/dagon" ] || [ -L "$dir/dagon" ]; then
+        rm -f "$dir/dagon" || fail "cannot remove $dir/dagon"
+        echo "dagon removed from $dir"
+    else
+        echo "dagon is not installed in $dir"
+    fi
+    echo "Your signing keys under ~/.dagon were kept. If you delete them, nodes written with those keys can no longer be updated."
+}
+
 main() {
     set -eu
+    case "${1:-}" in
+        --uninstall) uninstall; return 0 ;;
+        --*) fail "unknown option: $1" ;;
+    esac
+    if [ -n "${DAGON_UNINSTALL:-}" ]; then uninstall; return 0; fi
     command -v curl > /dev/null 2>&1 || fail "needs curl"
     command -v tar > /dev/null 2>&1 || fail "needs tar"
 
@@ -81,11 +107,7 @@ main() {
         *[!0-9A-Za-z.-]* | "" | [!0-9]*) fail "not a version: $version" ;;
     esac
 
-    dir="${DAGON_INSTALL_DIR:-${HOME:?set HOME or DAGON_INSTALL_DIR}/.local/bin}"
-    case "$dir" in
-        /* | [A-Za-z]:[\\/]*) ;;
-        *) dir="$PWD/$dir" ;;
-    esac
+    dir="$(install_dir)"
     archive="dagon-cli-$version-$target.tar.gz"
     url="https://github.com/$REPO/releases/download/cli-v$version/$archive"
 

@@ -220,8 +220,8 @@ docs: <no release>
   suffix and keeps the version.
 - Release files carry the component name and the tag's version in their names
   (`dagon-cli-0.2.0-rc.1-<target>.tar.gz`).
-- A CLI pre-release is published on GitHub as a pre-release. `install.sh` and
-  `install.ps1` do not choose one unless that version (`0.2.0-rc.1`) is named.
+- A CLI pre-release is published on GitHub as a pre-release. `setup.sh` and
+  `setup.ps1` do not choose one unless that version (`0.2.0-rc.1`) is named.
   `cargo binstall` looks for the archive of the crate's version, so it does
   not install a pre-release.
 - A component's changelog is made from the commits since its last tag that

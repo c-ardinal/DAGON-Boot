@@ -31,7 +31,8 @@ irm https://raw.githubusercontent.com/c-ardinal/DAGON-Boot/main/setup.ps1 | iex
 |---|---|
 | `DAGON_VERSION` | 入れるバージョン。`setup.sh`は引数でも受け取ります（`sh -s -- <version>`）。プレリリース（`<version>-rc.N`）は、こうして指定したときだけ入ります |
 | `DAGON_INSTALL_DIR` | 置くフォルダ |
-| `DAGON_NO_MODIFY_PATH` | `setup.ps1`で、PATHを変えず足し方を表示します |
+| `DAGON_NO_MODIFY_PATH` | `setup.ps1`で、PATHを変えず足し方（アンインストールでは外し方）を表示します |
+| `DAGON_UNINSTALL` | 空でないとき、入れずに外します。`setup.sh`は引数`--uninstall`でも受け取ります |
 
 `cargo binstall dagon-cli --git https://github.com/c-ardinal/DAGON-Boot`でも同じアーカイブを取得します。`cargo-binstall`が要ります。
 
@@ -46,6 +47,27 @@ dagon --help
 ```
 
 DAGON Consoleは`dagon`に組み込まれています。Node.jsは要りません。
+
+## 外す
+
+入れたときと同じスクリプトで外します。ダウンロードはしません。
+
+LinuxとmacOS:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/c-ardinal/DAGON-Boot/main/setup.sh | sh -s -- --uninstall
+```
+
+Windows（PowerShell）:
+
+```powershell
+$env:DAGON_UNINSTALL = "1"; irm https://raw.githubusercontent.com/c-ardinal/DAGON-Boot/main/setup.ps1 | iex
+```
+
+- 外すのは`dagon`だけです。Windowsはそのフォルダが空なら消し、ユーザーのPATHとこのプロセスのPATHからそのフォルダの項目も外します。インストーラーがその項目を足したかは記録がないので、あれば外します。
+- `~/.dagon`には触りません。署名の鍵（`~/.dagon/keys`）は残ります。消すと、その鍵で書いたノードは更新できなくなります。
+- もう一度実行しても成功します。
+- `cargo install`で入れたときは`cargo uninstall dagon-cli`です。
 
 ## 自分でビルドする
 

@@ -86,6 +86,20 @@ Windows
 irm https://raw.githubusercontent.com/c-ardinal/DAGON-Boot/main/setup.ps1 | iex
 ```
 
+#### Uninstall
+
+The same script removes it. The keys in `~/.dagon` are kept; if you delete them, nodes written with those keys can no longer be updated.
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/c-ardinal/DAGON-Boot/main/setup.sh | sh -s -- --uninstall
+```
+
+```powershell
+$env:DAGON_UNINSTALL = "1"; irm https://raw.githubusercontent.com/c-ardinal/DAGON-Boot/main/setup.ps1 | iex
+```
+
+The environment variable `DAGON_UNINSTALL=1` works too.
+
 #### Try it in the simulator
 
 ```sh
@@ -161,7 +175,7 @@ It needs two things:
 cargo install --git https://github.com/c-ardinal/DAGON-Boot --tag cli-v<version> dagon-cli
 ```
 
-From a clone, it is `cargo install --path crates/dagon-cli`.
+From a clone, it is `cargo install --path crates/dagon-cli`. To remove it, run `cargo uninstall dagon-cli`.
 
 ## Dependencies and external data
 

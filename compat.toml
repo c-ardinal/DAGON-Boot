@@ -181,7 +181,7 @@ name = "relay"
 version = "0.1.0"
 packages = ["dagon-relay"]
 paths = ["crates/dagon-relay"]
-formats = { wire = [1], topology-bin = [2] }
+formats = { wire = [1] }
 
 [[component]]
 name = "host"

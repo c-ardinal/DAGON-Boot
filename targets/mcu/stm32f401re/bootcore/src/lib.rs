@@ -21,8 +21,8 @@
 //!
 //! Boot core A/B (`dagon_core::bootcore::settle_log` over the shared state
 //! log): started by stage0 as the pending core, it confirms itself only
-//! after its own check (an app is startable and that app's header verifies
-//! under this core's key); otherwise it resets, so stage0 counts the start
+//! after its own check (the decision starts an app, so that app's header
+//! verified under this core's key); otherwise it resets, so stage0 counts the start
 //! and falls back once the starts run out. Started while another core is
 //! pending, it records the rollback. Built for boot core slot A, or B with
 //! `slot-b`.
@@ -36,8 +36,6 @@ use dagon_core::boot::{BootConfig, Decision};
 use dagon_core::bootcore::{settle_log, Cell, MustReset, Settled, CLEARED};
 use dagon_ed25519::Ed25519Small;
 use dagon_events::{compose_boot, BootExtension, Clock, Extension};
-use dagon_format::header::{verify_header, HEADER_SIZE};
-use dagon_format::SigVerifier;
 use dagon_mcu_stm32f401re::clock::Setup;
 use dagon_mcu_stm32f401re::flash::F401Flash;
 use dagon_mcu_stm32f401re::layout as board;
@@ -45,7 +43,6 @@ use dagon_mcu_stm32f401re::tag::checked_tag;
 use dagon_mcu_stm32f401re::{iwdg, trial, LINKED_SLOT, TRIAL_ATTEMPTS};
 use dagon_mcu_stm32f401re::{PUBKEY, TARGET_TAG};
 use dagon_port::BootSelectS;
-use dagon_port::Flash;
 #[allow(unused_imports)]
 use embassy_stm32::gpio::{Level, Output, Speed};
 
@@ -160,11 +157,8 @@ pub fn run<E: Extension>(chain: E, limits: &'static [BootExtension]) -> ! {
         board::TRIAL_WDT_MS,
     );
     let decision = boot.decision();
-    let healthy = !cfg!(feature = "no-confirm")
-        && match decision {
-            Decision::Boot { slot, .. } => app_verifies(&mut flash, slot, &VERIFIER),
-            Decision::NoImage => false,
-        };
+    // The decision verified the app it starts under this core's key.
+    let healthy = !cfg!(feature = "no-confirm") && matches!(decision, Decision::Boot { .. });
     let settled = settle_log(
         &mut flash,
         &board::LOG,
@@ -211,26 +205,14 @@ pub fn run<E: Extension>(chain: E, limits: &'static [BootExtension]) -> ! {
     }
 }
 
-/// The header of the app in APP slot `slot` verifies under this core's
-/// key: the part of a new core's own check that proves its verifier and
-/// key accept the project's images.
-fn app_verifies(flash: &mut F401Flash, slot: u8, verifier: &impl SigVerifier) -> bool {
-    let mut raw = [0u8; HEADER_SIZE];
-    board::SLOTS
-        .slots
-        .get(usize::from(slot))
-        .is_some_and(|&(base, _)| flash.read(base, &mut raw).is_ok())
-        && verify_header(&raw, verifier).is_ok()
-}
-
 struct Jump;
 
 impl BootSelectS for Jump {
     fn boot(&mut self, entry: u32) -> ! {
         // SAFETY: the boot core enables no interrupts, so clearing NVIC
         // enables and pending bits leaves nothing to fire mid-handover.
-        // `entry` is the body of a slot whose SHA-256 (and, on trial, header
-        // signature) was just verified, so it starts with a vector table
+        // `entry` is the body of a slot whose header signature and SHA-256
+        // were just verified, so it starts with a vector table
         // (initial MSP, reset vector) at a 512-byte aligned address, as VTOR
         // requires on this part.
         unsafe {

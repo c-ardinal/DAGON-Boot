@@ -143,6 +143,17 @@ fn the_agent_over_a_one_slot_store_knows_no_slot_b() {
     assert_eq!(split_status(f.payload).unwrap().0, Status::Unsupported);
 }
 
+/// A confirmed app whose signature does not verify (header, body and log
+/// records all consistent) is not started.
+#[test]
+fn a_confirmed_app_with_a_bad_signature_is_not_started() {
+    let mut forged = image(0, 0);
+    forged[0x1C0] ^= 1;
+    let mut store = SimStore::new(SimFlash::stm32f401xe(3), ONE, *kp().pk);
+    store.provision(0, &forged).unwrap();
+    assert_eq!(store.boot(), Boot::Nothing);
+}
+
 /// With its only boot core slot erased (a new core's write cut by a power
 /// loss), stage0 has no core to start and starts the confirmed app, which
 /// can write the core again; with an app on trial it starts nothing.

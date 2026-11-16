@@ -586,7 +586,8 @@ impl SimStore {
     /// image on trial (its header the one the log names, signature and
     /// body verified, attempts left) after a BOOT_ATTEMPT; otherwise roll
     /// it back with a ROLLBACK naming the confirmed slot the boot returns
-    /// to; then start the confirmed slot while it holds its image. Behind
+    /// to; then start the confirmed slot while it holds its image (its
+    /// header the one the log names, signature and body verified). Behind
     /// a stage0 with no boot core to start, stage0 starts the confirmed
     /// app itself ([`SimStore::confirmed_app`]).
     pub fn boot(&mut self) -> Boot {
@@ -616,7 +617,9 @@ impl SimStore {
             }
         }
         match ls.confirmed {
-            Some(c) if self.head(c.slot) == Some(c) => Boot::Run(c.slot),
+            Some(c) if self.head(c.slot) == Some(c) && self.verified(c.slot).is_some() => {
+                Boot::Run(c.slot)
+            }
             _ => Boot::Nothing,
         }
     }

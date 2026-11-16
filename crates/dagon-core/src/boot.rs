@@ -1,13 +1,13 @@
 //! Kind S boot decision (it never erases: records go into the room the
-//! agent reserved, `Log::reserve`): try the pending slot (signature and SHA-256, a
-//! BOOT_ATTEMPT before every start, rollback once the attempts run out),
-//! otherwise start the confirmed slot after checking its SHA-256 and that its
-//! header is the one the log confirmed.
+//! agent reserved, `Log::reserve`): try the pending slot (a BOOT_ATTEMPT
+//! before every start, rollback once the attempts run out), otherwise start
+//! the confirmed slot. Every slot is checked before it starts: its header is
+//! the one the log names, its signature verifies, and its body matches the
+//! header's SHA-256. The log carries no key, so the signature is checked at
+//! every boot, not only on trial.
 
 use crate::log::{Log, SlotRef};
-use dagon_format::header::{
-    header_digest16, image_kind, placement, verify_header, ImageHeader, HEADER_SIZE,
-};
+use dagon_format::header::{header_digest16, image_kind, placement, verify_header, HEADER_SIZE};
 use dagon_format::statelog::{kind, reason, target};
 use dagon_format::{Sha256, SigVerifier};
 use dagon_port::Flash;
@@ -38,8 +38,9 @@ pub enum Decision {
     NoImage,
 }
 
-/// Decides what to start, appending BOOT_ATTEMPT or ROLLBACK to `log`;
-/// a pending image's signature is checked by `verifier`.
+/// Decides what to start, appending BOOT_ATTEMPT or ROLLBACK to `log`.
+/// `verifier` checks the signature of every image before it starts, once
+/// per slot considered; a [`Decision::Boot`] is an image it accepted.
 pub fn decide<F: Flash, V: SigVerifier + ?Sized>(
     flash: &mut F,
     log: &mut Log,
@@ -55,7 +56,7 @@ pub fn decide<F: Flash, V: SigVerifier + ?Sized>(
     let Some(c) = log.state.confirmed else {
         return Decision::NoImage;
     };
-    match check(flash, slots, cfg, verifier, c, false) {
+    match check(flash, slots, cfg, verifier, c) {
         Ok(entry) => Decision::Boot {
             slot: c.slot,
             entry,
@@ -77,7 +78,7 @@ fn try_pending<F: Flash, V: SigVerifier + ?Sized>(
     let why = if log.state.attempts >= cfg.max_attempts {
         reason::TRIAL_EXHAUSTED
     } else {
-        match check(flash, slots, cfg, verifier, p, true) {
+        match check(flash, slots, cfg, verifier, p) {
             // Counted before the jump, so a crash in the new image still counts.
             // If the log cannot take the record, no trial starts.
             Ok(entry) => {
@@ -104,16 +105,13 @@ fn try_pending<F: Flash, V: SigVerifier + ?Sized>(
 }
 
 /// Checks the slot image `r` refers to; returns the body address or the
-/// state log reason code of the failure. `signature` adds the signature
-/// check by `verifier` (pending slots); confirmed slots rely on the header
-/// digest the log holds.
+/// state log reason code of the failure.
 fn check<F: Flash, V: SigVerifier + ?Sized>(
     flash: &mut F,
     slots: &SlotLayout,
     cfg: &BootConfig,
     verifier: &V,
     r: SlotRef,
-    signature: bool,
 ) -> Result<u32, u8> {
     let (base, len) = *slots
         .slots
@@ -126,11 +124,7 @@ fn check<F: Flash, V: SigVerifier + ?Sized>(
     if header_digest16(&raw) != r.digest16 {
         return Err(reason::HASH_MISMATCH);
     }
-    let h = if signature {
-        verify_header(&raw, verifier).map_err(|_| reason::SIG_INVALID)?
-    } else {
-        ImageHeader::parse(&raw).map_err(|_| reason::HASH_MISMATCH)?
-    };
+    let h = verify_header(&raw, verifier).map_err(|_| reason::SIG_INVALID)?;
     let body = base + HEADER_SIZE as u32;
     let fits = h.image_kind == image_kind::APP
         && h.load_addr == body

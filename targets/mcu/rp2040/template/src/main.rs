@@ -50,8 +50,6 @@ async fn main(spawner: Spawner) {
     let setup = Setup {
         // DAGON_TARGET_TAG in .cargo/config.toml (the boot core uses it too).
         tag: dagon_mcu_rp2040::target_tag!(),
-        // This node's index in the 構成 (wiring.rs).
-        index: wiring::NODE.index,
         // The role the 構成 gives this node (wiring.rs).
         role: if wiring::NODE.hub {
             relay::role::HUB
@@ -60,7 +58,6 @@ async fn main(spawner: Spawner) {
         },
         name: "{{node}}",
         app: app::dagon(),
-        state: relay::new_state(),
         relay: Default::default(),
     };
     let (links, spare) = board::links(io, UPLINK, DOWNLINKS);

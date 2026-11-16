@@ -61,7 +61,7 @@ const _: () = links::require_downlinks(DOWNLINKS);
 const CLOCK: Clock = dagon_mcu_rp2040::clock_setup!(wiring::clock);
 dagon_mcu_rp2040::require_uplink_clock!(CLOCK, UPLINK, "my-hub");
 
-const TASKS: usize = board::APP_TASKS + app::TASKS;
+const TASKS: usize = relay::TASKS + app::TASKS;
 static GUARD: Guard<TASKS> = Guard::new(
     relay::levels::<TASKS>(),
     Trial::FeedUntilMs(60_000),
@@ -73,19 +73,15 @@ async fn main(spawner: embassy_executor::Spawner) {
     let (dagon, io) = Board::split(embassy_rp::init(CLOCK.hal_config()));
     let setup = Setup {
         tag: dagon_mcu_rp2040::target_tag!(),
-        // The node's index in the 構成 (wiring.rs).
-        index: wiring::NODE.index,
         // The role the 構成 gives this node (wiring.rs).
         role: if wiring::NODE.hub { relay::role::HUB } else { relay::role::NODE },
         name: "my-hub",
         app: app::dagon(),
-        // The relay's state, shared with the display.
-        state: relay::new_state(),
         // dagon_relay::Config: the relay's defaults.
         relay: Default::default(),
     };
     let (spare, _events) = board::start(spawner, dagon, io, &GUARD, setup, UPLINK, DOWNLINKS);
-    app::start(spawner, spare, &GUARD, board::APP_TASKS);
+    app::start(spawner, spare, &GUARD, relay::TASKS);
 }
 ```
 
@@ -126,10 +122,11 @@ async fn work(spare: Spare, lease: Lease) {
 (taking over the watchdog the boot core started), spawns the PC task
 (`dagon_relay::serve`) and one task per link (`dagon_relay::run_link`) on
 DAGON's high-priority executor (`exec`, an interrupt executor on SWI_IRQ_0
-at P1, guard tasks 0..3 `Preempting`), and the watchdog feeder and the
-display on `spawner` (thread mode, `Background`; the display reads the
-relay's state), and returns the board's `Spare` pins and peripherals (free
-GPIOs, I2C1, SPI0, UART0/1, PIO1, ADC, DMA channels) for the app. Your tasks run in thread mode below the relay, so they never
+at P1, guard tasks 0..3 `Preempting`), and the watchdog feeder on
+`spawner` (thread mode, `Background`), and returns the board's `Spare` pins
+and peripherals (free GPIOs, the display's pins, I2C1, SPI0, UART0/1, PIO1,
+ADC, DMA channels) for the app, with the node's events (`AppEvents`: what
+the app draws a display or writes a log from). Your tasks run in thread mode below the relay, so they never
 delay it; a stuck one stops the feeding and the chip resets (a version on
 trial then rolls back). Build with `DAGON_PUBKEY` set (below);
 `--features slot-b` links the same app for slot B.

@@ -56,7 +56,7 @@
 "The slot on trial was confirmed after its self-check." = "試行中のスロットを、自己検査の後で確定した。"
 "The slot store was read at start." = "起動時にスロットのストアを読んだ。"
 "The slot to start is final (`trial`: the pending slot on a counted attempt)." = "起動するスロットが決まった（`trial`: 数える試行での待機のスロット）。"
-"The slot was erased for a new image (never the running or the confirmed slot)." = "新しいイメージのためにスロットを消去した（動いているスロットや確定したスロットは消さない）。"
+"The slot was erased for a new image (never the slot the writer runs from; the app never erases its confirmed slot either)." = "新しいイメージのためにスロットを消去した（書き込む側が動いているスロットは消さない。アプリは確定したスロットも消さない）。"
 "The start took over the boot core's watchdog: its period, and what the guard does with it while the image is on trial." = "起動がブートローダのウォッチドッグを引き継いだ: その周期と、イメージが試行のあいだガードがそれをどう扱うか。"
 "The state log was read (`ok: false`: no valid face)." = "状態ログを読んだ（`ok: false`: 有効な面が無い）。"
 "The transfer was dropped." = "転送を捨てた。"

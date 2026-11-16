@@ -47,7 +47,7 @@ pub enum Command {
     /// Make or show the signing key pair
     #[command(subcommand)]
     Key(KeyCmd),
-    /// Check, compile or send a topology
+    /// Check or compile a topology
     #[command(subcommand)]
     Topo(TopoCmd),
     /// Sign firmware images

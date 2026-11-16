@@ -19,7 +19,7 @@ press. Every other build compiles the flag to false and leaves the demo's parts 
 
 構成 edits go to the project's YAML by themselves (PUT /v1/topology about 500 ms after the last
 edit; 保存 saves at once). Until a save goes through the band shows 「● 未保存」 and why; 書込 and
-親機へ送る wait for the saved 構成, and leaving the project (menu, 最初からやり直す, closing the
+運用 wait for the saved 構成, and leaving the project (menu, 最初からやり直す, closing the
 tab) saves first and asks when it cannot. Known limit: the YAML is written out from the page's
 document, so comments in the file are not kept.
 

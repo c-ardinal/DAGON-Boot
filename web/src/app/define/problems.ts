@@ -4,7 +4,7 @@
 import { topo_check } from '../../wasm/dagon.ts';
 import { topo_cut } from '../../wasm/pkg/dagon_wasm.js';
 import { INSPECT, RULE_FIX, RULE_SHORT, type FixWords } from '../copy.ts';
-import { boardMissing, busNodes, definedPins, flashTooSmall, i2cHzs, linkKey, maxNodes, romI2cPairs, sides, type Doc } from './model.ts';
+import { busNodes, definedPins, i2cHzs, linkKey, maxNodes, romI2cPairs, sides, type Doc } from './model.ts';
 
 export interface Issue {
   rule: string;
@@ -81,7 +81,6 @@ function sentence(i: Issue, w: Where, doc: Doc, skipped: Record<string, string>)
     id: w.node ?? '',
     many: t.nodes.length > maxNodes(),
     max: maxNodes(),
-    size: i.rule === 'B-02' ? i.message : undefined,
     skipped: (s?.down.node ?? w.node ?? '') in skipped,
     // The pin's own node: the end the path names, else the node the link is drawn from.
     pins: definedPins(node(end?.node ?? s?.up.node ?? w.node)).map((n) => `GPIO${n}`).join('・') || undefined,
@@ -103,23 +102,12 @@ function select(w: Where, doc: Doc): string | null {
 
 const RANK: Record<Issue['severity'], number> = { error: 0, warning: 1, info: 2 };
 
-const kib = (b: number) => (b >= 1 << 20 ? `${b >> 20} MiB` : `${b >> 10} KiB`);
-
-/** The board fields of nodes chosen by MCU: missing (B-01, before making the project) or too small. */
-function boardIssues(doc: Doc): Issue[] {
-  return doc.topo.nodes.flatMap((n, i): Issue[] => {
-    const need = flashTooSmall(doc, n.id);
-    if (need) return [{ rule: 'B-02', severity: 'error', path: `nodes[${i}].board.flash`, message: kib(need) }];
-    return boardMissing(doc, n.id) ? [{ rule: 'B-01', severity: 'warning', path: `nodes[${i}].board.flash`, message: '' }] : [];
-  });
-}
-
 /** topo_check on the document (as JSON, which the YAML parser reads): errors, then cautions, then what is not updatable yet. */
 export function problems(doc: Doc): Problem[] {
   const text = JSON.stringify(doc.topo);
   const report = JSON.parse(topo_check(text)) as { issues: Issue[] };
   const skipped = (topo_cut(text) as { skipped: Record<string, string> } | null)?.skipped ?? {};
-  return [...report.issues, ...boardIssues(doc)]
+  return report.issues
     .map((i) => {
       const w = where(i.path, doc);
       return { ...i, short: RULE_SHORT[i.rule] ?? i.rule, sentence: sentence(i, w, doc, skipped), select: select(w, doc), field: w.rest };

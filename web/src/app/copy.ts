@@ -783,9 +783,6 @@ export const RULE_SHORT: Record<string, string> = {
   'V-25': '親機にできないマイコン',
   'V-26': 'UART の速さ',
   'V-27': 'リンクのつなぐ口',
-  /** Checked by the page (dagon.toml's [board.<id>]), not by dagon-topology. */
-  'B-01': 'ボード 未設定',
-  'B-02': '容量不足',
 };
 
 /** Names a fix sentence needs: the node (呼び名), its board, its id, and whether there are too many nodes. */
@@ -796,8 +793,6 @@ export interface FixWords {
   many: boolean;
   /** The node limit. */
   max: number;
-  /** A size such as "512 KiB". */
-  size?: string;
   /** The node is one updating skips: its link is not a thing to fix. */
   skipped?: boolean;
   /** For the fix sentences, read from what the check reads: the pins the pin's own node defines, the pairs its ROM loader listens on, the speeds every node on the bus names. */
@@ -837,8 +832,6 @@ export const RULE_FIX: Record<string, (w: FixWords) => string> = {
   'V-25': (w) => `${w.to}の代わりに、親機にできるマイコンのノードを親機にしてください。`,
   'V-26': () => 'UART の速さを、つなぐ両方のマイコンで誤差が 2 % 以内になる値にしてください。',
   'V-27': () => 'リンクの端のつなぐ口を、そのマイコンの定義にある、リンクと同じ種類のものにしてください。',
-  'B-01': (w) => `『直す』で ${w.to}のボードの容量を入れてください。`,
-  'B-02': (w) => `${w.to}は容量が ${w.size ?? ''} 以上のボードにしてください。`,
 };
 
 /** Header: the two modes (準備｜書込). */
@@ -967,12 +960,10 @@ export const INSPECT = {
   pullups: 'プルアップ',
   pullupKinds: { external: '外付け', board: '基板上' } as Record<string, string>,
   inUse: (what: string) => `（使用中: ${what}）`,
-  /** The board of a node chosen by MCU. */
-  board: 'ボード',
   boardOwn: 'ボード定義なし',
+  /** The flash of the MCU of a node chosen by MCU, read from the MCU definition. */
   flashSize: 'フラッシュ容量',
-  flashHelp: 'ボードの資料にある大きさ',
-  boardUnset: '▲ ボード 未設定',
+  flashValue: (b: number) => (b >= 1 << 20 ? `${b / (1 << 20)} MiB` : `${b / (1 << 10)} KiB`),
   kindsMore: {
     can: 'CAN（親機どうし）',
     ethernet: 'Ethernet（親機どうし）',

@@ -190,11 +190,6 @@ export function mcus(): McuInfo[] {
   return supported_mcus() as McuInfo[];
 }
 
-/** What the developer fills for a node chosen by MCU (dagon.toml's [board.<id>]). */
-export interface BoardFields {
-  flashBytes?: number;
-}
-
 export interface Topo {
   dagon: number;
   name: string;
@@ -210,8 +205,6 @@ export interface Doc {
   topo: Topo;
   /** 呼び名 by node id (page-side, optional). */
   names: Record<string, string>;
-  /** [board.<id>] of the nodes chosen by MCU. */
-  boards?: Record<string, BoardFields>;
 }
 
 /** The board table's placement defaults (dagon-wasm's board_template). */
@@ -270,9 +263,9 @@ export function withDefaults(t: Topo): Topo {
   return { buses: [], links: [], recovery: {}, ...t, update: t.update ?? { order: [] } };
 }
 
-/** A document with every default filled in (its 構成's, and no board fields). */
+/** A document with every default filled in; any other key (a saved session's old `boards`) is dropped. */
 export function docWithDefaults(doc: Doc): Doc {
-  return { ...doc, topo: withDefaults(doc.topo), boards: doc.boards ?? {} };
+  return { topo: withDefaults(doc.topo), names: doc.names };
 }
 
 export function emptyDoc(name = 'my-project'): Doc {
@@ -332,7 +325,7 @@ export function place(doc: Doc, board: string, name?: string): { doc: Doc; id: s
   return { doc: { topo, names: name ? { ...doc.names, [id]: name } : doc.names }, id };
 }
 
-/** "置く" by MCU: a node without a board (P1); flash size and pins are the developer's to fill. */
+/** "置く" by MCU: a node without a board (P1); its flash is the MCU's own, from the MCU definition. */
 export function placeMcu(doc: Doc, mcu: string): { doc: Doc; id: string } {
   const m = mcus().find((x) => x.id === mcu);
   if (!m || doc.topo.nodes.length >= maxNodes()) return { doc, id: '' };
@@ -350,27 +343,13 @@ export function placeMcu(doc: Doc, mcu: string): { doc: Doc; id: string } {
   };
   const recovery = { ...t.recovery, [id]: asHub ? ['local'] : ['local', 'redistribute'] };
   const topo = reorder({ ...t, nodes: [...t.nodes, node], recovery });
-  return { doc: { ...doc, topo, boards: { ...doc.boards, [id]: {} } }, id };
+  return { doc: { ...doc, topo }, id };
 }
 
-/** The board fields a node chosen by MCU still lacks (▲ ボード 未設定), or null when complete or not needed. */
-export function boardMissing(doc: Doc, id: string): ('flash')[] | null {
+/** The flash of the MCU of a node that names no board, from the MCU definition (nothing is asked); null for a node with a board. */
+export function ownFlash(doc: Doc, id: string): number | null {
   const n = doc.topo.nodes.find((x) => x.id === id);
-  if (!n || n.board) return null;
-  const b = doc.boards?.[id] ?? {};
-  return b.flashBytes ? null : ['flash'];
-}
-
-/** Flash too small for the node's flash map: an error before building. */
-export function flashTooSmall(doc: Doc, id: string): number | null {
-  const n = doc.topo.nodes.find((x) => x.id === id);
-  const need = n ? mcus().find((m) => m.id === n.mcu)?.flashBytes : null;
-  const have = doc.boards?.[id]?.flashBytes;
-  return n && !n.board && need && have && have < need ? need : null;
-}
-
-export function setBoard(doc: Doc, id: string, fields: BoardFields): Doc {
-  return { ...doc, boards: { ...doc.boards, [id]: { ...doc.boards?.[id], ...fields } } };
+  return n && !n.board ? (mcus().find((m) => m.id === n.mcu)?.flashBytes ?? null) : null;
 }
 
 /** I2C addresses no end of another link on `bus` uses, without the defined ROM loaders'. */
@@ -452,10 +431,8 @@ export function removeNode(doc: Doc, id: string): Doc {
   delete recovery[id];
   const names = { ...next.names };
   delete names[id];
-  const boards = { ...next.boards };
-  delete boards[id];
   const topo = reorder({ ...next.topo, nodes: next.topo.nodes.filter((n) => n.id !== id), recovery });
-  return { topo, names, boards };
+  return { topo, names };
 }
 
 /** Changes one field of node `id`; a new id is carried into links, recovery, order and names. */
@@ -468,8 +445,7 @@ export function setNode(doc: Doc, id: string, field: keyof TNode, value: unknown
   const links = (t.links ?? []).map((l) => ({ ...l, ends: l.ends.map((e) => ({ ...e, node: swap(e.node) })) as TLink['ends'] }));
   const recovery = Object.fromEntries(Object.entries(t.recovery ?? {}).map(([k, v]) => [swap(k), v]));
   const names = Object.fromEntries(Object.entries(doc.names).map(([k, v]) => [swap(k), v]));
-  const boards = Object.fromEntries(Object.entries(doc.boards ?? {}).map(([k, v]) => [swap(k), v]));
-  return { names, boards, topo: { ...t, nodes, links, recovery, update: { ...t.update, order: t.update.order.map(swap) } } };
+  return { names, topo: { ...t, nodes, links, recovery, update: { ...t.update, order: t.update.order.map(swap) } } };
 }
 
 export function setName(doc: Doc, id: string, name: string): Doc {

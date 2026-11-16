@@ -271,7 +271,9 @@ resolve inside its own folder.
 The `<id>` of `[board.<id>]` is a board id, the id a node's `board:` names;
 a `[board.<id>]` table of `dagon.toml` is always a board definition. A node
 on such a board has no board package: `dagon gen` makes it from its MCU
-package and writes the board's `flash_bytes` into its `wiring.rs`.
+package and writes the board's `flash_bytes` into its `wiring.rs`. A node
+that names only an MCU needs no board: nothing asks for a board or a flash
+size, and the Console shows the MCU's flash from the MCU definition.
 
 ### Overriding a definition
 

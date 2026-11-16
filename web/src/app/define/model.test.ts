@@ -3,7 +3,7 @@ import { describe, expect, test } from 'vitest';
 import { supportedBoards, topo_check, topo_compile } from '../../wasm/dagon.ts';
 import { rom_i2c_addrs, schema_version } from '../../wasm/pkg/dagon_wasm.js';
 import { SAMPLE_CONFIG, SAMPLE_YAML } from '../sample.ts';
-import { boardMissing, canPlace, maxNodes, connect, emptyDoc, freeAddrs, fromYaml, hopAvailable, linkKinds, linkView, SCHEMA_VERSION, place, placeMcu, removeNode, setBoard, setLink, setLinkKind, setNode, setUplink, toConfig, toYaml } from './model.ts';
+import { canPlace, mcus, ownFlash, maxNodes, connect, emptyDoc, freeAddrs, fromYaml, hopAvailable, linkKinds, linkView, SCHEMA_VERSION, place, placeMcu, removeNode, setLink, setLinkKind, setNode, setUplink, toConfig, toYaml } from './model.ts';
 import { problemChip } from './problems.ts';
 import { problems } from './problems.ts';
 
@@ -103,7 +103,7 @@ describe('define document', () => {
     expect(check(toYaml(doc.topo)).ok).toBe(true);
   });
 
-  test('chosen by MCU: no board, the board fields asked for (B-01), a flash too small refused (B-02)', () => {
+  test('chosen by MCU: no board entry, no B-01/B-02, the own flash of the MCU from its definition', () => {
     let doc = placeMcu(emptyDoc(), 'rp2040').doc;
     doc = placeMcu(doc, 'stm32f401re').doc;
     expect(doc.topo.nodes.map((n) => [n.id, n.role, n.board])).toEqual([
@@ -111,13 +111,14 @@ describe('define document', () => {
       ['stm32f401re', 'node', undefined],
     ]);
     doc = connect(doc, 'stm32f401re');
-    expect(boardMissing(doc, 'hub')).toEqual(['flash']);
-    expect(problems(doc).filter((p) => p.rule === 'B-01').length).toBe(2);
-    doc = setBoard(setBoard(doc, 'hub', { flashBytes: 2 << 20 }), 'stm32f401re', { flashBytes: 512 << 10 });
-    const b02 = problems(doc).filter((p) => p.rule === 'B-02');
-    expect(b02.map((p) => [p.select, p.sentence])).toEqual([['node:hub', 'hubは容量が 4 MiB 以上のボードにしてください。']]);
-    doc = setBoard(doc, 'hub', { flashBytes: 4 << 20 });
-    expect(problems(doc).filter((p) => p.severity === 'error')).toEqual([]);
+    expect(Object.keys(doc)).not.toContain('boards');
+    expect(problems(doc).filter((p) => p.rule === 'B-01' || p.rule === 'B-02')).toEqual([]);
+    expect(ownFlash(doc, 'hub')).toBe(mcus().find((m) => m.id === 'rp2040')!.flashBytes);
+    expect(ownFlash(doc, 'stm32f401re')).toBe(mcus().find((m) => m.id === 'stm32f401re')!.flashBytes);
+  });
+
+  test('a node that names a board has no own flash line (the board definition holds it)', () => {
+    expect(ownFlash(fromYaml(SAMPLE_YAML), 'hub')).toBeNull();
   });
 
   test('any shape: a second 親機 over CAN and a grandchild are drawn in rows and told as not updatable yet (V-23)', () => {

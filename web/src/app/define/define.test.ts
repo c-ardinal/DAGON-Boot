@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import { RULE_FIX } from '../copy.ts';
-import { Define } from './define.svelte.ts';
-import { connect, emptyDoc, fromYaml, linkView, placeMcu, setLink, setLinkKind, setNode } from './model.ts';
+import { canonical, Define } from './define.svelte.ts';
+import { connect, emptyDoc, type Doc, fromYaml, linkView, placeMcu, setLink, setLinkKind, setNode } from './model.ts';
 import { setName } from './model.ts';
 import { SAMPLE_YAML } from '../sample.ts';
 import { problemChip } from './problems.ts';
@@ -189,14 +189,23 @@ describe('define session', () => {
     expect([d.doc.topo.nodes.length, d.canUndo]).toEqual([0, false]);
   });
 
-  test('a node chosen by MCU reads the name of the MCU, and its missing board is a caution (▲), not an error', () => {
+  test('a node chosen by MCU reads the name of the MCU and raises no board caution', () => {
     const d = new Define();
     d.placeSample();
     const r = placeMcu(d.doc, 'rp2040');
     d.apply(connect(r.doc, r.id));
     const n = d.config.nodes.find((x) => x.id === r.id)!;
     expect([n.product, n.mcu]).toEqual(['ボード定義なし', 'RP2040']);
-    expect(problemChip(d.problems.find((p) => p.rule === 'B-01')!)).toEqual({ mark: '▲', kind: 'warning' });
+    expect(d.problems.some((p) => p.rule === 'B-01' || p.rule === 'B-02')).toBe(false);
+  });
+
+  test('a saved session that still holds page-only board data loads and ignores it', () => {
+    const fresh = placeMcu(emptyDoc(), 'rp2040').doc;
+    const d = new Define();
+    d.load({ ...fresh, boards: { hub: { flashBytes: 1 << 20 } } } as Doc);
+    expect(Object.keys(d.doc)).not.toContain('boards');
+    expect(d.problems.some((p) => p.rule === 'B-01' || p.rule === 'B-02')).toBe(false);
+    expect(canonical(d.doc)).toBe(canonical(fresh));
   });
 
   test('a coordinator whose MCU cannot be one is V-25, with its own name and fix sentence', () => {

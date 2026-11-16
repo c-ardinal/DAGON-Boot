@@ -1,4 +1,4 @@
-//! `status`, `apply`, `rollback`, `topo push`: thin shells over
+//! `status`, `apply`, `rollback`: thin shells over
 //! dagon-host on the hub's serial port.
 
 use std::path::{Path, PathBuf};
@@ -15,7 +15,7 @@ use dagon_sim::block_on;
 use dagon_topology::defs::Registry;
 use dagon_topology::Topology;
 
-use crate::cli::{ApplyArgs, RollbackArgs, StatusArgs, TopoPushArgs};
+use crate::cli::{ApplyArgs, RollbackArgs, StatusArgs};
 use crate::config::{load_key, read_file, read_topology, Config};
 use crate::serial;
 
@@ -365,28 +365,6 @@ pub fn rollback(a: &RollbackArgs) -> Res {
     Ok(())
 }
 
-pub fn topo_push(a: &TopoPushArgs) -> Res {
-    let cfg = Config::load(a.config.as_deref())?;
-    let path = match &a.yaml {
-        Some(p) => PathBuf::from(p),
-        None => cfg.topology_path(None)?,
-    };
-    let reg = crate::defs::registry(&cfg)?;
-    let t = read_topology(&cfg, &path)?;
-    let bin = topology_bin(&reg, &t)?;
-    let mut host = serial::host(a.port.as_deref())?;
-    host.timings = node_timings(&reg, &t)?;
-    host.local = local(&reg, &t);
-    block_on(host.push_topology(&bin)).map_err(|e| format!("topo push: {e:?}"))?;
-    println!(
-        "{}: {} bytes sent to the hub, sha256 {}",
-        path.display(),
-        bin.len(),
-        to_hex(&dagon_format::sha256(&bin))
-    );
-    Ok(())
-}
-
 /// Each node's own time limits from its MCU definition, for
 /// [`Host::timings`].
 pub(crate) fn node_timings(
@@ -520,7 +498,6 @@ where
             "stopped; nothing was written ({names} not touched)"
         ));
     }
-    block_on(host.push_topology(topology)).map_err(|e| format!("{e:?}"))?;
     for (node, index, boot, stage0) in &silent {
         let assets = dagon_host::RecoverAssets {
             release,

@@ -43,6 +43,12 @@ cortex-m = "0.7"
 cortex-m-rt = "0.7"
 panic-halt = "1"
 
+[dev-dependencies]
+# examples/size.rs: the update session the boot core serves, measured with it.
+dagon-agent = { path = "../../../../crates/dagon-agent" }
+dagon-mcu-common = { path = "../../common" }
+dagon-proto = { path = "../../../../crates/dagon-proto" }
+
 [build-dependencies]
 # The board facts and the linked extensions' check from the node's boot folder.
 dagon-topology = { path = "../../../../crates/dagon-topology" }

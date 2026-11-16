@@ -5,9 +5,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use dagon_agent::snapshot::{AppSnapshot, Phase};
-use dagon_agent::{
-    image, requests, session, Agent, Config, SlotStore, StoreError, Transition, Writer,
-};
+use dagon_agent::{image, requests, session, Agent, Config, SlotStore, StoreError, Transition};
 use dagon_ed25519::Ed25519Compact;
 use dagon_events::{
     compose, Accept, Bounds, Composed, Ctx, Delay, Event, Extension, Health, Layer, Nop, Published,
@@ -280,7 +278,6 @@ fn config() -> Config {
         mode: mode::APP,
         max_payload: max_payload::I2C as u16,
         trial_attempts: 3,
-        writer: Writer::App,
     }
 }
 

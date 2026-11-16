@@ -3,7 +3,8 @@
 //! a slot its writer does not run from, checks them with the verifier it is
 //! built with, switches the boot target and confirms.
 //!
-//! [`Config::writer`] names the image the session runs in ([`Writer`]).
+//! The session's type names the image it runs in ([`Writer`]): what only
+//! the app serves is compiled into the app's session alone.
 //!
 //! Every state change is a transition of one of the machines declared
 //! below, and every transition delivers its event to the app layer's
@@ -569,31 +570,51 @@ pub struct Config {
     /// Boots the boot core gives an image on trial before it rolls back
     /// (the MCU package's boot settings; `TrialInfo::max`).
     pub trial_attempts: u8,
-    /// The image the session runs in: which slots it never writes.
-    pub writer: Writer,
 }
 
 /// The image a session runs in, as the MCU definition's `[writers]` names
-/// the kinds that write: a writer never writes the slot it runs from, nor
-/// the one it goes back to (`Agent`'s guards).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum Writer {
-    /// The app, running from an APP slot.
-    App,
-    /// The boot core, running from a boot core slot.
-    BootCore,
-}
+/// the kinds that write: the session's type parameter ([`Agent`]).
+pub mod writer {
+    use dagon_proto::payload::target;
 
-impl Writer {
-    /// The XFER target of the image kind it runs from.
-    pub fn target(self) -> u8 {
-        match self {
-            Writer::App => payload::target::APP,
-            Writer::BootCore => payload::target::BOOTCORE,
-        }
+    /// The image a session runs in. A writer never writes the slot it runs
+    /// from, nor the one it goes back to (the session's guards). Only the
+    /// app's session serves the app's own trial (CONFIRM and its
+    /// self-check), replays the boot stage's changes at its start, takes the
+    /// recovery agent's and the topology copy's targets and SHOW, and makes
+    /// log room when it starts; the other writers' sessions are built
+    /// without them.
+    pub trait Writer: sealed::Sealed {
+        /// The XFER target of the image kind it runs from.
+        const TARGET: u8;
+        /// Whether it is the app.
+        const APP: bool;
+    }
+
+    /// The app, running from an APP slot.
+    pub struct App;
+
+    /// The boot core, running from a boot core slot.
+    pub struct BootCore;
+
+    impl Writer for App {
+        const TARGET: u8 = target::APP;
+        const APP: bool = true;
+    }
+
+    impl Writer for BootCore {
+        const TARGET: u8 = target::BOOTCORE;
+        const APP: bool = false;
+    }
+
+    mod sealed {
+        pub trait Sealed {}
+        impl Sealed for super::App {}
+        impl Sealed for super::BootCore {}
     }
 }
+
+pub use writer::Writer;
 
 pub use dagon_port::NO_ADDR;
 

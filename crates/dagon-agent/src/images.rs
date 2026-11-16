@@ -83,6 +83,9 @@ pub(crate) struct ImageStore<S> {
     store: S,
     /// Boots the boot core gives a trial (`trial_started`'s `max`).
     max: u8,
+    /// Whether the store makes its log room at each start (the app's
+    /// session; outside a write the boot stages never compact or erase).
+    room: bool,
     /// The APP slots the store has: the first `app_slots` of `app`.
     app: [image::Machine; ROOM],
     app_slots: u8,
@@ -127,11 +130,13 @@ pub(crate) fn store_status(e: StoreError) -> Status {
 
 impl<S: SlotStore> ImageStore<S> {
     /// Takes the store and brings each slot's machine to the state the
-    /// store reports; `max` is the boot core's trial attempt limit.
-    pub(crate) fn open(store: S, max: u8) -> Self {
+    /// store reports; `max` is the boot core's trial attempt limit, `room`
+    /// whether each start makes the store's log room.
+    pub(crate) fn open(store: S, max: u8, room: bool) -> Self {
         let mut images = ImageStore {
             store,
             max,
+            room,
             view: ImageView {
                 status: StatusResp::default(),
                 slots: [image::State::Empty; ROOM],
@@ -152,7 +157,9 @@ impl<S: SlotStore> ImageStore<S> {
     pub(crate) fn reopen(&mut self) {
         // A store that cannot make room refuses SET_PENDING later (its
         // reservation fails); nothing else depends on it here.
-        let _ = self.store.keep_room();
+        if self.room {
+            let _ = self.store.keep_room();
+        }
         self.app_slots = self.slot_count(target::APP);
         self.core_slots = self.slot_count(target::BOOTCORE);
         let status = self.store.status();

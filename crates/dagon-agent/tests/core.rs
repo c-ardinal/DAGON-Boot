@@ -7,7 +7,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use dagon_agent::{core_image, Agent, Config, SlotStore, StoreError, Transition, Writer};
+use dagon_agent::{core_image, Agent, Config, SlotStore, StoreError, Transition};
 use dagon_core::log::{Log, LogLayout, SlotRef};
 use dagon_ed25519::Ed25519Compact;
 use dagon_events::{
@@ -307,7 +307,6 @@ fn config() -> Config {
         mode: mode::APP,
         max_payload: max_payload::USB as u16,
         trial_attempts: 3,
-        writer: Writer::App,
     }
 }
 

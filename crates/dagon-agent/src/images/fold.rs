@@ -212,7 +212,7 @@ struct Model {
 impl Model {
     fn new() -> Self {
         Model {
-            images: ImageStore::open(FoldStore::provisioned(), MAX),
+            images: ImageStore::open(FoldStore::provisioned(), MAX, true),
             next_digest: 2,
         }
     }
@@ -221,7 +221,7 @@ impl Model {
     /// agree with ([`Model::agrees`] held before).
     fn copy(&mut self) -> Self {
         Model {
-            images: ImageStore::open(*self.images.store(), MAX),
+            images: ImageStore::open(*self.images.store(), MAX, true),
             next_digest: self.next_digest,
         }
     }

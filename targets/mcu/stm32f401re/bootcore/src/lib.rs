@@ -33,7 +33,7 @@ use cortex_m::peripheral::{DWT, NVIC, SCB};
 use dagon_boot::BootRun;
 use dagon_core::boot::{BootConfig, Decision};
 use dagon_core::bootcore::{settle_log, Cell, MustReset, Settled, CLEARED};
-use dagon_ed25519::Ed25519Compact;
+use dagon_ed25519::Ed25519Small;
 use dagon_events::{compose_boot, BootExtension, Clock, Extension};
 use dagon_format::header::{verify_header, HEADER_SIZE};
 use dagon_mcu_stm32f401re::clock::Setup;
@@ -88,8 +88,9 @@ mod pins {
     include!(concat!(env!("OUT_DIR"), "/pins.rs"));
 }
 
-/// This core's signature verifier, under the key built into it.
-const VERIFIER: Ed25519Compact = Ed25519Compact::new(PUBKEY);
+/// This core's signature verifier, under the key built into it: stage0's
+/// small Ed25519, so the boot core has room for the update session.
+const VERIFIER: Ed25519Small = Ed25519Small::new(PUBKEY);
 
 const CONFIG: BootConfig = BootConfig {
     mcu_id: board::MCU_ID,

@@ -1,16 +1,82 @@
 # Installs the dagon command from a GitHub release, for Windows.
 #
-#     irm https://raw.githubusercontent.com/c-ardinal/DAGON-Boot/main/install.ps1 | iex
+#     irm https://raw.githubusercontent.com/c-ardinal/DAGON-Boot/main/setup.ps1 | iex
 #
 # A version:      $env:DAGON_VERSION = "1.2.3"    (default: the latest)
 # The folder:     $env:DAGON_INSTALL_DIR          (default: %LOCALAPPDATA%\Programs\dagon)
 # Leave PATH as:  $env:DAGON_NO_MODIFY_PATH = "1"
+# Remove it:      $env:DAGON_UNINSTALL = "1"      (removes dagon.exe and its PATH entry; keeps ~/.dagon)
 #
 # It stops on any download or checksum error and leaves the folder as it was.
 # It needs no administrator rights. It runs on Windows PowerShell 5.1.
 #
 # Everything is inside Install-Dagon, called on the last line, so a download
 # cut short runs nothing. Errors are thrown, never `exit`, so the window stays.
+
+# The PATH without the entries equal to $dir (case and a trailing backslash do not
+# matter); every other segment stays as it is, empty ones and %VAR% text included.
+function Remove-PathEntry([string]$path, [string]$dir) {
+    if (-not $path) { return $path }
+    $want = $dir.TrimEnd('\')
+    return (@($path -split ';' | Where-Object { $_.TrimEnd('\') -ine $want }) -join ';')
+}
+
+function Uninstall-Dagon($dir) {
+    $exe = Join-Path $dir 'dagon.exe'
+    if (Test-Path -LiteralPath $exe -PathType Leaf) {
+        # A running dagon holds its file; give it a moment, then say what to do.
+        for ($try = 1; ; $try++) {
+            try { Remove-Item -LiteralPath $exe -Force; break }
+            catch {
+                if ($try -ge 20) { throw "dagon install: cannot remove ${exe}; close dagon and run this again" }
+                Start-Sleep -Milliseconds 100
+            }
+        }
+        Write-Output "dagon removed from $dir"
+    } else {
+        Write-Output "dagon is not installed in $dir"
+    }
+    if ((Test-Path -LiteralPath $dir -PathType Container) -and -not (Get-ChildItem -LiteralPath $dir -Force)) {
+        Remove-Item -LiteralPath $dir -Force
+    }
+
+    # The installer keeps no record of adding the entry, so the entry goes either way.
+    $scope = if ($env:DAGON_PATH_SCOPE) { $env:DAGON_PATH_SCOPE } else { 'User' }
+    $processPath = Remove-PathEntry $env:Path $dir
+    $changed = $processPath -cne $env:Path
+    if ($scope -eq 'User') {
+        # Through the registry, so a REG_EXPAND_SZ value keeps its kind and its %VAR% text.
+        $key = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Environment', $true)
+        try {
+            $old = $key.GetValue('Path', $null, [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
+            $new = Remove-PathEntry $old $dir
+            if ($new -cne $old) {
+                $changed = $true
+                if (-not $env:DAGON_NO_MODIFY_PATH) {
+                    $key.SetValue('Path', $new, $key.GetValueKind('Path'))
+                    # Setting a variable that is not there tells open windows that the environment changed.
+                    [Environment]::SetEnvironmentVariable('DAGON_PATH_NOTIFY', $null, 'User')
+                }
+            }
+        } finally { $key.Close() }
+    } else {
+        $old = [Environment]::GetEnvironmentVariable('Path', $scope)
+        $new = Remove-PathEntry $old $dir
+        if ($new -cne $old) {
+            $changed = $true
+            if (-not $env:DAGON_NO_MODIFY_PATH) { [Environment]::SetEnvironmentVariable('Path', $new, $scope) }
+        }
+    }
+    if ($changed) {
+        if ($env:DAGON_NO_MODIFY_PATH) {
+            Write-Output "$dir is on your PATH. Remove it in Settings, under your user's environment variables."
+        } else {
+            $env:Path = $processPath
+            Write-Output "$dir removed from your user's PATH. setup.ps1 cannot tell whether it added that entry, so it removes it."
+        }
+    }
+    Write-Output 'Your signing keys under ~/.dagon were kept. If you delete them, nodes written with those keys can no longer be updated.'
+}
 
 function Install-Dagon {
     $ErrorActionPreference = 'Stop'
@@ -20,7 +86,18 @@ function Install-Dagon {
     $repo = 'c-ardinal/DAGON-Boot'
 
     if ($PSVersionTable.PSEdition -eq 'Core' -and -not $IsWindows) {
-        throw 'dagon install: this script is for Windows; use install.sh'
+        throw 'dagon install: this script is for Windows; use setup.sh'
+    }
+    $dir = $env:DAGON_INSTALL_DIR
+    if (-not $dir) { $dir = Join-Path $env:LOCALAPPDATA 'Programs\dagon' }
+    # Absolute from here on: .NET calls below resolve a relative path against the
+    # process's folder, which is not PowerShell's current location.
+    $dir = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($dir)
+    if ($env:DAGON_UNINSTALL) {
+        # Cleared, so the next run in this window installs instead of removing again.
+        Remove-Item Env:DAGON_UNINSTALL
+        Uninstall-Dagon $dir
+        return
     }
     $machine = $env:PROCESSOR_ARCHITEW6432
     if (-not $machine) { $machine = $env:PROCESSOR_ARCHITECTURE }
@@ -50,12 +127,7 @@ function Install-Dagon {
     }
     if ($version -notmatch '^[0-9][0-9A-Za-z.-]*$') { throw "dagon install: not a version: $version" }
 
-    $dir = $env:DAGON_INSTALL_DIR
-    if (-not $dir) { $dir = Join-Path $env:LOCALAPPDATA 'Programs\dagon' }
-    # Absolute from here on: .NET calls below resolve a relative path against the
-    # process's folder, which is not PowerShell's current location.
-    $dir = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($dir)
-    $archive = "dagon-cli-$version-$target.zip"
+    $archive ="dagon-cli-$version-$target.zip"
     $url = "https://github.com/$repo/releases/download/cli-v$version/$archive"
 
     $staged = $null

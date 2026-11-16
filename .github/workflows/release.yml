@@ -5,7 +5,7 @@
 # the commits since the component's last tag require. Only a CLI tag
 # (cli-v<version>, with or without -rc.N) then builds the dagon
 # executables and, once every build has passed, publishes the GitHub release
-# install.sh and install.ps1 read. A manual run builds and publishes nothing.
+# setup.sh and setup.ps1 read. A manual run builds and publishes nothing.
 name: release build
 
 on:

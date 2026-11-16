@@ -590,6 +590,155 @@ mod tests {
         assert!(!wrote(&cmds), "{cmds:?}");
     }
 
+    /// The node of `mcu` the PC is connected to, running its sample app and
+    /// relaying over its port `i2c` to an erased F401 ("seg") wired to its
+    /// NRST and BOOT0: the topology and a release for the F401.
+    fn rom_world(mcu: &str, i2c: &str) -> (World, Vec<dagon_port::RelayLinkDef>) {
+        use dagon_format::topology::{self as topo, TopoEnd, TopoLink, TopoNode, NONE};
+        use dagon_sim::{sample, Layout, SimFlash, SimNode};
+        let key = KeyPair::from_seed(Seed::new(SEED));
+        let pk = *key.pk;
+        let mut def = dagon_topology::defs::Registry::builtin()
+            .mcu(mcu)
+            .unwrap()
+            .clone();
+        def.relay_links = vec![dagon_topology::defs::RelayLinkSpec {
+            id: 1,
+            port: i2c.into(),
+            addressing: dagon_topology::defs::AddressingSpec::SevenBit,
+            max_payload: dagon_proto::max_payload::I2C as u16,
+        }];
+        let (cfg, flash, layout, app) = match mcu {
+            "rp2040" => (
+                dagon_sim::hub_config(pk),
+                SimFlash::rp2040_2m(1),
+                Layout::RP2040_HUB,
+                sample::HUB_1_0_0,
+            ),
+            "stm32f401re" => (
+                dagon_sim::f401_config(pk),
+                SimFlash::stm32f401xe(1),
+                Layout::STM32F401XE,
+                sample::SEG_1_0_0,
+            ),
+            _ => (
+                dagon_sim::watch_config(pk),
+                SimFlash::esp32s3_4m(1),
+                Layout::ESP32S3_WATCH,
+                sample::WATCH_1_0_0,
+            ),
+        };
+        let mut node = SimNode::new(cfg, flash, layout);
+        node.provision(app, 0).unwrap();
+        let mut f401 = SimNode::new(
+            dagon_sim::f401_config(pk),
+            SimFlash::stm32f401xe(2),
+            Layout::STM32F401XE,
+        );
+        f401.i2c_addr = Some(NODE_I2C_ADDR);
+        let mut relay = SimRelay::with_definition(node, &def);
+        relay.add_i2c(i2c, f401, true);
+
+        let node = |index, mcu: &str, tag: &str| TopoNode {
+            index,
+            role: topo::role::NODE,
+            mcu_id: image::mcu_id_of(mcu).unwrap(),
+            port_kind: image::port_kind_of("self-boot").unwrap(),
+            max_attempts: 3,
+            recovery_tiers: [topo::tier::LOCAL, 0, 0],
+            order_rank: index,
+            target_tag: target_tag(tag),
+            ..Default::default()
+        };
+        let nodes = [
+            node(0, mcu, "conn"),
+            node(SEG, "stm32f401re", &topology_tag("seg")),
+        ];
+        let end = |node, port, addr| TopoEnd { node, port, addr };
+        let links = [TopoLink {
+            ends: [
+                end(0, def.port(i2c).unwrap().index, NONE),
+                // The F401's i2c3.
+                end(SEG, 3, NODE_I2C_ADDR),
+            ],
+            iface: topo::iface::I2C_BUS,
+            control: topo::control::FULL,
+            tx_pin: NONE,
+            rx_pin: NONE,
+            nrst_pin: 1,
+            boot_pin: 2,
+            baud: 400_000,
+            rom_entry: topo::rom_entry::STM32_I2C_ROM,
+            bus_id: 0,
+            gpio_end: 0,
+        }];
+        let mut topology = vec![0u8; topo::total_size(2, 1, 0)];
+        topo::encode(&nodes, &links, &[], &mut topology).unwrap();
+        let images = [seg_img(&key, 0, NEW), seg_img(&key, 1, NEW)];
+        let items: Vec<_> = images
+            .iter()
+            .map(|image| dagon_sign::release::ReleaseItem {
+                image,
+                node_index: SEG,
+                dest: dest::SUB_STORE,
+            })
+            .collect();
+        let release = dagon_sign::release::assemble("rom", 1, &items, &topology, &key)
+            .unwrap()
+            .bundle;
+        let w = World {
+            key,
+            sim: Sim::new(relay),
+            topology,
+            release,
+        };
+        (w, def.relay_link_defs())
+    }
+
+    /// The ROM write of a silent node as `dagon deploy` runs it, with an
+    /// RP2040, an STM32F401 and an ESP32-S3 connected: nothing goes to the
+    /// connected node but the ROM loader's lines and bytes, no topology and
+    /// no SHOW.
+    #[test]
+    fn a_rom_write_sends_no_topology_and_no_show_whatever_node_is_connected() {
+        for (mcu, i2c) in [
+            ("rp2040", "i2c0"),
+            ("stm32f401re", "i2c1"),
+            ("esp32s3", "i2c0"),
+        ] {
+            let (w, links) = rom_world(mcu, i2c);
+            // The nodes by name, in the order of the topology binary.
+            let yaml = YAML.replace("mcu: rp2040", &format!("mcu: {mcu}"));
+            let t = dagon_topology::parse_str(&yaml).unwrap();
+            let sent = Rc::new(RefCell::new(Vec::new()));
+            let mut host = Host::new(Recording(w.sim.clone(), sent.clone()), w.sim.clone());
+            host.local = Ok(dagon_host::LocalNode { index: 0, links });
+            let dir = provision_files(&w, &["seg"]);
+            let r = crate::device::write_silent_nodes(
+                &mut host,
+                &t,
+                &w.topology,
+                &w.release,
+                &w.key.pk,
+                &["seg".to_string()],
+                &all_roms(),
+                &dir,
+                &mut |_| true,
+            );
+            let _ = std::fs::remove_dir_all(&dir);
+            assert_eq!(r, Ok(Vec::new()), "{mcu}");
+            let to = host.target(&w.topology, SEG).unwrap();
+            let h = block_on(host.hello(to)).unwrap();
+            assert_eq!((h.active_version, h.trial), (NEW, false), "{mcu}");
+            let cmds = sent.borrow();
+            use dagon_proto::Cmd;
+            assert!(cmds.contains(&(Cmd::I2cRaw as u8)), "{mcu}: {cmds:?}");
+            for c in [Cmd::XferBegin, Cmd::Show] {
+                assert!(!cmds.contains(&(c as u8)), "{mcu}: {c:?} sent");
+            }
+        }
+    }
+
     fn wipe(w: &World) {
         let mut relay = w.sim.relay.borrow_mut();
         let now = relay.now_ms();

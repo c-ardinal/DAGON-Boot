@@ -9,7 +9,8 @@ description = "Every DAGON state machine's catalog in one registry, and the gene
 [dependencies]
 dagon-agent = { path = "../dagon-agent" }
 dagon-boot = { path = "../dagon-boot" }
-dagon-events = { path = "../dagon-events" }
+# It prints the catalogs' docs.
+dagon-events = { path = "../dagon-events", features = ["catalog-docs"] }
 dagon-sim = { path = "../dagon-sim" }
 
 [dev-dependencies]

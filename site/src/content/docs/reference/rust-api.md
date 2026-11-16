@@ -14,7 +14,7 @@ rustdocの本文は元のソースのままで、英語です。
 
 | Crate | 中身 |
 |---|---|
-| [`dagon-agent`](/api/dagon_agent/) | DAGONのエージェント: アプリケーションに組み込まれ、HELLO/STATUS/VERSIONに答え、イメージを使っていないスロットに受け取り、ブートの対象を切り替えて確定します。 |
+| [`dagon-agent`](/api/dagon_agent/) | DAGONのエージェント: ノードの書き込みのセッションで、アプリケーションでもブートローダでも同じです。HELLO/STATUS/VERSIONに答え、イメージを書き込む側が動いていないスロットに受け取り、組み込まれた検証器で確かめ、ブートの対象を切り替えて確定します。 |
 | [`dagon-boot`](/api/dagon_boot/) | 状態機械としてのブートローダの手順: 有効にしたウォッチドッグからジャンプか停止までの各ステップが、ブートローダの拡張が観測するイベントです |
 | [`dagon-catalog`](/api/dagon_catalog/) | DAGONのすべての状態機械のカタログを1つにまとめた登録簿と、文書のイベントとポートの生成ページ |
 | [`dagon-cli`](/api/dagon/) | DAGON Bootのコマンドラインツール |

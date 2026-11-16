@@ -177,7 +177,6 @@ fn provisioned() -> Mem {
 
 fn config() -> Config {
     Config {
-        pubkey: *keypair().pk,
         mcu_id: mcu_id::STM32F401XE,
         port_kind: port_kind::SELF_BOOT,
         target_tag: TAG,
@@ -204,7 +203,7 @@ fn chain() -> Chain {
 }
 
 struct Node {
-    agent: Agent<KindSStore<Shared>, Chain>,
+    agent: Agent<KindSStore<Shared>, Chain, Ed25519Compact>,
     flash: Shared,
     seq: u8,
 }
@@ -234,7 +233,7 @@ impl Node {
         };
         let store = KindSStore::load(flash.clone(), &LOG, SLOTS, &ERASE_REGIONS).unwrap();
         let node = Node {
-            agent: Agent::new(config(), store, chain()),
+            agent: Agent::new(config(), Ed25519Compact::new(*keypair().pk), store, chain()),
             flash,
             seq: 0,
         };

@@ -558,6 +558,50 @@ pub struct AiTopologyArgs {
     pub model: Option<String>,
 }
 
+/// The text printed for a command-line parse error. Under `ai key` none of
+/// clap's rendered text is reused, since it names the offending input, which
+/// may be a key typed by mistake; a fixed message and the usage of the
+/// matched command are printed instead.
+pub fn parse_error_text(argv: &[String], e: &clap::Error) -> String {
+    use clap::error::ErrorKind::{
+        DisplayHelp, DisplayHelpOnMissingArgumentOrSubcommand, DisplayVersion,
+    };
+    let shown = matches!(
+        e.kind(),
+        DisplayHelp | DisplayHelpOnMissingArgumentOrSubcommand | DisplayVersion
+    );
+    match ai_key_command(argv) {
+        Some(mut cmd) if !shown => format!(
+            "error: invalid input under `dagon ai key` (not shown, it may be a key)\n\n{}\n\n\
+             For more information, try 'dagon ai key --help'.\n",
+            cmd.render_usage()
+        ),
+        _ => e.to_string(),
+    }
+}
+
+/// The command `argv` resolves to when it is in the `ai key` subtree, found by
+/// walking the command tree the way clap does: options and a `help` word are
+/// skipped, and the walk stops at the first word that is not a subcommand of
+/// the current command.
+fn ai_key_command(argv: &[String]) -> Option<clap::Command> {
+    let mut cmd = Cli::command();
+    cmd.build();
+    let mut path = Vec::new();
+    for a in argv.iter().skip(1).filter(|a| !a.starts_with('-')) {
+        if a == "help" {
+            continue;
+        }
+        let Some(sub) = cmd.find_subcommand(a).cloned() else {
+            break;
+        };
+        path.push(sub.get_name().to_string());
+        cmd = sub;
+    }
+    path.starts_with(&["ai".to_string(), "key".to_string()])
+        .then_some(cmd)
+}
+
 /// Every visible command's full help, one Markdown section each.
 pub fn markdown() -> String {
     let mut root = Cli::command();

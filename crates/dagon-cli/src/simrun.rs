@@ -610,28 +610,29 @@ mod tests {
         }];
         let (cfg, flash, layout, app) = match mcu {
             "rp2040" => (
-                dagon_sim::hub_config(pk),
+                dagon_sim::hub_config(),
                 SimFlash::rp2040_2m(1),
                 Layout::RP2040_HUB,
                 sample::HUB_1_0_0,
             ),
             "stm32f401re" => (
-                dagon_sim::f401_config(pk),
+                dagon_sim::f401_config(),
                 SimFlash::stm32f401xe(1),
                 Layout::STM32F401XE,
                 sample::SEG_1_0_0,
             ),
             _ => (
-                dagon_sim::watch_config(pk),
+                dagon_sim::watch_config(),
                 SimFlash::esp32s3_4m(1),
                 Layout::ESP32S3_WATCH,
                 sample::WATCH_1_0_0,
             ),
         };
-        let mut node = SimNode::new(cfg, flash, layout);
+        let mut node = SimNode::new(cfg, pk, flash, layout);
         node.provision(app, 0).unwrap();
         let mut f401 = SimNode::new(
-            dagon_sim::f401_config(pk),
+            dagon_sim::f401_config(),
+            pk,
             SimFlash::stm32f401xe(2),
             Layout::STM32F401XE,
         );

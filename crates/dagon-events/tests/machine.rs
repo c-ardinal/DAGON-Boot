@@ -97,6 +97,18 @@ fn the_crate_lists_its_machines() {
     assert_eq!(dagon_events::MACHINES.catalogs()[0].machine, "decisions");
 }
 
+/// The machine's and each transition's doc reach the catalog only with the
+/// `catalog-docs` feature (the hosted tools that print them); a firmware
+/// image carries none of their text.
+#[test]
+fn docs_are_in_the_catalog_only_with_the_feature() {
+    let c = transfer::CATALOG;
+    // The machine and its first transition are documented.
+    for doc in [c.doc, c.entries[0].doc] {
+        assert_eq!(doc.is_empty(), !dagon_events::CATALOG_DOCS, "{doc:?}");
+    }
+}
+
 #[test]
 fn the_catalog_is_the_declaration() {
     let c = transfer::CATALOG;
@@ -104,7 +116,12 @@ fn the_catalog_is_the_declaration() {
     assert_eq!(c.layer, Layer::App);
     assert_eq!(c.initial, "Idle");
     assert_eq!(c.states, ["Idle", "Header", "Body"]);
-    assert_eq!(c.doc.trim(), "A transfer into one slot.");
+    let doc = if dagon_events::CATALOG_DOCS {
+        "A transfer into one slot."
+    } else {
+        ""
+    };
+    assert_eq!(c.doc.trim(), doc);
     let kinds: Vec<_> = c.entries.iter().map(|e| (e.kind, e.code)).collect();
     assert_eq!(
         kinds,

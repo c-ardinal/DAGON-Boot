@@ -64,7 +64,7 @@ path changes persistent image state outside this machine.
 
 | Transition | Layer | Guard (status on refusal) | Persisted as | Event |
 |---|---|---|---|---|
-| `erase` | app | XFER_BEGIN passed every guard and `accept_update`; from `Empty`, `Written`, `Pending` or `Reverted` (never from the active or the confirmed slot). From `Pending` because the protocol lets a new image replace one set pending but not started; the erased header no longer matches the SLOT_PENDING record, so the slot reads empty | slot body and header place erased | `app.transfer_started` |
+| `erase` | app | XFER_BEGIN passed every guard and `accept_update`; from `Empty`, `Written`, `Pending`, `Trial`, `Confirmed` or `Reverted`, never from the slot the writer runs from (the session's `Writer` type: the app or the boot loader), and in the app never from its confirmed slot either. From `Pending` because the protocol lets a new image replace one set pending but not started; the erased header no longer matches the SLOT_PENDING record, so the slot reads empty | slot body and header place erased | `app.transfer_started` |
 | `written` | app | XFER_END: body digest equals the header's, header written and re-verified | header in place | `app.written { slot, version }` |
 | `pending_set` | app | SET_PENDING: header present, signature and compatibility, body digest; never the running slot; from `Written`, `Reverted`, `Pending` (a repeated SET_PENDING appends again) or `Confirmed` (the confirmed slot set pending again while the other slot is on trial, which switches back to it) | SLOT_PENDING record / vendor selection | `app.pending_set { slot, version }` |
 | `pending_moved` | app | SET_PENDING on the other slot while this one is `Pending` or `Trial`, and this slot is not the confirmed one | the same SLOT_PENDING record (the log names one pending slot) | `app.pending_moved { from, to }` |
@@ -570,7 +570,9 @@ Registration per layer:
   the operating system's.
 
 The app's agent takes the composed chain and nothing else:
-`Agent::new(config, store, chain)`, where `chain` is `compose`'s result.
+`Agent::new(config, verifier, store, chain)`, where `chain` is
+`compose`'s result and `verifier` the MCU definition's signature
+verifier.
 There is no separate hooks trait; observing events and answering
 `accept_update`, `allow_reboot_now` and `self_check` are `Extension`
 methods. The MCU definitions' `start` still accepts the app's
@@ -1342,7 +1344,12 @@ The one authentication rule, applied by every verifier in the chain
   interpreter, without flash wait states, and fails above 55 million):
   on the RP2040 about 7.7 s on its ring oscillator at the nominal
   6.5 MHz (4.2 s to 28 s across its 1.8 to 12 MHz), and about 0.4 s at
-  125 MHz from a board's 12 MHz crystal. A stage0 built with the
+  125 MHz from a board's 12 MHz crystal. The boot loader checks
+  signatures with the same `Ed25519Small` and SHA-2 with compact rounds,
+  so it leaves room for the update session; each boot it checks the
+  header of the app it starts, which adds one such check to every boot,
+  and feeds its watchdog at every step of the check.
+  A stage0 built with the
   `verify-time` feature measures it on the node: it times each check in
   core clock cycles (SysTick), keeps the longest in `DAGON_VERIFY_CYCLES`
   and their number in `DAGON_VERIFY_COUNT` for a debug probe to read,

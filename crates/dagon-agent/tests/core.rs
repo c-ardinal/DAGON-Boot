@@ -9,6 +9,7 @@ use std::rc::Rc;
 
 use dagon_agent::{core_image, Agent, Config, SlotStore, StoreError, Transition};
 use dagon_core::log::{Log, LogLayout, SlotRef};
+use dagon_ed25519::Ed25519Compact;
 use dagon_events::{
     compose, Bounds, Composed, Ctx, Event, Extension, Layer, Nop, Published, Watchdog,
 };
@@ -299,7 +300,6 @@ fn now() -> u64 {
 
 fn config() -> Config {
     Config {
-        pubkey: *kp().pk,
         mcu_id: mcu_id::RP2040,
         port_kind: port_kind::SELF_BOOT,
         target_tag: TAG,
@@ -310,9 +310,13 @@ fn config() -> Config {
     }
 }
 
+fn verifier() -> Ed25519Compact {
+    Ed25519Compact::new(*kp().pk)
+}
+
 struct Node {
     store: &'static RefCell<Store>,
-    agent: Agent<&'static RefCell<Store>, Chain>,
+    agent: Agent<&'static RefCell<Store>, Chain, Ed25519Compact>,
     seen: Probe,
     seq: u8,
 }
@@ -323,7 +327,7 @@ impl Node {
         let seen = Probe::default();
         Node {
             store,
-            agent: Agent::new(config(), store, Self::chain(&seen)),
+            agent: Agent::new(config(), verifier(), store, Self::chain(&seen)),
             seen,
             seq: 0,
         }
@@ -344,7 +348,7 @@ impl Node {
     fn reset(&mut self, boot: impl FnOnce(&mut Store)) {
         boot(&mut self.store.borrow_mut());
         self.seen.0.borrow_mut().clear();
-        self.agent = Agent::new(config(), self.store, Self::chain(&self.seen));
+        self.agent = Agent::new(config(), verifier(), self.store, Self::chain(&self.seen));
     }
 
     fn events(&self) -> Vec<String> {

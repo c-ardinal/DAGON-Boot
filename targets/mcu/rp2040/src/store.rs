@@ -30,6 +30,25 @@ pub struct AppStore {
     pub(crate) regions: &'static [EraseRegion],
 }
 
+impl AppStore {
+    /// The slot store over `flash`, this MCU's flash driver. A long erase
+    /// reports its progress to guard task `task` of `watch`; erases are
+    /// planned over `regions` (`BoardDef::ERASE_REGIONS`).
+    pub fn new(
+        flash: SharedFlash,
+        watch: &'static dyn Watch,
+        task: usize,
+        regions: &'static [EraseRegion],
+    ) -> Self {
+        AppStore {
+            flash,
+            watch,
+            task,
+            regions,
+        }
+    }
+}
+
 /// Where a target's region starts, where its body starts, body capacity.
 fn region(t: u8, slot: u8) -> Result<(u32, u32, u32), StoreError> {
     crate::regions::region(t, slot).ok_or(StoreError::Unsupported)

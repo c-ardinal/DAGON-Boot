@@ -70,7 +70,8 @@ fn id_on(def: &McuDef, port: &str) -> u8 {
 
 fn relaying_node() -> SimNode {
     SimNode::new(
-        hub_config(sample::PUBKEY),
+        hub_config(),
+        sample::PUBKEY,
         SimFlash::rp2040_2m(1),
         Layout::RP2040_HUB,
     )
@@ -78,9 +79,14 @@ fn relaying_node() -> SimNode {
 
 /// An F401 at [`ADDR`] whose HELLO answers with `max` as its payload size.
 fn f401(seed: u64, max: u16) -> SimNode {
-    let mut cfg = f401_config(sample::PUBKEY);
+    let mut cfg = f401_config();
     cfg.max_payload = max;
-    let mut n = SimNode::new(cfg, SimFlash::stm32f401xe(seed), Layout::STM32F401XE);
+    let mut n = SimNode::new(
+        cfg,
+        sample::PUBKEY,
+        SimFlash::stm32f401xe(seed),
+        Layout::STM32F401XE,
+    );
     n.i2c_addr = Some(ADDR);
     n.provision(sample::SEG_1_0_0, 0).expect("seg fixture fits");
     n

@@ -246,18 +246,28 @@ fn definition() -> McuDef {
 /// An F401 at [`NODE_I2C_ADDR`] whose HELLO gives `max`, so the test knows
 /// which node answered.
 fn f401(seed: u64, max: u16) -> SimNode {
-    let mut cfg = f401_config(sample::PUBKEY);
+    let mut cfg = f401_config();
     cfg.max_payload = max;
-    let mut n = SimNode::new(cfg, SimFlash::stm32f401xe(seed), Layout::STM32F401XE);
+    let mut n = SimNode::new(
+        cfg,
+        sample::PUBKEY,
+        SimFlash::stm32f401xe(seed),
+        Layout::STM32F401XE,
+    );
     n.i2c_addr = Some(NODE_I2C_ADDR);
     n.provision(sample::SEG_1_0_0, 0).unwrap();
     n
 }
 
 fn watch(seed: u64, max: u16) -> SimNode {
-    let mut cfg = watch_config(sample::PUBKEY);
+    let mut cfg = watch_config();
     cfg.max_payload = max;
-    let mut n = SimNode::new(cfg, SimFlash::esp32s3_4m(seed), Layout::ESP32S3_WATCH);
+    let mut n = SimNode::new(
+        cfg,
+        sample::PUBKEY,
+        SimFlash::esp32s3_4m(seed),
+        Layout::ESP32S3_WATCH,
+    );
     n.provision(sample::WATCH_1_0_0, 0).unwrap();
     n
 }
@@ -266,7 +276,8 @@ fn watch(seed: u64, max: u16) -> SimNode {
 /// watch on pio-uart.
 fn relay(def: &McuDef) -> SimRelay {
     let node = SimNode::new(
-        hub_config(sample::PUBKEY),
+        hub_config(),
+        sample::PUBKEY,
         SimFlash::rp2040_2m(1),
         Layout::RP2040_HUB,
     );

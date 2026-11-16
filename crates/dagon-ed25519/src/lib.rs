@@ -40,17 +40,34 @@ use dagon_format::SigVerifier;
 
 mod small;
 
-/// The Ed25519 verifier built from this crate's own arithmetic.
+/// No tick: the check of [`Ed25519Small::new`], which calls nothing
+/// between its steps.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct NoTick;
+
+/// The Ed25519 verifier built from this crate's own arithmetic. With a
+/// tick ([`Ed25519Small::with_tick`]) a check calls it at every step of its
+/// arithmetic (about 760 times per check, never more than about 700,000
+/// Cortex-M0+ cycles apart), so a caller keeps a watchdog fed through a
+/// check that takes seconds on a slow clock.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Ed25519Small {
+pub struct Ed25519Small<T = NoTick> {
     key: [u8; 32],
+    tick: T,
 }
 
 impl Ed25519Small {
     /// Checks under the 32-byte public key `key`. `const`, so the key can
     /// sit in a program's flash as a constant.
     pub const fn new(key: [u8; 32]) -> Self {
-        Self { key }
+        Self { key, tick: NoTick }
+    }
+}
+
+impl<F: Fn() + Copy> Ed25519Small<F> {
+    /// Checks under `key`, calling `tick` at every step of a check.
+    pub const fn with_tick(key: [u8; 32], tick: F) -> Self {
+        Self { key, tick }
     }
 }
 
@@ -61,6 +78,16 @@ impl SigVerifier for Ed25519Small {
 
     fn verify(&self, domain: &[u8], msg: &[&[u8]], sig: &[u8; 64]) -> bool {
         small::verify(&self.key, domain, msg, sig)
+    }
+}
+
+impl<F: Fn() + Copy> SigVerifier for Ed25519Small<F> {
+    fn key_id(&self) -> [u8; 8] {
+        dagon_format::key_id(&self.key)
+    }
+
+    fn verify(&self, domain: &[u8], msg: &[&[u8]], sig: &[u8; 64]) -> bool {
+        small::verify_ticking(&self.key, domain, msg, sig, self.tick)
     }
 }
 

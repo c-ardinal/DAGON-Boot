@@ -101,9 +101,25 @@ mod sealed {
     }
 }
 
+/// Whether the catalogs carry their machines' and transitions' docs
+/// (feature `catalog-docs`, which the hosted tools that print them turn on;
+/// a firmware image leaves the text out).
+pub const CATALOG_DOCS: bool = cfg!(feature = "catalog-docs");
+
 #[doc(hidden)]
 pub mod __private {
     pub use crate::machine::{contains, listed, snake, snake_len, unique_codes};
+
+    /// A doc as a catalog keeps it: the text with [`crate::CATALOG_DOCS`],
+    /// else empty. Evaluated where the catalog is a constant, so the text
+    /// is not in an image built without the feature.
+    pub const fn catalog_doc(doc: &'static str) -> &'static str {
+        if crate::CATALOG_DOCS {
+            doc
+        } else {
+            ""
+        }
+    }
 
     /// Implemented by [`crate::state_machine!`] for the payload types it
     /// generates; not for use outside the macro (see [`crate::Payload`]).

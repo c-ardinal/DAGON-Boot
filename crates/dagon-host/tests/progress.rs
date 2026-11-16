@@ -177,20 +177,19 @@ fn release(c: &Connected, bin: &[u8]) -> Vec<u8> {
 }
 
 fn config(c: &Connected) -> (Config, SimFlash, Layout) {
-    let pk = *key().pk;
     let (mut cfg, flash, layout) = match c.mcu {
         "rp2040" => (
-            dagon_sim::hub_config(pk),
+            dagon_sim::hub_config(),
             SimFlash::rp2040_2m(1),
             Layout::RP2040_HUB,
         ),
         "stm32f401re" => (
-            dagon_sim::f401_config(pk),
+            dagon_sim::f401_config(),
             SimFlash::stm32f401xe(1),
             Layout::STM32F401XE,
         ),
         _ => (
-            dagon_sim::watch_config(pk),
+            dagon_sim::watch_config(),
             SimFlash::esp32s3_4m(1),
             Layout::ESP32S3_WATCH,
         ),
@@ -204,12 +203,17 @@ fn config(c: &Connected) -> (Config, SimFlash, Layout) {
 /// to NRST and BOOT0.
 fn relay(c: &Connected, def: &McuDef) -> SimRelay {
     let (cfg, flash, layout) = config(c);
-    let mut node = SimNode::new(cfg, flash, layout);
+    let mut node = SimNode::new(cfg, *key().pk, flash, layout);
     node.provision(&app(c.mcu, c.port_kind, &connected_tag(c), 0, OLD), 0)
         .unwrap();
-    let mut f401 = dagon_sim::f401_config(*key().pk);
+    let mut f401 = dagon_sim::f401_config();
     f401.target_tag = target_tag(LINKED_TAG);
-    let mut linked = SimNode::new(f401, SimFlash::stm32f401xe(2), Layout::STM32F401XE);
+    let mut linked = SimNode::new(
+        f401,
+        *key().pk,
+        SimFlash::stm32f401xe(2),
+        Layout::STM32F401XE,
+    );
     linked.i2c_addr = Some(ADDR);
     linked
         .provision(&app("stm32f401re", "self-boot", LINKED_TAG, 0, OLD), 0)

@@ -7,12 +7,13 @@
 //! (`app.link_up`, `app.link_down`, `app.request`, `app.replied`).
 
 use dagon_agent::{reply_status, Agent, AppChain, SlotStore, IDLE_TIMEOUT_MS};
+use dagon_format::SigVerifier;
 
 use crate::link::{Link, LinkError};
 
 /// What the serving loop asks of its MCU.
 #[allow(async_fn_in_trait)]
-pub trait ServeHost<S: SlotStore, X: AppChain> {
+pub trait ServeHost<S: SlotStore, X: AppChain, V: SigVerifier> {
     /// Milliseconds on a monotonic clock.
     fn now_ms(&self) -> u64;
     /// Waiting for a request (no deadline of its own).
@@ -28,12 +29,12 @@ pub trait ServeHost<S: SlotStore, X: AppChain> {
     fn on_request(&mut self) {}
     /// Answers `request` before the agent does (a conformance build);
     /// `None` leaves it to the agent.
-    fn intercept(&mut self, _agent: &mut Agent<S, X>, _request: &[u8]) -> Option<&[u8]> {
+    fn intercept(&mut self, _agent: &mut Agent<S, X, V>, _request: &[u8]) -> Option<&[u8]> {
         None
     }
     /// The request (command `cmd`) was answered (e.g. trial state re-read,
     /// timing log).
-    fn after(&mut self, _agent: &mut Agent<S, X>, _cmd: u8) {}
+    fn after(&mut self, _agent: &mut Agent<S, X, V>, _cmd: u8) {}
     /// A read failed (logging); the loop goes on.
     fn on_error(&mut self, _e: LinkError) {}
     /// Waits `ms` before a reset. The loop has reported itself idle, so
@@ -59,12 +60,13 @@ pub enum Exit {
 /// a reply cannot be written or the link closes (`app.link_down`). A reboot
 /// follows only a reply that was written and flushed; otherwise the node
 /// keeps serving and the peer's retry gets the same reply again.
-pub async fn serve<L, S, X, H>(link: &mut L, agent: &mut Agent<S, X>, host: &mut H) -> Exit
+pub async fn serve<L, S, X, V, H>(link: &mut L, agent: &mut Agent<S, X, V>, host: &mut H) -> Exit
 where
     L: Link,
     S: SlotStore,
     X: AppChain,
-    H: ServeHost<S, X>,
+    V: SigVerifier,
+    H: ServeHost<S, X, V>,
 {
     let (via, addr) = (link.kind().code(), link.addr());
     let mut up = false;
@@ -160,6 +162,7 @@ mod tests {
     use std::vec::Vec;
 
     use crate::hooks::{always, node_chain, NodeChain};
+    use dagon_ed25519::Ed25519Compact;
     use dagon_events::{
         compose, Bounds, Composed, Ctx, Delay, Event, Extension, Layer, Nop, Published,
         RebootRequest, Watchdog,
@@ -246,7 +249,7 @@ mod tests {
         calls: Vec<std::string::String>,
     }
 
-    impl<S: SlotStore, X: AppChain> ServeHost<S, X> for Host {
+    impl<S: SlotStore, X: AppChain, V: SigVerifier> ServeHost<S, X, V> for Host {
         fn now_ms(&self) -> u64 {
             0
         }
@@ -263,11 +266,11 @@ mod tests {
         fn on_request(&mut self) {
             self.requests += 1;
         }
-        fn intercept(&mut self, _: &mut Agent<S, X>, request: &[u8]) -> Option<&[u8]> {
+        fn intercept(&mut self, _: &mut Agent<S, X, V>, request: &[u8]) -> Option<&[u8]> {
             (request.get(5) == Some(&0x7F)).then_some(())?;
             self.answer.as_deref()
         }
-        fn after(&mut self, _: &mut Agent<S, X>, cmd: u8) {
+        fn after(&mut self, _: &mut Agent<S, X, V>, cmd: u8) {
             self.cmds.push(cmd);
             self.calls.push("answered".into());
         }
@@ -298,7 +301,7 @@ mod tests {
 
     type ProbeChain = Composed<&'static Published<(), 8>, Nop, Probe, fn() -> u64>;
 
-    fn probed(probe: Probe) -> Agent<SimStore, ProbeChain> {
+    fn probed(probe: Probe) -> Agent<SimStore, ProbeChain, Ed25519Compact> {
         let events = std::boxed::Box::leak(std::boxed::Box::new(Published::new()));
         let now: fn() -> u64 = || 0;
         let chain = compose(
@@ -308,13 +311,25 @@ mod tests {
             probe,
             Bounds::new(now, Watchdog::new(4000, 4000)),
         );
-        Agent::new(dagon_sim::f401_config([0; 32]), SimStore::default(), chain)
+        let verifier = Ed25519Compact::new([0; 32]);
+        Agent::new(
+            dagon_sim::f401_config(),
+            verifier,
+            SimStore::default(),
+            chain,
+        )
     }
 
-    fn agent() -> Agent<SimStore, NodeChain> {
+    fn agent() -> Agent<SimStore, NodeChain, Ed25519Compact> {
         let events = std::boxed::Box::leak(std::boxed::Box::new(Published::new()));
         let (chain, _) = node_chain(events, None, None, always, || 0, Watchdog::new(4000, 4000));
-        Agent::new(dagon_sim::f401_config([0; 32]), SimStore::default(), chain)
+        let verifier = Ed25519Compact::new([0; 32]);
+        Agent::new(
+            dagon_sim::f401_config(),
+            verifier,
+            SimStore::default(),
+            chain,
+        )
     }
 
     fn hello(seq: u8) -> Vec<u8> {

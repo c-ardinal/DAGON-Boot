@@ -674,6 +674,7 @@ name = "dagon-relay"
 version = "0.1.0"
 dependencies = [
  "dagon-agent",
+ "dagon-ed25519",
  "dagon-events",
  "dagon-format",
  "dagon-port",

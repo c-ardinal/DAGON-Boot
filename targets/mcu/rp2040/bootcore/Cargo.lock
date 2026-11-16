@@ -229,7 +229,6 @@ name = "dagon-agent"
 version = "0.1.0"
 dependencies = [
  "critical-section",
- "dagon-ed25519",
  "dagon-events",
  "dagon-format",
  "dagon-port",
@@ -309,6 +308,7 @@ dependencies = [
  "cortex-m",
  "dagon-agent",
  "dagon-core",
+ "dagon-ed25519",
  "dagon-events",
  "dagon-format",
  "dagon-mcu-build",
@@ -355,13 +355,16 @@ version = "0.1.0"
 dependencies = [
  "cortex-m",
  "cortex-m-rt",
+ "dagon-agent",
  "dagon-boot",
  "dagon-core",
  "dagon-ed25519",
  "dagon-events",
  "dagon-format",
+ "dagon-mcu-common",
  "dagon-mcu-rp2040",
  "dagon-port",
+ "dagon-proto",
  "dagon-topology",
  "embassy-rp",
  "embassy-time",

@@ -551,6 +551,48 @@ fn bad_command_lines_are_usage_errors() {
 }
 
 #[test]
+fn a_parse_error_under_ai_key_never_shows_the_input() {
+    const FAKE: &str = "FAKE-NOT-A-KEY-123";
+    for line in [
+        "ai key set FAKE-NOT-A-KEY-123",
+        "ai key set -- FAKE-NOT-A-KEY-123",
+        "ai key set --FAKE-NOT-A-KEY-123",
+        "ai key FAKE-NOT-A-KEY-123",
+        "help ai key FAKE-NOT-A-KEY-123",
+        "help ai key set FAKE-NOT-A-KEY-123",
+    ] {
+        let argv: Vec<String> = std::iter::once("dagon")
+            .chain(line.split_whitespace())
+            .map(String::from)
+            .collect();
+        let e = Cli::try_parse_from(&argv).expect_err(line);
+        assert_eq!(e.exit_code(), 2, "dagon {line}");
+        let text = parse_error_text(&argv, &e);
+        assert!(!text.contains(FAKE), "dagon {line}: {text}");
+        assert!(text.contains("Usage: dagon ai key"), "dagon {line}: {text}");
+    }
+}
+
+#[test]
+fn a_parse_error_under_ai_key_shows_no_part_of_a_multiline_input() {
+    let argv = v(&["dagon", "ai", "key", "set", "FAKE-HEAD\n\nFAKE-TAIL-123"]);
+    let e = Cli::try_parse_from(&argv).expect_err("multiline input");
+    assert_eq!(e.exit_code(), 2);
+    let text = parse_error_text(&argv, &e);
+    assert!(!text.contains("FAKE-"), "{text}");
+    assert!(text.contains("Usage: dagon ai key"), "{text}");
+}
+
+#[test]
+fn a_parse_error_elsewhere_keeps_clap_text() {
+    let argv = v(&["dagon", "status", "extra-word"]);
+    let e = Cli::try_parse_from(&argv).expect_err("status extra-word");
+    let text = parse_error_text(&argv, &e);
+    assert_eq!(text, e.to_string());
+    assert!(text.contains("extra-word"), "{text}");
+}
+
+#[test]
 fn a_repeated_option_keeps_its_last_value() {
     assert_eq!(
         command("topo compile t.yaml --out a.bin --out b.bin"),

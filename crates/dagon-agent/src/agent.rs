@@ -1,12 +1,11 @@
 //! The DAGON wire protocol mapped onto the agent's machines.
 
-use dagon_ed25519::Ed25519Compact;
 use dagon_events::{
     Accept, Catalog, Clock, Composed, Delay, EventRecord, Extension, Health, Published,
     RebootRequest, Refused, Sink, Snapshot, TrialInfo, Unreadable, UpdateOffer,
 };
 use dagon_format::header::{self, image_kind, slot_binding, ImageHeader, HEADER_SIZE};
-use dagon_format::{FormatError, Sha256};
+use dagon_format::{FormatError, Sha256, SigVerifier};
 use dagon_proto::payload::{
     self, phase, reboot_mode, target, HelloReq, HelloResp, SetPending, Show, SlotState, StatusResp,
     VersionResp, VersionSlots, XferBegin, XferChunk, IMAGE_HDR_LEN,
@@ -15,8 +14,10 @@ use dagon_proto::{flags, frame_len, max_payload, split_status, Cmd, Frame, Statu
 
 use crate::images::{ImageStore, ImageView};
 use crate::{
-    node, protocol, requests, session, AbortCause, Config, NameDigest, SlotStore, TrialPolicy,
+    node, protocol, requests, session, writer, AbortCause, Config, NameDigest, SlotStore,
+    TrialPolicy, Writer,
 };
+use core::marker::PhantomData;
 
 /// A transfer with no request for this long returns to idle.
 pub const IDLE_TIMEOUT_MS: u32 = 10_000;
@@ -69,9 +70,11 @@ pub struct Reply<'a> {
     pub reboot_delay_ms: u32,
 }
 
-pub struct Agent<S, X> {
+/// The update session of writer `W` (the app's by default).
+pub struct Agent<S, X, V, W = writer::App> {
     cfg: Config,
-    key_id: [u8; 8],
+    writer: PhantomData<W>,
+    verifier: V,
     images: ImageStore<S>,
     chain: X,
     session: session::Machine,
@@ -91,17 +94,27 @@ fn noted(r: Result<(), Refused>) {
     debug_assert!(r.is_ok(), "{r:?}");
 }
 
-impl<S: SlotStore, X: AppChain> Agent<S, X> {
+impl<S: SlotStore, X: AppChain, V: SigVerifier> Agent<S, X, V, writer::App> {
+    /// The app's session ([`Agent::for_writer`] with the app's writer).
+    pub fn new(cfg: Config, verifier: V, store: S, chain: X) -> Self {
+        Self::for_writer(cfg, verifier, store, chain)
+    }
+}
+
+impl<S: SlotStore, X: AppChain, V: SigVerifier, W: Writer> Agent<S, X, V, W> {
     /// DAGON's start: `app.starting`, then the slot store is opened
-    /// (`app.store_opened`) and the boot core's changes it shows are
-    /// replayed (`app.trial_started`, `app.rolled_back`).
-    pub fn new(cfg: Config, store: S, mut chain: X) -> Self {
+    /// (`app.store_opened`), and in the app's session the store makes its
+    /// log room and the boot core's changes it shows are replayed
+    /// (`app.trial_started`, `app.rolled_back`). `verifier` checks every
+    /// image header under the node's key; HELLO reports its key id.
+    pub fn for_writer(cfg: Config, verifier: V, store: S, mut chain: X) -> Self {
         let mut node = node::Machine::new();
         let tag = NameDigest::of(NameDigest::TAG, &cfg.target_tag);
         noted(node.starting(&mut chain, tag, cfg.role, cfg.mode));
         let mut agent = Agent {
-            key_id: dagon_format::key_id(&cfg.pubkey),
-            images: ImageStore::open(store, cfg.trial_attempts),
+            verifier,
+            writer: PhantomData,
+            images: ImageStore::open(store, cfg.trial_attempts, W::APP),
             cfg,
             chain,
             session: session::Machine::new(),
@@ -145,7 +158,9 @@ impl<S: SlotStore, X: AppChain> Agent<S, X> {
             st.attempts,
             st.last_reason,
         ));
-        self.images.replay_boot(&mut self.chain);
+        if W::APP {
+            self.images.replay_boot(&mut self.chain);
+        }
     }
 
     /// The slots, read-only.
@@ -202,10 +217,10 @@ impl<S: SlotStore, X: AppChain> Agent<S, X> {
     /// Confirms the running image while it is on trial (an app that
     /// confirms itself at start): `self_check` first, then the `confirmed`
     /// transition; `app.confirm_refused` when it is not on trial or not
-    /// healthy.
+    /// healthy, or when the session runs in another writer than the app.
     pub fn confirm_own(&mut self) -> Result<(), Status> {
         let st = self.images.status();
-        if !self.images.view().on_trial() {
+        if !W::APP || !self.images.view().on_trial() {
             noted(
                 self.requests
                     .confirm_refused(&mut self.chain, Status::State as u8),
@@ -265,7 +280,7 @@ impl<S: SlotStore, X: AppChain> Agent<S, X> {
             Some(Cmd::SetPending) => self.set_pending(SetPending::parse(p)?),
             Some(Cmd::Reboot) => self.reboot(payload::parse_u8(p)?),
             Some(Cmd::Confirm) => self.confirm(payload::parse_u8(p)?),
-            Some(Cmd::Show) => self.show(Show::parse(p)?),
+            Some(Cmd::Show) if W::APP => self.show(Show::parse(p)?),
             _ => Err(Status::Unsupported),
         }
     }
@@ -310,7 +325,7 @@ impl<S: SlotStore, X: AppChain> Agent<S, X> {
             mode: self.cfg.mode,
             active_version: active.version,
             trial: active.state == SlotState::Trying,
-            key_id: self.key_id,
+            key_id: self.verifier.key_id(),
             max_payload: self.cfg.max_payload,
         };
         Ok((resp.encode(self.body()).expect("fits"), None))
@@ -373,7 +388,7 @@ impl<S: SlotStore, X: AppChain> Agent<S, X> {
             );
             return Err(Status::State);
         }
-        if !signed(req.target) {
+        if W::APP && !signed(req.target) {
             self.open_body(req.target, req.slot, body_len)?;
         }
         Ok((0, None))
@@ -386,8 +401,8 @@ impl<S: SlotStore, X: AppChain> Agent<S, X> {
         let factory = req.slot == FACTORY;
         match req.target {
             target::APP | target::BOOTCORE if req.hdr_len == IMAGE_HDR_LEN && ab => {}
-            target::AGENT if req.hdr_len == IMAGE_HDR_LEN && factory => {}
-            target::TOPOLOGY if req.hdr_len == 0 && req.slot == 0 => {}
+            target::AGENT if W::APP && req.hdr_len == IMAGE_HDR_LEN && factory => {}
+            target::TOPOLOGY if W::APP && req.hdr_len == 0 && req.slot == 0 => {}
             _ => return Err(Status::Arg),
         }
         let cap = self.images.capacity(req.target, req.slot);
@@ -397,11 +412,11 @@ impl<S: SlotStore, X: AppChain> Agent<S, X> {
         if body_len > cap {
             return Err(Status::Range);
         }
-        if req.target == target::AGENT {
-            // The recovery agent's slot is rewritten only while a confirmed
-            // app runs from another slot: that app's agent is the way back
-            // if the write is cut, and the factory is then neither running
-            // nor the fallback.
+        if W::APP && req.target == target::AGENT {
+            // The recovery agent's slot is rewritten only by a confirmed
+            // app running from another slot: that app's agent is the way
+            // back if the write is cut, and the factory is then neither
+            // running nor the fallback.
             let st = self.images.status();
             let running = st.slots.get(usize::from(st.active)).map(|s| s.state);
             let fallback = req.slot == st.active || req.slot == st.confirmed;
@@ -423,11 +438,11 @@ impl<S: SlotStore, X: AppChain> Agent<S, X> {
         Ok(body_len)
     }
 
-    /// `t` is the MCU's one boot core slot and the running app is on
-    /// trial: the slot is not written or set pending then. Stage0 starts
-    /// no app while an APP trial is open, so a write of the only core cut
-    /// by a power loss would leave nothing to start; the app is confirmed
-    /// or rolled back first.
+    /// `t` is the MCU's one boot core slot, written in place by an app
+    /// that is on trial: the slot is not written or set pending then.
+    /// Stage0 starts no app while an APP trial is open, so a write of the
+    /// only core cut by a power loss would leave nothing to start; the app
+    /// is confirmed or rolled back first.
     fn only_core_on_trial(&mut self, t: u8) -> bool {
         if self.keeps(t) {
             return false;
@@ -438,15 +453,19 @@ impl<S: SlotStore, X: AppChain> Agent<S, X> {
             .is_some_and(|s| s.state == SlotState::Trying)
     }
 
-    /// Whether the running and the confirmed slot of `t` are kept
-    /// from being written and set pending. An APP slot: always, as the app
-    /// runs from it and goes back to the confirmed one. A boot core slot:
-    /// while the MCU has another boot core slot, which takes the new core
-    /// so the old one stays for stage0 to fall back to; the only boot core
-    /// slot is written in place (this agent runs from an APP slot, and
-    /// stage0 starts the confirmed app when no core may start).
+    /// Whether the running and the confirmed slot of `t` are kept from
+    /// being written (the running one also from being set pending). Kept:
+    /// the slots of the image kind the writer runs from, as it runs from
+    /// one and goes back to the other; and boot core slots while the MCU
+    /// has another one, which takes the new core so the old one stays for
+    /// stage0 to fall back to. A writer runs from no slot of any other
+    /// kind and writes each of them: the app writes the only boot core
+    /// slot in place (stage0 starts the confirmed app when no core may
+    /// start), and the boot core any APP slot, the confirmed one too (the
+    /// boot core itself receives again when a cut write leaves no app to
+    /// start).
     fn keeps(&self, t: u8) -> bool {
-        t != target::BOOTCORE || self.images.slot_count(t) > 1
+        t == W::TARGET || (t == target::BOOTCORE && self.images.slot_count(t) > 1)
     }
 
     /// Erases the slot (image `erase`) and opens the session's body.
@@ -500,7 +519,7 @@ impl<S: SlotStore, X: AppChain> Agent<S, X> {
     /// Signature, key and compatibility of the header in `self.hdr` for a
     /// slot of `target`.
     fn check_header(&self, target: u8, slot: u8) -> Result<ImageHeader, Status> {
-        check_header(&self.cfg, &self.hdr, target, slot)
+        check_header((&self.cfg, &self.verifier), &self.hdr, target, slot)
     }
 
     fn xfer_data(&mut self, chunk: XferChunk<'_>) -> Handled {
@@ -559,7 +578,7 @@ impl<S: SlotStore, X: AppChain> Agent<S, X> {
     /// held header and writes the header last (`written`).
     fn verify_and_commit(&mut self, target: u8, slot: u8, len: u32) -> Result<[u8; 32], Status> {
         let digest = self.hash_body(target, slot, len)?;
-        if !signed(target) {
+        if W::APP && !signed(target) {
             noted(self.requests.verify_ok(&mut self.chain, target, slot, len));
             self.images.body_written(target, slot, &mut self.chain)?;
             return Ok(digest);
@@ -570,12 +589,12 @@ impl<S: SlotStore, X: AppChain> Agent<S, X> {
         }
         noted(self.requests.verify_ok(&mut self.chain, target, slot, len));
         let hdr = self.hdr;
-        let cfg = &self.cfg;
+        let node = (&self.cfg, &self.verifier);
         self.images.write_header(
             (target, slot),
             &hdr,
             (h.version, h.payload_size),
-            |back| check_header(cfg, back, target, slot).is_ok(),
+            |back| check_header(node, back, target, slot).is_ok(),
             &mut self.chain,
         )?;
         Ok(digest)
@@ -647,6 +666,16 @@ impl<S: SlotStore, X: AppChain> Agent<S, X> {
         if t != target::APP {
             return Err(Status::Arg);
         }
+        // An app confirms the trial it runs; under another writer no app
+        // runs, so nothing here may be confirmed.
+        if !W::APP {
+            let refused = Status::State;
+            noted(
+                self.requests
+                    .confirm_refused(&mut self.chain, refused as u8),
+            );
+            return Err(refused);
+        }
         let st = self.images.status();
         let active = st.slots.get(st.active as usize).ok_or(Status::State)?;
         if active.state != SlotState::Trying {
@@ -704,17 +733,17 @@ fn kind_of(target: u8) -> Option<u8> {
     }
 }
 
-/// Signature, key and compatibility of `hdr` for `slot` of `target`: the
-/// kind that target holds, this node's MCU, port and tag, and for a
-/// verifying image (boot core, agent) the capability rule.
-fn check_header(
-    cfg: &Config,
+/// Signature and key of `hdr` under `verifier`, and its compatibility for
+/// `slot` of `target`: the kind that target holds, this node's MCU, port
+/// and tag, and for a verifying image (boot core, agent) the capability
+/// rule.
+fn check_header<V: SigVerifier>(
+    (cfg, verifier): (&Config, &V),
     hdr: &[u8; HEADER_SIZE],
     target: u8,
     slot: u8,
 ) -> Result<ImageHeader, Status> {
-    let verifier = Ed25519Compact::new(cfg.pubkey);
-    let h = header::verify_header(hdr, &verifier).map_err(format_status)?;
+    let h = header::verify_header(hdr, verifier).map_err(format_status)?;
     let compatible = Some(h.image_kind) == kind_of(target)
         && header::capabilities_ok(h.image_kind, h.build_flags, h.capabilities)
         && h.mcu_id == cfg.mcu_id

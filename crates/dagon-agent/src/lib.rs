@@ -1,5 +1,10 @@
-//! DAGON agent: embedded in an application, it answers HELLO/STATUS/VERSION, receives
-//! images into the inactive slot, switches the boot target and confirms.
+//! DAGON agent: a node's update session, the same in its application and
+//! in its boot core. It answers HELLO/STATUS/VERSION, receives images into
+//! a slot its writer does not run from, checks them with the verifier it is
+//! built with, switches the boot target and confirms.
+//!
+//! The session's type names the image it runs in ([`Writer`]): what only
+//! the app serves is compiled into the app's session alone.
 //!
 //! Every state change is a transition of one of the machines declared
 //! below, and every transition delivers its event to the app layer's
@@ -58,9 +63,10 @@ dagon_events::state_machine! {
         initial Empty;
         states { Empty, Written, Pending, Trial, Confirmed, Reverted }
         transitions {
-            /// The slot was erased for a new image (never the running or
-            /// the confirmed slot).
-            erase(target: u8, slot: u8, len: u32): Empty | Written | Pending | Reverted => Empty
+            /// The slot was erased for a new image (never the slot the
+            /// writer runs from; the app never erases its confirmed slot
+            /// either).
+            erase(target: u8, slot: u8, len: u32): Empty | Written | Pending | Trial | Confirmed | Reverted => Empty
                 emits TransferStarted = 0x20 { target: u8, slot: u8, len: u32 }
                 observe(live, host);
             /// The body verified and the header written and read back: the
@@ -379,7 +385,8 @@ pub enum StoreError {
 /// `target` is the XFER target (`payload::target::APP`, or
 /// `payload::target::TOPOLOGY` with `slot = 0` on the hub); `slot` is 0 = A,
 /// 1 = B. Offsets are relative to the start of the image body. The agent never
-/// asks to erase or write the running slot or the confirmed slot.
+/// asks to erase or write the slot its [`Writer`] runs from, nor the
+/// confirmed slot of that image kind.
 ///
 /// The mutators take a [`Transition`]: only the agent's image machine calls
 /// them, inside the transition that emits the change's event. Methods added
@@ -545,11 +552,9 @@ pub trait SlotStore {
     }
 }
 
-/// Identity of the node the agent runs on.
+/// Identity of the node the agent runs on, and the image it runs in.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Config {
-    /// Ed25519 public key embedded at build time.
-    pub pubkey: [u8; 32],
     /// Image header `mcu_id` this node accepts.
     pub mcu_id: u16,
     /// Image header `port_kind` this node accepts.
@@ -566,6 +571,50 @@ pub struct Config {
     /// (the MCU package's boot settings; `TrialInfo::max`).
     pub trial_attempts: u8,
 }
+
+/// The image a session runs in, as the MCU definition's `[writers]` names
+/// the kinds that write: the session's type parameter ([`Agent`]).
+pub mod writer {
+    use dagon_proto::payload::target;
+
+    /// The image a session runs in. A writer never writes the slot it runs
+    /// from, nor the one it goes back to (the session's guards). Only the
+    /// app's session serves the app's own trial (CONFIRM and its
+    /// self-check), replays the boot stage's changes at its start, takes the
+    /// recovery agent's and the topology copy's targets and SHOW, and makes
+    /// log room when it starts; the other writers' sessions are built
+    /// without them.
+    pub trait Writer: sealed::Sealed {
+        /// The XFER target of the image kind it runs from.
+        const TARGET: u8;
+        /// Whether it is the app.
+        const APP: bool;
+    }
+
+    /// The app, running from an APP slot.
+    pub struct App;
+
+    /// The boot core, running from a boot core slot.
+    pub struct BootCore;
+
+    impl Writer for App {
+        const TARGET: u8 = target::APP;
+        const APP: bool = true;
+    }
+
+    impl Writer for BootCore {
+        const TARGET: u8 = target::BOOTCORE;
+        const APP: bool = false;
+    }
+
+    mod sealed {
+        pub trait Sealed {}
+        impl Sealed for super::App {}
+        impl Sealed for super::BootCore {}
+    }
+}
+
+pub use writer::Writer;
 
 pub use dagon_port::NO_ADDR;
 

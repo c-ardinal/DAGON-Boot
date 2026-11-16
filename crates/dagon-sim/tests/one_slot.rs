@@ -5,6 +5,7 @@
 
 use dagon_agent::image::State as Image;
 use dagon_agent::{Agent, SlotStore};
+use dagon_ed25519::Ed25519Compact;
 use dagon_events::{compose, Bounds, Composed, Layer, Nop, Published, Watchdog};
 use dagon_format::header::*;
 use dagon_format::statelog::{kind, Record};
@@ -56,7 +57,7 @@ fn image(slot: u8, minor: u16) -> Vec<u8> {
         min_bootcore_version: Version::new(1, 0, 0),
         payload_sha256: sha256(&body),
         key_id: key_id(&kp.pk),
-        target_tag: f401_config(*kp.pk).target_tag,
+        target_tag: f401_config().target_tag,
         proto_version: 1,
         capabilities: capabilities::CONFIRM_BY_HUB,
         signature: [0; 64],
@@ -112,7 +113,7 @@ fn the_store_receives_into_the_slots_its_layout_gives_only() {
 #[test]
 fn the_agent_over_a_one_slot_store_knows_no_slot_b() {
     let store = node();
-    let mut agent = Agent::new(f401_config(*kp().pk), store, chain());
+    let mut agent = Agent::new(f401_config(), Ed25519Compact::new(*kp().pk), store, chain());
     let view = agent.images();
     assert_eq!(view.state(0), Some(Image::Confirmed));
     assert_eq!(view.state(1), None);
@@ -148,7 +149,7 @@ fn the_agent_over_a_one_slot_store_knows_no_slot_b() {
 #[test]
 fn with_no_core_to_start_stage0_starts_the_confirmed_app() {
     let (base, len) = ONE.cores.unwrap().slots[0];
-    let tag = f401_config(*kp().pk).target_tag;
+    let tag = f401_config().target_tag;
     let mut store = node();
     store.flash().erase(base, len).unwrap();
     assert_eq!(store.boot(), Boot::Nothing, "a stage0 with no node tag");

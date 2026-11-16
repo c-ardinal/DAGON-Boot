@@ -68,6 +68,12 @@ struct Mem {
     /// Room for the reserved target 3 at slot 0, as a store built before
     /// that target was removed still reports.
     reserved_room: bool,
+    /// Its boot core has an update mode: a stay can be written for it.
+    update_mode: bool,
+    /// Stays written for the boot core (UPDATE_STAY).
+    stays: usize,
+    /// Making log room fails (a flash that does not erase).
+    room_fails: bool,
 }
 
 impl Mem {
@@ -86,6 +92,9 @@ impl Mem {
             headers: BTreeMap::new(),
             rooms: 0,
             reserved_room: false,
+            update_mode: true,
+            stays: 0,
+            room_fails: false,
         }
     }
 
@@ -163,7 +172,17 @@ impl SlotStore for Mem {
         Ok(())
     }
     fn keep_room(&mut self) -> Result<(), StoreError> {
+        if self.room_fails {
+            return Err(StoreError::Flash);
+        }
         self.rooms += 1;
+        Ok(())
+    }
+    fn request_update_mode(&mut self) -> Result<(), StoreError> {
+        if !self.update_mode {
+            return Err(StoreError::Unsupported);
+        }
+        self.stays += 1;
         Ok(())
     }
     fn target_status(&mut self, t: u8) -> Option<StatusResp> {
@@ -290,15 +309,26 @@ struct Bench<V: SigVerifier, W: Writer> {
 
 impl<V: SigVerifier, W: Writer> Bench<V, W> {
     fn new(verifier: V, mem: Mem) -> Self {
+        Self::in_mode(verifier, mem, mode::APP)
+    }
+
+    /// The session answering HELLO with `mode` (`payload::mode`).
+    fn in_mode(verifier: V, mem: Mem, mode: u8) -> Self {
         let mem: &'static RefCell<Mem> = Box::leak(Box::new(RefCell::new(mem)));
+        let cfg = Config { mode, ..config() };
         Bench {
             mem,
-            agent: Agent::for_writer(config(), verifier, mem, chain()),
+            agent: Agent::for_writer(cfg, verifier, mem, chain()),
             seq: 0,
         }
     }
 
     fn call(&mut self, cmd: Cmd, payload: &[u8]) -> Status {
+        self.exchange(cmd, payload).0
+    }
+
+    /// The reply's status, body and whether the node resets after it.
+    fn exchange(&mut self, cmd: Cmd, payload: &[u8]) -> (Status, Vec<u8>, bool) {
         self.seq = self.seq.wrapping_add(1);
         let mut buf = vec![0u8; 300];
         let n = Frame {
@@ -310,9 +340,11 @@ impl<V: SigVerifier, W: Writer> Bench<V, W> {
         .encode(&mut buf)
         .unwrap();
         let reply = self.agent.handle(&buf[..n]).expect("reply");
+        let reboot = reply.reboot;
         let (f, _) = Frame::decode(reply.frame, 300).unwrap();
         assert_eq!((f.seq, f.flags), (self.seq, flags::RESP));
-        split_status(f.payload).unwrap().0
+        let (st, body) = split_status(f.payload).unwrap();
+        (st, body.to_vec(), reboot)
     }
 
     /// XFER of `img` (`total` bytes announced) into `slot` of `t`: the
@@ -688,4 +720,106 @@ fn sources(dir: &std::path::Path) -> Vec<(String, String)> {
         }
     }
     out
+}
+
+/// REBOOT mode 1 to the app: the store writes the stay for the boot core
+/// (UPDATE_STAY) and the node resets after the reply. A node whose boot
+/// core has no update mode refuses it and does not reset.
+#[test]
+fn the_app_hands_over_to_the_boot_core_with_reboot_mode_1() {
+    let kp = keypair();
+    let mut app = Bench::<_, writer::App>::new(ed25519(&kp), Mem::new(2, 1));
+    let (st, _, reboot) = app.exchange(Cmd::Reboot, &[reboot_mode::UPDATE]);
+    assert_eq!((st, reboot), (Status::Ok, true));
+    assert_eq!(app.mem.borrow().stays, 1);
+
+    let mut none = Mem::new(2, 1);
+    none.update_mode = false;
+    let mut app = Bench::<_, writer::App>::new(ed25519(&kp), none);
+    let (st, _, reboot) = app.exchange(Cmd::Reboot, &[reboot_mode::UPDATE]);
+    assert_eq!((st, reboot), (Status::Unsupported, false));
+
+    let (st, _, reboot) = app.exchange(Cmd::Reboot, &[reboot_mode::NORMAL]);
+    assert_eq!((st, reboot), (Status::Ok, true), "mode 0 as before");
+    let (st, _, reboot) = app.exchange(Cmd::Reboot, &[2]);
+    assert_eq!((st, reboot), (Status::Arg, false), "a mode not defined");
+}
+
+/// STAY is the boot core's: while the app runs it is refused (E_STATE);
+/// the boot core in update mode takes it, and REBOOT mode 1 there keeps
+/// it in update mode (no reset, no stay written).
+#[test]
+fn stay_and_reboot_mode_1_keep_the_boot_core_in_update_mode() {
+    let kp = keypair();
+    let mut app = Bench::<_, writer::App>::new(ed25519(&kp), Mem::new(2, 1));
+    assert_eq!(app.call(Cmd::Stay, &[]), Status::State);
+    assert_eq!(app.call(Cmd::Stay, &[0]), Status::Arg);
+
+    let mut core =
+        Bench::<_, writer::BootCore>::in_mode(ed25519(&kp), Mem::new(2, 1), mode::UPDATE);
+    let (st, _, reboot) = core.exchange(Cmd::Stay, &[]);
+    assert_eq!((st, reboot), (Status::Ok, false));
+    let (st, _, reboot) = core.exchange(Cmd::Reboot, &[reboot_mode::UPDATE]);
+    assert_eq!((st, reboot), (Status::Ok, false));
+    assert_eq!(core.mem.borrow().stays, 0);
+    let (st, _, reboot) = core.exchange(Cmd::Reboot, &[reboot_mode::NORMAL]);
+    assert_eq!((st, reboot), (Status::Ok, true), "leaves update mode");
+}
+
+/// The boot core makes log room with the shared algorithm (the store's
+/// reservation, which compacts) when a write starts, before anything is
+/// erased; when it cannot, the write is refused and nothing is erased.
+/// The app's write path is unchanged: its room was made at its start.
+#[test]
+fn the_boot_core_makes_log_room_before_a_write_starts() {
+    let kp = keypair();
+    let a = image(Shape::app(slot_binding::A), &body(), &kp);
+    let mut core = Bench::<_, writer::BootCore>::new(ed25519(&kp), Mem::new(2, 1));
+    assert_eq!(core.mem.borrow().rooms, 0);
+    assert_eq!(core.transfer(target::APP, 0, &a), Status::Ok);
+    assert_eq!(core.mem.borrow().rooms, 1);
+
+    let mut stuck = Mem::new(2, 1);
+    stuck.room_fails = true;
+    let mut core = Bench::<_, writer::BootCore>::new(ed25519(&kp), stuck);
+    assert_eq!(core.transfer(target::APP, 0, &a), Status::Flash);
+    assert!(core.mem.borrow().bodies.is_empty(), "nothing erased");
+    assert_eq!(core.state(target::APP, 0), SlotState::Confirmed);
+
+    let b = image(Shape::app(slot_binding::B), &body(), &kp);
+    let mut app = Bench::<_, writer::App>::new(ed25519(&kp), Mem::new(2, 1));
+    assert_eq!(app.mem.borrow().rooms, 1);
+    assert_eq!(app.transfer(target::APP, 1, &b), Status::Ok);
+    assert_eq!(app.mem.borrow().rooms, 1, "the app path is unchanged");
+}
+
+/// A host that predates update mode meets a node in it: HELLO says so
+/// (mode 1, or 2 in recovery), and what such a host asks of a running app
+/// is refused with a status it knows (CONFIRM: E_STATE, SHOW:
+/// E_UNSUPPORTED), never taken as done; the normal write still works.
+#[test]
+fn an_old_host_meeting_a_node_in_update_mode_gets_a_clear_refusal() {
+    let kp = keypair();
+    for m in [mode::UPDATE, mode::RECOVERY] {
+        let mut mem = Mem::new(2, 1);
+        mem.status[0].active = 1;
+        mem.status[0].slots[1].state = SlotState::Trying;
+        let mut core = Bench::<_, writer::BootCore>::in_mode(ed25519(&kp), mem, m);
+        let mut p = [0u8; 8];
+        let n = HelloReq {
+            proto_ver: 1,
+            max_payload: 256,
+        }
+        .encode(&mut p)
+        .unwrap();
+        let (st, hello, _) = core.exchange(Cmd::Hello, &p[..n]);
+        assert_eq!(st, Status::Ok);
+        assert_eq!(HelloResp::parse(&hello).unwrap().mode, m);
+        assert_eq!(core.call(Cmd::Confirm, &[target::APP]), Status::State);
+        assert_eq!(core.state(target::APP, 1), SlotState::Trying);
+        let show = [1, 1, 42, 0, 0, 0, 0];
+        assert_eq!(core.call(Cmd::Show, &show), Status::Unsupported);
+        let a = image(Shape::app(slot_binding::A), &body(), &kp);
+        assert_eq!(core.transfer(target::APP, 0, &a), Status::Ok, "the write");
+    }
 }

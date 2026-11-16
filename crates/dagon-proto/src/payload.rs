@@ -868,6 +868,32 @@ mod tests {
         );
     }
 
+    /// HELLO's modes (0 app, 1 update, 2 recovery, 3 agent) each round
+    /// trip; REBOOT mode 1 asks for update mode.
+    #[test]
+    fn hello_modes_and_reboot_into_update_mode() {
+        let modes = [mode::APP, mode::UPDATE, mode::RECOVERY, mode::AGENT];
+        assert_eq!(modes, [0, 1, 2, 3]);
+        let mut b = [0u8; HelloResp::LEN];
+        for m in modes {
+            let h = HelloResp {
+                proto_ver: 1,
+                role: role::NODE,
+                port_kind: 1,
+                mcu_id: 2,
+                mode: m,
+                active_version: Version::new(1, 0, 0),
+                trial: false,
+                key_id: [7; 8],
+                max_payload: 256,
+            };
+            assert_eq!(h.encode(&mut b).unwrap(), HelloResp::LEN);
+            assert_eq!(HelloResp::parse(&b), Ok(h));
+        }
+        assert_eq!((reboot_mode::NORMAL, reboot_mode::UPDATE), (0, 1));
+        assert_eq!(parse_u8(&[reboot_mode::UPDATE]), Ok(reboot_mode::UPDATE));
+    }
+
     #[test]
     fn version_reply_skips_what_it_does_not_read() {
         let mut b = [0u8; 64];

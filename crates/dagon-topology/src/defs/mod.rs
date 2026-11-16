@@ -23,6 +23,8 @@ mod tests_clock;
 #[cfg(test)]
 mod tests_hal_clock;
 #[cfg(test)]
+mod tests_boot_receive;
+#[cfg(test)]
 mod tests_isolation;
 #[cfg(test)]
 mod tests_merge;

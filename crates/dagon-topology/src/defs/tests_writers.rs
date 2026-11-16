@@ -77,8 +77,14 @@ fn kinds(m: &McuDef) -> Vec<ImageKind> {
 fn the_built_in_definitions_state_their_writers() {
     use ImageKind::{Agent, App, Bootcore};
     let want: BTreeMap<&str, Vec<(ImageKind, Vec<ImageKind>)>> = [
-        ("rp2040", vec![(App, vec![App]), (Bootcore, vec![App])]),
-        ("stm32f401re", vec![(App, vec![App]), (Bootcore, vec![App])]),
+        (
+            "rp2040",
+            vec![(App, vec![App, Bootcore]), (Bootcore, vec![App])],
+        ),
+        (
+            "stm32f401re",
+            vec![(App, vec![App, Bootcore]), (Bootcore, vec![App])],
+        ),
         ("esp32s3", vec![(App, vec![Agent]), (Agent, vec![App])]),
     ]
     .into_iter()
@@ -88,9 +94,15 @@ fn the_built_in_definitions_state_their_writers() {
         let mut expected = want[m.id.as_str()].clone();
         expected.sort();
         assert_eq!(have, expected, "{}", m.id);
-        assert!(
-            m.writers.values().all(|w| !w.contains(&Bootcore)),
-            "{}: no boot core writes anything",
+        let core_writes: Vec<_> = (m.writers.iter())
+            .filter(|(_, w)| w.contains(&Bootcore))
+            .map(|(k, _)| *k)
+            .collect();
+        let has_core = m.slots.iter().any(|s| s.image == Bootcore);
+        let want: &[ImageKind] = if has_core { &[App] } else { &[] };
+        assert_eq!(
+            core_writes, want,
+            "{}: a boot core writes the app only",
             m.id
         );
     }
@@ -135,6 +147,13 @@ const WRITES: &[(&str, &str, &str, &str, &str)] = &[
     ),
     (
         "rp2040",
+        "app",
+        "bootcore",
+        "crates/dagon-sim/tests/update_mode.rs",
+        "the_rp2040_boot_core_writes_the_app",
+    ),
+    (
+        "rp2040",
         "bootcore",
         "app",
         "crates/dagon-host/tests/sim.rs",
@@ -146,6 +165,13 @@ const WRITES: &[(&str, &str, &str, &str, &str)] = &[
         "app",
         "targets/mcu/stm32f401re/tests/flow.rs",
         "update_confirm_then_back_to_previous_version",
+    ),
+    (
+        "stm32f401re",
+        "app",
+        "bootcore",
+        "targets/mcu/stm32f401re/tests/update_mode.rs",
+        "the_boot_core_writes_the_app_in_update_mode",
     ),
     (
         "stm32f401re",
@@ -238,12 +264,12 @@ fn the_built_in_combinations_are_these() {
     for (mcu, single, ok) in [
         ("rp2040", &[][..], true),
         ("rp2040", &["bootcore"][..], true),
-        ("rp2040", &["app"][..], false),
-        ("rp2040", &["app", "bootcore"][..], false),
+        ("rp2040", &["app"][..], true),
+        ("rp2040", &["app", "bootcore"][..], true),
         ("stm32f401re", &[][..], true),
         ("stm32f401re", &["bootcore"][..], true),
-        ("stm32f401re", &["app"][..], false),
-        ("stm32f401re", &["app", "bootcore"][..], false),
+        ("stm32f401re", &["app"][..], true),
+        ("stm32f401re", &["app", "bootcore"][..], true),
     ] {
         assert_eq!(with_single(mcu, single).is_ok(), ok, "{mcu} {single:?}");
     }

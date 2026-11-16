@@ -129,3 +129,37 @@ impl Record {
         b
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Every kind keeps its number; the update-mode records take the
+    /// design's 0x06 and 0x09 and round trip like any record.
+    #[test]
+    fn record_kinds_are_distinct_and_round_trip() {
+        let kinds = [
+            kind::SLOT_PENDING,
+            kind::BOOT_ATTEMPT,
+            kind::CONFIRMED,
+            kind::ROLLBACK,
+            kind::UPDATE_STAY,
+            kind::PROVISION,
+            kind::UPDATE_DONE,
+            kind::SNAPSHOT,
+        ];
+        assert_eq!(kinds, [0x01, 0x02, 0x03, 0x04, 0x06, 0x08, 0x09, 0x0A]);
+        for k in kinds {
+            let r = Record {
+                kind: k,
+                target: target::APP,
+                slot: slot::NONE,
+                reason: reason::NONE,
+                seq: 7,
+                version: Version::default(),
+                digest16: [0; 16],
+            };
+            assert_eq!(Record::parse(&r.to_bytes()), Ok(r));
+        }
+    }
+}

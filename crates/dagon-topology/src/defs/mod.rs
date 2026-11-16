@@ -19,11 +19,11 @@ pub mod slot_layout;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
+mod tests_boot_receive;
+#[cfg(test)]
 mod tests_clock;
 #[cfg(test)]
 mod tests_hal_clock;
-#[cfg(test)]
-mod tests_boot_receive;
 #[cfg(test)]
 mod tests_isolation;
 #[cfg(test)]
@@ -530,6 +530,32 @@ pub struct Links {
     pub down: Vec<LinkKind>,
 }
 
+/// `[boot_receive]`: how the boot stage that writes the app receives
+/// (the boot core, or a vendor-stage2 MCU's recovery agent).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BootReceive {
+    /// How long after its start the boot stage waits for STAY before it
+    /// boots, ms: 0 to [`BootReceive::MAX_WINDOW_MS`]; 0 opens no window.
+    #[serde(default = "BootReceive::default_window_ms")]
+    pub listen_window_ms: u16,
+    /// Per link kind, whether it takes part in the listen window (a kind
+    /// left out does not).
+    pub kinds: BTreeMap<LinkKind, bool>,
+}
+
+impl BootReceive {
+    /// The design's default window, ms.
+    pub const DEFAULT_WINDOW_MS: u16 = 50;
+    /// The longest window, ms: a node without a waiting host boots at most
+    /// this much later.
+    pub const MAX_WINDOW_MS: u16 = 200;
+
+    fn default_window_ms() -> u16 {
+        Self::DEFAULT_WINDOW_MS
+    }
+}
+
 /// How the user connects the MCU for a write (UI copy).
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -671,6 +697,15 @@ pub struct McuDef {
     /// Link kinds the MCU package's firmware implements (its `LINK_KINDS`).
     #[serde(default)]
     pub links: Links,
+    /// How the boot stage that writes the app (`[writers] app` names a kind other than `app`)
+    /// receives when the app does not answer, required exactly then: `listen_window_ms` (0 to
+    /// 200, 50 when left out; 0 opens no window), how long after its start it waits for STAY
+    /// before it boots, and `kinds = { <link kind> = true | false, ... }`, whether each link kind
+    /// takes part in the listen window (a kind left out does not). A kind the other end enumerates
+    /// first (`usb-cdc`) cannot. The boot stage receives on every link of a kind of `[links]`,
+    /// none above another: on a kind that takes part from its start, on the others in update or
+    /// recovery mode. A project changes the window with `[mcu_override.<id>.boot_receive]`.
+    pub boot_receive: Option<BootReceive>,
     /// The MCU's link interfaces a topology link end names: `index` (0 to 255), `name` (`a-z`,
     /// `0-9`, `-`) and `kind` (a link kind: `i2c`, `uart`, `can`, `ethernet`, `usb-cdc`, `ble`,
     /// `wifi-tcp`); `index` and `name` each unique. A link end's `port` is one of these names, of
@@ -806,6 +841,22 @@ impl McuDef {
                 })
             })
             .collect()
+    }
+
+    /// The listen window the boot stage opens on a link of `kind`, ms: the
+    /// definition's window when `kind` is one of `[links]` and takes part
+    /// in it, else 0 (no window).
+    pub fn listen_window_ms(&self, kind: LinkKind) -> u16 {
+        let linked = self
+            .links
+            .up
+            .iter()
+            .chain(&self.links.down)
+            .any(|k| *k == kind);
+        self.boot_receive
+            .as_ref()
+            .filter(|r| linked && r.kinds.get(&kind) == Some(&true))
+            .map_or(0, |r| r.listen_window_ms)
     }
 
     /// Whether flash map and slot addresses are CPU addresses (every flash

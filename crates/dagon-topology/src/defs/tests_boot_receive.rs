@@ -82,17 +82,22 @@ fn the_listen_window_is_0_to_200_ms_and_50_by_default() {
     assert!(e.contains("listen_window_ms") && e.contains("200"), "{e}");
 }
 
-/// A kind that needs enumeration (USB) cannot take part in the window; a
-/// kind the firmware does not have cannot be received on.
+/// A kind that needs enumeration (USB) cannot take part in the window. The
+/// window opens only on a kind of `[links]` marked as taking part: a kind
+/// left out does not, and one the MCU has no link of opens none (a
+/// project may take a link kind out of `[links]` alone).
 #[test]
 fn usb_cannot_take_part_in_the_window() {
     let m = parsed("[boot_receive]\nkinds = { i2c = true, usb-cdc = false }\n").unwrap();
+    assert_eq!(m.listen_window_ms(LinkKind::I2c), 50);
+    assert_eq!(m.listen_window_ms(LinkKind::UsbCdc), 0);
     let k = m.boot_receive.unwrap().kinds;
     assert_eq!((k[&LinkKind::I2c], k[&LinkKind::UsbCdc]), (true, false));
     let e = parsed("[boot_receive]\nkinds = { usb-cdc = true }\n").unwrap_err();
     assert!(e.contains("usb-cdc") && e.contains("enumeration"), "{e}");
-    let e = parsed("[boot_receive]\nkinds = { uart = true }\n").unwrap_err();
-    assert!(e.contains("uart") && e.contains("[links]"), "{e}");
+    let m = parsed("[boot_receive]\nkinds = { uart = true }\n").unwrap();
+    assert_eq!(m.listen_window_ms(LinkKind::Uart), 0, "no uart link");
+    assert_eq!(m.listen_window_ms(LinkKind::I2c), 0, "left out");
     assert!(LinkKind::UsbCdc.enumerated());
     for k in [LinkKind::I2c, LinkKind::Uart, LinkKind::Can] {
         assert!(!k.enumerated(), "{k:?}");

@@ -110,6 +110,12 @@ pub const MCU: &[Requirement<McuCheck>] = &[
         check: writers,
     },
     Requirement {
+        engine: "boot stage listen window (boot core, recovery agent)",
+        fields: &["boot_receive.listen_window_ms"],
+        rule: "given exactly when a kind other than app writes app; window 0..=200 ms; an enumerated kind (usb-cdc) does not take part",
+        check: boot_receive,
+    },
+    Requirement {
         engine: "flash placement (all engines' regions)",
         fields: &[
             "layout.stage0.at",
@@ -588,6 +594,40 @@ fn writers(m: &McuDef) -> Result<(), String> {
                 ),
                 k.as_str(),
                 by.iter().map(|w| w.as_str()).collect::<Vec<_>>()
+            )
+        })?;
+    }
+    Ok(())
+}
+
+/// `[boot_receive]`: the boot stage that writes the app says how it
+/// receives, within the window's range, no kind that must enumerate
+/// first taking part in the window.
+fn boot_receive(m: &McuDef) -> Result<(), String> {
+    let receives = m
+        .writers
+        .get(&ImageKind::App)
+        .is_some_and(|by| by.iter().any(|w| *w != ImageKind::App));
+    let Some(r) = &m.boot_receive else {
+        return fail(receives, || {
+            "a kind other than app writes app ([writers] app), so [boot_receive] says how it receives".into()
+        });
+    };
+    fail(!receives, || {
+        "[boot_receive] is only for an MCU whose app another kind writes ([writers] app)".into()
+    })?;
+    let max = super::BootReceive::MAX_WINDOW_MS;
+    fail(r.listen_window_ms > max, || {
+        format!(
+            "boot_receive.listen_window_ms = {} is longer than {max} ms",
+            r.listen_window_ms
+        )
+    })?;
+    for (kind, &takes_part) in &r.kinds {
+        fail(takes_part && kind.enumerated(), || {
+            format!(
+                "boot_receive.kinds: {} needs enumeration before it carries a frame, so it cannot take part in the listen window",
+                kind.name()
             )
         })?;
     }

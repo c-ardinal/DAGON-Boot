@@ -40,31 +40,16 @@ use dagon_format::SigVerifier;
 
 mod small;
 
-/// What a check with [`Ed25519Small`] calls at every step of its
-/// arithmetic (a few hundred times per check, about every hundred thousand
-/// cycles on a Cortex-M0+), so a caller keeps a watchdog fed through a
-/// check that takes seconds on a slow clock. Any `Fn()` is one.
-pub trait Tick {
-    fn tick(&self);
-}
-
-/// No tick: a check that calls nothing ([`Ed25519Small::new`]).
+/// No tick: the check of [`Ed25519Small::new`], which calls nothing
+/// between its steps.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct NoTick;
 
-impl Tick for NoTick {
-    #[inline(always)]
-    fn tick(&self) {}
-}
-
-impl<F: Fn()> Tick for F {
-    fn tick(&self) {
-        self()
-    }
-}
-
-/// The Ed25519 verifier built from this crate's own arithmetic; `T` is
-/// what it calls at every step of a check ([`Tick`]).
+/// The Ed25519 verifier built from this crate's own arithmetic. With a
+/// tick ([`Ed25519Small::with_tick`]) a check calls it at every step of its
+/// arithmetic (about 760 times per check, never more than about 700,000
+/// Cortex-M0+ cycles apart), so a caller keeps a watchdog fed through a
+/// check that takes seconds on a slow clock.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Ed25519Small<T = NoTick> {
     key: [u8; 32],
@@ -79,20 +64,30 @@ impl Ed25519Small {
     }
 }
 
-impl<T: Tick> Ed25519Small<T> {
+impl<F: Fn() + Copy> Ed25519Small<F> {
     /// Checks under `key`, calling `tick` at every step of a check.
-    pub const fn with_tick(key: [u8; 32], tick: T) -> Self {
+    pub const fn with_tick(key: [u8; 32], tick: F) -> Self {
         Self { key, tick }
     }
 }
 
-impl<T: Tick> SigVerifier for Ed25519Small<T> {
+impl SigVerifier for Ed25519Small {
     fn key_id(&self) -> [u8; 8] {
         dagon_format::key_id(&self.key)
     }
 
     fn verify(&self, domain: &[u8], msg: &[&[u8]], sig: &[u8; 64]) -> bool {
-        small::verify(&self.key, domain, msg, sig, &self.tick)
+        small::verify(&self.key, domain, msg, sig)
+    }
+}
+
+impl<F: Fn() + Copy> SigVerifier for Ed25519Small<F> {
+    fn key_id(&self) -> [u8; 8] {
+        dagon_format::key_id(&self.key)
+    }
+
+    fn verify(&self, domain: &[u8], msg: &[&[u8]], sig: &[u8; 64]) -> bool {
+        small::verify_ticking(&self.key, domain, msg, sig, self.tick)
     }
 }
 
@@ -127,6 +122,6 @@ impl SigVerifier for Ed25519Compact {
         for part in msg {
             st.absorb(part);
         }
-        st.verify().is_ok() && small::verify(&self.key, domain, msg, sig, &NoTick)
+        st.verify().is_ok() && small::verify(&self.key, domain, msg, sig)
     }
 }

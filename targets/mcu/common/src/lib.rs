@@ -8,6 +8,8 @@
 //! - [`frames`]: DAGON frames cut out of a byte stream (USB CDC, UART);
 //! - [`uart`]: request/response over a byte stream (bounded, resyncing);
 //! - [`serve`]: the agent's serving loop over any link;
+//! - [`reattach`]: when a USB device drops off the bus and attaches again
+//!   because the host never reset it;
 //! - [`mapped`]: read-only `Flash` over memory-mapped flash;
 //! - [`shared`]: several handles on one flash driver, no interrupt masking;
 //! - [`vector`]: the entry point of an image that starts with its vector
@@ -25,6 +27,7 @@ pub mod hooks;
 pub mod link;
 pub mod liveness;
 pub mod mapped;
+pub mod reattach;
 pub mod serve;
 pub mod shared;
 pub mod tag;

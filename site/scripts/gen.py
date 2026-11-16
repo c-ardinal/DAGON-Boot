@@ -689,6 +689,42 @@ def def_rows(lang, path, struct, prefix=""):
     return head + "\n|---|---|---|---|\n" + "\n".join(rows) + "\n"
 
 
+MERGE = DEFS / "merge.rs"
+MERGE_ROW = re.compile(r'^\s*(row|ordered)\((Mcu|Board), "([\w.]+)", (\w+)(?:\((.*)\))?\),$', re.M)
+
+
+def merge_rows(lang):
+    """The merge-key table of a project's overrides, from the loader's `ROWS`."""
+    block = re.search(r"pub const ROWS: &\[Row\] = &\[\n(.*?)^\];", MERGE.read_text(encoding="utf-8"), re.M | re.S).group(1)
+    found = MERGE_ROW.findall(block)
+    if len(found) != len(re.findall(r"^\s*(?:row|ordered)\(", block, re.M)):
+        sys.exit(f"{MERGE.relative_to(ROOT).as_posix()}: a ROWS entry gen.py cannot read; keep one `row(..)` per line")
+    rows = []
+    for how, kind, path, rule, arg in found:
+        keys = tr(lang, "、", ", ").join(f"`{k}`" for k in re.findall(r'"([^"]+)"', arg or ""))
+        text = {
+            "Keyed": tr(lang, f"キー（{keys}）でエントリごとに合成", f"merged entry by entry by key ({keys})"),
+            "AddOrDelete": tr(lang, f"キー（{keys}）でエントリを丸ごと足すか消す", f"whole entries added or removed by key ({keys})"),
+            "Whole": tr(lang, "書くと丸ごと置き換わる", "replaced whole when given"),
+            "WholeWhenChanged": tr(lang, f"キーごとに合成。{keys}を変えるときはテーブルを丸ごと書く",
+                                   f"merged key by key; a new {keys} comes with the whole table"),
+            "Fixed": tr(lang, "上書きできない", "may not be overridden"),
+            "Same": tr(lang, "変えられない（定義の識別か、パッケージのファイル）", "may not change (the definition's identity or a file of its package)"),
+        }[rule]
+        if how == "ordered":
+            text += tr(lang, "。`dagon-order`で順を与えられる", "; `dagon-order` gives its order")
+        rows.append(f"| {tr(lang, 'マイコン' if kind == 'Mcu' else 'ボード', 'MCU' if kind == 'Mcu' else 'board')} | `{path}` | {text} |")
+    head = tr(lang, "| 定義 | 場所 | 規則 |", "| Definition | Path | Rule |")
+    return head + "\n|---|---|---|\n" + "\n".join(rows) + "\n"
+
+
+def project_keys(lang):
+    """The top-level keys of dagon.toml, from dagon-topology's `project::KEYS`."""
+    src = (ROOT / "crates" / "dagon-topology" / "src" / "project.rs").read_text(encoding="utf-8")
+    keys = re.findall(r'"([^"]+)"', re.search(r"pub const KEYS: \[&str; \d+\] = \[(.*?)\];", src, re.S).group(1))
+    return tr(lang, "、", ", ").join(f"`{k}`" for k in keys) + "\n"
+
+
 REGION_BEGIN = "<!-- generated from {}: python site/scripts/gen.py -->\n"
 REGION_END = "<!-- end of generated table -->\n"
 # (hand-written page, what the region is generated from, the region's text); a page may hold several.
@@ -697,6 +733,8 @@ REGIONS = [
     ("reference/definitions.md", "dagon-topology's McuDef", lambda lang: def_rows(lang, DEFS / "mod.rs", "McuDef")),
     ("reference/definitions.md", "dagon-topology's Isolation", lambda lang: def_rows(lang, DEFS / "isolation.rs", "Isolation", "isolation")),
     ("reference/definitions.md", "dagon-topology's BoardDef", lambda lang: def_rows(lang, DEFS / "mod.rs", "BoardDef")),
+    ("reference/definitions.md", "dagon-topology's project KEYS", project_keys),
+    ("reference/definitions.md", "dagon-topology's merge ROWS", merge_rows),
     ("reference/topology.md", "dagon-topology's Link", lambda lang: field_table(rust_struct(SCHEMA, "Link"), lang) + "\n"),
     ("reference/topology.md", "dagon-topology's End", lambda lang: field_table(rust_struct(SCHEMA, "End"), lang) + "\n"),
     ("explanation/index.md", "site/scripts/architecture.py", lambda lang: f"<div>{architecture.node_svg(lang)}</div>\n\n{architecture.component_table(lang)}"),

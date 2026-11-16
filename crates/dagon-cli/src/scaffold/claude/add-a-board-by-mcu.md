@@ -20,6 +20,13 @@ given).
   board also gives `i2c_target = true` and its `i2c` pairs. The fields are
   on the MCU and board definitions page of DAGON's documentation
   (Reference).
+- A board that is a listed board with a few differences (another pin
+  assignment, another flash part) needs no whole definition: write only
+  the fields that differ in `[board_override.<listed board id>]` of
+  `dagon.toml`, and name the listed board in the node's `board:`. It
+  applies to every node on that board; when only some nodes differ, use a
+  new `[board.<board id>]` instead. The rules are on the MCU and board
+  definitions page (Reference, Project definitions).
 - The board's clock input, when a crystal or an oscillator drives it:
   `clock = { source = { crystal_hz = <Hz> } }` (or `external_hz`), from the
   schematic or the datasheet. Left out, the node runs on its MCU's

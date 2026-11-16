@@ -16,12 +16,20 @@ Use these words with the developer, and count in ノード ("3 ノード").
 
 ## Layout
 
-- `dagon.toml`: project settings. `topology`, `pubkey` (the public key the
-  firmware embeds), `[dagon]` (where the DAGON crates come from),
-  `[build.<id>]` (how `dagon build` builds a node), `[board.<board id>]`
-  (a whole board definition for a board not in DAGON's table; the table
-  name is the board id, never a node id), `[provision.<id>]` (first-write
-  inputs).
+- `dagon.toml`: project settings. It starts with `format = 1` (the
+  number of its format; a file without it or with another number is
+  refused, and so is any top-level key DAGON does not read). `topology`,
+  `pubkey` (the public key the firmware embeds), `[dagon]` (where the
+  DAGON crates come from), `[build.<id>]` (how `dagon build` builds a
+  node), `[board.<board id>]` (a whole board definition for a board not in
+  DAGON's table; the table name is the board id, never a node id),
+  `mcu_files` (the project's own MCU definitions),
+  `[mcu_override.<mcu id>]` and `[board_override.<board id>]` (only the
+  fields of an existing MCU or board definition this project changes, for
+  every node on that MCU or board), `[provision.<id>]` (first-write
+  inputs). The keys and the override rules are on the MCU and board
+  definitions page of DAGON's documentation (Reference, Project
+  definitions).
 - `topology.yaml`: the 構成. A node with `board:` uses that board's
   package; a node with only `mcu:`, or with `board:` naming a board
   defined in `dagon.toml`, uses the MCU package (with that board's
@@ -35,6 +43,11 @@ Use these words with the developer, and count in ノード ("3 ノード").
     `topology.yaml` and run `dagon gen`.
   - `Cargo.toml`: `dagon gen` rewrites only the `dagon-board-*` and
     `dagon-mcu-*` lines; other dependencies are kept.
+- `boot/<id>/`: made by `dagon gen` for each node: its boot crate and the
+  definitions its firmware builds from (`mcu.toml`, and `board.toml` for a
+  node with a board: DAGON's definitions with the project's overrides
+  applied), with their hashes in `defs.sha256`. Never edit them; a build
+  refuses an edited one. Change `dagon.toml` and run `dagon gen`.
 - `out/`: build, signing and release output (not committed).
 
 ## Commands
@@ -62,3 +75,7 @@ first write) and `dagon deploy`.
   instead of guessing, and say which board document each value came from.
 - Do not edit the DAGON crates, the 構成 checker or the conformance tests
   to make a problem go away.
+- To change an MCU or board definition DAGON has, write only the fields
+  that change in `[mcu_override.<mcu id>]` or `[board_override.<board id>]`
+  of `dagon.toml`, then run `dagon gen`. Never copy or edit DAGON's
+  definition files.

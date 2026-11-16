@@ -66,7 +66,7 @@ esac
 FAKE_IWR = r"""
 function Invoke-WebRequest {
     param([string]$Uri, [string]$OutFile, [switch]$UseBasicParsing)
-    Add-Content -LiteralPath (Join-Path $env:FAKE_RELEASE 'urls.log') -Value $Uri
+    Add-Content -LiteralPath (Join-Path $env:FAKE_RELEASE "urls-$PID.log") -Value $Uri
     $prefix = 'https://github.com/c-ardinal/DAGON-Boot/releases/download/'
     if ($Uri.StartsWith('https://api.github.com/')) {
         $page = $Uri.Substring($Uri.LastIndexOf('page=') + 5)
@@ -120,8 +120,7 @@ class FakeRelease:
             (folder / f"{name}.sha256").write_text(f"{digest}  {name}\n", encoding="utf-8")
 
     def urls(self):
-        log = self.root / "urls.log"
-        return log.read_text(encoding="utf-8").split() if log.exists() else []
+        return [u for log in sorted(self.root.glob("urls*.log")) for u in log.read_text(encoding="utf-8").split()]
 
 
 def posix_shells():

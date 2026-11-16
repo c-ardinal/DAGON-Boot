@@ -70,7 +70,7 @@ name = "mcu-rp2040"
 version = "0.1.0"
 packages = ["dagon-mcu-rp2040"]
 paths = ["targets/mcu/rp2040"]
-formats = { wire = [1], image-header = [1], state-log = [1], topology-bin = [2], definitions = [2] }
+formats = { wire = [1], image-header = [1], state-log = [1], definitions = [2] }
 
 [[component]]
 name = "mcu-stm32f401re"

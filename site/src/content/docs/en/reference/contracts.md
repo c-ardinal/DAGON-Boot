@@ -39,7 +39,7 @@ writes, as `compat.toml` holds them. The rules for changing them are in
 | `cli` | 0.1.0 | `dagon-cli` | `wire` 1, `image-header` 1, `state-log` 1, `manifest` 1, `bundle` 1, `topology-bin` 2, `topology-yaml` 2, `definitions` 2, `serve-api` 1, `layout` 1, `event` 1, `extension-manifest` 1, `boot-program` 1, `project` 1 |
 | `boot-rp2040` | 0.1.0 | `dagon-rp2040-stage0`, `dagon-rp2040-bootcore` | `image-header` 1, `state-log` 1, `event` 1 |
 | `boot-stm32f401re` | 0.1.0 | `dagon-stm32f401re-stage0`, `dagon-stm32f401re-bootcore` | `image-header` 1, `state-log` 1, `event` 1 |
-| `mcu-rp2040` | 0.1.0 | `dagon-mcu-rp2040` | `wire` 1, `image-header` 1, `state-log` 1, `topology-bin` 2, `definitions` 2 |
+| `mcu-rp2040` | 0.1.0 | `dagon-mcu-rp2040` | `wire` 1, `image-header` 1, `state-log` 1, `definitions` 2 |
 | `mcu-stm32f401re` | 0.1.0 | `dagon-mcu-stm32f401re` | `wire` 1, `image-header` 1, `state-log` 1, `definitions` 2 |
 | `mcu-esp32s3` | 0.1.0 | `dagon-mcu-esp32s3` | `wire` 1, `image-header` 1, `state-log` 1, `definitions` 2 |
 | `mcu-common` | 0.1.0 | `dagon-mcu-common` | `wire` 1 |

@@ -40,7 +40,33 @@ function literalsOf(expr: string): string[] {
   return out;
 }
 
-const unquote = (s: string | undefined): string | null => (s !== undefined && /^'(GET|POST|PUT|DELETE)'$/.test(s.trim()) ? s.trim().slice(1, -1) : null);
+const METHODS = 'GET|POST|PUT|DELETE';
+const isIdent = (s: string): boolean => /^\w+$/.test(s);
+
+/** The text of `s` when it is exactly one string literal (single, double or backtick quotes), else null. */
+function wholeLiteral(s: string): string | null {
+  const t = s.trim();
+  const lit = /^['"`]/.test(t) ? literalsOf(t)[0] : undefined;
+  return lit !== undefined && lit.length + 2 === t.length ? lit : null;
+}
+
+function methodOf(s: string | undefined): string | null {
+  const lit = wholeLiteral(s ?? '');
+  return lit !== null && new RegExp(`^(${METHODS})$`).test(lit) ? lit : null;
+}
+
+/** The index of the first top-level `ch` of `t` (outside quotes and brackets), or -1. */
+function topLevel(t: string, ch: string): number {
+  let depth = 0;
+  for (let i = 0; i < t.length; i++) {
+    const c = t[i];
+    if (c === "'" || c === '"' || c === '`') i += literalsOf(t.slice(i))[0].length + 1;
+    else if ('([{'.includes(c)) depth++;
+    else if (')]}'.includes(c)) depth--;
+    else if (c === ch && depth === 0 && !(ch === '?' && (t[i + 1] === '.' || t[i + 1] === '?' || t[i - 1] === '?'))) return i;
+  }
+  return -1;
+}
 
 /** Calls of api/call/json('METHOD', path, ..), start('kind', path, ..), projectCall(path, ..) and fetch('/v1/path', { method }), with their top-level arguments. */
 function callsIn(src: string): { name: string; args: string[] }[] {
@@ -51,57 +77,139 @@ function callsIn(src: string): { name: string; args: string[] }[] {
     let from = m.index! + m[0].length;
     for (let i = from; i < src.length; i++) {
       const c = src[i];
-      if (c === "'" || c === '"' || c === '`') {
-        const lit = literalsOf(src.slice(i))[0];
-        i += lit.length + 1;
-      } else if ('([{'.includes(c)) depth++;
+      if (c === "'" || c === '"' || c === '`') i += literalsOf(src.slice(i))[0].length + 1;
+      else if ('([{'.includes(c)) depth++;
       else if (')]}'.includes(c) && depth-- === 0) {
         args.push(src.slice(from, i));
         break;
       } else if (c === ',' && depth === 0) (args.push(src.slice(from, i)), (from = i + 1));
     }
-    // A definition or a type has `name: type` parameters; only calls are read.
-    if (!/^\s*\w+\s*:/.test(args[0] ?? '') && !(m[1] === 'start' && !/^\s*'/.test(args[0] ?? ''))) out.push({ name: m[1], args });
+    const first = args[0] ?? '';
+    // A definition has `name: type` parameters, and a call with no argument (r.json()) carries no path.
+    if (!/^\s*\w+\s*:/.test(first) && !(args.length === 1 && first.trim() === '')) out.push({ name: m[1], args });
   }
   return out;
 }
+
+interface Read {
+  calls: { file: string; method: string; path: string }[];
+  unreadable: string[];
+}
+
+/** What `src` (the file `file`) sends to the API: method and path of each call, and every recognized call whose method or path could not be read. */
+function readCalls(file: string, src: string): Read {
+  const calls: Read['calls'] = [];
+  const unreadable: string[] = [];
+  // const path = `agent/key/...`; used later as api('PUT', path)
+  const vars = new Map([...src.matchAll(/const (\w+) = (['"`])(.*?)\2\s*;/g)].map((m) => [m[1], m[3]]));
+  // Parameters that carry a method or a path on to api()/call()/json(), start() or projectCall(): the callers of those functions are read instead.
+  const wrappers = [...src.matchAll(/\b(?:api|call|json)(?:<[^>(]*>)?\(\s*(\w+)\s*:[^,]+,\s*(\w+)\s*:/g)];
+  const forwardedMethods = new Set(wrappers.map((m) => m[1]));
+  const forwarded = new Set([...wrappers.map((m) => m[2]), ...[...src.matchAll(/\bstart\(\s*\w+\s*:\s*[^,]+,\s*(\w+)\s*:|\bprojectCall\(\s*(\w+)\s*:/g)].map((m) => m[1] ?? m[2])]);
+
+  /** Every path `expr` can be: a literal, a named literal, a forwarded parameter (none here), or each arm of a conditional; null when any is unreadable. */
+  const pathsOf = (expr: string): string[] | null => {
+    const t = expr.trim();
+    const lit = wholeLiteral(t);
+    if (lit !== null) return [lit];
+    if (isIdent(t)) return vars.has(t) ? [vars.get(t)!] : forwarded.has(t) ? [] : null;
+    const q = topLevel(t, '?');
+    if (q < 0) return null;
+    const rest = t.slice(q + 1);
+    const colon = topLevel(rest, ':');
+    if (colon < 0) return null;
+    const arms = [pathsOf(rest.slice(0, colon)), pathsOf(rest.slice(colon + 1))];
+    return arms.some((a) => a === null) ? null : arms.flatMap((a) => a!);
+  };
+
+  for (const call of callsIn(src)) {
+    const shown = `${file}: ${call.name}(${call.args.join(', ')})`;
+    if (call.name === 'fetch') {
+      // fetch('/v1/topology', { method: 'PUT', .. }); the wrapper's own `/v1/${path}` and a forwarded `...args` are not calls.
+      const expr = call.args[0].trim();
+      if (expr.startsWith('...') || expr === '`/v1/${path}`') continue;
+      const opts = call.args[1];
+      const method = opts === undefined ? 'GET' : (new RegExp(`method:\\s*(['"\`])(${METHODS})\\1`).exec(opts)?.[2] ?? (/^\s*\{(?![^}]*method)/.test(opts) ? 'GET' : null));
+      const paths = pathsOf(expr);
+      if (method === null || paths === null || !paths.length || paths.some((p) => !p.startsWith('/v1/'))) unreadable.push(shown);
+      else for (const p of paths) calls.push({ file, method, path: p.slice('/v1/'.length) });
+      continue;
+    }
+    const helper = call.name === 'start' || call.name === 'projectCall';
+    const method = helper ? 'POST' : (methodOf(call.args[0]) ?? (forwardedMethods.has((call.args[0] ?? '').trim()) ? 'forwarded' : null));
+    const paths = pathsOf(call.args[call.name === 'start' ? 1 : helper ? 0 : 1] ?? '');
+    if (method === null || paths === null) unreadable.push(shown);
+    else if (method !== 'forwarded') for (const p of paths) calls.push({ file, method, path: p });
+  }
+  return { calls, unreadable };
+}
+
+describe('the reader of the Console calls', () => {
+  const read = (src: string): Read => readCalls('x.ts', src);
+  const found = (src: string): string[] => read(src).calls.map((c) => `${c.method} ${c.path}`);
+
+  test.each([
+    ['api', "this.api('GET', 'a')", ['GET a']],
+    ['call', "this.call('POST', 'b')", ['POST b']],
+    ['json', "this.json<T>('PUT', 'c', body)", ['PUT c']],
+    ['start', "this.start('gen', 'd', { nodes }, 'x')", ['POST d']],
+    ['projectCall', "this.projectCall('e', { path }, false)", ['POST e']],
+    ['fetch', "this.d.fetch('/v1/f', { method: 'DELETE', headers })", ['DELETE f']],
+    ['fetch without options', "this.d.fetch('/v1/g')", ['GET g']],
+    ['both arms of a conditional', "this.json('GET', p === undefined ? 'h' : `h?path=${encodeURIComponent(p)}`)", ['GET h', 'GET h?path=${encodeURIComponent(p)}']],
+    ['double quotes', 'this.call("GET", "i")', ['GET i']],
+    ['backticks without ${}', 'this.call(`GET`, `j`)', ['GET j']],
+    ['backticks with ${}', 'this.call("GET", `k/${id}`)', ['GET k/${id}']],
+    ['a named template', 'const p = `l/${a}`;\nthis.api("PUT", p)', ['PUT l/${a}']],
+    ['a named double-quoted string', 'const p = "m";\nthis.api("PUT", p)', ['PUT m']],
+    ['a conditional fetch', "this.d.fetch(x ? '/v1/n' : \"/v1/o\", { method: `POST` })", ['POST n', 'POST o']],
+  ])('%s is read', (_n, src, want) => {
+    const r = read(src);
+    expect(r.unreadable).toEqual([]);
+    expect(found(src)).toEqual(want);
+  });
+
+  test('a wrapper passing its method and path on is not a call; its callers are', () => {
+    const src = "api(method: string, path: string) { return this.call(method, path); }\nthis.api('GET', 'q')";
+    expect(read(src)).toMatchObject({ unreadable: [], calls: [{ method: 'GET', path: 'q' }] });
+  });
+
+  test.each([
+    ['a method that is a call', "this.call(verb(), 'a')"],
+    ['a method that is not a literal', "this.call(verb, 'a')"],
+    ['a method that is not an HTTP one', 'this.call("FETCH", "a")'],
+    ['a path built by a function', "this.call('GET', pathOf(1))"],
+    ['a path that is a variable of unknown value', "this.call('GET', target)"],
+    ['a path concatenated', "this.call('GET', 'a' + id)"],
+    ['one conditional arm that is not a literal', "this.call('GET', c ? 'a' : other)"],
+    ['a call with no path', "this.call('GET')"],
+    ['a fetch of a variable', 'this.d.fetch(url, { method: "GET" })'],
+    ['a fetch with a method that is not a literal', "this.d.fetch('/v1/a', { method: m })"],
+    ['a fetch outside /v1/', "this.d.fetch('/other', { method: 'GET' })"],
+    ['a start with a path that is not a literal', "this.start('gen', where, {}, 'x')"],
+    ['a projectCall with a path that is not a literal', 'this.projectCall(where, {}, false)'],
+  ])('%s is unreadable, not skipped', (_n, src) => {
+    expect(read(src).unreadable).toHaveLength(1);
+  });
+});
 
 describe('every API path the Console calls is in the server route table', () => {
   const routes = [...text('crates/dagon-cli/src/serve/api.rs').matchAll(/\("(GET|POST|PUT|DELETE)",\s*\[([^\]]*)\]\)/g)].map((m) => ({
     method: m[1],
     // A quoted segment is literal, a bare name is a parameter.
-    segs: m[2].split(',').map((s) => s.trim()).map((s) => (s.startsWith('"') ? s.slice(1, -1) : null)),
+    segs: m[2]
+      .split(',')
+      .map((s) => s.trim())
+      .map((s) => (s.startsWith('"') ? s.slice(1, -1) : null)),
   }));
 
   const sources = ['app/agent.svelte.ts', 'app/define/cli.svelte.ts'];
-  const calls: { file: string; method: string; path: string }[] = [];
+  const calls: Read['calls'] = [];
   const unreadable: string[] = [];
   for (const file of sources) {
-    const src = web(file);
-    // const path = `agent/key/...`; used later as api('PUT', path)
-    const vars = new Map([...src.matchAll(/const (\w+) = `([^`]*)`/g)].map((m) => [m[1], m[2]]));
-    // A parameter that carries a path on to api()/call()/json(): the callers of its function are read instead.
-    const forwarded = new Set([...src.matchAll(/\bstart\(\s*\w+\s*:\s*[^,]+,\s*(\w+)\s*:|\bprojectCall\(\s*(\w+)\s*:/g)].map((m) => m[1] ?? m[2]));
-    for (const call of callsIn(src)) {
-      if (call.name === 'fetch') {
-        // fetch('/v1/topology', { method: 'PUT', .. }); the wrapper's own `/v1/${path}` and a forwarded `...args` are not calls.
-        const expr = call.args[0].trim();
-        const method = /method:\s*'(GET|POST|PUT|DELETE)'/.exec(call.args[1] ?? '')?.[1] ?? (call.args[1] === undefined ? 'GET' : null);
-        if (expr.startsWith('...') || expr === '`/v1/${path}`') continue;
-        const lits = literalsOf(expr).filter((l) => l.startsWith('/v1/'));
-        if (!lits.length || method === null) unreadable.push(`${file}: fetch(${call.args.join(', ')})`);
-        else for (const l of lits) calls.push({ file, method, path: l.slice('/v1/'.length) });
-        continue;
-      }
-      const exprs = call.name === 'start' || call.name === 'projectCall' ? [call.args[call.name === 'start' ? 1 : 0]] : [call.args[1]];
-      const method = call.name === 'start' || call.name === 'projectCall' ? 'POST' : unquote(call.args[0]);
-      if (method === null || exprs[0] === undefined) continue;
-      const expr = exprs[0].trim();
-      const lits = literalsOf(expr);
-      const path = lits.length ? lits : /^\w+$/.test(expr) && vars.has(expr) ? [vars.get(expr)!] : /^\w+$/.test(expr) && forwarded.has(expr) ? [] : null;
-      if (path === null) unreadable.push(`${file}: ${call.name}(${call.args.join(', ')})`);
-      else for (const p of path) calls.push({ file, method, path: p });
-    }
+    const read = readCalls(file, web(file));
+    calls.push(...read.calls);
+    unreadable.push(...read.unreadable);
   }
 
   const matches = (c: { method: string; path: string }): boolean => {
@@ -115,7 +223,7 @@ describe('every API path the Console calls is in the server route table', () => 
     expect(calls.map((c) => `${c.method} ${c.path.split('?')[0]}`)).toContain('GET fs');
   });
 
-  test('no call is skipped because its path cannot be read', () => {
+  test('no call is skipped because its method or path cannot be read', () => {
     expect(unreadable).toEqual([]);
   });
 
@@ -123,7 +231,7 @@ describe('every API path the Console calls is in the server route table', () => 
     const files = (dir: URL): URL[] => readdirSync(dir, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? files(new URL(`${e.name}/`, dir)) : [new URL(e.name, dir)]));
     const callers = files(new URL('../', import.meta.url))
       .filter((f) => /\.(ts|svelte)$/.test(f.pathname) && !/\.test\.ts$|agentMock|wasm\/pkg/.test(f.pathname) && !sources.some((s) => f.pathname.endsWith(`/${s}`)))
-      .filter((f) => /fetch\(\s*[`'"]\/v1\/|\b(?:api|call|json)(?:<[^>(]*>)?\(\s*'(?:GET|POST|PUT|DELETE)'/.test(new TextDecoder().decode(readFileSync(f))));
+      .filter((f) => /fetch\(\s*[`'"]\/v1\/|\b(?:api|call|json)(?:<[^>(]*>)?\(\s*['"`](?:GET|POST|PUT|DELETE)['"`]/.test(new TextDecoder().decode(readFileSync(f))));
     expect(callers.map((f) => f.pathname.split('/src/')[1])).toEqual([]);
   });
 

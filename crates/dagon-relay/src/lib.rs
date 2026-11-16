@@ -3,9 +3,9 @@
 //!
 //! - [`serve`]: answers the requests of the PC (or whoever drives this
 //!   node) over a [`dagon_port::Link`]: RELAY to a node over one of this
-//!   node's links, SHOW to the [`State`] a display reads, SUBCTL and
-//!   I2C_RAW for the ROM recovery path ([`Recovery`]), everything else to
-//!   this node's own agent.
+//!   node's links, SUBCTL and I2C_RAW for the ROM recovery path
+//!   ([`Recovery`]), everything else to this node's own agent (SHOW
+//!   included; the [`State`] a display reads notes its progress too).
 //! - [`run_link`]: one worker per link ([`dagon_port::NodeLink`]): it
 //!   carries the requests [`serve`] hands it through a [`Port`], and polls
 //!   the nodes on its link with HELLO while the PC is quiet.

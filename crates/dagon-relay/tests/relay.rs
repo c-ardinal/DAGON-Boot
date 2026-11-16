@@ -13,7 +13,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::task::{Context, Poll, Wake, Waker};
 
-use dagon_events::{compose, Bounds, Composed, Layer, Nop, Published, Watchdog};
+use dagon_agent::snapshot::AppSnapshot;
+use dagon_events::{compose, Bounds, Composed, Layer, Nop, Published, Reader, Watchdog};
 use dagon_format::Version;
 use dagon_port::{
     hello_request, BusError, Flash, FlashError, FlashRegion, Link, LinkError, LinkKind, NodeLink,
@@ -298,7 +299,7 @@ impl Flash for Erased {
     }
 }
 
-type Chain = Composed<&'static Published<(), 8>, Nop, Nop, fn() -> u64>;
+type Chain = Composed<&'static Published<AppSnapshot, 8>, Nop, Nop, fn() -> u64>;
 
 /// This node's agent: the agent crate's, over the simulator's store.
 struct NodeAgent(dagon_agent::Agent<SimStore, Chain>);
@@ -330,8 +331,9 @@ impl OwnAgent for NodeAgent {
     }
 }
 
-fn agent() -> NodeAgent {
-    let events = Box::leak(Box::new(Published::new()));
+/// This node's agent, and what its app reads from it.
+fn agent() -> (NodeAgent, Reader<AppSnapshot, 8>) {
+    let events: &'static mut Published<AppSnapshot, 8> = Box::leak(Box::new(Published::new()));
     let now: fn() -> u64 = || 0;
     let chain = compose(
         Layer::App,
@@ -341,7 +343,11 @@ fn agent() -> NodeAgent {
         Bounds::new(now, Watchdog::new(4000, 4000)),
     );
     let cfg = dagon_sim::hub_config(dagon_sim::sample::PUBKEY);
-    NodeAgent(dagon_agent::Agent::new(cfg, SimStore::default(), chain))
+    let app = chain.reader();
+    (
+        NodeAgent(dagon_agent::Agent::new(cfg, SimStore::default(), chain)),
+        app,
+    )
 }
 
 /// The PC end of the relay's uplink: the scenario sends requests and reads
@@ -503,8 +509,9 @@ fn the_relay_serves_the_pc_over_its_links() {
         port: sim_ports[i],
         asked,
     };
+    let (own, app) = agent();
     let relay = Relay {
-        agent: agent(),
+        agent: own,
         flash: Erased,
         topology: 0,
         identity: Identity {
@@ -592,6 +599,10 @@ fn the_relay_serves_the_pc_over_its_links() {
         let shown = clock.now_ms();
         let before = bus_asked.borrow().len();
         assert!(state.home().progress.is_some());
+        // The SHOW reaches this node's own agent too: its app reads the
+        // progress the host told it.
+        let told = app.latest().map(|l| l.state.percent);
+        assert_eq!(told, Some(Some(10)), "the app's progress");
         clock.wait_until(shown + 9_500).await;
         assert_eq!(
             bus_asked.borrow().len(),
@@ -743,7 +754,7 @@ fn serves(index: u8) -> (Vec<dagon_relay::nodes::LinkedNode>, Vec<u8>) {
     let (requests, replies) = (Frames::new(), Frames::new());
     let asked = Rc::new(RefCell::new(Vec::new()));
     let relay = Relay {
-        agent: agent(),
+        agent: agent().0,
         flash: same_tag_topology(),
         topology: 0,
         identity: Identity {

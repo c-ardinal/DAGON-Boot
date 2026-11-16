@@ -10,7 +10,6 @@ version = "0.1.0"
 store-tests = []
 
 [dependencies]
-dagon-ed25519 = { path = "../dagon-ed25519", features = ["compact"] }
 dagon-events = { path = "../dagon-events" }
 dagon-format = { path = "../dagon-format" }
 dagon-proto = { path = "../dagon-proto" }
@@ -25,4 +24,5 @@ critical-section = { version = "1.1", features = ["std"] }
 # Its own tests share their slot store with the bench (`store-tests`).
 dagon-agent = { path = ".", features = ["store-tests"] }
 dagon-core = { path = "../dagon-core" }
+dagon-ed25519 = { path = "../dagon-ed25519", features = ["compact"] }
 ed25519-compact = { version = "2.6", default-features = false }

@@ -1,5 +1,7 @@
-//! DAGON agent: embedded in an application, it answers HELLO/STATUS/VERSION, receives
-//! images into the inactive slot, switches the boot target and confirms.
+//! DAGON agent: a node's update session, the same in its application and
+//! in its boot core ([`Writer`]). It answers HELLO/STATUS/VERSION, receives
+//! images into a slot its writer does not run from, checks them with the
+//! verifier it is built with, switches the boot target and confirms.
 //!
 //! Every state change is a transition of one of the machines declared
 //! below, and every transition delivers its event to the app layer's
@@ -58,9 +60,9 @@ dagon_events::state_machine! {
         initial Empty;
         states { Empty, Written, Pending, Trial, Confirmed, Reverted }
         transitions {
-            /// The slot was erased for a new image (never the running or
-            /// the confirmed slot).
-            erase(target: u8, slot: u8, len: u32): Empty | Written | Pending | Reverted => Empty
+            /// The slot was erased for a new image (never the slot the
+            /// writer runs from, nor the app's confirmed slot by the app).
+            erase(target: u8, slot: u8, len: u32): Empty | Written | Pending | Trial | Confirmed | Reverted => Empty
                 emits TransferStarted = 0x20 { target: u8, slot: u8, len: u32 }
                 observe(live, host);
             /// The body verified and the header written and read back: the
@@ -379,7 +381,8 @@ pub enum StoreError {
 /// `target` is the XFER target (`payload::target::APP`, or
 /// `payload::target::TOPOLOGY` with `slot = 0` on the hub); `slot` is 0 = A,
 /// 1 = B. Offsets are relative to the start of the image body. The agent never
-/// asks to erase or write the running slot or the confirmed slot.
+/// asks to erase or write the slot its [`Writer`] runs from, nor the
+/// confirmed slot of that image kind.
 ///
 /// The mutators take a [`Transition`]: only the agent's image machine calls
 /// them, inside the transition that emits the change's event. Methods added
@@ -545,11 +548,9 @@ pub trait SlotStore {
     }
 }
 
-/// Identity of the node the agent runs on.
+/// Identity of the node the agent runs on, and the image it runs in.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Config {
-    /// Ed25519 public key embedded at build time.
-    pub pubkey: [u8; 32],
     /// Image header `mcu_id` this node accepts.
     pub mcu_id: u16,
     /// Image header `port_kind` this node accepts.
@@ -565,6 +566,30 @@ pub struct Config {
     /// Boots the boot core gives an image on trial before it rolls back
     /// (the MCU package's boot settings; `TrialInfo::max`).
     pub trial_attempts: u8,
+    /// The image the session runs in: which slots it never writes.
+    pub writer: Writer,
+}
+
+/// The image a session runs in, as the MCU definition's `[writers]` names
+/// the kinds that write: a writer never writes the slot it runs from, nor
+/// the one it goes back to (`Agent`'s guards).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum Writer {
+    /// The app, running from an APP slot.
+    App,
+    /// The boot core, running from a boot core slot.
+    BootCore,
+}
+
+impl Writer {
+    /// The XFER target of the image kind it runs from.
+    pub fn target(self) -> u8 {
+        match self {
+            Writer::App => payload::target::APP,
+            Writer::BootCore => payload::target::BOOTCORE,
+        }
+    }
 }
 
 pub use dagon_port::NO_ADDR;

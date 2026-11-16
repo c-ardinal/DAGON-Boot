@@ -3,14 +3,13 @@
   import { INSPECT } from '../../app/copy.ts';
   import type { Define } from '../../app/define/define.svelte.ts';
   import {
-    boardMissing,
     connect,
     freeAddrs,
     definedPins,
     hopAvailable,
     LINK_KINDS,
+    ownFlash,
     removeLink,
-    setBoard,
     setBus,
     setLink,
     setLinkKind,
@@ -53,6 +52,7 @@
   const hubPins = $derived(definedPins(hub));
   const MAX_ATTEMPTS = [1, 2, 3, 4, 5];
   const nodeLink = $derived(node ? linkIndexOf(t, node.id) : -1);
+  const flash = $derived(node ? ownFlash(d.doc, node.id) : null);
   const name = (id: string) => d.doc.names[id] ?? id;
   const byId = (id: string) => t.nodes.find((n) => n.id === id);
   /** Kinds a 親機's uplink may be (not I2C or CAN towards a PC). */
@@ -91,8 +91,7 @@
 {#snippet bad(field: string)}
   {#each issues(field) as p (p.rule + p.path)}
     {@const c = problemChip(p)}
-    <!-- B-01 is said once, beside the ボード heading. -->
-    {#if p.rule !== 'B-01'}<span class={c.kind} id="bad-{p.rule}-{field}">{c.mark} {p.short}</span>{/if}
+    <span class={c.kind} id="bad-{p.rule}-{field}">{c.mark} {p.short}</span>
   {/each}
 {/snippet}
 
@@ -175,20 +174,8 @@
           </select></label
         >
       {/if}
-      {#if !node.board}
-        <h3>{INSPECT.board}{#if boardMissing(d.doc, node.id)}&ensp;<span class="warn">{INSPECT.boardUnset}</span>{/if}</h3>
-        <label
-          >{INSPECT.flashSize}<select
-            data-field="board.flash"
-            value={d.doc.boards?.[node.id]?.flashBytes ?? ''}
-            aria-invalid={issues('board.flash').some((p) => p.severity === 'error')}
-            aria-describedby="flash-help"
-            onchange={(e) => d.apply(setBoard(d.doc, node.id, { flashBytes: e.currentTarget.value ? Number(e.currentTarget.value) : undefined }))}
-          >
-            <option value="">{INSPECT.unset}</option>
-            {#each [18, 19, 20, 21, 22, 23, 24, 25] as p (p)}<option value={2 ** p}>{2 ** p >= 2 ** 20 ? `${2 ** (p - 20)} MiB` : `${2 ** (p - 10)} KiB`}</option>{/each}
-          </select><span id="flash-help" class="help">{INSPECT.flashHelp}</span>{@render bad('board.flash')}</label
-        >
+      {#if flash !== null}
+        <div class="field"><span class="label">{INSPECT.flashSize}</span><span class="value" data-field="flash-own" translate="no">{INSPECT.flashValue(flash)}</span></div>
       {/if}
       {#if nodeLink >= 0}
         {@render controlPins(linkView(t, (t.links ?? [])[nodeLink]), nodeLink)}
@@ -392,17 +379,6 @@
   }
   [aria-invalid='true'] {
     border-color: var(--c-signal);
-  }
-  h3 {
-    margin: var(--s-2) 0 0;
-    font: 700 var(--t-small) / 20px var(--f-ja);
-  }
-  .warn {
-    font: 700 var(--t-caption) / 16px var(--f-ja);
-  }
-  .help {
-    color: var(--c-muted);
-    font-weight: 400;
   }
   .error {
     color: var(--c-signal);

@@ -3,8 +3,8 @@
     python -m unittest discover -s scripts -p "test_*.py"
 
 Nothing in the scripts points at a test server: a fake `curl` and `uname` come
-first on PATH for install.sh, and a fake Invoke-WebRequest shadows the cmdlet for
-install.ps1, so the scripts run as they are and every URL they ask for is seen.
+first on PATH for setup.sh, and a fake Invoke-WebRequest shadows the cmdlet for
+setup.ps1, so the scripts run as they are and every URL they ask for is seen.
 """
 import hashlib
 import io
@@ -20,8 +20,8 @@ import unittest
 import zipfile
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-SH = ROOT / "install.sh"
-PS1 = ROOT / "install.ps1"
+SH = ROOT / "setup.sh"
+PS1 = ROOT / "setup.ps1"
 RELEASES = "https://github.com/c-ardinal/DAGON-Boot/releases/download/"
 API = "https://api.github.com/repos/c-ardinal/DAGON-Boot/releases?per_page=100&page="
 LINUX = "x86_64-unknown-linux-gnu"
@@ -341,6 +341,56 @@ class InstallSh(unittest.TestCase):
         text = SH.read_text(encoding="utf-8")
         self.assertIn("--proto '=https'", text)
         self.assertEqual(re.findall(r"http://", text), [])
+    def installed(self):
+        self.dir.mkdir()
+        (self.dir / "dagon").write_bytes(b"binary dagon")
+        (self.dir / "other").write_bytes(b"keep")
+
+    def test_uninstall_removes_only_dagon_and_requests_nothing(self):
+        self.installed()
+        for how in ({"args": ("--uninstall",)}, {"env": {"DAGON_UNINSTALL": "1"}}):
+            with self.subTest(**how):
+                (self.dir / "dagon").write_bytes(b"binary dagon")
+                r = self.run_script(*how.get("args", ()), env=how.get("env"))
+                self.assertEqual(r.returncode, 0, r.stderr)
+                self.assertEqual(sorted(p.name for p in self.dir.iterdir()), ["other"])
+                self.assertIn(b"removed", r.stdout)
+                self.assertEqual(self.release.urls(), [])
+
+    def test_uninstall_twice_succeeds_and_keeps_the_folder(self):
+        self.installed()
+        (self.dir / "other").unlink()
+        self.assertEqual(self.run_script("--uninstall").returncode, 0)
+        r = self.run_script("--uninstall")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn(b"not installed", r.stdout)
+        self.assertTrue(self.dir.is_dir())
+
+    def test_uninstall_keeps_the_keys_and_says_so(self):
+        self.installed()
+        home = pathlib.Path(self.tmp.name) / "home"
+        key = home / ".dagon" / "keys" / "node" / "dagon-signing.key"
+        key.parent.mkdir(parents=True)
+        key.write_bytes(b"secret")
+        r = self.run_script("--uninstall", env={"HOME": str(home)})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(key.read_bytes(), b"secret")
+        self.assertIn(b"no longer be updated", r.stdout)
+
+    def test_uninstall_works_in_every_posix_shell_and_a_relative_folder(self):
+        for shell in posix_shells():
+            with self.subTest(shell=shell):
+                (self.dir / "bin").mkdir(parents=True, exist_ok=True)
+                (self.dir / "bin" / "dagon").write_bytes(b"x")
+                r = self.run_script("--uninstall", shell=shell, env={"DAGON_INSTALL_DIR": "bin"}, cwd=self.dir)
+                self.assertEqual(r.returncode, 0, r.stderr)
+                self.assertFalse((self.dir / "bin" / "dagon").exists())
+
+    def test_an_unknown_option_stops_it(self):
+        self.installed()
+        r = self.run_script("--purge")
+        self.assertNotEqual(r.returncode, 0)
+        self.assertTrue((self.dir / "dagon").exists())
 
 
 def powershell():
@@ -497,6 +547,98 @@ class InstallPs1(unittest.TestCase):
     def test_an_archive_without_dagon_stops_it(self):
         self.release.publish("1.2.3", WINDOWS, a_zip(["other"]), ".zip")
         self.assert_nothing_installed(self.run_script())
+    def installed(self):
+        self.dir.mkdir()
+        (self.dir / "dagon.exe").write_bytes(b"binary dagon.exe")
+
+    def test_uninstall_removes_dagon_and_the_empty_folder_and_requests_nothing(self):
+        self.installed()
+        r = self.run_script(env={"DAGON_UNINSTALL": "1"})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertFalse(self.dir.exists())
+        self.assertIn(b"removed", r.stdout)
+        self.assertEqual(self.release.urls(), [])
+
+    def test_uninstall_keeps_a_folder_with_other_files(self):
+        self.installed()
+        (self.dir / "other").write_bytes(b"keep")
+        r = self.run_script(env={"DAGON_UNINSTALL": "1"})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual([p.name for p in self.dir.iterdir()], ["other"])
+
+    def test_uninstall_twice_succeeds(self):
+        self.installed()
+        self.assertEqual(self.run_script(env={"DAGON_UNINSTALL": "1"}).returncode, 0)
+        r = self.run_script(env={"DAGON_UNINSTALL": "1"})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn(b"not installed", r.stdout)
+        self.assertEqual(self.release.urls(), [])
+
+    def test_uninstall_keeps_the_keys_and_says_so(self):
+        self.installed()
+        home = pathlib.Path(self.tmp.name) / "home"
+        key = home / ".dagon" / "keys" / "node" / "dagon-signing.key"
+        key.parent.mkdir(parents=True)
+        key.write_bytes(b"secret")
+        r = self.run_script(env={"DAGON_UNINSTALL": "1", "USERPROFILE": str(home)})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(key.read_bytes(), b"secret")
+        self.assertIn(b"no longer be updated", r.stdout)
+
+    def uninstall_path(self, entries, modify=True):
+        """Runs the uninstall on the process PATH scope, never the user's registry; returns the PATH after."""
+        self.installed()
+        text = self.harness.read_text(encoding="utf-8") + '\nWrite-Output "PATH=$env:Path"\n'
+        self.harness.write_text(text, encoding="utf-8")
+        environment = {**os.environ, "FAKE_RELEASE": str(self.release.root), "DAGON_INSTALL_DIR": str(self.dir),
+                       "DAGON_UNINSTALL": "1", "DAGON_PATH_SCOPE": "Process", "Path": ";".join(entries)}
+        environment.pop("DAGON_NO_MODIFY_PATH", None)
+        if not modify:
+            environment["DAGON_NO_MODIFY_PATH"] = "1"
+        r = subprocess.run([powershell(), "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(self.harness)], env=environment, capture_output=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return r.stdout.decode().split("PATH=", 1)[1].strip(), r.stdout
+
+    def test_uninstall_drops_exactly_the_folders_path_entry(self):
+        before = ["C:\\one", str(self.dir).upper() + "\\", "C:\\two", str(self.dir)]
+        after, out = self.uninstall_path(before)
+        self.assertEqual(after, "C:\\one;C:\\two")
+        self.assertIn(b"removed from your user's PATH", out)
+
+    def test_uninstall_keeps_every_other_segment_as_it_is(self):
+        before = ["%USERPROFILE%\\bin", "", str(self.dir), "C:\\one\\", "", str(self.dir).lower() + "\\", "%PATH_VAR%"]
+        after, _ = self.uninstall_path(before)
+        self.assertEqual(after, "%USERPROFILE%\\bin;;C:\\one\\;;%PATH_VAR%")
+
+    def test_uninstall_leaves_a_directory_named_dagon_exe_alone(self):
+        self.dir.mkdir()
+        (self.dir / "dagon.exe").mkdir()
+        r = self.run_script(env={"DAGON_UNINSTALL": "1"})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertTrue((self.dir / "dagon.exe").is_dir())
+        self.assertIn(b"not installed", r.stdout)
+
+    def test_a_run_after_an_uninstall_in_the_same_session_installs(self):
+        self.installed()
+        self.release.publish("1.2.3", WINDOWS, self.good, ".zip")
+        run = f"Get-Content -Raw -LiteralPath '{PS1}' | Invoke-Expression\n"
+        self.harness.write_text(self.harness.read_text(encoding="utf-8") + run, encoding="utf-8")
+        (self.dir / "dagon.exe").write_bytes(b"old")
+        r = self.run_script(env={"DAGON_UNINSTALL": "1"})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn(b"removed", r.stdout)
+        self.assertIn(b"installed in", r.stdout)
+        self.assertEqual((self.dir / "dagon.exe").read_bytes(), b"binary dagon.exe")
+
+    def test_uninstall_leaves_path_alone_when_the_folder_is_not_on_it(self):
+        after, _ = self.uninstall_path(["C:\\one", "C:\\two"])
+        self.assertEqual(after, "C:\\one;C:\\two")
+
+    def test_uninstall_with_no_modify_path_leaves_path_and_says_how(self):
+        before = ["C:\\one", str(self.dir)]
+        after, out = self.uninstall_path(before, modify=False)
+        self.assertEqual(after, ";".join(before))
+        self.assertIn(b"Remove it", out)
 
 
 class Scripts(unittest.TestCase):
@@ -559,8 +701,18 @@ class Scripts(unittest.TestCase):
     def test_the_one_liners_point_at_the_main_branch(self):
         for rel in ("README.md", "README.en.md", "site/src/content/docs/getting-started/install.md", "site/src/content/docs/en/getting-started/install.md"):
             text = (ROOT / rel).read_text(encoding="utf-8")
-            self.assertIn("curl -fsSL https://raw.githubusercontent.com/c-ardinal/DAGON-Boot/main/install.sh | sh", text, rel)
-            self.assertIn("irm https://raw.githubusercontent.com/c-ardinal/DAGON-Boot/main/install.ps1 | iex", text, rel)
+            self.assertIn("curl -fsSL https://raw.githubusercontent.com/c-ardinal/DAGON-Boot/main/setup.sh | sh", text, rel)
+            self.assertIn("irm https://raw.githubusercontent.com/c-ardinal/DAGON-Boot/main/setup.ps1 | iex", text, rel)
+
+    def test_the_readmes_and_install_pages_say_how_to_uninstall(self):
+        for rel in ("README.md", "README.en.md", "site/src/content/docs/getting-started/install.md", "site/src/content/docs/en/getting-started/install.md"):
+            text = (ROOT / rel).read_text(encoding="utf-8")
+            self.assertIn("--uninstall", text, rel)
+            self.assertIn("DAGON_UNINSTALL", text, rel)
+            self.assertIn('$env:DAGON_UNINSTALL = "1"; irm https://raw.githubusercontent.com/c-ardinal/DAGON-Boot/main/setup.ps1 | iex\n', text, rel)
+            self.assertNotIn("Env:DAGON_UNINSTALL", text, rel)
+            self.assertIn("cargo uninstall dagon-cli", text, rel)
+        self.assertIn("Remove-Item Env:DAGON_UNINSTALL", PS1.read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":

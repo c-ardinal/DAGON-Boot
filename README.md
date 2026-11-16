@@ -77,14 +77,28 @@ PCに繋いだ1つのマイコンを通してその先のマイコンにも、�
 Linux / macOS
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/c-ardinal/DAGON-Boot/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/c-ardinal/DAGON-Boot/main/setup.sh | sh
 ```
 
 Windows
 
 ```powershell
-irm https://raw.githubusercontent.com/c-ardinal/DAGON-Boot/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/c-ardinal/DAGON-Boot/main/setup.ps1 | iex
 ```
+
+#### アンインストール
+
+同じスクリプトで外せます。`~/.dagon`の鍵は残ります。消すと、その鍵で書いたマイコンに、もう書き込めなくなります。
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/c-ardinal/DAGON-Boot/main/setup.sh | sh -s -- --uninstall
+```
+
+```powershell
+$env:DAGON_UNINSTALL = "1"; irm https://raw.githubusercontent.com/c-ardinal/DAGON-Boot/main/setup.ps1 | iex
+```
+
+環境変数`DAGON_UNINSTALL=1`でも同じです。PowerShellのスクリプトは、実行したあとでこの変数を消します。
 
 #### シミュレータで試す
 
@@ -161,7 +175,7 @@ DAGONがしないことと、スロットが1つのイメージにできない�
 cargo install --git https://github.com/c-ardinal/DAGON-Boot --tag cli-v<version> dagon-cli
 ```
 
-クローンからビルドするときは`cargo install --path crates/dagon-cli`です。
+クローンからビルドするときは`cargo install --path crates/dagon-cli`です。外すときは`cargo uninstall dagon-cli`です。
 
 ## 依存しているものと外部のデータ
 

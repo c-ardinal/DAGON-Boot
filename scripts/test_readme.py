@@ -123,8 +123,10 @@ class Readmes(unittest.TestCase):
             self.assertIn(word, text, path.name)
             for cc in compilers:
                 self.assertIn(cc, text, path.name)
-        for name in ("ci.yml", "release.yml", "pages.yml"):
-            self.assertNotIn("-latest", (ROOT / ".github/workflows" / name).read_text(encoding="utf-8"), name)
+        workflows = sorted((ROOT / ".github/workflows").glob("*.y*ml"))
+        self.assertIn("ci.yml", [p.name for p in workflows])
+        for path in workflows:
+            self.assertNotIn("-latest", path.read_text(encoding="utf-8"), path.name)
         ci = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
         for image in re.findall(r"os: \[([^\]]+)\]", ci)[0].split(", "):
             self.assertIn(f"os: {image},", release, image)

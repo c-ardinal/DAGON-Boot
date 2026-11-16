@@ -126,6 +126,16 @@ Each key is the entry of service `dagon`, account `<agent id>/<way id>`
 key in a file; where no store can be used, registering is refused. A key
 leaves the store only into the request header of its way.
 
+Where no store can be used, `dagon ai key` answers as follows (serve's PUT
+and DELETE answer 503 `AGENT_KEY_STORE`, above):
+
+- `dagon ai key set` and `dagon ai key delete` print `error: <store> cannot
+  be used (<reason>); <how to install or start one>. DAGON keeps API keys
+  nowhere else` and exit 1; `set` refuses before asking for the key.
+- `dagon ai key status` exits 0 and shows each way that takes a key as
+  `未登録 (<reason>)`; its exit code does not tell a missing store from a
+  missing key.
+
 ## AI routes before linking
 
 Every `/v1/ai/...` route answers, until linked:

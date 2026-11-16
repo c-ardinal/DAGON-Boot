@@ -136,7 +136,7 @@ description: "dagon-mcu.tomlとdagon-board.toml: DAGONがマイコンやボー�
 
 `dagon.toml`は、ボードを`[board.<id>]`のテーブルとしてその場で定義でき（`id`を除いたボードのスキーマ）、マイコンのファイルを`mcu_files = ["defs/my-mcu/dagon-mcu.toml"]`で登録できます。定義が参照するファイルは、その定義のフォルダの中で解決します。
 
-`[board.<id>]`の`<id>`はボードのidで、ノードの`board:`がこのidを指します。`dagon.toml`の`[board.<id>]`は、いつもボードの定義です。そのボードにはボードのcrateが無いので、そのボードを指すノードは、`dagon gen`がマイコンのcrateから作り、ボードの`flash_bytes`を`wiring.rs`に書きます。
+`[board.<id>]`の`<id>`はボードのidで、ノードの`board:`がこのidを指します。`dagon.toml`の`[board.<id>]`は、いつもボードの定義です。そのボードにはボードのcrateが無いので、そのボードを指すノードは、`dagon gen`がマイコンのcrateから作り、ボードの`flash_bytes`を`wiring.rs`に書きます。マイコンだけを指すノードにはボードがいりません。ボードもフラッシュの大きさも求めず、DAGON Consoleは、マイコンの定義の既定のフラッシュマップが配置するフラッシュの大きさを、読み取り専用で示します。
 
 ### 定義の上書き
 

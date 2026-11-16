@@ -8,13 +8,13 @@ description: "Installing the dagon command from a release, and building it yours
 Linux and macOS:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/c-ardinal/DAGON-Boot/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/c-ardinal/DAGON-Boot/main/setup.sh | sh
 ```
 
 Windows (PowerShell):
 
 ```powershell
-irm https://raw.githubusercontent.com/c-ardinal/DAGON-Boot/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/c-ardinal/DAGON-Boot/main/setup.ps1 | iex
 ```
 
 The script does this:
@@ -29,9 +29,10 @@ The script reads these environment variables:
 
 | Variable | Meaning |
 |---|---|
-| `DAGON_VERSION` | The version to install. `install.sh` also takes it as an argument (`sh -s -- <version>`). A pre-release (`<version>-rc.N`) is installed only when named this way |
+| `DAGON_VERSION` | The version to install. `setup.sh` also takes it as an argument (`sh -s -- <version>`). A pre-release (`<version>-rc.N`) is installed only when named this way |
 | `DAGON_INSTALL_DIR` | The folder to put it in |
-| `DAGON_NO_MODIFY_PATH` | With `install.ps1`, leaves PATH as it is and says how to add the folder |
+| `DAGON_NO_MODIFY_PATH` | With `setup.ps1`, leaves PATH as it is and says how to add the folder (when uninstalling, how to remove it) |
+| `DAGON_UNINSTALL` | When not empty, removes dagon instead of installing it. `setup.sh` also takes `--uninstall` as an argument |
 
 `cargo binstall dagon-cli --git https://github.com/c-ardinal/DAGON-Boot` takes the same archive, and needs `cargo-binstall`.
 
@@ -46,6 +47,29 @@ dagon --help
 ```
 
 DAGON Console is built into `dagon`. Node.js is not needed.
+
+## Remove it
+
+The script that installed it removes it. It downloads nothing.
+
+Linux and macOS:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/c-ardinal/DAGON-Boot/main/setup.sh | sh -s -- --uninstall
+```
+
+Windows (PowerShell):
+
+```powershell
+$env:DAGON_UNINSTALL = "1"; irm https://raw.githubusercontent.com/c-ardinal/DAGON-Boot/main/setup.ps1 | iex
+```
+
+The PowerShell script clears `DAGON_UNINSTALL` when it runs, so running it again in the same window installs instead of removing.
+
+- It removes only `dagon`. On Windows it also removes the folder if it is empty, and removes that folder's entry from your user's PATH and this process's PATH. The installer keeps no record of adding the entry, so the entry is removed if it is there.
+- It does not touch `~/.dagon`. Your signing keys (`~/.dagon/keys`) stay. If you delete them, nodes written with those keys can no longer be updated.
+- Running it again succeeds.
+- If you installed with `cargo install`, run `cargo uninstall dagon-cli`.
 
 ## Build it yourself
 

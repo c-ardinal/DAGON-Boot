@@ -39,7 +39,7 @@ pub use timing::{Medium, TimedRelay};
 // The simulator declares no machine of its own: its nodes run the agent's.
 dagon_events::state_machine! {}
 
-use dagon_agent::{Config, Writer};
+use dagon_agent::Config;
 use dagon_format::header::{mcu_id, port_kind, target_tag};
 use dagon_proto::max_payload;
 use dagon_proto::payload::{mode, role};
@@ -61,7 +61,6 @@ pub fn hub_config() -> Config {
         mode: mode::APP,
         max_payload: max_payload::USB as u16,
         trial_attempts: store::trial_attempts("rp2040"),
-        writer: Writer::App,
     }
 }
 
@@ -75,7 +74,6 @@ pub fn f401_config() -> Config {
         mode: mode::APP,
         max_payload: max_payload::I2C as u16,
         trial_attempts: store::trial_attempts("stm32f401re"),
-        writer: Writer::App,
     }
 }
 
@@ -113,7 +111,6 @@ pub fn watch_config() -> Config {
         mode: mode::APP,
         max_payload: max_payload::UART as u16,
         trial_attempts: store::trial_attempts("esp32s3"),
-        writer: Writer::App,
     }
 }
 

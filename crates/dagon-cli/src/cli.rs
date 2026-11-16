@@ -565,15 +565,8 @@ pub fn parse_error_text(argv: &[String], e: &clap::Error) -> String {
     use clap::error::ErrorKind::{
         DisplayHelp, DisplayHelpOnMissingArgumentOrSubcommand, DisplayVersion,
     };
-    let words: Vec<&str> = argv
-        .iter()
-        .skip(1)
-        .map(String::as_str)
-        .filter(|a| !a.starts_with('-'))
-        .take(2)
-        .collect();
     let text = e.to_string();
-    if words != ["ai", "key"]
+    if !under_ai_key(argv)
         || matches!(
             e.kind(),
             DisplayHelp | DisplayHelpOnMissingArgumentOrSubcommand | DisplayVersion
@@ -583,6 +576,25 @@ pub fn parse_error_text(argv: &[String], e: &clap::Error) -> String {
     }
     let rest = text.split_once("\n\n").map_or("", |(_, rest)| rest);
     format!("error: invalid input under `dagon ai key` (not shown, it may be a key)\n\n{rest}")
+}
+
+/// Whether `argv` resolves to the `ai key` subtree, walking the command tree
+/// the way clap does: options and a leading `help` are skipped, and the walk
+/// stops at the first word that is not a subcommand of the current command.
+fn under_ai_key(argv: &[String]) -> bool {
+    let mut cmd = Cli::command();
+    let mut path = Vec::new();
+    for a in argv.iter().skip(1).filter(|a| !a.starts_with('-')) {
+        if a == "help" {
+            continue;
+        }
+        let Some(sub) = cmd.find_subcommand(a).cloned() else {
+            break;
+        };
+        path.push(sub.get_name().to_string());
+        cmd = sub;
+    }
+    path.starts_with(&["ai".to_string(), "key".to_string()])
 }
 
 /// Every visible command's full help, one Markdown section each.

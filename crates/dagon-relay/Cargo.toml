@@ -18,6 +18,8 @@ heapless = "0.9"
 # crates each register their machines (dagon-catalog), and the relay has no
 # machine of its own. The host test drives a real agent.
 dagon-agent = { path = "../dagon-agent" }
-# The host test: the agent's chain, the simulator's nodes, store and bus.
+# The host test: the agent's chain and verifier, the simulator's nodes,
+# store and bus.
+dagon-ed25519 = { path = "../dagon-ed25519", features = ["compact"] }
 dagon-events = { path = "../dagon-events" }
 dagon-sim = { path = "../dagon-sim" }

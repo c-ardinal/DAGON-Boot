@@ -14,6 +14,7 @@ use std::sync::Arc;
 use std::task::{Context, Poll, Wake, Waker};
 
 use dagon_agent::snapshot::AppSnapshot;
+use dagon_ed25519::Ed25519Compact;
 use dagon_events::{compose, Bounds, Composed, Layer, Nop, Published, Reader, Watchdog};
 use dagon_format::Version;
 use dagon_port::{
@@ -302,7 +303,7 @@ impl Flash for Erased {
 type Chain = Composed<&'static Published<AppSnapshot, 8>, Nop, Nop, fn() -> u64>;
 
 /// This node's agent: the agent crate's, over the simulator's store.
-struct NodeAgent(dagon_agent::Agent<SimStore, Chain>);
+struct NodeAgent(dagon_agent::Agent<SimStore, Chain, Ed25519Compact>);
 
 impl OwnAgent for NodeAgent {
     fn link_up(&mut self, link: u8, addr: u8) {
@@ -342,10 +343,16 @@ fn agent() -> (NodeAgent, Reader<AppSnapshot, 8>) {
         Nop,
         Bounds::new(now, Watchdog::new(4000, 4000)),
     );
-    let cfg = dagon_sim::hub_config(dagon_sim::sample::PUBKEY);
+    let cfg = dagon_sim::hub_config();
+    let verifier = Ed25519Compact::new(dagon_sim::sample::PUBKEY);
     let app = chain.reader();
     (
-        NodeAgent(dagon_agent::Agent::new(cfg, SimStore::default(), chain)),
+        NodeAgent(dagon_agent::Agent::new(
+            cfg,
+            verifier,
+            SimStore::default(),
+            chain,
+        )),
         app,
     )
 }

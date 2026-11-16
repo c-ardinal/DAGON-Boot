@@ -1,6 +1,7 @@
 //! STM32F401RE boot core: sets its clock up as the definitions choose for
 //! the node (the MCU's `[[bootcore.clock]]` setup for its board's
-//! `[clock]`), arms the watchdog with the trial period, reads
+//! `[clock]`), arms the watchdog with the trial period (fed at every step
+//! of a signature check), reads
 //! the state log, picks the APP slot (trial of the pending slot, rollback
 //! after the attempts run out, otherwise the confirmed slot), sets the
 //! watchdog to the confirmed period when the slot is not on trial, and
@@ -36,6 +37,7 @@ use dagon_core::bootcore::{settle_log, Cell, MustReset, Settled, CLEARED};
 use dagon_ed25519::Ed25519Small;
 use dagon_events::{compose_boot, BootExtension, Clock, Extension};
 use dagon_format::header::{verify_header, HEADER_SIZE};
+use dagon_format::SigVerifier;
 use dagon_mcu_stm32f401re::clock::Setup;
 use dagon_mcu_stm32f401re::flash::F401Flash;
 use dagon_mcu_stm32f401re::layout as board;
@@ -90,7 +92,8 @@ mod pins {
 
 /// This core's signature verifier, under the key built into it: stage0's
 /// small Ed25519, so the boot core has room for the update session.
-const VERIFIER: Ed25519Small = Ed25519Small::new(PUBKEY);
+/// It feeds the IWDG at every step of a check.
+const VERIFIER: Ed25519Small<fn()> = Ed25519Small::with_tick(PUBKEY, iwdg::feed);
 
 const CONFIG: BootConfig = BootConfig {
     mcu_id: board::MCU_ID,
@@ -159,7 +162,7 @@ pub fn run<E: Extension>(chain: E, limits: &'static [BootExtension]) -> ! {
     let decision = boot.decision();
     let healthy = !cfg!(feature = "no-confirm")
         && match decision {
-            Decision::Boot { slot, .. } => app_verifies(&mut flash, slot),
+            Decision::Boot { slot, .. } => app_verifies(&mut flash, slot, &VERIFIER),
             Decision::NoImage => false,
         };
     let settled = settle_log(
@@ -211,13 +214,13 @@ pub fn run<E: Extension>(chain: E, limits: &'static [BootExtension]) -> ! {
 /// The header of the app in APP slot `slot` verifies under this core's
 /// key: the part of a new core's own check that proves its verifier and
 /// key accept the project's images.
-fn app_verifies(flash: &mut F401Flash, slot: u8) -> bool {
+fn app_verifies(flash: &mut F401Flash, slot: u8, verifier: &impl SigVerifier) -> bool {
     let mut raw = [0u8; HEADER_SIZE];
     board::SLOTS
         .slots
         .get(usize::from(slot))
         .is_some_and(|&(base, _)| flash.read(base, &mut raw).is_ok())
-        && verify_header(&raw, &VERIFIER).is_ok()
+        && verify_header(&raw, verifier).is_ok()
 }
 
 struct Jump;

@@ -12,7 +12,7 @@ description: "手元のファームウェアにDAGONのエージェントと書�
    - ほかのマイコン: 同じ形にフラッシュを割り付けます。ブートローダ、状態ログ2面、イメージの種類ごとのスロット（AとB、または別の種類のイメージが書き込む種類ではAだけ。[マイコンとボードの定義](/reference/definitions/)の`[[slot]]`と`[writers]`）です。各スロットの先頭に512バイトの署名付きイメージヘッダを置き、本体はスロット先頭 + 0x200に置きます。
 
 3. ボード用に`dagon-port`のtrait（`Flash`、`Link`、`Reset`、`Watchdog`、`BootSelectS`か`BootSelectV`）と`dagon_agent::SlotStore`を実装します。
-4. アプリ層のチェーンを`dagon_events::compose`で組み立て、`dagon_agent::Config`（アプリのエージェントは`writer: Writer::App`）、署名の検証器（`dagon_format::SigVerifier`の実装。例: `dagon_ed25519::Ed25519Compact::new(PUBKEY)`）、`SlotStore`の実装を`dagon_agent::Agent::new`に渡して、エージェントを作ります。拡張が判断点に答え、イベントを受け取ります（[イベント](/reference/events/)）。
+4. アプリ層のチェーンを`dagon_events::compose`で組み立て、`dagon_agent::Config`、署名の検証器（`dagon_format::SigVerifier`の実装。例: `dagon_ed25519::Ed25519Compact::new(PUBKEY)`）、`SlotStore`の実装を`dagon_agent::Agent::new`に渡して、エージェントを作ります。拡張が判断点に答え、イベントを受け取ります（[イベント](/reference/events/)）。
 5. リンク（`dagon_port::Link`）から要求のフレームを読み、`Agent::handle`の答えを書き、求められたリセットをする繰り返しを書きます。次は、マイコンの定義が使っている繰り返し（`targets/mcu/common/src/serve.rs`）そのものです。`host`はマイコンごとに違う部分（時計、ウォッチドッグへの報告、記録、待ち）です。答えを書けなかったとき（`wrote`が`Err`）は、リセットせずに次の要求を待ちます。リセットするのは、リブートへの答えを書けて、送り終えた（`flush`）ときだけです。`Exit::Reboot`で戻ったら、呼んだ側がリセットします。
 
    ```rust

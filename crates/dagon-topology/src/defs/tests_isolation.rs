@@ -521,7 +521,17 @@ fn erase_regions_and_slot_layouts_are_checked() {
         (
             "target = \"app\"\nslot = \"b\"",
             "target = \"topology\"\nslot = \"b\"",
-            "slot a only",
+            "target `topology` was removed",
+        ),
+        (
+            "target = \"app\"\nslot = \"b\"",
+            "target = \"topology\"\nslot = \"a\"",
+            "target `topology` was removed: the compiled topology stays with the host",
+        ),
+        (
+            "target = \"app\"\nslot = \"b\"",
+            "target = \"apps\"\nslot = \"b\"",
+            "unknown target `apps`, expected one of `app`, `bootcore`, `agent`",
         ),
         (
             "target = \"app\"\nslot = \"b\"",

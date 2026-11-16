@@ -734,8 +734,9 @@ pub struct McuDef {
     /// source (cite it in a comment), `{ unverified = N }` or `"unmeasured"` (no value; not for
     /// `unit_max_ms`).
     pub execution: Option<Execution>,
-    /// Every XFER target and slot the node receives into: `target` (`app`, `bootcore`, `agent`,
-    /// `topology`), `slot` (`a`, `b`, `factory`), `start`, `capacity` (largest body, header
+    /// Every XFER target and slot the node receives into: `target` (`app`, `bootcore`, `agent`;
+    /// the removed `topology` is refused), `slot` (`a`, `b`, `factory`), `start`, `capacity`
+    /// (largest body, header
     /// excluded), `header` (`"inline"` at `start`, or `{ detached = <address> }`), `partition`
     /// (optional: the partition the body region is, checked against the table). One per target
     /// and slot, with `[execution]`; each `[[slot]]` image has its own, and an erase of the largest

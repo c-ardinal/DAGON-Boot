@@ -121,11 +121,10 @@ flowchart LR
 ```
 
 1. The PC checks the package's signatures and that the package fits this setup.
-2. The PC sends the setup to the hub.
-3. Through the hub, the PC sends each microcontroller its new image. Children come first and the hub last.
-4. A microcontroller writes the new image to a slot other than the running one.
-5. The microcontroller starts the new image on trial.
-6. When its self-check passes, it confirms the new version. Otherwise it resets and, with two slots, goes back to the previous version.
+2. Through the hub, the PC sends each microcontroller its new image. Children come first and the hub last.
+3. A microcontroller writes the new image to a slot other than the running one.
+4. The microcontroller starts the new image on trial.
+5. When its self-check passes, it confirms the new version. Otherwise it resets and, with two slots, goes back to the previous version.
 
 What DAGON does not do, and what an image with one slot cannot do, are in [Limitations](https://c-ardinal.github.io/DAGON-Boot/doc/en/explanation/limitations/).
 

@@ -828,7 +828,7 @@ export const RULE_FIX: Record<string, (w: FixWords) => string> = {
   'V-18': (w) => `${w.to}のアドレスを、空いている番号に変えてください。`,
   'V-20': (w) => `共有の 2 本線（I2C）の速さを、つながるノードの定義にあるもの（${w.hzs ?? '定義の速さ'}）のどれかにしてください。`,
   'V-21': (w) => `${w.to}は UART でつないでください。`,
-  'V-22': (w) => `最後の手段で復旧するには、『直す』で ${w.to}のリセット・起動の配線を設定してください（このままでも親機へ送れます）。`,
+  'V-22': (w) => `最後の手段で復旧するには、『直す』で ${w.to}のリセット・起動の配線を設定してください（このままでも書き込めます）。`,
   'V-23': () => 'この構成のままで正しく使えます。いまの書き込みはこの部分に届かないため、書き込みではこの部分を飛ばします。',
   'V-24': (w) =>
     w.skipped
@@ -848,8 +848,8 @@ export const MODE = {
   label: 'モード',
   /** Why a mode cannot be chosen, on hover. */
   offWhy: { locked: '書き込みが終わるまで、モードは変えられません', operate: '構成を作り、問題を直すと、書込を使えます' },
-  /** 書込 or 親機へ送る pressed while the 構成 is not in the project's YAML. */
-  lockedUnsaved: { sentence: '構成を保存すると、書込と親機へ送るを使えます。' },
+  /** 書込 pressed while the 構成 is not in the project's YAML. */
+  lockedUnsaved: { sentence: '構成を保存すると、書込を使えます。' },
   /** M69: 書込 pressed with no 構成 or one with problems. */
   lockedProblems: { sentence: '構成を作り、問題を直すと、書込を使えます。' },
 } as const;
@@ -916,9 +916,6 @@ export const DEFINE = {
   notYetSentence: (k: number) => `書き込めないノードが ${k} つあります。構成はこのままで使え、書き込みではそのノードを飛ばします。`,
   /** The 構成 of the release file chosen in 書込 replaces this one (undoable, saved to the YAML). */
   importFileTopology: 'ファイルの構成を取り込む',
-  sendSentence: '親機へ送ると、書き込めるようになります。',
-  send: '親機へ送る',
-  connectSend: 'つないで、親機へ送る',
   unreadableChip: '× 形式違い',
   unreadableSentence: 'dagon で書き出した .yaml ファイルを選んでください。',
   /** GET /v1/definitions 500: the open project's MCU/board definitions do not load (serve's terminal says why). */

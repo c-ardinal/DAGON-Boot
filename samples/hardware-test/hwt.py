@@ -236,7 +236,7 @@ class Run:
         if config is not False:  # key gen, release build of a test key: no project config
             cmd += ["--config", str(config or self.project / "dagon.toml")]
         shown = " ".join(cmd)
-        if args[0] in MUTATING or args[:2] == ["topo", "push"]:
+        if args[0] in MUTATING:
             self.wrote = True
         t0 = now()
         p = subprocess.Popen(cmd, cwd=self.project, stdin=subprocess.PIPE,

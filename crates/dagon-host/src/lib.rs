@@ -1,5 +1,5 @@
 //! Host-side procedures shared by the CLI and the browser: discover, status,
-//! topology push, apply, rollback, confirm, recover.
+//! apply, rollback, confirm, recover.
 //!
 //! Everything runs through two small traits the caller supplies: a
 //! [`Transport`] carrying the byte stream to the hub (serial port, Web

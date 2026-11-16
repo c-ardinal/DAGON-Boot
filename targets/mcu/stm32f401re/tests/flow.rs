@@ -6,7 +6,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use dagon_agent::{Agent, Config, SlotStore, Transition, Writer};
+use dagon_agent::{Agent, Config, SlotStore, Transition};
 use dagon_core::boot::{decide, BootConfig, Decision, SlotLayout};
 use dagon_core::log::{Log, LogLayout, SlotRef};
 use dagon_ed25519::Ed25519Compact;
@@ -184,7 +184,6 @@ fn config() -> Config {
         mode: mode::APP,
         max_payload: max_payload::I2C as u16,
         trial_attempts: 3,
-        writer: Writer::App,
     }
 }
 

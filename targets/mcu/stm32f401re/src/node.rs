@@ -19,7 +19,7 @@
 //! Flash size is check-only: the layout is fixed (`layout`, the topology's
 //! `f401-default` flash map) and needs [`MIN_FLASH_SIZE`] bytes.
 
-use dagon_agent::{Agent, Config, SlotStore, Writer};
+use dagon_agent::{Agent, Config, SlotStore};
 pub use dagon_core::log::LogError;
 use dagon_ed25519::Ed25519Compact;
 use dagon_events::{Published, Watchdog as Periods};
@@ -187,7 +187,6 @@ pub fn config(tag: &str) -> Config {
         mode: mode::APP,
         max_payload: max_payload::I2C as u16,
         trial_attempts: crate::TRIAL_ATTEMPTS,
-        writer: Writer::App,
     }
 }
 

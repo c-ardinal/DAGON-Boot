@@ -32,10 +32,7 @@ const LIFTS: &[&str] = &[
 const SCANNED: &[&str] = &["targets/mcu", "crates/dagon-relay"];
 
 /// The functions allowed to mask, by file: each says why on itself.
-const EXEMPT: &[(&str, &str)] = &[
-    ("targets/mcu/common/src/guard.rs", "fn with_state"),
-    ("crates/dagon-relay/src/state.rs", "fn locked"),
-];
+const EXEMPT: &[(&str, &str)] = &[("targets/mcu/common/src/guard.rs", "fn with_state")];
 
 fn repo_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..")

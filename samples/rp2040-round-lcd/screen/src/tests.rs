@@ -4,7 +4,7 @@ use dagon_events::{compose_boot, BootExtension};
 
 // DAGON's boot test bench: an in-memory flash, signed test images and state
 // logs (in a copy, point this path at the DAGON checkout too).
-#[path = "../../../crates/dagon-core/tests/bench/mod.rs"]
+#[path = "../../../../crates/dagon-core/tests/bench/mod.rs"]
 mod bench;
 use bench::*;
 
@@ -34,17 +34,20 @@ fn each_boot_step_has_its_gauge_step_and_text() {
 
 #[test]
 fn the_screen_uses_the_defined_words() {
-    // DAGON's screen words: バージョン, never 版; ノード, never 台.
-    for w in [
-        texts::STARTING,
-        texts::CHECKING,
-        texts::CONFIRMED,
-        texts::TRIAL,
-    ] {
-        assert!(!w.contains('版') && !w.contains('台'), "{w}");
+    // DAGON's screen words: バージョン, never 版; ノード, never 台; 書き込む
+    // for writing to a node, never 更新.
+    for w in texts::WORDS {
+        assert!(
+            !w.contains('版') && !w.contains('台') && !w.contains("更新"),
+            "{w}"
+        );
     }
-    let readme = include_str!("../README.md");
-    assert!(!readme.contains('版') && !readme.contains('台'));
+    for readme in [
+        include_str!("../README.md"),
+        include_str!("../../README.md"),
+    ] {
+        assert!(!readme.contains('版') && !readme.contains('台'));
+    }
 }
 
 /// Records the screen of every event the boot core delivers (`None`: the
@@ -119,12 +122,7 @@ fn a_boot_with_nothing_to_start_draws_nothing_after_the_check() {
 #[test]
 fn the_glyphs_are_exactly_the_words_characters() {
     let mut want: Vec<char> = Vec::new();
-    for w in [
-        texts::STARTING,
-        texts::CHECKING,
-        texts::CONFIRMED,
-        texts::TRIAL,
-    ] {
+    for w in texts::WORDS {
         for c in w.chars() {
             if !want.contains(&c) {
                 want.push(c);

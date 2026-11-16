@@ -3,8 +3,7 @@
 //! UART as its links, and the NRST / BOOT0 lines of an STM32 node. This
 //! module holds only what is RP2040 hardware: the [`Links`] built from its
 //! peripherals, [`start`], the embassy tasks that run the relay with these
-//! concrete types, and the embassy-time [`RelayClock`]. A display, if the board
-//! has one, reads the [`State`] it passes to [`start`] in [`Setup`].
+//! concrete types, and the embassy-time [`RelayClock`].
 //!
 //! Tasks: the PC task and one task per present link run on DAGON's
 //! high-priority executor ([`crate::exec`]), as guard tasks
@@ -17,10 +16,8 @@
 use dagon_port::NodeLink;
 /// The role values a node reports ([`Setup::role`]).
 pub use dagon_proto::payload::role;
-use dagon_proto::payload::StatusResp;
-use dagon_relay::nodes::Identity;
 use dagon_relay::{
-    run_link, serve, task, Config, LinkRoute, Liveness, OwnAgent, Port, Recovery, RelayClock, State,
+    run_link, serve, task, Config, LinkRoute, Liveness, OwnAgent, Port, Recovery, RelayClock,
 };
 use embassy_executor::Spawner;
 use embassy_rp::peripherals::{I2C0, PIO0, USB};
@@ -29,7 +26,7 @@ use embassy_time::{Instant, Timer};
 use static_cell::StaticCell;
 
 use crate::links::{I2cLink, PioStream, RpI2c};
-use crate::node::{self, App, AppAgent, AppEvents, BoardDef, DagonParts, SharedFlash};
+use crate::node::{self, App, AppAgent, AppEvents, BoardDef, DagonParts};
 use crate::sub::SubLines;
 use crate::uart::UartLink;
 use crate::watchdog::{feed_forever, now_ms, Guard, Level, Watch};
@@ -59,24 +56,13 @@ pub struct Links {
 pub struct Setup {
     /// Image target tag of this node (as in the topology); names it.
     pub tag: &'static str,
-    /// Its node index in the topology (`wiring::NODE.index`), which says
-    /// which topology links are its own.
-    pub index: u8,
     /// The role it reports ([`role`]), from its definition.
     pub role: u8,
     /// USB product name shown on the host.
     pub name: &'static str,
     /// The app's self-check, extensions and who confirms.
     pub app: App,
-    /// The relay's state, from [`new_state`]; a display reads the same one.
-    pub state: &'static State,
     pub relay: Config,
-}
-
-/// The relay's state, kept here for the life of the app. Call once.
-pub fn new_state() -> &'static State {
-    static STATE: StaticCell<State> = StaticCell::new();
-    STATE.init(State::new())
 }
 
 /// Index of the link `id` in [`RELAY_LINKS`].
@@ -156,16 +142,12 @@ impl OwnAgent for RpAgent {
         let r = self.0.handle(request)?;
         Some((r.frame, r.reboot.then_some(r.reboot_delay_ms)))
     }
-    fn status(&self) -> &StatusResp {
-        self.0.images().status()
-    }
     fn before_reboot(&mut self) {
         self.0.before_reboot()
     }
 }
 
-type RpRelay =
-    dagon_relay::Relay<'static, RpAgent, SharedFlash, SubLines<'static>, RpWatch, RpClock>;
+type RpRelay = dagon_relay::Relay<'static, RpAgent, SubLines<'static>, RpWatch, RpClock>;
 type RpUart = UartLink<PioStream<'static, PIO0, 0, 1>, fn() -> u64>;
 
 /// Starts the relay: opens the store and the agent (taking over the
@@ -183,7 +165,6 @@ pub fn start<B: BoardDef, const N: usize>(
     let node::Opened {
         agent,
         serial,
-        flash,
         events,
     } = node::open::<B, N>(
         parts.flash,
@@ -213,31 +194,23 @@ pub fn start<B: BoardDef, const N: usize>(
     }));
     let relay = RpRelay {
         agent: RpAgent(agent),
-        flash,
-        topology: crate::layout::TOPOLOGY,
-        identity: Identity {
-            index: setup.index,
-            tag: setup.tag,
-        },
         links: routes,
         // The STM32's ROM loader answers on the I2C link.
         recovery: links.lines.map(|lines| Recovery {
             lines,
             link: crate::RELAY_LINK_I2C0,
         }),
-        state: setup.state,
         watch,
         clock: RpClock,
         config: setup.relay,
     };
     let high = crate::exec::start();
     high.spawn(pc_task(parts.usb, setup.name, serial, relay).expect("task pool"));
-    let (state, config) = (setup.state, setup.relay);
     if let Some(i2c) = links.i2c {
-        high.spawn(i2c_task(i2c, watch, state, config).expect("task pool"));
+        high.spawn(i2c_task(i2c, watch).expect("task pool"));
     }
     if let Some(uart) = uart {
-        high.spawn(uart_task(uart, watch, state, config).expect("task pool"));
+        high.spawn(uart_task(uart, watch).expect("task pool"));
     }
     spawner.spawn(feed(guard).expect("task pool"));
     events
@@ -262,33 +235,19 @@ async fn pc_task(
 
 /// The worker of `link`, with its port and guard task by its place in
 /// [`RELAY_LINKS`].
-async fn work<L: NodeLink>(link: &mut L, watch: RpWatch, state: &State, config: Config) -> ! {
+async fn work<L: NodeLink>(link: &mut L, watch: RpWatch) -> ! {
     let i = slot(link.link_id());
-    run_link(
-        link,
-        &PORTS[i],
-        RpClock,
-        watch,
-        task::link(i),
-        state,
-        &config,
-    )
-    .await
+    run_link(link, &PORTS[i], watch, task::link(i)).await
 }
 
 #[embassy_executor::task]
-async fn i2c_task(
-    mut link: I2cLink<RpI2c<'static, I2C0>>,
-    watch: RpWatch,
-    state: &'static State,
-    config: Config,
-) -> ! {
-    work(&mut link, watch, state, config).await
+async fn i2c_task(mut link: I2cLink<RpI2c<'static, I2C0>>, watch: RpWatch) -> ! {
+    work(&mut link, watch).await
 }
 
 #[embassy_executor::task]
-async fn uart_task(mut link: RpUart, watch: RpWatch, state: &'static State, config: Config) -> ! {
-    work(&mut link, watch, state, config).await
+async fn uart_task(mut link: RpUart, watch: RpWatch) -> ! {
+    work(&mut link, watch).await
 }
 
 #[embassy_executor::task]

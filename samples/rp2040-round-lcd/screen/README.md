@@ -1,10 +1,18 @@
-# hub-boot-screen (sample trusted boot extension)
+# rp2040-round-lcd-screen (the sample's screens and trusted boot extension)
 
-User code that runs inside the RP2040 hub's boot core, before the app: a
-copy of `targets/boot-extension-template` that shows the boot core's steps
-on the hub's round LCD, as a gauge of four steps and a line of Japanese
-text. It is a sample, not part of DAGON. The boot events
-(`dagon_boot::sequence`) tell it what to show.
+The one implementation of the round LCD's screens of the
+[rp2040-round-lcd sample](../README.md): the GC9A01 panel's commands and
+init sequence (`src/gc9a01.rs`), the Japanese glyphs (`src/glyphs.rs`),
+the app's home screen (`src/home.rs`, drawn into `src/frame.rs`), and a
+trusted boot extension. The sample app (`../app`) draws the home screen
+with them; the boot extension draws the boot screen. It is a sample, not
+part of DAGON.
+
+The boot extension is user code that runs inside the RP2040 node's boot
+core, before the app: a copy of `targets/boot-extension-template` that
+shows the boot core's steps on the round LCD, as a gauge of four steps and
+a line of Japanese text. The boot events (`dagon_boot::sequence`) tell it
+what to show.
 
 | Boot event | Gauge | Text |
 |---|---|---|
@@ -22,7 +30,7 @@ extension the LCD stays dark until then.
 
 Usually only the last step's text, briefly, just before the app's screen
 appears. The boot events come as fast as the boot core works and the app
-takes the chip over right after them ([boot extensions](../../site/src/content/docs/en/reference/extension-manifest.md#boot-extensions)).
+takes the chip over right after them ([boot extensions](../../../site/src/content/docs/en/reference/extension-manifest.md#boot-extensions)).
 Nothing here waits for the screen to be seen, and the panel needs time
 before it takes commands:
 
@@ -39,16 +47,16 @@ before it takes commands:
   Around them the panel shows what its memory held: the app's last screen
   after a reset, or noise after power-on.
 
-The 120 ms figures are those of the hub board package's driver
-(`targets/boards/waveshare-rp2040-touch-lcd-1.28/src/gc9a01.rs`). They are
-not checked against the GC9A01 datasheet. Neither are the order used here
+The 120 ms figures are the ones the app's driver waits too
+(`src/gc9a01.rs`, `RESET_RELEASE_MS` and `SLEEP_OUT_MS`). They are not
+checked against the GC9A01 datasheet. Neither are the order used here
 (the screen written and display on sent before sleep out, so no command
 follows sleep out in the same call) and the panel's memory after a reset.
 
 ## Time per call and per boot
 
 Each call stays within the manifest's `max_run_us` of 45 ms (its bounds:
-[`limits`](../../site/src/content/docs/en/reference/extension-manifest.md#dagon-extensiontoml-extension-manifest-format-1)). A call stops sending rows once 40 ms have
+[`limits`](../../../site/src/content/docs/en/reference/extension-manifest.md#dagon-extensiontoml-extension-manifest-format-1)). A call stops sending rows once 40 ms have
 passed since it started (`DEADLINE_US`), and it waits for the panel at most
 20 ms. The longest call is the one that sets the panel up: about 9,000
 bytes (the init sequence, the text line of 210 x 14 pixels and the gauge
@@ -70,12 +78,12 @@ each, which holds whatever the real time per byte.
 ## What it takes from the chip
 
 As a trusted extension it takes what it drives itself, and its safety is
-this sample's own ([boot extensions](../../site/src/content/docs/en/reference/extension-manifest.md#boot-extensions)). It takes its
+this sample's own ([boot extensions](../../../site/src/content/docs/en/reference/extension-manifest.md#boot-extensions)). It takes its
 parts straight from the HAL the boot core runs on (`embassy-rp`, the
 version the MCU package uses):
 
 - SPI1 with SCK GPIO10 and MOSI GPIO11 at 20 MHz, and the pins CS GPIO9,
-  DC GPIO8 and reset GPIO13. These numbers are from the hub's board
+  DC GPIO8 and reset GPIO13. These numbers are from the board
   definition (`targets/boards/waveshare-rp2040-touch-lcd-1.28/dagon-board.toml`:
   `[[pin]] lcd_cs`, `lcd_dc`, `lcd_rst` and `[[bus]] lcd`) and are written
   in `src/lib.rs` with those lines. On another board, change them there.
@@ -88,7 +96,8 @@ The boot core uses none of these.
 ## Japanese text
 
 `src/glyphs.rs` holds 14 x 14 bitmaps of exactly the characters of
-`src/texts.rs`, and nothing more. It is rendered from Noto Sans JP Regular
+`src/texts.rs` (the boot screen's lines and the home screen's state words),
+and nothing more. It is rendered from Noto Sans JP Regular
 (SIL Open Font License 1.1, `fonts/OFL-NotoSansJP.txt`) by
 `tools/gen_glyphs.py`, which needs Pillow:
 
@@ -99,10 +108,10 @@ python tools/gen_glyphs.py <NotoSansJP-Regular.ttf>
 After you change a word, run it again. The host tests fail while the table
 and the words differ.
 
-## Enable it for the hub
+## Enable the boot extension for the node
 
-Copy this folder to `extensions/hub-boot-screen/` of the project and
-point its paths at the DAGON checkout ([dagon.toml](../../site/src/content/docs/en/reference/extension-manifest.md#dagontoml)). Point
+Copy this folder to `extensions/rp2040-round-lcd-screen/` of the project and
+point its paths at the DAGON checkout ([dagon.toml](../../../site/src/content/docs/en/reference/extension-manifest.md#dagontoml)). Point
 the `#[path]` of `src/tests.rs` there too: the host tests run the real
 boot core on DAGON's boot test bench (`crates/dagon-core/tests/bench`).
 Then, in the project's `dagon.toml`:
@@ -116,18 +125,15 @@ trusted = [{ id = "boot-screen", sha256 = "<the hash dagon gen names>" }]
 ```
 
 Then run `dagon gen hub`, put the hash it names in `sha256`, and build
-the boot core in `boot/hub/` ([boot extensions](../../site/src/content/docs/en/reference/extension-manifest.md#boot-extensions)).
+the boot core in `boot/hub/` ([boot extensions](../../../site/src/content/docs/en/reference/extension-manifest.md#boot-extensions)).
 stage0 does not change. Run the copy's tests with a target directory
 outside its folder, since files written there change its hash
-([dagon.toml](../../site/src/content/docs/en/reference/extension-manifest.md#dagontoml)):
+([dagon.toml](../../../site/src/content/docs/en/reference/extension-manifest.md#dagontoml)):
 
 ```sh
-CARGO_TARGET_DIR=/tmp/hub-boot-screen cargo test --target <host triple>
+CARGO_TARGET_DIR=/tmp/rp2040-round-lcd-screen cargo test --target <host triple>
 ```
 
 To remove it, take `"boot-screen"` out of the hub's `boot` and `trusted`
 lists (and the `extensions/*` glob unless another extension uses it), then
 run `dagon gen hub` again.
-
-Size: the hub boot core grows by 8,388 bytes (67,616 to 76,004 bytes of
-its 131,072-byte (128 KiB) slot).

@@ -1,6 +1,6 @@
 //! Start-up written by `dagon new`: the board, the DAGON 親機 (PC link,
-//! relaying to the 子機, recovery, the home screen) and your application
-//! in app.rs. You do not need to change this file.
+//! relaying to the 子機, recovery) and your application in app.rs, which
+//! gets the display's pins with the other spare ones. You do not need to change this file.
 //!
 //! DAGON's relay runs on a high-priority interrupt executor; your tasks in
 //! app.rs run on the main executor below it, so they never delay the relay.
@@ -33,8 +33,8 @@ const _: () = links::require_downlinks(DOWNLINKS);
 const CLOCK: Clock = dagon_mcu_rp2040::clock_setup!(wiring::clock);
 dagon_mcu_rp2040::require_uplink_clock!(CLOCK, UPLINK, "{{node}}");
 
-/// Watchdog guard tasks: the relay's and the display's, then app.rs's.
-const TASKS: usize = board::APP_TASKS + app::TASKS;
+/// Watchdog guard tasks: the relay's, then app.rs's.
+const TASKS: usize = relay::TASKS + app::TASKS;
 
 /// A version on trial keeps feeding for 60 s after boot; unless the PC
 /// confirms it in that time, the watchdog resets the chip and the previous
@@ -48,8 +48,6 @@ async fn main(spawner: Spawner) {
     let setup = Setup {
         // DAGON_TARGET_TAG in .cargo/config.toml (the boot core uses it too).
         tag: dagon_mcu_rp2040::target_tag!(),
-        // This node's index in the 構成 (wiring.rs).
-        index: wiring::NODE.index,
         // The role the 構成 gives this node (wiring.rs).
         role: if wiring::NODE.hub {
             relay::role::HUB
@@ -58,9 +56,8 @@ async fn main(spawner: Spawner) {
         },
         name: "{{node}}",
         app: app::dagon(),
-        state: relay::new_state(),
         relay: Default::default(),
     };
     let (spare, _events) = board::start(spawner, dagon, io, &GUARD, setup, UPLINK, DOWNLINKS);
-    app::start(spawner, spare, &GUARD, board::APP_TASKS);
+    app::start(spawner, spare, &GUARD, relay::TASKS);
 }

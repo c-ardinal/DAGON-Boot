@@ -1,0 +1,43 @@
+[package]
+name = "rp2040-round-lcd"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+version = "0.0.0"
+publish = false
+
+# Sample app, not part of DAGON: the relaying node of the sample topology on
+# the Waveshare RP2040-Touch-LCD-1.28, drawing its own round LCD from the
+# events DAGON hands it and from wiring.rs. Standalone: built for thumbv6m
+# only, so it stays out of the host workspace.
+[workspace]
+
+[package.metadata.dagon]
+# Firmware clippy runs in CI (scripts/ci_crates.py --firmware-lint).
+lint = { target = "thumbv6m-none-eabi", features = [""] }
+
+[features]
+# Link for APP-B instead of APP-A (same source, two link addresses).
+slot-b = ["dagon-board-waveshare-rp2040-touch-lcd-1-28/slot-b"]
+
+[dependencies]
+# diag-panic: a panic blinks the backlight with the last step code.
+dagon-board-waveshare-rp2040-touch-lcd-1-28 = { path = "../../../targets/boards/waveshare-rp2040-touch-lcd-1.28", features = ["diag-panic"] }
+dagon-mcu-rp2040 = { path = "../../../targets/mcu/rp2040" }
+# The published state (AppSnapshot) the screen follows.
+dagon-agent = { path = "../../../crates/dagon-agent" }
+rp2040-round-lcd-screen = { path = "../screen" }
+embassy-rp = { version = "0.10.0", features = ["rp2040", "time-driver", "critical-section-impl", "boot2-none"] }
+embassy-executor = { version = "0.10", features = ["platform-cortex-m", "executor-thread", "executor-interrupt"] }
+embassy-time = "0.5"
+embedded-graphics = "0.8"
+heapless = "0.9"
+cortex-m-rt = "0.7"
+static_cell = "2"
+portable-atomic = { version = "1", features = ["critical-section"] }
+
+[profile.release]
+opt-level = "z"
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+debug = true

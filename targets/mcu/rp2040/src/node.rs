@@ -63,9 +63,8 @@ pub trait BoardDef: BoardCore {
 /// CONFIRM check.
 pub type AppAgent = Agent<AppStore, NodeChain>;
 
-/// A handle on the one flash driver: the slot store holds one, the start
-/// hands out another for the package's own reads (the topology copy), both
-/// used by the serving task only. Flash operations run from RAM with XIP
+/// A handle on the one flash driver, held by the slot store and used by the
+/// serving task only. Flash operations run from RAM with XIP
 /// off and interrupts masked by the driver, one 4 KiB sector (or page) per
 /// operation (`ERASE_REGIONS`, worst case `ERASE_UNIT_MAX_MS`); DAGON masks
 /// nothing around them.
@@ -76,8 +75,6 @@ pub(crate) struct Opened {
     pub(crate) agent: AppAgent,
     /// The flash chip's [`serial`].
     pub(crate) serial: &'static str,
-    /// Another handle on the slot store's flash driver.
-    pub(crate) flash: SharedFlash,
     /// The app's read access to the node's events.
     pub(crate) events: AppEvents,
 }
@@ -117,8 +114,8 @@ pub fn on_trial(st: &StatusResp) -> bool {
 /// Opens the slot store, takes over the watchdog the boot core started
 /// (fed once right away), builds the agent with the app's chain, runs the
 /// board's bring-up and, with [`Confirm::Own`], confirms the app's trial
-/// ([`finish_start`]); returns the agent with the flash chip's [`serial`],
-/// a handle on the flash driver and the node's events. `task` is the guard
+/// ([`finish_start`]); returns the agent with the flash chip's [`serial`]
+/// and the node's events. `task` is the guard
 /// task that serves the agent; `tag` and `role` are the node's image
 /// target tag and topology role; `app` holds the self-check, the app's
 /// extensions and who confirms. Only the starts in this package hold the
@@ -175,7 +172,6 @@ pub(crate) fn open<B: BoardDef, const N: usize>(
     Opened {
         agent,
         serial,
-        flash,
         events,
     }
 }
@@ -233,7 +229,6 @@ mod usb_node {
             agent,
             serial,
             events,
-            ..
         } = open::<B, N>(
             parts.flash,
             parts.watchdog,

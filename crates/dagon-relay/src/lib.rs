@@ -5,41 +5,29 @@
 //!   node) over a [`dagon_port::Link`]: RELAY to a node over one of this
 //!   node's links, SUBCTL and I2C_RAW for the ROM recovery path
 //!   ([`Recovery`]), everything else to this node's own agent (SHOW
-//!   included; the [`State`] a display reads notes its progress too).
+//!   included).
 //! - [`run_link`]: one worker per link ([`dagon_port::NodeLink`]): it
-//!   carries the requests [`serve`] hands it through a [`Port`], and polls
-//!   the nodes on its link with HELLO while the PC is quiet.
-//! - [`State`]: what the relay knows about this node and the linked nodes;
-//!   the caller owns the one instance and shares it with a display.
+//!   carries the requests [`serve`] hands it through a [`Port`].
 //! - [`cmd`]: the argument rules of the relay commands (RELAY, I2C_RAW).
-//! - [`nodes`]: the nodes reached over the links, from the stored topology
-//!   or a fallback list.
-//! - [`view`]: what a home screen shows about this node and the linked
-//!   nodes.
 //!
 //! The MCU package states the links its relay reaches nodes over, as its
 //! definition's [`RelayLinkDef`] list (generated from `[[relay_link]]`),
-//! where its flash holds the topology, its clock
-//! ([`RelayClock`]), its watchdog guard ([`Liveness`]) and this node's own agent
-//! ([`OwnAgent`]); this crate names no link id or topology interface of its
-//! own. Embassy task functions cannot
-//! be generic, so the MCU package runs [`serve`] and each [`run_link`]
-//! inside its own tasks with its concrete types.
+//! its clock ([`RelayClock`]), its watchdog guard ([`Liveness`]) and this
+//! node's own agent ([`OwnAgent`]); this crate names no link id or topology
+//! interface of its own. Embassy task functions cannot be generic, so the
+//! MCU package runs [`serve`] and each [`run_link`] inside its own tasks
+//! with its concrete types.
 #![no_std]
 #![allow(async_fn_in_trait)]
 
 pub mod cmd;
-pub mod nodes;
 mod pc;
 mod port;
-mod state;
-pub mod view;
 
 use dagon_port::RelayLinkDef;
 
 pub use pc::{serve, Recovery, Relay};
 pub use port::{run_link, LinkRoute, Port};
-pub use state::State;
 
 /// The relay's settings. The defaults are the relay's own values; an MCU
 /// package or app changes only what its wiring needs.
@@ -50,17 +38,9 @@ pub struct Config {
     pub rom_addr: u8,
     /// Bound on one I2C_RAW request at the link worker.
     pub raw_timeout_ms: u16,
-    /// A link worker polls its nodes with HELLO this often while the PC is
-    /// quiet.
-    pub hello_poll_ms: u32,
-    /// After a RELAY or SHOW the PC drives the nodes for this long: no
-    /// HELLO polling, and the SHOW progress stays.
-    pub quiet_ms: u32,
     /// How much longer than a request's own timeout [`serve`] waits for
     /// the link worker's answer.
     pub port_margin_ms: u32,
-    /// Linked nodes to poll and show while no topology is stored.
-    pub fallback: &'static [nodes::LinkedNode],
 }
 
 impl Default for Config {
@@ -68,10 +48,7 @@ impl Default for Config {
         Config {
             rom_addr: 0x39,
             raw_timeout_ms: 1_000,
-            hello_poll_ms: 2_000,
-            quiet_ms: 10_000,
             port_margin_ms: 1_000,
-            fallback: &[],
         }
     }
 }
@@ -118,8 +95,6 @@ pub trait OwnAgent {
     /// Answers `request` for this node: the reply frame (none: no answer)
     /// and, when a reboot follows the reply, its delay in ms.
     fn handle(&mut self, request: &[u8]) -> Option<(&[u8], Option<u32>)>;
-    /// This node's own images, as STATUS reports them.
-    fn status(&self) -> &dagon_proto::payload::StatusResp;
     /// The reset after a reboot request is next.
     fn before_reboot(&mut self);
 }

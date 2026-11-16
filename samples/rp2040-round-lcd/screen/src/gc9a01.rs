@@ -1,9 +1,15 @@
-//! The hub's GC9A01 240x240 round panel over 4-wire SPI (mode 0): the
-//! commands this extension sends and the panel vendor's init sequence, as
-//! the hub board package's driver sends them
-//! (targets/boards/waveshare-rp2040-touch-lcd-1.28/src/gc9a01.rs).
+//! The GC9A01 240x240 round panel over 4-wire SPI (mode 0): the commands
+//! the boot extension and the app's driver send, the panel vendor's init
+//! sequence and the waits around reset and sleep out. Commands are framed
+//! by CS with DC low for the command byte and high for its parameters.
+//! Pixels are RGB565, high byte first.
 
 pub const SIZE: u16 = 240;
+
+/// After the reset line goes high, the panel takes commands only this much
+/// later; after sleep out, the same before the next command.
+pub const RESET_RELEASE_MS: u32 = 120;
+pub const SLEEP_OUT_MS: u32 = 120;
 
 pub const CASET: u8 = 0x2A;
 pub const RASET: u8 = 0x2B;

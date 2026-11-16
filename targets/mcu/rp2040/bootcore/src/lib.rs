@@ -1,7 +1,8 @@
 //! Hub boot core: dagon-core's kind S decision over the hub layout. A
-//! pending app slot is tried (signature + SHA-256, BOOT_ATTEMPT before the
-//! jump) until the attempts run out, then rolled back; otherwise the
-//! confirmed slot starts after a SHA-256 check. dagon-core also requires
+//! pending app slot is tried (BOOT_ATTEMPT before the jump) until the
+//! attempts run out, then rolled back; otherwise the confirmed slot starts.
+//! Either slot starts only after its signature and SHA-256 check, one
+//! signature check per started slot at every boot. dagon-core also requires
 //! each header's `load_addr` to be its slot body (the hub's `Flash` speaks
 //! XIP addresses). Every start arms the watchdog for 8 s before the log is
 //! read, and feeds it at every step of a signature check (seconds on the
@@ -18,8 +19,8 @@
 //! Boot core A/B (`dagon_mcu_rp2040::bl::settle_core`): before it starts
 //! the app, the core settles the boot core trial. Started as the pending
 //! core, it confirms itself (CONFIRMED in the boot core log) only after its
-//! own check: an app is startable and that app's header verifies under
-//! this core's key. Otherwise it resets through the watchdog, so stage0
+//! own check: the decision starts an app, so that app's header verified
+//! under this core's key. Otherwise it resets through the watchdog, so stage0
 //! counts the start and falls back once the starts run out. Started while
 //! another core is pending, it records the rollback. Built for slot A, or
 //! B with `slot-b`.
@@ -38,8 +39,7 @@ use dagon_core::boot::{BootConfig, Decision};
 use dagon_core::bootcore::CLEARED;
 use dagon_ed25519::Ed25519Small;
 use dagon_events::{compose_boot, BootExtension, Extension};
-use dagon_format::header::{self, mcu_id, HEADER_SIZE};
-use dagon_format::SigVerifier;
+use dagon_format::header::mcu_id;
 use dagon_mcu_rp2040::arm::{jump, led, step, trial};
 use dagon_mcu_rp2040::bl::{self, Settled};
 use dagon_mcu_rp2040::clock::Setup;
@@ -47,7 +47,6 @@ use dagon_mcu_rp2040::flash::RpFlash;
 use dagon_mcu_rp2040::layout::{watchdog_ms, APP_LOG_LAYOUT, APP_SLOTS};
 use dagon_mcu_rp2040::tag::checked_tag;
 use dagon_mcu_rp2040::{LINKED_SLOT, PUBKEY, TARGET_TAG, TRIAL_ATTEMPTS};
-use dagon_port::Flash;
 use embassy_rp::watchdog::Watchdog;
 use embassy_time::Duration;
 #[cfg(not(feature = "diag"))]
@@ -123,18 +122,6 @@ fn hand_back_clocks() {
     }
 }
 
-/// The header of the app in APP slot `slot` verifies under this core's
-/// key: the part of a new core's own check that proves its verifier and
-/// key accept the project's images.
-fn app_verifies(flash: &mut RpFlash, slot: u8, verifier: &impl SigVerifier) -> bool {
-    let mut raw = [0u8; HEADER_SIZE];
-    APP_SLOTS
-        .slots
-        .get(usize::from(slot))
-        .is_some_and(|&(base, _)| flash.read(base, &mut raw).is_ok())
-        && header::verify_header(&raw, verifier).is_ok()
-}
-
 /// Microseconds since reset: the TIMER, which counts the watchdog's tick
 /// that HAL init starts at clk_ref / 1 MHz cycles (RP2040 datasheet
 /// section 4.6; about a microsecond on the ring oscillator, which varies).
@@ -189,11 +176,8 @@ pub fn run<E: Extension>(chain: E, limits: &'static [BootExtension]) -> ! {
         watchdog_ms(true),
     );
     let decision = boot.decision();
-    let healthy = !cfg!(feature = "no-confirm")
-        && match decision {
-            Decision::Boot { slot, .. } => app_verifies(&mut flash, slot, &verifier),
-            Decision::NoImage => false,
-        };
+    // The decision verified the app it starts under this core's key.
+    let healthy = !cfg!(feature = "no-confirm") && matches!(decision, Decision::Boot { .. });
     match bl::settle_core(
         &mut flash,
         LINKED_SLOT,

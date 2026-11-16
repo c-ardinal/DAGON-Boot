@@ -753,6 +753,7 @@ dependencies = [
  "dagon-ed25519",
  "dagon-format",
  "dagon-host",
+ "dagon-mcu-build",
  "dagon-port",
  "dagon-proto",
  "dagon-sign",

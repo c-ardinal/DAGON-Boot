@@ -50,6 +50,11 @@ pub fn embed_pubkey() {
         is_key_hex(&hex),
         "DAGON_PUBKEY: expected 64 hex digits (or a file holding them)"
     );
+    fs::write(out_dir().join("pubkey.rs"), pubkey_rs(&hex)).unwrap();
+}
+
+/// The text of `pubkey.rs` for a key of 64 hex digits.
+fn pubkey_rs(hex: &str) -> String {
     let bytes: Vec<String> = (0..32)
         .map(|i| {
             format!(
@@ -58,18 +63,14 @@ pub fn embed_pubkey() {
             )
         })
         .collect();
-    fs::write(
-        out_dir().join("pubkey.rs"),
-        format!(
-            "/// Verifying key embedded at build time (`DAGON_PUBKEY`).\n\
-             pub const PUBKEY: [u8; 32] = [{}];\n\
-             /// Built with the public test key: anyone can sign images for it.\n\
-             pub const TEST_KEY: bool = {};\n",
-            bytes.join(", "),
-            hex.eq_ignore_ascii_case(TEST_PUBKEY_HEX)
-        ),
+    format!(
+        "/// Verifying key embedded at build time (`DAGON_PUBKEY`).\n\
+         pub const PUBKEY: [u8; 32] = [{}];\n\
+         /// Built with the public test key: anyone can sign images for it.\n\
+         pub const TEST_KEY: bool = {};\n",
+        bytes.join(", "),
+        hex.eq_ignore_ascii_case(TEST_PUBKEY_HEX)
     )
-    .unwrap();
 }
 
 fn is_key_hex(s: &str) -> bool {
@@ -1157,6 +1158,103 @@ mod tests {
         });
         let msg = *otp.unwrap_err().downcast::<String>().unwrap();
         assert!(msg.contains("cannot read a key from that place"), "{msg}");
+    }
+
+    /// The repository root: the nearest folder above the compiling crate's
+    /// manifest that holds this crate (other crates include this file).
+    fn repo_root() -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .ancestors()
+            .find(|d| d.join("targets/mcu/build/Cargo.toml").is_file())
+            .expect("repository root")
+            .canonicalize()
+            .unwrap()
+    }
+
+    fn rust_files(dir: &Path, out: &mut Vec<PathBuf>) {
+        for e in fs::read_dir(dir).unwrap().flatten() {
+            let p = e.path();
+            let name = e.file_name();
+            let name = name.to_string_lossy();
+            if p.is_dir() {
+                if !["target", "node_modules", ".git", "pkg"].contains(&name.as_ref()) {
+                    rust_files(&p, out);
+                }
+            } else if name.ends_with(".rs") {
+                out.push(p);
+            }
+        }
+    }
+
+    /// The MCU packages: each folder of `targets/mcu` with a definition.
+    fn mcu_packages() -> Vec<PathBuf> {
+        let dir = repo_root().join("targets/mcu");
+        let mut v: Vec<PathBuf> = fs::read_dir(dir)
+            .unwrap()
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| p.join("dagon-mcu.toml").is_file())
+            .collect();
+        v.sort();
+        assert!(v.len() >= 3, "{v:?}");
+        v
+    }
+
+    /// Every MCU package gets its key from [`embed_pubkey`] and includes the
+    /// file it writes, and where its definition puts the key
+    /// (`[stage0] key`) is the one place that file serves (`flash`).
+    #[test]
+    fn every_mcu_key_lands_where_its_definition_says() {
+        for pkg in mcu_packages() {
+            let name = pkg.file_name().unwrap().to_string_lossy().into_owned();
+            let build = fs::read_to_string(pkg.join("build.rs")).unwrap();
+            assert!(build.contains("embed_pubkey()"), "{name}: build.rs");
+            let lib = fs::read_to_string(pkg.join("src/lib.rs")).unwrap();
+            assert!(lib.contains("/pubkey.rs\""), "{name}: src/lib.rs");
+            let def = fs::read_to_string(pkg.join("dagon-mcu.toml")).unwrap();
+            let table: toml::Table = def.parse().unwrap();
+            if table.contains_key("stage0") {
+                let rs = definition_rs(&def);
+                assert!(rs.contains("STAGE0_KEY_PLACE: &str = \"flash\""), "{name}");
+            }
+        }
+    }
+
+    /// The embedded constants are the key's bytes in order, and `TEST_KEY`
+    /// is set for the RFC 8032 key alone.
+    #[test]
+    fn pubkey_constants_hold_the_key_bytes() {
+        let key = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1F";
+        let rs = pubkey_rs(key);
+        let bytes: Vec<String> = (0..32).map(|i| format!("{i:#04x}")).collect();
+        assert!(rs.contains(&format!("[{}]", bytes.join(", "))), "{rs}");
+        assert!(rs.contains("TEST_KEY: bool = false"), "{rs}");
+        let rs = pubkey_rs(&TEST_PUBKEY_HEX.to_uppercase());
+        assert!(rs.contains("0xd7, 0x5a, 0x98, 0x01"), "{rs}");
+        assert!(rs.contains("TEST_KEY: bool = true"), "{rs}");
+    }
+
+    /// The code that reads the key from the build environment and writes it
+    /// into a build exists in this crate only.
+    #[test]
+    fn key_embedding_code_exists_only_in_this_crate() {
+        let root = repo_root();
+        let mut files = Vec::new();
+        rust_files(&root, &mut files);
+        let here = root.join("targets/mcu/build/src/lib.rs");
+        let words = [
+            "DAGON_PUBKEY_HEX",
+            "var(\"DAGON_PUBKEY\")",
+            "rustc-env=DAGON_PUBKEY",
+        ];
+        let mut found = Vec::new();
+        for f in files.iter().filter(|f| f.canonicalize().unwrap() != here) {
+            let text = fs::read_to_string(f).unwrap_or_default();
+            if words.iter().any(|w| text.contains(w)) {
+                found.push(f.strip_prefix(&root).unwrap().display().to_string());
+            }
+        }
+        assert!(found.is_empty(), "key embedding outside: {found:?}");
     }
 
     /// `STAGE0_INTERNAL_HZ` is the internal setup's `out_hz`; a stage0

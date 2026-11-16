@@ -5,11 +5,10 @@ license.workspace = true
 version = "0.1.0"
 
 [dependencies]
-dagon-format = { path = "../dagon-format" }
 dagon-port = { path = "../dagon-port" }
 dagon-proto = { path = "../dagon-proto" }
 embassy-futures = "0.1"
-# The state's critical-section mutex and signal, the link ports' channels.
+# The link ports' channels.
 embassy-sync = "0.8"
 heapless = "0.9"
 
@@ -20,4 +19,6 @@ heapless = "0.9"
 dagon-agent = { path = "../dagon-agent" }
 # The host test: the agent's chain, the simulator's nodes, store and bus.
 dagon-events = { path = "../dagon-events" }
+# The SHOW the host test sends carries a version.
+dagon-format = { path = "../dagon-format" }
 dagon-sim = { path = "../dagon-sim" }

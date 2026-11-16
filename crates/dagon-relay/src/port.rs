@@ -1,19 +1,14 @@
 //! The link workers. Each owns its link, serves the RELAY and I2C_RAW
-//! requests [`serve`](crate::serve) hands it through its [`Port`], and
-//! polls the nodes on its link with HELLO every
-//! [`Config::hello_poll_ms`] while the PC is quiet. Every link operation is
-//! bounded by a deadline (the link's own).
+//! requests [`serve`](crate::serve) hands it through its [`Port`]. Every
+//! link operation is bounded by a deadline (the link's own).
 
 use dagon_port::NodeLink;
-use dagon_proto::payload::HelloResp;
 use dagon_proto::{frame_len, Status};
-use embassy_futures::select::{select, Either};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex as Cs;
 use embassy_sync::channel::Channel;
 use heapless::Vec;
 
-use crate::view::Seen;
-use crate::{until, Config, Liveness, RelayClock, RelayLinkDef, State};
+use crate::{until, Liveness, RelayClock, RelayLinkDef};
 
 /// Largest request or response body carried through a port.
 pub(crate) const DATA_MAX: usize = dagon_proto::max_payload::USB - 1;
@@ -101,71 +96,39 @@ pub struct LinkRoute<'a> {
     pub port: Option<&'a Port>,
 }
 
-fn seen(h: Option<HelloResp>) -> Seen {
-    Seen::from_hello(h.as_ref())
-}
-
-fn next_seq(seq: &mut u8) -> u8 {
-    *seq = seq.wrapping_add(1) | 0x80;
-    *seq
-}
-
 /// Serves `link` for good (the caller keeps it, so an embassy task holds
-/// one copy): the requests arriving on `port`, and HELLO polls
-/// of the nodes in `state` on this link (by its [`NodeLink::link_id`])
-/// while the PC is quiet. `task` is its guard task
+/// one copy): the requests arriving on `port`. `task` is its guard task
 /// ([`task::link`](crate::task::link)).
-pub async fn run_link<L: NodeLink, T: RelayClock, W: Liveness>(
+pub async fn run_link<L: NodeLink, W: Liveness>(
     link: &mut L,
     port: &Port,
-    clock: T,
     watch: W,
     task: usize,
-    state: &State,
-    config: &Config,
 ) -> ! {
-    let mut seq = 0x80;
     let frame_max = frame_len(link.max_payload()).min(DATA_MAX);
     loop {
         watch.idle(task);
-        let poll_at = clock.now_ms() + u64::from(config.hello_poll_ms);
-        let event = select(port.req.receive(), clock.wait_until(poll_at)).await;
+        let req = port.req.receive().await;
         watch.busy(task);
-        match event {
-            Either::First(req) => {
-                watch.busy_for(task, req.timeout_ms.into());
-                let mut out = [0u8; DATA_MAX];
-                let (status, n) = match req.op {
-                    Op::Relay => {
-                        let r = link
-                            .exchange(req.addr, &req.data, req.timeout_ms, &mut out[..frame_max])
-                            .await;
-                        r.map_or_else(|s| (s, 0), |n| (Status::Ok, n))
-                    }
-                    Op::Raw => {
-                        let n = usize::from(req.read_len).min(DATA_MAX);
-                        let r = link.raw(req.addr, &req.data, &mut out[..n]).await;
-                        r.map_or_else(|s| (s, 0), |()| (Status::Ok, n))
-                    }
-                };
-                port.answer(Resp {
-                    id: req.id,
-                    status,
-                    data: Vec::from_slice(&out[..n]).unwrap_or_default(),
-                });
+        watch.busy_for(task, req.timeout_ms.into());
+        let mut out = [0u8; DATA_MAX];
+        let (status, n) = match req.op {
+            Op::Relay => {
+                let r = link
+                    .exchange(req.addr, &req.data, req.timeout_ms, &mut out[..frame_max])
+                    .await;
+                r.map_or_else(|s| (s, 0), |n| (Status::Ok, n))
             }
-            Either::Second(()) if state.pc_quiet(clock.now_ms()) => {
-                let id = link.link_id();
-                let mut i = 0;
-                while let Some(node) = state.linked_at(i) {
-                    i += 1;
-                    if node.link == id {
-                        let h = link.hello(node.addr, next_seq(&mut seq)).await;
-                        state.set_seen(node.index, seen(h));
-                    }
-                }
+            Op::Raw => {
+                let n = usize::from(req.read_len).min(DATA_MAX);
+                let r = link.raw(req.addr, &req.data, &mut out[..n]).await;
+                r.map_or_else(|s| (s, 0), |()| (Status::Ok, n))
             }
-            Either::Second(()) => {}
-        }
+        };
+        port.answer(Resp {
+            id: req.id,
+            status,
+            data: Vec::from_slice(&out[..n]).unwrap_or_default(),
+        });
     }
 }

@@ -1357,7 +1357,8 @@ The one authentication rule, applied by every verifier in the chain
   125 MHz from a board's 12 MHz crystal. The boot loader checks
   signatures with the same `Ed25519Small` and SHA-2 with compact rounds,
   so it leaves room for the update session; each boot it checks the
-  header of the app it starts, which adds one such check to every boot.
+  header of the app it starts, which adds one such check to every boot,
+  and feeds its watchdog at every step of the check.
   A stage0 built with the
   `verify-time` feature measures it on the node: it times each check in
   core clock cycles (SysTick), keeps the longest in `DAGON_VERIFY_CYCLES`

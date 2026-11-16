@@ -605,6 +605,31 @@ class InstallPs1(unittest.TestCase):
         self.assertEqual(after, "C:\\one;C:\\two")
         self.assertIn(b"removed from your user's PATH", out)
 
+    def test_uninstall_keeps_every_other_segment_as_it_is(self):
+        before = ["%USERPROFILE%\\bin", "", str(self.dir), "C:\\one\\", "", str(self.dir).lower() + "\\", "%PATH_VAR%"]
+        after, _ = self.uninstall_path(before)
+        self.assertEqual(after, "%USERPROFILE%\\bin;;C:\\one\\;;%PATH_VAR%")
+
+    def test_uninstall_leaves_a_directory_named_dagon_exe_alone(self):
+        self.dir.mkdir()
+        (self.dir / "dagon.exe").mkdir()
+        r = self.run_script(env={"DAGON_UNINSTALL": "1"})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertTrue((self.dir / "dagon.exe").is_dir())
+        self.assertIn(b"not installed", r.stdout)
+
+    def test_a_run_after_an_uninstall_in_the_same_session_installs(self):
+        self.installed()
+        self.release.publish("1.2.3", WINDOWS, self.good, ".zip")
+        run = f"Get-Content -Raw -LiteralPath '{PS1}' | Invoke-Expression\n"
+        self.harness.write_text(self.harness.read_text(encoding="utf-8") + run, encoding="utf-8")
+        (self.dir / "dagon.exe").write_bytes(b"old")
+        r = self.run_script(env={"DAGON_UNINSTALL": "1"})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn(b"removed", r.stdout)
+        self.assertIn(b"installed in", r.stdout)
+        self.assertEqual((self.dir / "dagon.exe").read_bytes(), b"binary dagon.exe")
+
     def test_uninstall_leaves_path_alone_when_the_folder_is_not_on_it(self):
         after, _ = self.uninstall_path(["C:\\one", "C:\\two"])
         self.assertEqual(after, "C:\\one;C:\\two")
@@ -684,6 +709,7 @@ class Scripts(unittest.TestCase):
             text = (ROOT / rel).read_text(encoding="utf-8")
             self.assertIn("--uninstall", text, rel)
             self.assertIn("DAGON_UNINSTALL", text, rel)
+            self.assertIn("; Remove-Item Env:DAGON_UNINSTALL", text, rel)
             self.assertIn("cargo uninstall dagon-cli", text, rel)
 
 

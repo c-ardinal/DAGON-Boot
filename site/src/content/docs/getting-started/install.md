@@ -61,7 +61,7 @@ curl -fsSL https://raw.githubusercontent.com/c-ardinal/DAGON-Boot/main/setup.sh 
 Windows（PowerShell）:
 
 ```powershell
-$env:DAGON_UNINSTALL = "1"; irm https://raw.githubusercontent.com/c-ardinal/DAGON-Boot/main/setup.ps1 | iex
+$env:DAGON_UNINSTALL = "1"; irm https://raw.githubusercontent.com/c-ardinal/DAGON-Boot/main/setup.ps1 | iex; Remove-Item Env:DAGON_UNINSTALL
 ```
 
 - 外すのは`dagon`だけです。Windowsはそのフォルダが空なら消し、ユーザーのPATHとこのプロセスのPATHからそのフォルダの項目も外します。インストーラーがその項目を足したかは記録がないので、あれば外します。

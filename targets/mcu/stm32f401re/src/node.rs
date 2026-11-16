@@ -19,8 +19,9 @@
 //! Flash size is check-only: the layout is fixed (`layout`, the topology's
 //! `f401-default` flash map) and needs [`MIN_FLASH_SIZE`] bytes.
 
-use dagon_agent::{Agent, Config, SlotStore};
+use dagon_agent::{Agent, Config, SlotStore, Writer};
 pub use dagon_core::log::LogError;
+use dagon_ed25519::Ed25519Compact;
 use dagon_events::{Published, Watchdog as Periods};
 use dagon_format::header::{port_kind, target_tag, ImageHeader, HEADER_SIZE};
 use dagon_format::Version;
@@ -52,7 +53,7 @@ pub type I2cTarget = I2c<'static, Async, MultiMaster>;
 pub type Store = KindSStore<SharedFlash>;
 /// The agent of a node on this MCU; its chain holds the app's extensions
 /// and CONFIRM check.
-pub type AppAgent = Agent<Store, NodeChain>;
+pub type AppAgent = Agent<Store, NodeChain, Ed25519Compact>;
 
 /// The guard task [`start`] gives DAGON's serving task; the app's tasks
 /// take the others.
@@ -179,7 +180,6 @@ pub fn install_watchdog<const N: usize>(
 /// is the node's image target tag.
 pub fn config(tag: &str) -> Config {
     Config {
-        pubkey: crate::PUBKEY,
         mcu_id: layout::MCU_ID,
         port_kind: port_kind::SELF_BOOT,
         target_tag: target_tag(tag),
@@ -187,6 +187,7 @@ pub fn config(tag: &str) -> Config {
         mode: mode::APP,
         max_payload: max_payload::I2C as u16,
         trial_attempts: crate::TRIAL_ATTEMPTS,
+        writer: Writer::App,
     }
 }
 
@@ -210,7 +211,8 @@ fn agent<const N: usize>(
     let events = EVENTS.init(Published::new());
     let (chain, reader) = node_chain(events, board, exts, self_check, now_us, periods);
     let on_trial = on_trial(&store);
-    let mut agent = Agent::new(config(tag), store, chain);
+    let verifier = Ed25519Compact::new(crate::PUBKEY);
+    let mut agent = Agent::new(config(tag), verifier, store, chain);
     agent.watchdog_taken(watchdog_period_ms(on_trial), guard.trial_policy());
     (agent, reader)
 }
@@ -304,7 +306,7 @@ struct Host {
     out: [u8; conform::OUT_MAX],
 }
 
-impl ServeHost<Store, NodeChain> for Host {
+impl ServeHost<Store, NodeChain, Ed25519Compact> for Host {
     fn now_ms(&self) -> u64 {
         Instant::now().as_millis()
     }

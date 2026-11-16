@@ -47,7 +47,7 @@ DAGONの状態の変化は、どれも宣言された状態機械の遷移を通
 
 | 遷移 | レイヤー | ガード（拒否のときのステータス） | 永続の形 | イベント |
 |---|---|---|---|---|
-| `erase` | app | XFER_BEGINがすべてのガードと`accept_update`を通った。`Empty`、`Written`、`Pending`、`Reverted`から（動いているスロットや確定したスロットからは不可）。`Pending`からなのは、プロトコルが、待機にしたが起動していないイメージを新しいイメージで置き換えられるからです。消したヘッダはもうSLOT_PENDINGの記録と一致しないので、そのスロットは空と読まれます | スロットの本体とヘッダの場所を消去 | `app.transfer_started` |
+| `erase` | app | XFER_BEGINがすべてのガードと`accept_update`を通った。`Empty`、`Written`、`Pending`、`Trial`、`Confirmed`、`Reverted`から。書き込む側（エージェントの`Config::writer`: アプリかブートローダ）が動いているスロットからは不可で、アプリでは確定したスロットからも不可です。`Pending`からなのは、プロトコルが、待機にしたが起動していないイメージを新しいイメージで置き換えられるからです。消したヘッダはもうSLOT_PENDINGの記録と一致しないので、そのスロットは空と読まれます | スロットの本体とヘッダの場所を消去 | `app.transfer_started` |
 | `written` | app | XFER_END: 本体のダイジェストがヘッダのものと同じで、ヘッダを書いて検証し直した | ヘッダが所定の場所にある | `app.written { slot, version }` |
 | `pending_set` | app | SET_PENDING: ヘッダがあり、署名と互換性、本体のダイジェストが正しい。動いているスロットは不可。`Written`、`Reverted`、`Pending`（SET_PENDINGを繰り返すと、もう一度追記します）、`Confirmed`（もう一方のスロットが試行のあいだに、確定したスロットをもう一度待機にして、そちらへ戻します）から | SLOT_PENDINGの記録/ ベンダーの選択 | `app.pending_set { slot, version }` |
 | `pending_moved` | app | このスロットが`Pending`か`Trial`のときに、もう一方のスロットへのSET_PENDINGがあり、このスロットが確定したものでない | 同じSLOT_PENDINGの記録（ログは待機のスロットを1つ示します） | `app.pending_moved { from, to }` |
@@ -338,7 +338,7 @@ pub struct Nop;  // no extension
 - **リレー。** リレー自身のエージェントは、同じチェーンを持つアプリです。リレーの状態機械のイベントと`NodeLink`のポートはそこを通ります。
 - **ホスト。**`dagon-host`は、CLIがプロジェクトの`dagon.toml`（`[host] extensions`）から作ったチェーンを`Box<dyn Extension>`として受け取ります。データで定義する種類（エージェントの定義、アクションの定義、プログラムやデバイスで指定するシリアルやCANのアダプタのような転送の定義）と、`dagon_host::Transport`、`Signer`、`BuildRunner`を実装するRustのcrateで、crateはCLIのビルドのワークスペースの依存として読み込みます。ホストは利用者の権限で動き、そのサンドボックスはOSです。
 
-アプリのエージェントは、合成されたチェーンだけを受け取ります。`Agent::new(config, store, chain)`で、`chain`は`compose`の結果です。別のフックのトレイトはありません。イベントの観測と、`accept_update`、`allow_reboot_now`、`self_check`への応答は`Extension`のメソッドです。マイコンの定義のコードの`start`は、アプリの`fn() -> bool`の自己検査も引き続き受け付け、1メソッドの拡張（`SelfCheck`）に包んで、チェーンの利用者の部分の、アプリの拡張の後に置きます。これは棄権しないので、先に置くと拡張の答えを隠してしまうからです。
+アプリのエージェントは、合成されたチェーンだけを受け取ります。`Agent::new(config, verifier, store, chain)`で、`chain`は`compose`の結果、`verifier`はマイコンの定義の署名の検証器です。別のフックのトレイトはありません。イベントの観測と、`accept_update`、`allow_reboot_now`、`self_check`への応答は`Extension`のメソッドです。マイコンの定義のコードの`start`は、アプリの`fn() -> bool`の自己検査も引き続き受け付け、1メソッドの拡張（`SelfCheck`）に包んで、チェーンの利用者の部分の、アプリの拡張の後に置きます。これは棄権しないので、先に置くと拡張の答えを隠してしまうからです。
 
 ### 2.4 待てる公開の状態
 

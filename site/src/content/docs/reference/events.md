@@ -89,7 +89,7 @@ DAGONの状態の変化は、どれも状態機械の遷移で、遷移はどれ
 
 | 種類 | コード | 遷移 | ペイロード | 受け取り | 備考 | 説明 |
 |---|---|---|---|---|---|---|
-| `app.transfer_started` | 0x20 | `erase`: Empty \| Written \| Pending \| Reverted → Empty | `target: u8` (1 B), `slot: u8` (1 B), `len: u32` (4 B) | live, host |  | 新しいイメージのためにスロットを消去した（動いているスロットや確定したスロットは消さない）。 |
+| `app.transfer_started` | 0x20 | `erase`: Empty \| Written \| Pending \| Trial \| Confirmed \| Reverted → Empty | `target: u8` (1 B), `slot: u8` (1 B), `len: u32` (4 B) | live, host |  | 新しいイメージのためにスロットを消去した（書き込む側が動いているスロットは消さない。アプリは確定したスロットも消さない）。 |
 | `app.written` | 0x21 | `written`: Empty → Written | `target: u8` (1 B), `slot: u8` (1 B), `version: Version` (4 B) | live, host |  | 本体を検証し、ヘッダを書いて読み返した。スロットにイメージがある。 |
 | `app.pending_set` | 0x22 | `pending_set`: Written \| Pending \| Confirmed \| Reverted → Pending | `slot: u8` (1 B), `version: Version` (4 B) | live, host |  | 次のブートで試すスロットになった。 |
 | `app.pending_moved` | 0x23 | `pending_moved`: Pending \| Trial → Written | `from: u8` (1 B), `to: u8` (1 B) | live, host |  | 別のスロットが待機になった。このスロットはもう待機ではない。 |

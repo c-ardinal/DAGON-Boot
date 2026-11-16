@@ -698,7 +698,8 @@ pub struct McuDef {
     #[serde(default)]
     pub links: Links,
     /// How the boot stage that writes the app (`[writers] app` names a kind other than `app`)
-    /// receives when the app does not answer, required exactly then: `listen_window_ms` (0 to
+    /// receives when the app does not answer (left out: no link kind takes part in a listen
+    /// window, and the boot stage receives only in update or recovery mode): `listen_window_ms` (0 to
     /// 200, 50 when left out; 0 opens no window), how long after its start it waits for STAY
     /// before it boots, and `kinds = { <link kind> = true | false, ... }`, whether each link kind
     /// takes part in the listen window (a kind left out does not). A kind the other end enumerates

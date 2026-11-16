@@ -112,7 +112,7 @@ pub const MCU: &[Requirement<McuCheck>] = &[
     Requirement {
         engine: "boot stage listen window (boot core, recovery agent)",
         fields: &["boot_receive.listen_window_ms"],
-        rule: "given exactly when a kind other than app writes app; window 0..=200 ms; an enumerated kind (usb-cdc) does not take part",
+        rule: "window 0..=200 ms; an enumerated kind (usb-cdc) does not take part",
         check: boot_receive,
     },
     Requirement {
@@ -604,18 +604,9 @@ fn writers(m: &McuDef) -> Result<(), String> {
 /// receives, within the window's range, no kind that must enumerate
 /// first taking part in the window.
 fn boot_receive(m: &McuDef) -> Result<(), String> {
-    let receives = m
-        .writers
-        .get(&ImageKind::App)
-        .is_some_and(|by| by.iter().any(|w| *w != ImageKind::App));
     let Some(r) = &m.boot_receive else {
-        return fail(receives, || {
-            "a kind other than app writes app ([writers] app), so [boot_receive] says how it receives".into()
-        });
+        return Ok(());
     };
-    fail(!receives, || {
-        "[boot_receive] is only for an MCU whose app another kind writes ([writers] app)".into()
-    })?;
     let max = super::BootReceive::MAX_WINDOW_MS;
     fail(r.listen_window_ms > max, || {
         format!(

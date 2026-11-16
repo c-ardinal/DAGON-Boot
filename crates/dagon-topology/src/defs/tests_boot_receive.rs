@@ -104,17 +104,21 @@ fn usb_cannot_take_part_in_the_window() {
     }
 }
 
-/// An MCU whose app another kind writes says how that kind receives; one
-/// whose app only the app writes need not.
+/// The table is optional, so a definition written before it still loads
+/// under the same definitions number: left out, no link kind takes part
+/// in a listen window.
 #[test]
-fn a_receiving_boot_stage_needs_the_table() {
-    let e = parsed("").unwrap_err();
-    assert!(e.contains("boot_receive"), "{e}");
-    let e = mcu_err(&format!("{FAKE_MCU}\n[boot_receive]\nkinds = {{}}\n"));
-    assert!(e.contains("boot_receive"), "{e}");
+fn without_the_table_no_window_opens() {
+    let m = parsed("").unwrap();
+    assert_eq!(m.boot_receive, None);
+    for k in LinkKind::ALL {
+        assert_eq!(m.listen_window_ms(*k), 0, "{k:?}");
+    }
     assert!(parsed("[boot_receive]\nkinds = {}\n").is_ok());
-    let plain = super::load::parse_mcu_text(FAKE_MCU, &[]).unwrap();
-    assert_eq!(plain.boot_receive, None);
+    let e = mcu_err(&format!(
+        "{FAKE_MCU}\n[boot_receive]\nkinds = {{ i2c = 1 }}\n"
+    ));
+    assert!(e.contains("boot_receive") || e.contains("bool"), "{e}");
 }
 
 fn project(name: &str, body: &str) -> Result<Registry, DefError> {

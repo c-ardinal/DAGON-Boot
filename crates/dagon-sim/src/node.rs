@@ -10,6 +10,7 @@ use std::sync::{Arc, MutexGuard};
 
 use dagon_agent::snapshot::AppSnapshot;
 use dagon_agent::{Agent, Config, SlotStore, StoreError};
+use dagon_ed25519::Ed25519Compact;
 use dagon_events::{
     compose, Bounds, Composed, Ctx, Extension, Health, Layer, Nop, Published, Reader, TrialInfo,
     Watchdog,
@@ -100,7 +101,7 @@ fn chain(check: SimCheck) -> SimChain {
 const TRIAL_WDT_MS: u32 = 10_000;
 
 pub struct SimNode {
-    agent: Agent<SimStore, SimChain>,
+    agent: Agent<SimStore, SimChain, Ed25519Compact>,
     /// What the app's display tasks read.
     events: Reader<AppSnapshot, 8>,
     /// The board's own handle on the flash the agent's store uses: its
@@ -131,15 +132,16 @@ pub struct SimNode {
 }
 
 impl SimNode {
-    /// Powers up and boots whatever the flash holds.
-    pub fn new(cfg: Config, flash: SimFlash, layout: Layout) -> Self {
-        let mut store = SimStore::new(flash, layout, cfg.pubkey);
+    /// Powers up and boots whatever the flash holds; its boot stages and
+    /// its agent verify images under `pubkey`.
+    pub fn new(cfg: Config, pubkey: [u8; 32], flash: SimFlash, layout: Layout) -> Self {
+        let mut store = SimStore::new(flash, layout, pubkey);
         store.stage0_node = Some((cfg.mcu_id, cfg.target_tag));
         let check = SimCheck::default();
         let app = chain(check.clone());
         let events = app.reader();
         let mut n = SimNode {
-            agent: Agent::new(cfg.clone(), store.clone(), app),
+            agent: Agent::new(cfg.clone(), Ed25519Compact::new(pubkey), store.clone(), app),
             events,
             store,
             check,

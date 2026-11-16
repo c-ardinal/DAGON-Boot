@@ -9,7 +9,7 @@
 //! `rp2040-4m` flash map) and needs [`MIN_FLASH_SIZE`] bytes; a board with
 //! less fails to build, a larger one keeps the rest for the app.
 
-use dagon_agent::{Agent, Config, SlotStore, Writer};
+use dagon_agent::{Agent, Config, SlotStore};
 use dagon_ed25519::Ed25519Compact;
 use dagon_events::{Published, Watchdog as Periods};
 use dagon_format::header::{mcu_id, port_kind, target_tag};
@@ -106,7 +106,6 @@ pub fn config(tag: &str, role: u8) -> Config {
         mode: mode::APP,
         max_payload: max_payload::USB as u16,
         trial_attempts: crate::TRIAL_ATTEMPTS,
-        writer: Writer::App,
     }
 }
 

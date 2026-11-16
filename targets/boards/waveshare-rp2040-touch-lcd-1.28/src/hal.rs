@@ -1,5 +1,5 @@
-//! The HAL side of the board: peripheral split, interrupts, the 親機 start
-//! and the link and display set-up.
+//! The HAL side of the board: peripheral split, interrupts, the relay
+//! start and the link and display bus set-up.
 
 use dagon_mcu_rp2040::links::{I2cLink, Kind, PioStream, RpI2c};
 pub use dagon_mcu_rp2040::node::DagonParts;
@@ -25,8 +25,6 @@ use crate::def::pins::{
     Backlight, ChildBoot0, ChildI2c, ChildI2cScl, ChildI2cSda, ChildNrst, ChildUart, ChildUartRx,
     ChildUartTx, Lcd, LcdCs, LcdDc, LcdMosi, LcdRst, LcdSck, TouchRst,
 };
-#[cfg(feature = "display")]
-use crate::{display, gc9a01};
 use crate::{BOARD_ID, DIAG_LED, FLASH_SIZE, I2C_HZ, LCD_SPI_HZ, UART_BAUD};
 
 pub struct Board;
@@ -44,24 +42,15 @@ macro_rules! dagon_pins {
     };
 }
 
-/// Guard task of the display; the app's own tasks start at [`APP_TASKS`].
-#[cfg(feature = "relay")]
-pub const DISPLAY_TASK: usize = dagon_mcu_rp2040::relay::TASKS;
-#[cfg(feature = "relay")]
-pub const APP_TASKS: usize = DISPLAY_TASK + 1;
-
-#[cfg(feature = "display")]
-static FRAME: static_cell::ConstStaticCell<gc9a01::Frame> =
-    static_cell::ConstStaticCell::new(gc9a01::Frame([0; gc9a01::FRAME_BYTES]));
-
-/// Starts the DAGON 親機 on this board: the relay over I2C0, the PIO UART
-/// and the STM32 control lines (PC and link tasks on DAGON's high-priority
-/// executor, the feeder on `spawner`), the touch controller held out of
-/// reset, and with `display` the home screen on `spawner` (guard task
-/// [`DISPLAY_TASK`]), drawn from the relay's state in `setup`. Declare the
-/// guard with `dagon_mcu_rp2040::relay::levels()`. Returns what DAGON does
-/// not use, for the app's own tasks, and the node's events. The board has
-/// no bring-up, so no `app.bring_up` is emitted.
+/// Starts DAGON's relay on this board: over I2C0, the PIO UART and the
+/// STM32 control lines (PC and link tasks on DAGON's high-priority
+/// executor, the feeder on `spawner`), with the touch controller held out
+/// of reset. Declare the guard with `dagon_mcu_rp2040::relay::levels()`;
+/// the app's tasks take the guard tasks from
+/// `dagon_mcu_rp2040::relay::TASKS` on. Returns what DAGON does not use,
+/// the display's pins among it, for the app's own tasks, and the node's
+/// events (what an app draws a display from). The board has no bring-up,
+/// so no `app.bring_up` is emitted.
 #[cfg(feature = "relay")]
 pub fn start<const N: usize>(
     spawner: embassy_executor::Spawner,
@@ -72,12 +61,6 @@ pub fn start<const N: usize>(
     uplink: Kind,
     downlinks: &[Kind],
 ) -> (Spare, dagon_mcu_rp2040::node::AppEvents) {
-    const {
-        assert!(
-            N > APP_TASKS - 1,
-            "the 親機 needs guard tasks 0..=DISPLAY_TASK"
-        )
-    };
     // The only uplink this board offers (`require_uplink` checks it at
     // compile time): the USB CDC device, built by the relay.
     assert!(uplink == Kind::UsbCdc, "uplink: only usb-cdc on this board");
@@ -96,22 +79,8 @@ pub fn start<const N: usize>(
     };
     // The touch controller stays out of reset for the life of the app.
     core::mem::forget(hold_touch(io.touch_rst));
-    #[allow(unused_mut)]
-    let mut spare = io.spare;
-    #[cfg(feature = "display")]
-    let display = io.display.pins(Irqs);
-    #[cfg(not(feature = "display"))]
-    {
-        spare.display = Some(io.display);
-    }
-    #[cfg(feature = "display")]
-    let state = setup.state;
     let events = dagon_mcu_rp2040::relay::start::<Board, N>(spawner, dagon, links, guard, setup);
-    #[cfg(feature = "display")]
-    spawner.spawn(
-        display::task(display, FRAME.take(), state, guard.lease(DISPLAY_TASK)).expect("task pool"),
-    );
-    (spare, events)
+    (io.spare, events)
 }
 
 /// Down `i2c` on this board: bus `child-i2c` at [`I2C_HZ`] with the
@@ -143,17 +112,17 @@ impl BoardDef for Board {
             watchdog: p.WATCHDOG,
             usb: p.USB,
         };
+        let display = Display {
+            spi: take!(p.lcd),
+            clk: take!(p.lcd_sck),
+            mosi: take!(p.lcd_mosi),
+            dma: p.DMA_CH0,
+            cs: take!(p.lcd_cs),
+            dc: take!(p.lcd_dc),
+            rst: take!(p.lcd_rst),
+            backlight: take!(p.backlight),
+        };
         let io = Io {
-            display: Display {
-                spi: take!(p.lcd),
-                clk: take!(p.lcd_sck),
-                mosi: take!(p.lcd_mosi),
-                dma: p.DMA_CH0,
-                cs: take!(p.lcd_cs),
-                dc: take!(p.lcd_dc),
-                rst: take!(p.lcd_rst),
-                backlight: take!(p.backlight),
-            },
             touch_rst: take!(p.touch_rst),
             sub_i2c: SubI2c {
                 bus: take!(p.child_i2c),
@@ -213,7 +182,7 @@ impl BoardDef for Board {
                 pwm_slice6: p.PWM_SLICE6,
                 pwm_slice7: p.PWM_SLICE7,
                 core1: p.CORE1,
-                display: None,
+                display,
             },
         };
         (dagon, io)
@@ -222,7 +191,6 @@ impl BoardDef for Board {
 
 /// What the app gets on this board.
 pub struct Io {
-    pub display: Display,
     /// Touch controller reset; see [`hold_touch`].
     pub touch_rst: Peri<'static, TouchRst>,
     pub sub_i2c: SubI2c,
@@ -232,8 +200,8 @@ pub struct Io {
     pub spare: Spare,
 }
 
-/// The pins and peripherals neither DAGON's relay nor the display use;
-/// [`start`] returns them for the app. Some of these pins are wired on the
+/// The pins and peripherals DAGON's relay does not use, the display's
+/// among them; [`start`] returns them for the app. Some of these pins are wired on the
 /// board itself:
 ///
 /// | Pin | On the board |
@@ -241,7 +209,7 @@ pub struct Io {
 /// | `pin_6`, `pin_7` | I2C1 SDA, SCL of the touch controller (CST816S) and the IMU (QMI8658) |
 /// | `pin_21` | touch controller interrupt |
 /// | `pin_23`, `pin_24` | IMU interrupts INT1, INT2 |
-/// | `pin_12` | LCD MISO (SPI1 RX; DAGON's display only writes) |
+/// | `pin_12` | LCD MISO (SPI1 RX; [`Display::pins`] sets the bus up to write only) |
 /// | `pin_29` | battery voltage (ADC3, through a divider) |
 ///
 /// The others (`pin_0`..`pin_5`, `pin_14`, `pin_15`, `pin_19`, `pin_20`)
@@ -292,8 +260,8 @@ pub struct Spare {
     pub pwm_slice7: Peri<'static, PWM_SLICE7>,
     /// The second core (DAGON runs on core 0 only).
     pub core1: Peri<'static, CORE1>,
-    /// The display's pins and bus when the `display` feature is off.
-    pub display: Option<Display>,
+    /// The round display's bus and pins; [`Display::pins`] sets them up.
+    pub display: Display,
 }
 
 /// Holds the touch controller out of reset and otherwise leaves it alone.
@@ -312,7 +280,8 @@ pub struct Display {
     pub backlight: Peri<'static, Backlight>,
 }
 
-/// The display's bus and lines, ready for [`gc9a01::Panel::new`].
+/// The display's bus (SPI1 at [`LCD_SPI_HZ`], write only, DMA) and lines,
+/// ready for the app's panel driver.
 pub struct DisplayPins {
     pub spi: Spi<'static, Lcd, Async>,
     pub cs: Output<'static>,

@@ -1,8 +1,8 @@
 //! Serving the PC: DAGON frames from the uplink. RELAY and I2C_RAW go to
-//! the worker of the link they name, SHOW to the [`State`], SUBCTL to the
-//! recovery lines (owned here); everything else is this node's own agent
-//! (owned here, with the flash). A link or recovery lines the node does
-//! not have answer E_UNSUPPORTED.
+//! the worker of the link they name, SUBCTL to the recovery lines (owned
+//! here); everything else is this node's own agent (owned here, with the
+//! flash), SHOW included, which the [`State`] also notes. A link or
+//! recovery lines the node does not have answer E_UNSUPPORTED.
 
 use dagon_port::{Flash, Link, Nrst, SubControl};
 use dagon_proto::payload::{boot0, nrst, HelloResp, Relay as RelayReq, Show, StatusResp, SubCtl};
@@ -157,7 +157,8 @@ where
             }
             Some(Cmd::Show) if is_request => {
                 self.pc_active();
-                (self.show(f.payload), 0)
+                self.note_show(f.payload);
+                return self.own(request, f.cmd);
             }
             Some(Cmd::SubCtl) if is_request => (self.lines(f.payload).await, 0),
             Some(Cmd::I2cRaw) if is_request => self.i2c_raw(f.payload).await,
@@ -295,13 +296,10 @@ where
         self.via(port, Op::Raw, addr, timeout, len, data).await
     }
 
-    fn show(&self, p: &[u8]) -> Status {
-        match Show::parse(p) {
-            Ok(s) => {
-                self.r.state.set_progress(Progress::from(&s));
-                Status::Ok
-            }
-            Err(e) => e,
+    /// SHOW is the agent's to answer; the [`State`] notes its progress.
+    fn note_show(&self, p: &[u8]) {
+        if let Ok(s) = Show::parse(p) {
+            self.r.state.set_progress(Progress::from(&s));
         }
     }
 }

@@ -43,6 +43,11 @@ pub enum Cmd {
     /// version, MCU id (`payload::VersionResp`). Additive: an agent that
     /// predates it answers `Status::Unsupported`.
     Version = 0x03,
+    /// To a node's boot core while its listen window is open: stay in
+    /// update mode instead of starting the app (empty request and reply).
+    /// A boot core already in update mode answers OK; an app answers
+    /// `Status::State`; an agent that predates it, `Status::Unsupported`.
+    Stay = 0x05,
     XferBegin = 0x10,
     XferData = 0x11,
     XferEnd = 0x12,
@@ -64,10 +69,11 @@ pub enum Cmd {
 }
 
 impl Cmd {
-    pub const ALL: [Cmd; 16] = [
+    pub const ALL: [Cmd; 17] = [
         Cmd::Hello,
         Cmd::Status,
         Cmd::Version,
+        Cmd::Stay,
         Cmd::XferBegin,
         Cmd::XferData,
         Cmd::XferEnd,

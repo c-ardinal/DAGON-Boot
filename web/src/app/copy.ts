@@ -37,9 +37,6 @@ export const BUTTON = {
   connect: '接続する',
   reselect: '親機を選び直す',
   reload: '構成を読み直す',
-  push: '親機へ送る',
-  pushAgain: '構成を送り直す',
-  scanAgain: 'ノードを探し直す',
   defineFix: '準備で構成を直す',
   chooseFile: 'パッケージファイルを選ぶ',
   useLatest: '最新のリリースを使う',
@@ -72,8 +69,6 @@ export const BAND = {
   M05: { chip: '× 使用中', sentence: '親機を使っているタブやアプリ（dagon CLI を含む）を閉じてから、もう一度押してください。' },
   M06: { chip: '× 許可なし', sentence: 'ターミナルに表示されたアドレスから開き直してください。' },
   M08: { chip: '× 応答なし', sentence: '一覧から「DAGON hub」を選び直してください。' },
-  M10: { sentence: '実際の配線と同じか確かめてから、親機へ送ってください。' },
-  M12: { chip: '× 送信失敗', sentence: 'USB ケーブルを確かめてから、もう一度送ってください。' },
   M13: { sentence: 'パッケージファイルをこの画面に置くか、選んでください。' },
   /** ready with a build to write: the main action writes it. */
   M13built: { sentence: '書き込むノードにチェックを入れて、『書き込む』を押してください。' },
@@ -95,7 +90,6 @@ export const BAND = {
   M26: { sentence: '『もう一度つなぐ』を押して、同じ機器を選んでください。' },
   M59: { sentence: 'そのまま待ってください（数秒で終わります）。' },
   M60: { sentence: '見つかったノードが降りてくるまで、そのまま待ってください。' },
-  M61: { sentence: '送り終わるまで、USB を抜かないでください。' },
   /**
    * The answering nodes are updated first, a silent one from its card:
    * nodesSilent, with a power and wiring hint for the silent ones.
@@ -122,7 +116,6 @@ export const HUB_TOGGLE = {
   locked: {
     choosing: '一覧で選び終わるまで、そのまま待ってください。',
     scanning: '探し終わるまで、切断できません。',
-    sending: '送り終わるまで、切断できません。',
     writing: '書き込みが終わるまで、切断できません。',
     hubRestarting: '親機とつなぎ直すまで、切断できません。',
     reconnectNeeded: '親機とつなぎ直すまで、切断できません。',
@@ -728,7 +721,6 @@ export const HELP = {
 export const ANNOUNCE = {
   A05: '親機 接続、ノード確認中',
   A06: (n: number) => `発見 ${n}`,
-  A07: '構成 送信済み',
   A08: (n: number, of: number) => `応答 ${n}/${of}`,
   A21silent: (name: string) => `${name} 応答なし`,
   A21lost: '親機 切断',

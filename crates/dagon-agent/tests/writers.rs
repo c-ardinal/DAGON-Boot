@@ -20,6 +20,10 @@ const FAKE_MCU: u16 = 0x7E57;
 const TAG: [u8; 16] = target_tag("fake-node");
 const CAP: u32 = 4096;
 const BODY: usize = 1000;
+/// The XFER target number the topology copy had: reserved, taken by no
+/// writer.
+#[allow(deprecated)]
+const RESERVED_TARGET: u8 = target::TOPOLOGY;
 
 type Chain = Composed<&'static Published<(), 16>, Nop, Nop, fn() -> u64>;
 
@@ -61,6 +65,9 @@ struct Mem {
     headers: BTreeMap<(u8, u8), [u8; HEADER_SIZE]>,
     /// Times the session asked the store to make log room.
     rooms: usize,
+    /// Room for the reserved target 3 at slot 0, as a store built before
+    /// that target was removed still reports.
+    reserved_room: bool,
 }
 
 impl Mem {
@@ -78,6 +85,7 @@ impl Mem {
             bodies: BTreeMap::new(),
             headers: BTreeMap::new(),
             rooms: 0,
+            reserved_room: false,
         }
     }
 
@@ -93,7 +101,8 @@ impl SlotStore for Mem {
         self.status[0]
     }
     fn capacity(&self, t: u8, slot: u8) -> u32 {
-        let has = self.count.get(usize::from(t)).is_some_and(|&n| slot < n);
+        let has = self.count.get(usize::from(t)).is_some_and(|&n| slot < n)
+            || (self.reserved_room && (t, slot) == (RESERVED_TARGET, 0));
         if has {
             CAP
         } else {
@@ -512,8 +521,8 @@ fn only_the_app_makes_log_room_when_its_session_starts() {
 }
 
 /// What only the app's writer serves is not in the boot core's session:
-/// SHOW and the recovery agent's and the topology copy's targets are
-/// unsupported or refused there, as the app answers them.
+/// SHOW and the recovery agent's target are unsupported or refused there,
+/// as the app answers them.
 #[test]
 fn the_boot_core_serves_none_of_the_app_only_requests() {
     let kp = keypair();
@@ -522,27 +531,46 @@ fn the_boot_core_serves_none_of_the_app_only_requests() {
     let show = [1, 1, 42, 0, 0, 0, 0];
     assert_eq!(app.call(Cmd::Show, &show), Status::Ok);
     assert_eq!(core.call(Cmd::Show, &show), Status::Unsupported);
-    for (t, slot, hdr) in [
-        (target::TOPOLOGY, 0, 0),
-        (target::AGENT, 2, HEADER_SIZE as u16),
-    ] {
-        let mut p = [0u8; 16];
-        let n = XferBegin {
-            target: t,
-            slot,
-            total_len: 600,
-            hdr_len: hdr,
-        }
-        .encode(&mut p)
-        .unwrap();
-        // This store keeps neither; the app finds no room for them.
-        assert_eq!(
-            app.call(Cmd::XferBegin, &p[..n]),
-            Status::Unsupported,
-            "{t}"
-        );
-        assert_eq!(core.call(Cmd::XferBegin, &p[..n]), Status::Arg, "{t}");
+    let p = begin(target::AGENT, 2, HEADER_SIZE as u16);
+    // This store keeps no agent slot; the app finds no room for it.
+    assert_eq!(app.call(Cmd::XferBegin, &p), Status::Unsupported);
+    assert_eq!(core.call(Cmd::XferBegin, &p), Status::Arg);
+}
+
+/// XFER_BEGIN of 600 bytes into `slot` of `t` with `hdr` header bytes.
+fn begin(t: u8, slot: u8, hdr: u16) -> Vec<u8> {
+    let mut p = [0u8; 16];
+    let n = XferBegin {
+        target: t,
+        slot,
+        total_len: 600,
+        hdr_len: hdr,
     }
+    .encode(&mut p)
+    .unwrap();
+    p[..n].to_vec()
+}
+
+/// Target 3 is reserved: no writer takes it, with or without a header,
+/// even from a store that still reports room for it; the refusal is the
+/// one for any target the writer does not take, and nothing is erased.
+#[test]
+fn no_writer_takes_the_reserved_target() {
+    let kp = keypair();
+    let room = || {
+        let mut m = Mem::new(2, 1);
+        m.reserved_room = true;
+        m
+    };
+    let mut app = Bench::<_, writer::App>::new(ed25519(&kp), room());
+    let mut core = Bench::<_, writer::BootCore>::new(ed25519(&kp), room());
+    for hdr in [0, HEADER_SIZE as u16] {
+        let p = begin(RESERVED_TARGET, 0, hdr);
+        assert_eq!(app.call(Cmd::XferBegin, &p), Status::Arg, "app, {hdr}");
+        assert_eq!(core.call(Cmd::XferBegin, &p), Status::Arg, "core, {hdr}");
+    }
+    assert!(app.mem.borrow().bodies.is_empty());
+    assert!(core.mem.borrow().bodies.is_empty());
 }
 
 /// A signature scheme no DAGON code knows: SHA-256 of the key, the domain

@@ -885,6 +885,8 @@ fn unknown_and_hub_commands_are_unsupported_on_nodes() {
     let mut n = Node::new(Probe::default());
     // The app handles ENTER_ROM before the agent sees it.
     assert_eq!(n.call(Cmd::EnterRom, &[1]).0, Status::Unsupported);
+    // The removed topology copy's target: reserved, taken by no node.
+    #[allow(deprecated)]
     let begin = XferBegin {
         target: target::TOPOLOGY,
         slot: 0,
@@ -894,7 +896,7 @@ fn unknown_and_hub_commands_are_unsupported_on_nodes() {
     assert_eq!(
         n.call(Cmd::XferBegin, &Node::enc(begin, XferBegin::encode))
             .0,
-        Status::Unsupported
+        Status::Arg
     );
     assert_eq!(
         n.call(Cmd::XferData, &[0, 0, 0, 0, 1]).0,

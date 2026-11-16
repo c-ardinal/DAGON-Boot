@@ -376,9 +376,17 @@ fn cases(kp: &KeyPair) -> Vec<(&'static str, Vec<u8>, u32)> {
     vec![
         ("good", good.clone(), good.len() as u32),
         ("bad signature", bad_sig.clone(), bad_sig.len() as u32),
-        ("wrong target", image(other, &body(), kp), (HEADER_SIZE + BODY) as u32),
+        (
+            "wrong target",
+            image(other, &body(), kp),
+            (HEADER_SIZE + BODY) as u32,
+        ),
         ("too large", good, full + 1),
-        ("rolled-back version", image(older, &body(), kp), (HEADER_SIZE + BODY) as u32),
+        (
+            "rolled-back version",
+            image(older, &body(), kp),
+            (HEADER_SIZE + BODY) as u32,
+        ),
     ]
 }
 
@@ -405,7 +413,8 @@ fn every_image_case_gets_the_same_verdict_from_every_writer() {
                 node.transfer_as(target::APP, 1, &img, total)
             })
             .collect();
-        println!("{name:<22} {:>10?} {:>10?}", verdicts[0], verdicts[1]);
+        let [app, core] = [0, 1].map(|i| format!("{:?}", verdicts[i]));
+        println!("{name:<22} {app:>10} {core:>10}");
         assert_eq!(verdicts, [want, want], "{name}");
     }
     assert!(
@@ -458,6 +467,20 @@ fn each_writer_is_kept_from_the_slot_it_runs_from() {
         Status::Ok,
         "the app writes the only boot core slot in place"
     );
+}
+
+/// Only the app confirms the trial it runs: the boot core runs while no
+/// app does, so a CONFIRM there leaves the slot on trial.
+#[test]
+fn only_the_app_confirms_its_trial() {
+    let kp = keypair();
+    let mut mem = Mem::new(2, 1);
+    mem.status[0].active = 1;
+    mem.status[0].slots[1].state = SlotState::Trying;
+    let mut core = Bench::new(Writer::BootCore, ed25519(&kp), mem);
+    assert_eq!(core.call(Cmd::Confirm, &[target::APP]), Status::State);
+    assert_eq!(core.agent.confirm_own(), Err(Status::State));
+    assert_eq!(core.state(target::APP, 1), SlotState::Trying);
 }
 
 /// A signature scheme no DAGON code knows: SHA-256 of the key, the domain
@@ -517,7 +540,11 @@ fn the_engine_runs_on_an_mcu_only_its_drivers_know() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let names = mcu_names(&root.join("targets/mcu"));
     assert!(names.len() >= 3, "{names:?}");
-    for engine in ["crates/dagon-agent/src", "crates/dagon-core/src", "crates/dagon-port/src"] {
+    for engine in [
+        "crates/dagon-agent/src",
+        "crates/dagon-core/src",
+        "crates/dagon-port/src",
+    ] {
         for (file, text) in sources(&root.join(engine)) {
             let text = text.to_lowercase();
             for n in &names {
@@ -558,7 +585,10 @@ fn sources(dir: &std::path::Path) -> Vec<(String, String)> {
         if p.is_dir() {
             out.extend(sources(&p));
         } else if p.extension().is_some_and(|x| x == "rs") {
-            out.push((p.display().to_string(), std::fs::read_to_string(&p).unwrap()));
+            out.push((
+                p.display().to_string(),
+                std::fs::read_to_string(&p).unwrap(),
+            ));
         }
     }
     out

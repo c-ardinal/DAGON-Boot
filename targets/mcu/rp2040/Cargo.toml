@@ -22,7 +22,7 @@ lint = { target = "thumbv6m-none-eabi", features = [""] }
 default = ["relay"]
 # The embassy-rp parts: flash port, watchdog guard, slot store, link
 # drivers, sub-MCU control lines, and the verifying key from DAGON_PUBKEY.
-hal = ["dep:embassy-rp", "dep:embassy-time", "dep:dagon-agent", "dep:dagon-events", "dep:static_cell", "dep:portable-atomic"]
+hal = ["dep:embassy-rp", "dep:embassy-time", "dep:dagon-agent", "dep:dagon-ed25519", "dep:dagon-events", "dep:static_cell", "dep:portable-atomic"]
 # DAGON over USB CDC (device, frame link, agent serving loop) and DAGON's
 # high-priority executor (SWI_IRQ_0).
 usb = ["hal", "embassy-rp?/rt", "embassy-rp?/unstable-pac", "dep:embassy-usb", "dep:embassy-executor"]
@@ -46,6 +46,8 @@ dagon-proto = { path = "../../../crates/dagon-proto" }
 dagon-relay = { path = "../../../crates/dagon-relay" }
 dagon-mcu-common = { path = "../common" }
 dagon-agent = { path = "../../../crates/dagon-agent", optional = true }
+# The verifier the node's agent checks images with.
+dagon-ed25519 = { path = "../../../crates/dagon-ed25519", features = ["compact"], optional = true }
 dagon-events = { path = "../../../crates/dagon-events", optional = true }
 # boot2-none: stage0 holds boot2; every other image starts after a header.
 embassy-rp = { version = "0.10.0", default-features = false, features = ["rp2040", "boot2-none"], optional = true }

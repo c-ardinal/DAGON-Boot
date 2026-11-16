@@ -21,6 +21,7 @@ use static_cell::StaticCell;
 
 use crate::frames::FrameReader;
 use crate::watchdog::Watch;
+use dagon_format::SigVerifier;
 use dagon_mcu_common::link::{Kind, Link, LinkError, Reconnect};
 use dagon_mcu_common::serve::{serve, Exit, ServeHost};
 
@@ -275,7 +276,7 @@ pub struct GuardHost<'a> {
     pub task: usize,
 }
 
-impl<S: SlotStore, X: AppChain> ServeHost<S, X> for GuardHost<'_> {
+impl<S: SlotStore, X: AppChain, V: SigVerifier> ServeHost<S, X, V> for GuardHost<'_> {
     fn now_ms(&self) -> u64 {
         embassy_time::Instant::now().as_millis()
     }
@@ -296,9 +297,9 @@ impl<S: SlotStore, X: AppChain> ServeHost<S, X> for GuardHost<'_> {
 /// Serves `agent` over `link` (any [`Link`]) forever; REBOOT resets the
 /// chip after the reply has left and the delay `allow_reboot_now` asked
 /// for.
-pub async fn serve_agent<L: Link, S: SlotStore, X: AppChain>(
+pub async fn serve_agent<L: Link, S: SlotStore, X: AppChain, V: SigVerifier>(
     mut link: L,
-    mut agent: Agent<S, X>,
+    mut agent: Agent<S, X, V>,
     guard: &dyn Watch,
     task: usize,
 ) -> ! {

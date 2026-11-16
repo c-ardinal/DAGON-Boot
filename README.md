@@ -88,7 +88,7 @@ irm https://raw.githubusercontent.com/c-ardinal/DAGON-Boot/main/setup.ps1 | iex
 
 #### アンインストール
 
-同じスクリプトで外せます。`~/.dagon`の鍵は残ります。消すと、その鍵で書いたマイコンは更新できなくなります。
+同じスクリプトで外せます。`~/.dagon`の鍵は残ります。消すと、その鍵で書いたマイコンに、もう書き込めなくなります。
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/c-ardinal/DAGON-Boot/main/setup.sh | sh -s -- --uninstall

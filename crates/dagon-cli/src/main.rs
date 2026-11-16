@@ -46,7 +46,13 @@ fn main() -> ExitCode {
         Ok(c) => c,
         // --help (exit 0) or a usage error (exit 2), as clap prints them.
         Err(e) => {
-            let _ = e.print();
+            let argv: Vec<String> = std::env::args().collect();
+            let text = cli::parse_error_text(&argv, &e);
+            if e.use_stderr() {
+                eprint!("{text}");
+            } else {
+                print!("{text}");
+            }
             return ExitCode::from(u8::try_from(e.exit_code()).unwrap_or(2));
         }
     };

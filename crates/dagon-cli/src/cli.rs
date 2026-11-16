@@ -558,6 +558,11 @@ pub struct AiTopologyArgs {
     pub model: Option<String>,
 }
 
+/// The text printed for a command-line parse error.
+pub fn parse_error_text(_argv: &[String], e: &clap::Error) -> String {
+    e.to_string()
+}
+
 /// Every visible command's full help, one Markdown section each.
 pub fn markdown() -> String {
     let mut root = Cli::command();

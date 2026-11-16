@@ -17,7 +17,16 @@ pub mod kind {
     pub const BOOT_ATTEMPT: u8 = 0x02;
     pub const CONFIRMED: u8 = 0x03;
     pub const ROLLBACK: u8 = 0x04;
+    /// The app asks its boot core to stay in update mode at the next
+    /// start (REBOOT mode 1). Node-wide: `target`, `reason`, `version`
+    /// and `digest16` are 0 and `slot` is `slot::NONE`. Used once: the
+    /// boot core consumes it with [`UPDATE_DONE`] as it enters update
+    /// mode. A reader that predates it skips it, as any unknown kind.
+    pub const UPDATE_STAY: u8 = 0x06;
     pub const PROVISION: u8 = 0x08;
+    /// The boot core consumed the [`UPDATE_STAY`] before it (fields as
+    /// UPDATE_STAY's).
+    pub const UPDATE_DONE: u8 = 0x09;
     pub const SNAPSHOT: u8 = 0x0A;
 }
 

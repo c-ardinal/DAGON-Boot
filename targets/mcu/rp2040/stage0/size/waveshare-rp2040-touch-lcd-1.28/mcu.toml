@@ -495,13 +495,6 @@ slot = "b"
 start = 269778944
 target = "app"
 
-[[slot_layout]]
-capacity = 4096
-header = "inline"
-slot = "a"
-start = 270827520
-target = "topology"
-
 [stage0]
 key = "flash"
 region_bytes = 16384

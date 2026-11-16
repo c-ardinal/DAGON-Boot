@@ -94,7 +94,6 @@ pub(crate) struct ImageStore<S> {
     core_slots: u8,
     /// The recovery agent's slot (factory) of a vendor-stage2 board.
     factory: image::Machine,
-    topology: image::Machine,
     view: ImageView,
 }
 
@@ -147,7 +146,6 @@ impl<S: SlotStore> ImageStore<S> {
             cores: core::array::from_fn(|_| core_image::Machine::new()),
             core_slots: 0,
             factory: image::Machine::new(),
-            topology: image::Machine::new(),
         };
         images.reopen();
         images
@@ -193,7 +191,6 @@ impl<S: SlotStore> ImageStore<S> {
             done(factory.written(&mut silent, target::AGENT, FACTORY, f.version));
         }
         self.factory = factory;
-        self.topology = image::Machine::new();
         self.refresh_view(status);
     }
 
@@ -314,7 +311,6 @@ impl<S: SlotStore> ImageStore<S> {
                 .get_mut(usize::from(slot))
                 .ok_or(Status::Arg),
             target::AGENT if slot == FACTORY => Ok(&mut self.factory),
-            target::TOPOLOGY if slot == 0 => Ok(&mut self.topology),
             _ => Err(Status::Unsupported),
         }
     }
@@ -432,21 +428,6 @@ impl<S: SlotStore> ImageStore<S> {
         if back != *hdr || !verify(&back) {
             return Err(Status::Flash);
         }
-        Ok(())
-    }
-
-    /// `written` for a target without a header (the topology copy).
-    pub(crate) fn body_written(
-        &mut self,
-        t: u8,
-        slot: u8,
-        out: &mut impl Sink,
-    ) -> Result<(), Status> {
-        let m = self.machine(t, slot)?;
-        if !allows("written", m.state()) {
-            return Err(Status::State);
-        }
-        done(m.written(out, t, slot, Version::default()));
         Ok(())
     }
 

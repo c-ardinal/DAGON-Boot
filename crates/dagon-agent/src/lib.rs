@@ -342,10 +342,10 @@ impl Compact for AbortCause {
 
 /// The erase a new body of `len` bytes into `slot` of `target` takes under
 /// `layout`: the shared planner ([`EraseLayout::plan`], the plan a host
-/// waits for) with the transfer's header length (none for the topology, an
-/// image header otherwise, as XFER_BEGIN requires). A target and slot the
-/// layout has no plan for is `Unsupported`; a body larger than the slot, or
-/// flash outside the erase regions, `Range`.
+/// waits for) with the image header every transfer carries, as XFER_BEGIN
+/// requires. A target and slot the layout has no plan for is
+/// `Unsupported`; a body larger than the slot, or flash outside the erase
+/// regions, `Range`.
 pub fn erase_plan<
     'l,
     R: AsRef<[dagon_port::timeout::EraseRegion]>,
@@ -356,12 +356,8 @@ pub fn erase_plan<
     slot: u8,
     len: u32,
 ) -> Result<Plan<'l>, StoreError> {
-    let hdr_len = match target {
-        payload::target::TOPOLOGY => 0,
-        _ => HEADER_SIZE as u32,
-    };
     layout
-        .plan(target, slot, hdr_len, len)
+        .plan(target, slot, HEADER_SIZE as u32, len)
         .map_err(|e| match e {
             PlanError::NoSlot => StoreError::Unsupported,
             PlanError::TooLong | PlanError::Uncovered { .. } => StoreError::Range,
@@ -382,11 +378,11 @@ pub enum StoreError {
 /// changes. A port (`SlotStore`, trusted only): the board's MCU package
 /// provides it.
 ///
-/// `target` is the XFER target (`payload::target::APP`, or
-/// `payload::target::TOPOLOGY` with `slot = 0` on the hub); `slot` is 0 = A,
-/// 1 = B. Offsets are relative to the start of the image body. The agent never
-/// asks to erase or write the slot its [`Writer`] runs from, nor the
-/// confirmed slot of that image kind.
+/// `target` is the XFER target (`payload::target::APP`,
+/// `payload::target::BOOTCORE` or `payload::target::AGENT`); `slot` is
+/// 0 = A, 1 = B, 2 = factory. Offsets are relative to the start of the
+/// image body. The agent never asks to erase or write the slot its
+/// [`Writer`] runs from, nor the confirmed slot of that image kind.
 ///
 /// The mutators take a [`Transition`]: only the agent's image machine calls
 /// them, inside the transition that emits the change's event. Methods added
@@ -581,9 +577,8 @@ pub mod writer {
     /// from, nor the one it goes back to (the session's guards). Only the
     /// app's session serves the app's own trial (CONFIRM and its
     /// self-check), replays the boot stage's changes at its start, takes the
-    /// recovery agent's and the topology copy's targets and SHOW, and makes
-    /// log room when it starts; the other writers' sessions are built
-    /// without them.
+    /// recovery agent's target and SHOW, and makes log room when it starts;
+    /// the other writers' sessions are built without them.
     pub trait Writer: sealed::Sealed {
         /// The XFER target of the image kind it runs from.
         const TARGET: u8;

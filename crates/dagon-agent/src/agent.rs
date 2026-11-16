@@ -287,7 +287,7 @@ impl<S: SlotStore, X: AppChain, V: SigVerifier, W: Writer> Agent<S, X, V, W> {
 
     /// SHOW to a node: touches no flash and no session, so it is safe
     /// between the chunks of a transfer. Only a transfer's number is for the
-    /// node's display; past the bytes its own phase says where it is.
+    /// node's app; past the bytes its own phase says where it is.
     fn show(&mut self, s: Show<'_>) -> Handled {
         if s.phase == phase::TRANSFER {
             let percent = s.percent.min(100);
@@ -388,9 +388,6 @@ impl<S: SlotStore, X: AppChain, V: SigVerifier, W: Writer> Agent<S, X, V, W> {
             );
             return Err(Status::State);
         }
-        if W::APP && !signed(req.target) {
-            self.open_body(req.target, req.slot, body_len)?;
-        }
         Ok((0, None))
     }
 
@@ -402,7 +399,6 @@ impl<S: SlotStore, X: AppChain, V: SigVerifier, W: Writer> Agent<S, X, V, W> {
         match req.target {
             target::APP | target::BOOTCORE if req.hdr_len == IMAGE_HDR_LEN && ab => {}
             target::AGENT if W::APP && req.hdr_len == IMAGE_HDR_LEN && factory => {}
-            target::TOPOLOGY if W::APP && req.hdr_len == 0 && req.slot == 0 => {}
             _ => return Err(Status::Arg),
         }
         let cap = self.images.capacity(req.target, req.slot);
@@ -423,7 +419,7 @@ impl<S: SlotStore, X: AppChain, V: SigVerifier, W: Writer> Agent<S, X, V, W> {
             if fallback || running != Some(SlotState::Confirmed) {
                 return Err(Status::State);
             }
-        } else if signed(req.target) {
+        } else {
             let st = self
                 .images
                 .target_status(req.target)
@@ -578,11 +574,6 @@ impl<S: SlotStore, X: AppChain, V: SigVerifier, W: Writer> Agent<S, X, V, W> {
     /// held header and writes the header last (`written`).
     fn verify_and_commit(&mut self, target: u8, slot: u8, len: u32) -> Result<[u8; 32], Status> {
         let digest = self.hash_body(target, slot, len)?;
-        if W::APP && !signed(target) {
-            noted(self.requests.verify_ok(&mut self.chain, target, slot, len));
-            self.images.body_written(target, slot, &mut self.chain)?;
-            return Ok(digest);
-        }
         let h = ImageHeader::parse(&self.hdr).map_err(format_status)?;
         if h.payload_sha256 != digest {
             return Err(Status::Digest);
@@ -715,12 +706,6 @@ pub fn reply_status(frame: &[u8]) -> Option<u8> {
         return None;
     }
     split_status(f.payload).map(|(s, _)| s as u8)
-}
-
-/// Whether `target`'s images carry a signed header (the topology copy
-/// does not).
-fn signed(target: u8) -> bool {
-    target != target::TOPOLOGY
 }
 
 /// The image kind a slot of `target` holds.

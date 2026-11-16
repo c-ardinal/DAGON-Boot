@@ -105,7 +105,7 @@ app = ["app"]
 bootcore = ["app"]
 
 # What the node receives into: each slot above (header inline at its
-# start), and the hub's display copy of the topology (no header).
+# start).
 [[slot_layout]]
 target = "bootcore"
 slot = "a"
@@ -132,13 +132,6 @@ target = "app"
 slot = "b"
 start = 0x1014_8000
 capacity = 0xF_FE00
-header = "inline"
-
-[[slot_layout]]
-target = "topology"
-slot = "a"
-start = 0x1024_8000
-capacity = 0x1000
 header = "inline"
 
 # First write: rescue.uf2 copied to the boot ROM drive (BOOT held at plug-in).

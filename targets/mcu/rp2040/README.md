@@ -217,7 +217,6 @@ the rest for the app.
 | 0x10028000 | 128 KiB | boot core slot B, as slot A |
 | 0x10048000 | 1 MiB | APP-A: 512-byte header, body at 0x10048200 |
 | 0x10148000 | 1 MiB | APP-B: same, body at 0x10148200 |
-| 0x10248000 | 4 KiB | topology display copy |
 
 The boot core starts the watchdog for 8 s before every jump. Stage0 starts
 the pending boot core (written by the running app's agent from a release)

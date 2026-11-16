@@ -22,31 +22,51 @@ pub type OwnedLayout = EraseLayout<Vec<EraseRegion>, Vec<SlotLayout>>;
 
 /// An XFER target by name.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "kebab-case")]
+#[serde(try_from = "String")]
 pub enum TargetName {
     App,
     Bootcore,
     Agent,
-    Topology,
 }
 
+/// Why a definition naming the removed `topology` target is refused: its
+/// wire number stays reserved (`dagon_proto::payload::target::TOPOLOGY`)
+/// and no node takes it.
+const TOPOLOGY_REMOVED: &str = "target `topology` was removed: the compiled topology stays with \
+     the host and no node stores a copy; delete this slot_layout";
+
 impl TargetName {
+    const ALL: [(Self, &'static str); 3] = [
+        (Self::App, "app"),
+        (Self::Bootcore, "bootcore"),
+        (Self::Agent, "agent"),
+    ];
+
     /// The XFER `target` byte.
     pub fn wire(self) -> u8 {
         match self {
             Self::App => target::APP,
             Self::Bootcore => target::BOOTCORE,
             Self::Agent => target::AGENT,
-            Self::Topology => target::TOPOLOGY,
         }
     }
+}
 
-    /// Header bytes a transfer to this target carries (a topology none).
-    fn header_len(self) -> u32 {
-        match self {
-            Self::Topology => 0,
-            _ => HEADER,
+impl TryFrom<String> for TargetName {
+    type Error = String;
+
+    fn try_from(s: String) -> Result<Self, String> {
+        if s == "topology" {
+            return Err(TOPOLOGY_REMOVED.into());
         }
+        Self::ALL
+            .iter()
+            .find(|(_, n)| *n == s)
+            .map(|(t, _)| *t)
+            .ok_or_else(|| {
+                let known: Vec<_> = Self::ALL.iter().map(|(_, n)| format!("`{n}`")).collect();
+                format!("unknown target `{s}`, expected one of {}", known.join(", "))
+            })
     }
 }
 
@@ -248,10 +268,6 @@ pub(super) fn slot_layouts(m: &McuDef) -> Result<(), String> {
                 .any(|o| (o.target, o.slot) == (l.target, l.slot)),
             || format!("{} is given twice", l.name()),
         )?;
-        fail(
-            l.target == TargetName::Topology && l.slot != SlotName::A,
-            || format!("{}: the topology has slot a only", l.name()),
-        )?;
         if let Some(name) = &l.partition {
             let p = m
                 .partition_table
@@ -318,7 +334,7 @@ fn covered(m: &McuDef, layout: &OwnedLayout, key: &str) -> Result<(), String> {
             &layout.slots,
             l.target.wire(),
             l.slot.wire(),
-            l.target.header_len(),
+            HEADER,
             l.capacity,
         )
         .map_err(|e| format!("{}: {e:?}", l.name()))?;

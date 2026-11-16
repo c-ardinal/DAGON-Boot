@@ -432,8 +432,11 @@ fn each_app_slot_has_its_own_capacity() {
     assert_eq!(s.capacity(target::APP, B), 0x1_0000 - HEADER_SIZE as u32);
 }
 
+/// The removed topology target (its number reserved) and a slot past B
+/// have no room.
 #[test]
-fn topology_target_is_unsupported() {
+#[allow(deprecated)]
+fn reserved_target_is_unsupported() {
     let s = KindSStore::load(provisioned(), &LOG, SLOTS, &ERASE_REGIONS).unwrap();
     assert_eq!(s.capacity(target::TOPOLOGY, 0), 0);
     assert_eq!(s.capacity(target::APP, 2), 0);

@@ -33,7 +33,7 @@
 use dagon_boot::BootRun;
 use dagon_core::boot::{BootConfig, Decision};
 use dagon_core::bootcore::CLEARED;
-use dagon_ed25519::Ed25519Compact;
+use dagon_ed25519::Ed25519Small;
 use dagon_events::{compose_boot, BootExtension, Extension};
 use dagon_format::header::{self, mcu_id, HEADER_SIZE};
 use dagon_mcu_rp2040::arm::{jump, led, step, trial};
@@ -147,8 +147,9 @@ fn now_us() -> u64 {
     }
 }
 
-/// This core's signature verifier, under the key built into it.
-const VERIFIER: Ed25519Compact = Ed25519Compact::new(PUBKEY);
+/// This core's signature verifier, under the key built into it: stage0's
+/// small Ed25519, so the boot core has room for the update session.
+const VERIFIER: Ed25519Small = Ed25519Small::new(PUBKEY);
 
 const CONFIG: BootConfig = BootConfig {
     mcu_id: mcu_id::RP2040,

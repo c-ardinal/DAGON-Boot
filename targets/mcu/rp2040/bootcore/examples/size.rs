@@ -7,8 +7,9 @@
 #![no_std]
 #![no_main]
 
-use dagon_agent::{Agent, Config, Writer};
-use dagon_ed25519::Ed25519Compact;
+use dagon_agent::writer::BootCore;
+use dagon_agent::{Agent, Config};
+use dagon_ed25519::Ed25519Small;
 use dagon_events::{compose, Bounds, Layer, Nop, Published, Watchdog};
 use dagon_format::header::{mcu_id, port_kind};
 use dagon_mcu_common::guard::Watch;
@@ -73,9 +74,9 @@ fn session() -> ! {
         mode: mode::APP,
         max_payload: max_payload::USB as u16,
         trial_attempts: TRIAL_ATTEMPTS,
-        writer: Writer::BootCore,
     };
-    let mut agent = Agent::new(cfg, Ed25519Compact::new(PUBKEY), store, chain);
+    let mut agent: Agent<_, _, _, BootCore> =
+        Agent::for_writer(cfg, Ed25519Small::new(PUBKEY), store, chain);
     loop {
         let request = core::hint::black_box(&REQUEST[..]);
         core::hint::black_box(agent.handle(request).map(|r| r.frame.len()));

@@ -203,11 +203,9 @@ pub struct ImageSignArgs {
     /// Output image file
     #[arg(long, value_name = "IMG")]
     pub out: String,
-    /// Slot the image is built for: a or b
-    #[arg(long, value_name = "SLOT", default_value = "a")]
+    #[arg(long, value_name = "SLOT", default_value = "a", help = slot_help())]
     pub slot: String,
-    /// Image kind: app, bootcore or agent
-    #[arg(long, value_name = "KIND", default_value = "app")]
+    #[arg(long, value_name = "KIND", default_value = "app", help = kind_help())]
     pub kind: String,
     /// Release sequence number
     #[arg(long, value_name = "N", default_value = "1")]
@@ -234,6 +232,38 @@ pub struct ImageSignArgs {
     pub key: Option<String>,
     #[arg(long, value_name = "FILE", help = CONFIG)]
     pub config: Option<String>,
+}
+
+/// `a, b or c`: the last of `items` after "or".
+fn or_list(items: Vec<String>) -> String {
+    match items.split_last() {
+        Some((last, [])) => last.clone(),
+        Some((last, rest)) => format!("{} or {last}", rest.join(", ")),
+        None => String::new(),
+    }
+}
+
+/// The slot letters `--slot` takes, as help and errors say them.
+pub(crate) fn slot_choices() -> String {
+    or_list(crate::commands::slot_letters().map(String::from).collect())
+}
+
+/// The image kinds `--kind` takes, as help and errors say them.
+pub(crate) fn kind_choices() -> String {
+    or_list(
+        dagon_sign::image::IMAGE_KIND_NAMES
+            .iter()
+            .map(|(n, _)| n.to_string())
+            .collect(),
+    )
+}
+
+fn slot_help() -> String {
+    format!("Slot the image is built for: {}", slot_choices())
+}
+
+fn kind_help() -> String {
+    format!("Image kind: {}", kind_choices())
 }
 
 fn names_help(what: &str, names: &[(&str, u32)]) -> String {

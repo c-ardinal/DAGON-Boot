@@ -156,9 +156,7 @@ impl Config {
     pub fn topology_path(&self, arg: Option<&str>) -> Result<PathBuf, String> {
         arg.map(PathBuf::from)
             .or_else(|| self.topology.clone())
-            .ok_or_else(|| {
-                format!("no topology: pass --topology <yaml> or set it in {CONFIG_FILE}")
-            })
+            .ok_or_else(|| format!("no topology: set topology in {CONFIG_FILE}"))
     }
 
     /// Where `dagon provision` writes and recovery reads: `provision_dir`,

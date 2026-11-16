@@ -61,8 +61,10 @@ curl -fsSL https://raw.githubusercontent.com/c-ardinal/DAGON-Boot/main/setup.sh 
 Windows (PowerShell):
 
 ```powershell
-$env:DAGON_UNINSTALL = "1"; irm https://raw.githubusercontent.com/c-ardinal/DAGON-Boot/main/setup.ps1 | iex; Remove-Item Env:DAGON_UNINSTALL
+$env:DAGON_UNINSTALL = "1"; irm https://raw.githubusercontent.com/c-ardinal/DAGON-Boot/main/setup.ps1 | iex
 ```
+
+The PowerShell script clears `DAGON_UNINSTALL` when it runs, so running it again in the same window installs instead of removing.
 
 - It removes only `dagon`. On Windows it also removes the folder if it is empty, and removes that folder's entry from your user's PATH and this process's PATH. The installer keeps no record of adding the entry, so the entry is removed if it is there.
 - It does not touch `~/.dagon`. Your signing keys (`~/.dagon/keys`) stay. If you delete them, nodes written with those keys can no longer be updated.

@@ -61,8 +61,10 @@ curl -fsSL https://raw.githubusercontent.com/c-ardinal/DAGON-Boot/main/setup.sh 
 Windows（PowerShell）:
 
 ```powershell
-$env:DAGON_UNINSTALL = "1"; irm https://raw.githubusercontent.com/c-ardinal/DAGON-Boot/main/setup.ps1 | iex; Remove-Item Env:DAGON_UNINSTALL
+$env:DAGON_UNINSTALL = "1"; irm https://raw.githubusercontent.com/c-ardinal/DAGON-Boot/main/setup.ps1 | iex
 ```
+
+PowerShellのスクリプトは、実行したあとで`DAGON_UNINSTALL`を消します。同じウィンドウで続けて実行すると、外さずに入れます。
 
 - 外すのは`dagon`だけです。Windowsはそのフォルダが空なら消し、ユーザーのPATHとこのプロセスのPATHからそのフォルダの項目も外します。インストーラーがその項目を足したかは記録がないので、あれば外します。
 - `~/.dagon`には触りません。署名の鍵（`~/.dagon/keys`）は残ります。消すと、その鍵で書いたノードは更新できなくなります。

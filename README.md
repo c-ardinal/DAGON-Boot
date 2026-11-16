@@ -95,10 +95,10 @@ curl -fsSL https://raw.githubusercontent.com/c-ardinal/DAGON-Boot/main/setup.sh 
 ```
 
 ```powershell
-$env:DAGON_UNINSTALL = "1"; irm https://raw.githubusercontent.com/c-ardinal/DAGON-Boot/main/setup.ps1 | iex; Remove-Item Env:DAGON_UNINSTALL
+$env:DAGON_UNINSTALL = "1"; irm https://raw.githubusercontent.com/c-ardinal/DAGON-Boot/main/setup.ps1 | iex
 ```
 
-環境変数`DAGON_UNINSTALL=1`でも同じです。
+環境変数`DAGON_UNINSTALL=1`でも同じです。PowerShellのスクリプトは、実行したあとでこの変数を消します。
 
 #### シミュレータで試す
 

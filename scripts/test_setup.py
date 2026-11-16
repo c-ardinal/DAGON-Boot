@@ -709,8 +709,10 @@ class Scripts(unittest.TestCase):
             text = (ROOT / rel).read_text(encoding="utf-8")
             self.assertIn("--uninstall", text, rel)
             self.assertIn("DAGON_UNINSTALL", text, rel)
-            self.assertIn("; Remove-Item Env:DAGON_UNINSTALL", text, rel)
+            self.assertIn('$env:DAGON_UNINSTALL = "1"; irm https://raw.githubusercontent.com/c-ardinal/DAGON-Boot/main/setup.ps1 | iex\n', text, rel)
+            self.assertNotIn("Env:DAGON_UNINSTALL", text, rel)
             self.assertIn("cargo uninstall dagon-cli", text, rel)
+        self.assertIn("Remove-Item Env:DAGON_UNINSTALL", PS1.read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":

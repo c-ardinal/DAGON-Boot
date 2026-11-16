@@ -95,10 +95,10 @@ curl -fsSL https://raw.githubusercontent.com/c-ardinal/DAGON-Boot/main/setup.sh 
 ```
 
 ```powershell
-$env:DAGON_UNINSTALL = "1"; irm https://raw.githubusercontent.com/c-ardinal/DAGON-Boot/main/setup.ps1 | iex; Remove-Item Env:DAGON_UNINSTALL
+$env:DAGON_UNINSTALL = "1"; irm https://raw.githubusercontent.com/c-ardinal/DAGON-Boot/main/setup.ps1 | iex
 ```
 
-The environment variable `DAGON_UNINSTALL=1` works too.
+The environment variable `DAGON_UNINSTALL=1` works too. The PowerShell script clears this variable when it runs.
 
 #### Try it in the simulator
 

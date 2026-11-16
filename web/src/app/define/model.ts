@@ -346,7 +346,7 @@ export function placeMcu(doc: Doc, mcu: string): { doc: Doc; id: string } {
   return { doc: { ...doc, topo }, id };
 }
 
-/** The flash of the MCU of a node that names no board, from the MCU definition (nothing is asked); null for a node with a board. */
+/** The flash size the MCU definition's default flash map lays out, for a node that names no board (nothing is asked); null for a node with a board. */
 export function ownFlash(doc: Doc, id: string): number | null {
   const n = doc.topo.nodes.find((x) => x.id === id);
   return n && !n.board ? (mcus().find((m) => m.id === n.mcu)?.flashBytes ?? null) : null;

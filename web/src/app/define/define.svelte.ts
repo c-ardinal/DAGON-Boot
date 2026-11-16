@@ -193,7 +193,7 @@ export class Define {
     return null;
   }
 
-  /** "置く" by MCU: a node without a board; its flash size is the developer's to fill. */
+  /** "置く" by MCU: a node without a board; nothing is asked for it. */
   placeMcu(mcu: string, name: string): void {
     const r = placeMcu(this.doc, mcu);
     if (!r.id || !this.apply(r.doc)) return;

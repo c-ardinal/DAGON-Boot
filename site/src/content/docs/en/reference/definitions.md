@@ -273,7 +273,8 @@ a `[board.<id>]` table of `dagon.toml` is always a board definition. A node
 on such a board has no board package: `dagon gen` makes it from its MCU
 package and writes the board's `flash_bytes` into its `wiring.rs`. A node
 that names only an MCU needs no board: nothing asks for a board or a flash
-size, and the Console shows the MCU's flash from the MCU definition.
+size, and DAGON Console shows, read-only, the flash size the MCU definition's
+default flash map lays out.
 
 ### Overriding a definition
 

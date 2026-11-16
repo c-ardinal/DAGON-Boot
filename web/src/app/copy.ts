@@ -961,8 +961,8 @@ export const INSPECT = {
   pullupKinds: { external: '外付け', board: '基板上' } as Record<string, string>,
   inUse: (what: string) => `（使用中: ${what}）`,
   boardOwn: 'ボード定義なし',
-  /** The flash of the MCU of a node chosen by MCU, read from the MCU definition. */
-  flashSize: 'フラッシュ容量',
+  /** The flash size the MCU definition's default flash map lays out (not a claim about the flash the chip owns). */
+  flashSize: 'フラッシュ（定義の配置）',
   flashValue: (b: number) => (b >= 1 << 20 ? `${b / (1 << 20)} MiB` : `${b / (1 << 10)} KiB`),
   kindsMore: {
     can: 'CAN（親機どうし）',

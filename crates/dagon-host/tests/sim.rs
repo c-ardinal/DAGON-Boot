@@ -1779,7 +1779,6 @@ fn one_core_layout() -> dagon_sim::Layout {
         bootcore: (0x1000_0000, 0x8000),
         log: (0x1030_0000, 0x1000),
         slots: &[(0x1004_8000, 0x10_0000), (0x1014_8000, 0x10_0000)],
-        topology: Some((0x1031_0000, 0x1_0000)),
         cores: Some(cores),
         ..hub
     }

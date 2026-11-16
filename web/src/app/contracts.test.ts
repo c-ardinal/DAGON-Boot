@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { describe, expect, test } from 'vitest';
 import { topo_parse } from '../wasm/pkg/dagon_wasm.js';
 import { AGENT } from './copy.ts';
@@ -22,6 +22,50 @@ describe('every agent error code the server defines has a Console text', () => {
   });
 });
 
+/** The string literals ('..', "..", `..`) written in `expr`, each branch of a conditional included. */
+function literalsOf(expr: string): string[] {
+  const out: string[] = [];
+  for (let i = 0; i < expr.length; i++) {
+    const q = expr[i];
+    if (q !== "'" && q !== '"' && q !== '`') continue;
+    let j = i + 1;
+    for (let depth = 0; j < expr.length && (expr[j] !== q || depth > 0); j++) {
+      if (expr[j] === '\\') j++;
+      else if (q === '`' && expr.startsWith('${', j)) (depth++, j++);
+      else if (q === '`' && expr[j] === '}' && depth > 0) depth--;
+    }
+    out.push(expr.slice(i + 1, j));
+    i = j;
+  }
+  return out;
+}
+
+const unquote = (s: string | undefined): string | null => (s !== undefined && /^'(GET|POST|PUT|DELETE)'$/.test(s.trim()) ? s.trim().slice(1, -1) : null);
+
+/** Calls of api/call/json('METHOD', path, ..), start('kind', path, ..), projectCall(path, ..) and fetch('/v1/path', { method }), with their top-level arguments. */
+function callsIn(src: string): { name: string; args: string[] }[] {
+  const out: { name: string; args: string[] }[] = [];
+  for (const m of src.matchAll(/\b(api|call|json|start|projectCall|fetch)(?:<[^>(]*>)?\(/g)) {
+    const args: string[] = [];
+    let depth = 0;
+    let from = m.index! + m[0].length;
+    for (let i = from; i < src.length; i++) {
+      const c = src[i];
+      if (c === "'" || c === '"' || c === '`') {
+        const lit = literalsOf(src.slice(i))[0];
+        i += lit.length + 1;
+      } else if ('([{'.includes(c)) depth++;
+      else if (')]}'.includes(c) && depth-- === 0) {
+        args.push(src.slice(from, i));
+        break;
+      } else if (c === ',' && depth === 0) (args.push(src.slice(from, i)), (from = i + 1));
+    }
+    // A definition or a type has `name: type` parameters; only calls are read.
+    if (!/^\s*\w+\s*:/.test(args[0] ?? '') && !(m[1] === 'start' && !/^\s*'/.test(args[0] ?? ''))) out.push({ name: m[1], args });
+  }
+  return out;
+}
+
 describe('every API path the Console calls is in the server route table', () => {
   const routes = [...text('crates/dagon-cli/src/serve/api.rs').matchAll(/\("(GET|POST|PUT|DELETE)",\s*\[([^\]]*)\]\)/g)].map((m) => ({
     method: m[1],
@@ -31,15 +75,33 @@ describe('every API path the Console calls is in the server route table', () => 
 
   const sources = ['app/agent.svelte.ts', 'app/define/cli.svelte.ts'];
   const calls: { file: string; method: string; path: string }[] = [];
+  const unreadable: string[] = [];
   for (const file of sources) {
     const src = web(file);
     // const path = `agent/key/...`; used later as api('PUT', path)
     const vars = new Map([...src.matchAll(/const (\w+) = `([^`]*)`/g)].map((m) => [m[1], m[2]]));
-    for (const m of src.matchAll(/\b(?:api|call|json)(?:<[^>(]*>)?\(\s*'(GET|POST|PUT|DELETE)'\s*,\s*(?:(['`])([^'`]*)\2|(\w+))/g)) {
-      const path = m[3] ?? vars.get(m[4]);
-      if (path !== undefined) calls.push({ file, method: m[1], path });
+    // A parameter that carries a path on to api()/call()/json(): the callers of its function are read instead.
+    const forwarded = new Set([...src.matchAll(/\bstart\(\s*\w+\s*:\s*[^,]+,\s*(\w+)\s*:|\bprojectCall\(\s*(\w+)\s*:/g)].map((m) => m[1] ?? m[2]));
+    for (const call of callsIn(src)) {
+      if (call.name === 'fetch') {
+        // fetch('/v1/topology', { method: 'PUT', .. }); the wrapper's own `/v1/${path}` and a forwarded `...args` are not calls.
+        const expr = call.args[0].trim();
+        const method = /method:\s*'(GET|POST|PUT|DELETE)'/.exec(call.args[1] ?? '')?.[1] ?? (call.args[1] === undefined ? 'GET' : null);
+        if (expr.startsWith('...') || expr === '`/v1/${path}`') continue;
+        const lits = literalsOf(expr).filter((l) => l.startsWith('/v1/'));
+        if (!lits.length || method === null) unreadable.push(`${file}: fetch(${call.args.join(', ')})`);
+        else for (const l of lits) calls.push({ file, method, path: l.slice('/v1/'.length) });
+        continue;
+      }
+      const exprs = call.name === 'start' || call.name === 'projectCall' ? [call.args[call.name === 'start' ? 1 : 0]] : [call.args[1]];
+      const method = call.name === 'start' || call.name === 'projectCall' ? 'POST' : unquote(call.args[0]);
+      if (method === null || exprs[0] === undefined) continue;
+      const expr = exprs[0].trim();
+      const lits = literalsOf(expr);
+      const path = lits.length ? lits : /^\w+$/.test(expr) && vars.has(expr) ? [vars.get(expr)!] : /^\w+$/.test(expr) && forwarded.has(expr) ? [] : null;
+      if (path === null) unreadable.push(`${file}: ${call.name}(${call.args.join(', ')})`);
+      else for (const p of path) calls.push({ file, method, path: p });
     }
-    for (const m of src.matchAll(/this\.start\(\s*'\w+'\s*,\s*'([^']+)'|projectCall\(\s*'([^']+)'/g)) calls.push({ file, method: 'POST', path: m[1] ?? m[2] });
   }
 
   const matches = (c: { method: string; path: string }): boolean => {
@@ -50,6 +112,19 @@ describe('every API path the Console calls is in the server route table', () => 
   test('the table and the calls are both found', () => {
     expect(routes.length).toBeGreaterThan(20);
     expect(calls.length).toBeGreaterThan(20);
+    expect(calls.map((c) => `${c.method} ${c.path.split('?')[0]}`)).toContain('GET fs');
+  });
+
+  test('no call is skipped because its path cannot be read', () => {
+    expect(unreadable).toEqual([]);
+  });
+
+  test('no other source calls the API', () => {
+    const files = (dir: URL): string[] => readdirSync(dir, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? files(new URL(`${e.name}/`, dir)) : [new URL(e.name, dir).pathname]));
+    const callers = files(new URL('../', import.meta.url))
+      .filter((f) => /\.(ts|svelte)$/.test(f) && !/\.test\.ts$|agentMock|wasm\/pkg/.test(f) && !sources.some((s) => f.endsWith(`/${s}`)))
+      .filter((f) => /fetch\(\s*[`'"]\/v1\/|\b(?:api|call|json)(?:<[^>(]*>)?\(\s*'(?:GET|POST|PUT|DELETE)'/.test(new TextDecoder().decode(readFileSync(f.replace(/^\/([A-Za-z]:)/, '$1')))));
+    expect(callers.map((f) => f.split('/src/')[1])).toEqual([]);
   });
 
   test.each(calls.map((c) => [`${c.method} ${c.path}`, c] as const))('%s', (_n, c) => {

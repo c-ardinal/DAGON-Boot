@@ -153,9 +153,20 @@ impl Config {
         Ok(c)
     }
 
+    /// The topology of a command that has `--topology`: `arg`, else dagon.toml's.
     pub fn topology_path(&self, arg: Option<&str>) -> Result<PathBuf, String> {
         arg.map(PathBuf::from)
             .or_else(|| self.topology.clone())
+            .ok_or_else(|| {
+                format!("no topology: pass --topology <yaml> or set it in {CONFIG_FILE}")
+            })
+    }
+
+    /// The topology of a caller without `--topology` (`gen`, `ai ask`, serve):
+    /// dagon.toml's alone.
+    pub fn configured_topology(&self) -> Result<PathBuf, String> {
+        self.topology
+            .clone()
             .ok_or_else(|| format!("no topology: set topology in {CONFIG_FILE}"))
     }
 

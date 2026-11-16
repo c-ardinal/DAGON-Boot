@@ -720,16 +720,34 @@ fn every_flag_a_help_text_names_is_one_the_command_has() {
 }
 
 #[test]
-fn a_config_error_names_only_flags_dagon_gen_has() {
-    // `dagon gen` takes its topology from dagon.toml alone.
-    let err = crate::config::Config::default()
-        .topology_path(None)
-        .expect_err("no topology configured");
+fn a_no_topology_error_names_only_flags_its_commands_have() {
+    let cfg = crate::config::Config::default();
     let mut root = Cli::command();
     root.build();
+    // `dagon gen` takes its topology from dagon.toml alone.
+    let err = cfg
+        .configured_topology()
+        .expect_err("no topology configured");
     let gen = leaf(&root, &["gen".to_string()]);
     for f in flags_in(&err) {
         assert!(has_long(gen, &f), "{err:?} names --{f}, which gen lacks");
+    }
+    // Every command with --topology is told it.
+    let err = cfg.topology_path(None).expect_err("no topology given");
+    assert!(err.contains("--topology"), "{err:?}");
+    let with_flag: Vec<_> = leaf_paths(&root, &[])
+        .into_iter()
+        .filter(|p| has_long(leaf(&root, p), "topology"))
+        .collect();
+    assert!(!with_flag.is_empty());
+    for p in &with_flag {
+        for f in flags_in(&err) {
+            assert!(
+                has_long(leaf(&root, p), &f),
+                "dagon {}: {err:?} names --{f}",
+                p.join(" ")
+            );
+        }
     }
 }
 
@@ -737,8 +755,14 @@ fn a_config_error_names_only_flags_dagon_gen_has() {
 fn conform_help_counts_the_tests_there_are() {
     let mut root = Cli::command();
     root.build();
-    let about = leaf(&root, &["conform".to_string()]).get_about().unwrap().to_string();
-    assert!(about.contains(&format!("{} conformance", dagon_conform::CTS.len())), "{about}");
+    let about = leaf(&root, &["conform".to_string()])
+        .get_about()
+        .unwrap()
+        .to_string();
+    assert!(
+        about.contains(&format!("{} conformance", dagon_conform::CTS.len())),
+        "{about}"
+    );
 }
 
 #[test]

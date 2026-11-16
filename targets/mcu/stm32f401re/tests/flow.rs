@@ -6,7 +6,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use dagon_agent::{Agent, Config, SlotStore, Transition};
+use dagon_agent::{Agent, Config, SlotStore, Transition, Writer};
 use dagon_core::boot::{decide, BootConfig, Decision, SlotLayout};
 use dagon_core::log::{Log, LogLayout, SlotRef};
 use dagon_ed25519::Ed25519Compact;
@@ -177,7 +177,6 @@ fn provisioned() -> Mem {
 
 fn config() -> Config {
     Config {
-        pubkey: *keypair().pk,
         mcu_id: mcu_id::STM32F401XE,
         port_kind: port_kind::SELF_BOOT,
         target_tag: TAG,
@@ -185,6 +184,7 @@ fn config() -> Config {
         mode: mode::APP,
         max_payload: max_payload::I2C as u16,
         trial_attempts: 3,
+        writer: Writer::App,
     }
 }
 
@@ -204,7 +204,7 @@ fn chain() -> Chain {
 }
 
 struct Node {
-    agent: Agent<KindSStore<Shared>, Chain>,
+    agent: Agent<KindSStore<Shared>, Chain, Ed25519Compact>,
     flash: Shared,
     seq: u8,
 }
@@ -234,7 +234,7 @@ impl Node {
         };
         let store = KindSStore::load(flash.clone(), &LOG, SLOTS, &ERASE_REGIONS).unwrap();
         let node = Node {
-            agent: Agent::new(config(), store, chain()),
+            agent: Agent::new(config(), Ed25519Compact::new(*keypair().pk), store, chain()),
             flash,
             seq: 0,
         };

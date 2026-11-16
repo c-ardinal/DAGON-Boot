@@ -28,7 +28,8 @@ def fail(why, out=""):
 
 
 def run(dagon, *args):
-    """(exit code, output) of `dagon ai key <args>` on a pty; types FAKE once asked, with echo off."""
+    """(exit code, output, whether the key was typed) of `dagon ai key <args>` on a pty; types FAKE
+    once asked, with echo off."""
     pid, fd = pty.fork()
     if pid == 0:
         os.execv(dagon, [dagon, "ai", "key", *args])
@@ -56,7 +57,7 @@ def run(dagon, *args):
     if FAKE in text:
         fail("the key showed in the output", text)
     print(f"$ dagon ai key {' '.join(args)}  -> exit {code}\n{text}")
-    return code, text
+    return code, text, typed
 
 
 def expect(ok, why, out):
@@ -73,29 +74,31 @@ def state(out):
 
 
 def with_store(dagon):
-    code, out = run(dagon, "status")
+    code, out, _ = run(dagon, "status")
     expect(code == 0 and state(out) == "未登録", f"{WAY} is not unregistered before the check", out)
     done = False
     try:
-        code, out = run(dagon, "set")
+        code, out, _ = run(dagon, "set")
         expect(code == 0 and f"{WAY}: 登録済み" in out, "set", out)
-        code, out = run(dagon, "status")
+        code, out, _ = run(dagon, "status")
         expect(code == 0 and state(out) == "登録済み", "status after set", out)
-        code, out = run(dagon, "delete")
+        code, out, _ = run(dagon, "delete")
         expect(code == 0 and f"{WAY}: 削除済み" in out, "delete", out)
         done = True
     finally:
         if not done:
             run(dagon, "delete")
-    code, out = run(dagon, "status")
+    code, out, _ = run(dagon, "status")
     expect(code == 0 and state(out) == "未登録", "status after delete", out)
 
 
 def without_store(dagon):
     for cmd in ("set", "delete"):
-        code, out = run(dagon, cmd)
+        code, out, typed = run(dagon, cmd)
         expect(code == 1 and all(s in out for s in NO_STORE), f"{cmd} without a store", out)
-    code, out = run(dagon, "status")
+        # set refuses before it asks for the key.
+        expect(not typed and PROMPT.decode() not in out, f"{cmd} asked for the key without a store", out)
+    code, out, _ = run(dagon, "status")
     expect(code == 0 and state(out).startswith("未登録 (") and NO_STORE[0] in state(out), "status without a store", out)
 
 

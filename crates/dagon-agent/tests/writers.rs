@@ -5,7 +5,8 @@
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 
-use dagon_agent::{Agent, Config, SlotStore, StoreError, Transition, Writer};
+use dagon_agent::writer::{self, Writer};
+use dagon_agent::{Agent, Config, SlotStore, StoreError, Transition};
 use dagon_ed25519::Ed25519Compact;
 use dagon_events::{compose, Bounds, Composed, Layer, Nop, Published, Watchdog};
 use dagon_format::header::*;
@@ -38,7 +39,7 @@ fn chain() -> Chain {
     )
 }
 
-fn config(writer: Writer) -> Config {
+fn config() -> Config {
     Config {
         mcu_id: FAKE_MCU,
         port_kind: port_kind::SELF_BOOT,
@@ -47,7 +48,6 @@ fn config(writer: Writer) -> Config {
         mode: mode::APP,
         max_payload: max_payload::I2C as u16,
         trial_attempts: 3,
-        writer,
     }
 }
 
@@ -59,6 +59,8 @@ struct Mem {
     status: [StatusResp; 2],
     bodies: BTreeMap<(u8, u8), Vec<u8>>,
     headers: BTreeMap<(u8, u8), [u8; HEADER_SIZE]>,
+    /// Times the session asked the store to make log room.
+    rooms: usize,
 }
 
 impl Mem {
@@ -75,6 +77,7 @@ impl Mem {
             status,
             bodies: BTreeMap::new(),
             headers: BTreeMap::new(),
+            rooms: 0,
         }
     }
 
@@ -148,6 +151,10 @@ impl SlotStore for Mem {
         let st = self.st(target::APP)?;
         st.slots[usize::from(slot)].state = SlotState::Confirmed;
         st.confirmed = slot;
+        Ok(())
+    }
+    fn keep_room(&mut self) -> Result<(), StoreError> {
+        self.rooms += 1;
         Ok(())
     }
     fn target_status(&mut self, t: u8) -> Option<StatusResp> {
@@ -265,19 +272,19 @@ fn body() -> Vec<u8> {
     (0..BODY as u32).map(|i| (i * 7) as u8).collect()
 }
 
-/// One node: the engine over the fake MCU's flash, as `writer` runs it.
-struct Bench<V: SigVerifier> {
+/// One node: the engine over the fake MCU's flash, as writer `W` runs it.
+struct Bench<V: SigVerifier, W: Writer> {
     mem: &'static RefCell<Mem>,
-    agent: Agent<&'static RefCell<Mem>, Chain, V>,
+    agent: Agent<&'static RefCell<Mem>, Chain, V, W>,
     seq: u8,
 }
 
-impl<V: SigVerifier> Bench<V> {
-    fn new(writer: Writer, verifier: V, mem: Mem) -> Self {
+impl<V: SigVerifier, W: Writer> Bench<V, W> {
+    fn new(verifier: V, mem: Mem) -> Self {
         let mem: &'static RefCell<Mem> = Box::leak(Box::new(RefCell::new(mem)));
         Bench {
             mem,
-            agent: Agent::new(config(writer), verifier, mem, chain()),
+            agent: Agent::for_writer(config(), verifier, mem, chain()),
             seq: 0,
         }
     }
@@ -347,8 +354,6 @@ impl<V: SigVerifier> Bench<V> {
     }
 }
 
-const WRITERS: [Writer; 2] = [Writer::App, Writer::BootCore];
-
 fn keypair() -> KeyPair {
     KeyPair::from_seed(Seed::new([0x5A; 32]))
 }
@@ -405,22 +410,29 @@ fn every_image_case_gets_the_same_verdict_from_every_writer() {
     let mut writers_run = Vec::new();
     println!("{:<22} {:>10} {:>10}", "image", "app", "boot core");
     for ((name, img, total), want) in cases(&kp).into_iter().zip(want) {
-        let verdicts: Vec<Status> = WRITERS
-            .iter()
-            .map(|&w| {
-                let mut node = Bench::new(w, ed25519(&kp), Mem::new(2, 2));
-                writers_run.push(w);
-                node.transfer_as(target::APP, 1, &img, total)
-            })
-            .collect();
-        let [app, core] = [0, 1].map(|i| format!("{:?}", verdicts[i]));
+        let verdicts = [
+            verdict::<writer::App>(&kp, &img, total, &mut writers_run),
+            verdict::<writer::BootCore>(&kp, &img, total, &mut writers_run),
+        ];
+        let [app, core] = verdicts.map(|v| format!("{v:?}"));
         println!("{name:<22} {app:>10} {core:>10}");
         assert_eq!(verdicts, [want, want], "{name}");
     }
-    assert!(
-        WRITERS.iter().all(|w| writers_run.contains(w)),
-        "both writers ran the engine"
+    writers_run.sort();
+    writers_run.dedup();
+    assert_eq!(
+        writers_run.len(),
+        2,
+        "both writers ran the engine: {writers_run:?}"
     );
+}
+
+/// The verdict on `img` (`total` bytes announced) for APP slot B through
+/// the engine as writer `W` runs it; the writer's type name goes to `run`.
+fn verdict<W: Writer>(kp: &KeyPair, img: &[u8], total: u32, run: &mut Vec<&str>) -> Status {
+    let mut node = Bench::<_, W>::new(ed25519(kp), Mem::new(2, 2));
+    run.push(std::any::type_name::<W>());
+    node.transfer_as(target::APP, 1, img, total)
 }
 
 /// The app never writes or sets pending the slot it runs from, nor the
@@ -433,15 +445,15 @@ fn each_writer_is_kept_from_the_slot_it_runs_from() {
     let kp = keypair();
     let a = image(Shape::app(slot_binding::A), &body(), &kp);
 
-    let mut app = Bench::new(Writer::App, ed25519(&kp), Mem::new(1, 1));
+    let mut app = Bench::<_, writer::App>::new(ed25519(&kp), Mem::new(1, 1));
     assert_eq!(app.transfer(target::APP, 0, &a), Status::State, "running");
     assert_eq!(app.set_pending(target::APP, 0), Status::State, "running");
     let mut two = Mem::new(2, 1);
     two.status[0].active = 1;
-    let mut app = Bench::new(Writer::App, ed25519(&kp), two);
+    let mut app = Bench::<_, writer::App>::new(ed25519(&kp), two);
     assert_eq!(app.transfer(target::APP, 0, &a), Status::State, "confirmed");
 
-    let mut core = Bench::new(Writer::BootCore, ed25519(&kp), Mem::new(1, 1));
+    let mut core = Bench::<_, writer::BootCore>::new(ed25519(&kp), Mem::new(1, 1));
     assert_eq!(core.transfer(target::APP, 0, &a), Status::Ok);
     assert_eq!(core.state(target::APP, 0), SlotState::Written);
     assert_eq!(core.set_pending(target::APP, 0), Status::Ok);
@@ -455,13 +467,13 @@ fn each_writer_is_kept_from_the_slot_it_runs_from() {
         &body(),
         &kp,
     );
-    let mut core = Bench::new(Writer::BootCore, ed25519(&kp), Mem::new(1, 1));
+    let mut core = Bench::<_, writer::BootCore>::new(ed25519(&kp), Mem::new(1, 1));
     assert_eq!(
         core.transfer(target::BOOTCORE, 0, &c),
         Status::State,
         "the boot core runs from its only slot"
     );
-    let mut app = Bench::new(Writer::App, ed25519(&kp), Mem::new(1, 1));
+    let mut app = Bench::<_, writer::App>::new(ed25519(&kp), Mem::new(1, 1));
     assert_eq!(
         app.transfer(target::BOOTCORE, 0, &c),
         Status::Ok,
@@ -477,10 +489,60 @@ fn only_the_app_confirms_its_trial() {
     let mut mem = Mem::new(2, 1);
     mem.status[0].active = 1;
     mem.status[0].slots[1].state = SlotState::Trying;
-    let mut core = Bench::new(Writer::BootCore, ed25519(&kp), mem);
+    let mut core = Bench::<_, writer::BootCore>::new(ed25519(&kp), mem);
     assert_eq!(core.call(Cmd::Confirm, &[target::APP]), Status::State);
     assert_eq!(core.agent.confirm_own(), Err(Status::State));
     assert_eq!(core.state(target::APP, 1), SlotState::Trying);
+}
+
+/// The boot core makes no log room when its session is made (nor when it
+/// starts again): outside a write the boot stages never compact or erase.
+/// The app makes room at its start, as before.
+#[test]
+fn only_the_app_makes_log_room_when_its_session_starts() {
+    let kp = keypair();
+    let mut app = Bench::<_, writer::App>::new(ed25519(&kp), Mem::new(2, 1));
+    assert_eq!(app.mem.borrow().rooms, 1);
+    app.agent.restart();
+    assert_eq!(app.mem.borrow().rooms, 2);
+    let mut core = Bench::<_, writer::BootCore>::new(ed25519(&kp), Mem::new(2, 1));
+    assert_eq!(core.mem.borrow().rooms, 0);
+    core.agent.restart();
+    assert_eq!(core.mem.borrow().rooms, 0);
+}
+
+/// What only the app's writer serves is not in the boot core's session:
+/// SHOW and the recovery agent's and the topology copy's targets are
+/// unsupported or refused there, as the app answers them.
+#[test]
+fn the_boot_core_serves_none_of_the_app_only_requests() {
+    let kp = keypair();
+    let mut app = Bench::<_, writer::App>::new(ed25519(&kp), Mem::new(2, 1));
+    let mut core = Bench::<_, writer::BootCore>::new(ed25519(&kp), Mem::new(2, 1));
+    let show = [1, 1, 42, 0, 0, 0, 0];
+    assert_eq!(app.call(Cmd::Show, &show), Status::Ok);
+    assert_eq!(core.call(Cmd::Show, &show), Status::Unsupported);
+    for (t, slot, hdr) in [
+        (target::TOPOLOGY, 0, 0),
+        (target::AGENT, 2, HEADER_SIZE as u16),
+    ] {
+        let mut p = [0u8; 16];
+        let n = XferBegin {
+            target: t,
+            slot,
+            total_len: 600,
+            hdr_len: hdr,
+        }
+        .encode(&mut p)
+        .unwrap();
+        // This store keeps neither; the app finds no room for them.
+        assert_eq!(
+            app.call(Cmd::XferBegin, &p[..n]),
+            Status::Unsupported,
+            "{t}"
+        );
+        assert_eq!(core.call(Cmd::XferBegin, &p[..n]), Status::Arg, "{t}");
+    }
 }
 
 /// A signature scheme no DAGON code knows: SHA-256 of the key, the domain
@@ -529,13 +591,8 @@ impl Signer for FakeSig {
 fn the_engine_runs_on_an_mcu_only_its_drivers_know() {
     let key = FakeSig([0x33; 32]);
     let img = image(Shape::app(1), &body(), &key);
-    for w in WRITERS {
-        let mut node = Bench::new(w, FakeSig([0x33; 32]), Mem::new(2, 0));
-        assert_eq!(node.transfer(target::APP, 1, &img), Status::Ok, "{w:?}");
-        assert_eq!(node.set_pending(target::APP, 1), Status::Ok, "{w:?}");
-        let mut other = Bench::new(w, FakeSig([0x34; 32]), Mem::new(2, 0));
-        assert_eq!(other.transfer(target::APP, 1, &img), Status::Key, "{w:?}");
-    }
+    fake_mcu_writes::<writer::App>(&img);
+    fake_mcu_writes::<writer::BootCore>(&img);
 
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let names = mcu_names(&root.join("targets/mcu"));
@@ -552,6 +609,17 @@ fn the_engine_runs_on_an_mcu_only_its_drivers_know() {
             }
         }
     }
+}
+
+/// `img` goes into the fake MCU's APP slot B under writer `W`, and is
+/// refused under another key.
+fn fake_mcu_writes<W: Writer>(img: &[u8]) {
+    let w = std::any::type_name::<W>();
+    let mut node = Bench::<_, W>::new(FakeSig([0x33; 32]), Mem::new(2, 0));
+    assert_eq!(node.transfer(target::APP, 1, img), Status::Ok, "{w}");
+    assert_eq!(node.set_pending(target::APP, 1), Status::Ok, "{w}");
+    let mut other = Bench::<_, W>::new(FakeSig([0x34; 32]), Mem::new(2, 0));
+    assert_eq!(other.transfer(target::APP, 1, img), Status::Key, "{w}");
 }
 
 /// The `id` and `name` of every MCU definition, lower case.

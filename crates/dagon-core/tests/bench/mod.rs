@@ -6,7 +6,7 @@ pub use dagon_core::boot::{decide, BootConfig, Decision, SlotLayout};
 pub use dagon_core::log::{Log, LogError, LogLayout, SlotRef};
 pub use dagon_format::header::*;
 pub use dagon_format::statelog::{kind, reason, target, FaceHeader, Record};
-pub use dagon_format::{key_id, sha256, Version};
+pub use dagon_format::{key_id, sha256, SigVerifier, Version};
 pub use dagon_port::{Flash, FlashError, FlashRegion};
 pub use ed25519_compact::{KeyPair, Seed};
 
@@ -201,4 +201,37 @@ pub fn entry(slot: u8) -> u32 {
 
 pub fn state(m: &mut Mem) -> dagon_core::log::LogState {
     Log::load(m, &LOG).unwrap().state
+}
+
+/// The test key's verifier, counting the signature checks it runs.
+pub struct Counting {
+    pub inner: dagon_ed25519::Ed25519Compact,
+    pub checks: std::cell::Cell<usize>,
+}
+
+impl Counting {
+    pub fn new() -> Self {
+        Counting {
+            inner: verifier(),
+            checks: std::cell::Cell::new(0),
+        }
+    }
+}
+
+impl SigVerifier for Counting {
+    fn key_id(&self) -> [u8; 8] {
+        self.inner.key_id()
+    }
+    fn verify(&self, domain: &[u8], msg: &[&[u8]], sig: &[u8; 64]) -> bool {
+        self.checks.set(self.checks.get() + 1);
+        self.inner.verify(domain, msg, sig)
+    }
+}
+
+/// One boot with `v`; returns the decision and the checks it ran.
+pub fn boot_counted(m: &mut Mem, v: &Counting) -> (Decision, usize) {
+    let before = v.checks.get();
+    let mut log = Log::load(m, &LOG).unwrap();
+    let d = decide(m, &mut log, &SLOTS, &cfg(), v);
+    (d, v.checks.get() - before)
 }

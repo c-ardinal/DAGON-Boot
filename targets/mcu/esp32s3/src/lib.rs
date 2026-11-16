@@ -67,7 +67,7 @@ fn panic(_: &core::panic::PanicInfo) -> ! {
     esp_hal::system::software_reset()
 }
 
-use dagon_agent::Config;
+use dagon_agent::{Config, Writer};
 use dagon_format::header::{mcu_id, port_kind};
 /// Image version (re-exported for `node::running_version`).
 pub use dagon_format::Version;
@@ -91,7 +91,6 @@ pub const fn target_tag(board_default: &str) -> [u8; 16] {
 /// Agent identity; `mode` is `payload::mode::APP` or `AGENT`.
 pub fn config(mode: u8, target_tag: [u8; 16]) -> Config {
     Config {
-        pubkey: PUBKEY,
         mcu_id: mcu_id::ESP32S3,
         port_kind: port_kind::VENDOR_STAGE2,
         target_tag,
@@ -99,6 +98,10 @@ pub fn config(mode: u8, target_tag: [u8; 16]) -> Config {
         mode,
         max_payload: dagon_proto::max_payload::UART as u16,
         trial_attempts: TRIAL_ATTEMPTS,
+        // The factory agent too: while it runs, STATUS names its slot as
+        // the running and the confirmed one, so the app's guards keep
+        // exactly that slot.
+        writer: Writer::App,
     }
 }
 

@@ -48,6 +48,7 @@ use crate::{
 use dagon_agent::{
     reply_status, Agent, SlotStore, StoreError, TrialPolicy, IDLE_TIMEOUT_MS, NO_ADDR,
 };
+use dagon_ed25519::Ed25519Compact;
 use dagon_events::{Published, Watchdog as Periods};
 pub use dagon_mcu_common::hooks::BoardExtension;
 pub use dagon_mcu_common::hooks::{always, App, AppEvents, Confirm, NodeChain, SelfCheck};
@@ -270,7 +271,7 @@ impl Watchdog for SharedWdt {
 }
 
 type Store = EspStore<EspFlash<'static, 'static>, EspBootSelect<'static, 'static>, SharedWdt>;
-type Node = Agent<Store, NodeChain>;
+type Node = Agent<Store, NodeChain, Ed25519Compact>;
 
 impl Otadata for EspBootSelect<'_, '_> {
     fn running(&self) -> u8 {
@@ -361,6 +362,7 @@ impl Link {
         publish_startup(&mut store);
         let mut agent = Agent::new(
             crate::config(start.mode, crate::target_tag(p.target_tag)),
+            Ed25519Compact::new(crate::PUBKEY),
             store,
             start.chain,
         );

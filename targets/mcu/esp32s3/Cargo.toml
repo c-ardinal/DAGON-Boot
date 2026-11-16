@@ -30,6 +30,8 @@ conform = ["dep:dagon-conform"]
 
 [dependencies]
 dagon-agent = { path = "../../../crates/dagon-agent" }
+# The verifier the node's agent checks images with.
+dagon-ed25519 = { path = "../../../crates/dagon-ed25519", features = ["compact"] }
 dagon-events = { path = "../../../crates/dagon-events" }
 dagon-conform = { path = "../../../crates/dagon-conform", optional = true }
 dagon-format = { path = "../../../crates/dagon-format" }

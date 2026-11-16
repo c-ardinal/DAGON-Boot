@@ -170,10 +170,44 @@ fn wait_until(limit: Duration, done: impl Fn() -> bool) {
     while !done() && embassy_time::Instant::now() < end {}
 }
 
-/// Runs the USB device.
+/// Runs the USB device, and re-attaches it while the host does not reset
+/// the bus ([`dagon_mcu_common::reattach`]).
 #[embassy_executor::task]
 pub async fn run(mut usb: UsbDevice<'static, UsbDriver>) -> ! {
+    // SAFETY: awaited directly inside this embassy task, whose context
+    // comes from the executor running it.
+    let spawner = unsafe { embassy_executor::Spawner::for_current_executor() }.await;
+    spawner.spawn(reattach().expect("task pool"));
     usb.run().await
+}
+
+const _: () = assert!(dagon_mcu_common::reattach::SPAN_MS <= crate::TRIAL_WDT_MS as u64);
+
+#[embassy_executor::task]
+async fn reattach() {
+    let resets = || BUS_RESETS.load(Ordering::Relaxed);
+    let now = || embassy_time::Instant::now().as_millis();
+    let mut r = dagon_mcu_common::reattach::Reattach::new(now(), resets());
+    while let Some(at) = r.step(now(), resets(), &mut SiePullup) {
+        Timer::at(embassy_time::Instant::from_millis(at)).await;
+    }
+}
+
+/// The pull-up through SIE_CTRL.PULLUP_EN: embassy-rp's `Bus::disable`
+/// does nothing, so embassy-usb cannot take the device off the bus.
+struct SiePullup;
+
+impl dagon_mcu_common::reattach::Pullup for SiePullup {
+    fn attach(&mut self) {
+        embassy_rp::pac::USB
+            .sie_ctrl()
+            .modify(|w| w.set_pullup_en(true));
+    }
+    fn detach(&mut self) {
+        embassy_rp::pac::USB
+            .sie_ctrl()
+            .modify(|w| w.set_pullup_en(false));
+    }
 }
 
 /// DAGON frames over the CDC serial class.

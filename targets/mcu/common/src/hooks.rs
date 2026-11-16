@@ -12,6 +12,7 @@ use dagon_events::{
     compose, BoardBringUp, Bounds, Chain, Composed, Ctx, Extension, Health, Layer, Published,
     Reader, TrialInfo, Watchdog,
 };
+use dagon_format::SigVerifier;
 
 /// Recent events a node keeps for its display and log tasks.
 pub const RECENT: usize = 8;
@@ -158,8 +159,8 @@ pub fn node_chain(
 /// one runs nothing and emits nothing. Then, with [`Confirm::Own`] and the
 /// image on trial, the trial is confirmed. Returns whether the image is
 /// still on trial (for the watchdog guard).
-pub fn finish_start<S: SlotStore, X: AppChain>(
-    agent: &mut Agent<S, X>,
+pub fn finish_start<S: SlotStore, X: AppChain, V: SigVerifier>(
+    agent: &mut Agent<S, X, V>,
     board: Option<(&str, &mut dyn BoardBringUp)>,
     confirm: Confirm,
 ) -> bool {

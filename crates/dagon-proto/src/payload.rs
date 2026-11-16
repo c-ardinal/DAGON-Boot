@@ -25,7 +25,11 @@ pub mod target {
     /// The recovery agent's slot (`slot = 2`, factory) of a vendor-stage2
     /// MCU; written with its header last, never set pending or confirmed.
     pub const AGENT: u8 = 2;
-    /// Hub display copy of the topology; `hdr_len = 0`, unsigned.
+    /// Reserved: the number of a removed target (a node's copy of the
+    /// compiled topology), never given to another. No node takes it; one
+    /// answers an XFER_BEGIN for it as for any target it does not take
+    /// (`Status::Arg`).
+    #[deprecated(note = "target 3 was removed and stays reserved; no node takes it")]
     pub const TOPOLOGY: u8 = 3;
 }
 
@@ -640,8 +644,8 @@ pub fn parse_u8(b: &[u8]) -> Result<u8, Status> {
     r.end().map(|_| v)
 }
 
-/// SHOW request: for the hub's display, or the display of the node being
-/// written.
+/// SHOW request: the host's progress for the node being written, which
+/// that node's agent hands to its app.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Show<'a> {
     pub node: u8,

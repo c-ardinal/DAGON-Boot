@@ -73,7 +73,7 @@ path changes persistent image state outside this machine.
 | `confirmed` | app | CONFIRM while on trial, `self_check` healthy | CONFIRMED record / vendor "valid" | `app.confirmed { slot, version }` |
 | `demoted` | app | the other slot's `confirmed` (the log's `confirmed` now names the other slot) | the same CONFIRMED record | `app.demoted { slot, version }` |
 | `rolled_back` | boot | attempts exhausted, or the pending image fails its check | ROLLBACK record / vendor abort | `boot.rollback { from, to, reason }` |
-| `chosen` | boot | the slot to start is final (confirmed, or trial) | none | `boot.slot_chosen { slot, trial, version }` |
+| `chosen` | boot | the slot to start is final (confirmed, or trial), its signature and digest checked | none | `boot.slot_chosen { slot, trial, version }` |
 | `no_image` | boot | no startable slot | none | `boot.no_image { reason }` |
 
 The extra source states of `erase` and `pending_set`, and
@@ -1280,8 +1280,12 @@ The one authentication rule, applied by every verifier in the chain
   a build that opts in). There is no key list on the device and no
   fallback key.
 - **Who verifies what.** The agent verifies an image before `written`
-  and the boot loader before `chosen` on a trial boot (and checks the
-  digest on every boot). A boot loader image is verified under the rule
+  and the boot loader before `chosen` on every boot, for the pending and
+  the confirmed slot alike: the state log carries no key, so a record
+  alone never vouches for an image. Each boot runs one signature check
+  for the slot it starts (two when a pending slot is refused and the
+  confirmed one is checked next). A slot that does not verify never
+  starts, and the boot loader starts no slot the log does not name. A boot loader image is verified under the rule
   by the agent before `written` and again before `pending_set` (the
   SLOT_PENDING record names its header digest).
 
@@ -1297,7 +1301,9 @@ The one authentication rule, applied by every verifier in the chain
   exactly what the host's and the agent's accept. The key is part of
   stage0, which is never updated in the field: replacing the project's
   signing key means rebuilding stage0 with the new key and writing it
-  through the MCU's ROM loader.
+  through the MCU's ROM loader. The boot loader built with the new key
+  starts no app signed with the old one: such an app does not boot
+  until it is written again, signed with the new key.
 
   Stage0 starts only a core the log names: a pending core with starts
   left, else the confirmed core. When the pending core does not check

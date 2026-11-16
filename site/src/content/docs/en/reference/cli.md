@@ -22,7 +22,7 @@ Usage: dagon
 
 Commands:
   key        Make or show the signing key pair
-  topo       Check, compile or send a topology
+  topo       Check or compile a topology
   image      Sign firmware images
   release    Build a signed release package (.dgb)
   provision  Make the first-install files of a node from [provision.<node>] in dagon.toml
@@ -106,7 +106,7 @@ Options:
 ## dagon topo
 
 ```text
-Check, compile or send a topology
+Check or compile a topology
 
 Usage: dagon topo <COMMAND>
 

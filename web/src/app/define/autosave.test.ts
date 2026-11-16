@@ -131,7 +131,7 @@ describe('autosave of the 構成 (UC-D04)', () => {
     expect([went, a.asking]).toEqual([['restart'], null]);
   });
 
-  test('運用 and 親機へ送る wait for the saved 構成: ready() is false while it cannot be saved, and saves what operate then uses', async () => {
+  test('運用 waits for the saved 構成: ready() is false while it cannot be saved, and saves what operate then uses', async () => {
     const { d, a, puts } = setup(['invalid', 'saved']);
     expect(await a.ready()).toBe(false);
     expect(await a.ready()).toBe(true);

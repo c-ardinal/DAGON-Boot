@@ -1,7 +1,9 @@
 //! DAGON agent: a node's update session, the same in its application and
-//! in its boot core ([`Writer`]). It answers HELLO/STATUS/VERSION, receives
-//! images into a slot its writer does not run from, checks them with the
-//! verifier it is built with, switches the boot target and confirms.
+//! in its boot core. It answers HELLO/STATUS/VERSION, receives images into
+//! a slot its writer does not run from, checks them with the verifier it is
+//! built with, switches the boot target and confirms.
+//!
+//! [`Config::writer`] names the image the session runs in ([`Writer`]).
 //!
 //! Every state change is a transition of one of the machines declared
 //! below, and every transition delivers its event to the app layer's
@@ -61,7 +63,8 @@ dagon_events::state_machine! {
         states { Empty, Written, Pending, Trial, Confirmed, Reverted }
         transitions {
             /// The slot was erased for a new image (never the slot the
-            /// writer runs from, nor the app's confirmed slot by the app).
+            /// writer runs from; the app never erases its confirmed slot
+            /// either).
             erase(target: u8, slot: u8, len: u32): Empty | Written | Pending | Trial | Confirmed | Reverted => Empty
                 emits TransferStarted = 0x20 { target: u8, slot: u8, len: u32 }
                 observe(live, host);

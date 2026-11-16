@@ -6,7 +6,7 @@ description: "The boot record, the lockup fuse, the MCU identity and the compile
 This document is the normative specification of the formats that
 [lifecycle-events.md section 5.5](/en/explanation/lifecycle-events/#55-boot-record-mcu-identity-and-compiled-topology-requirements-and-the-executable-model)
 leaves to an executable model: the boot record, the lockup fuse, the MCU
-identity and the compiled topology's node layout and replacement. Every
+identity and the compiled topology's node layout. Every
 shape here is the one `crates/dagon-retained-model` proves; a change to a
 shape is a change to the model first, and the model's tests decide.
 
@@ -53,8 +53,7 @@ What the proofs assume of the hardware and what they inject:
 
 Two guarantees are probabilistic. Random bytes are accepted as a valid
 entry or record only by coincidence of an 8-bit commit value and a CRC-32
-(at most 2^-40 per slot); the topology store also requires a SHA-256
-match. A new boot-record sequence repeats an earlier one's numbers and
+(at most 2^-40 per slot). A new boot-record sequence repeats an earlier one's numbers and
 tag only with probability about 2^-k for k bits of min-entropy in the
 entropy word (2.3), and this matters only against the identities a
 consumer saw in its previous replay. Every other guarantee below is
@@ -422,50 +421,7 @@ count (≤ `MAX_LINKS`), constraint count (≤ `MAX_CONSTRAINTS`), 7 zero bytes.
 
 Canonical: node `index` equals its position, a link's ends in node order,
 links sorted by their ends' nodes, reserved bytes zero; layout 1 (16-byte
-links) is not read; a decoder re-encodes and compares. The host's
-`host.topology.pushed` and the hub's `relay.children_set` carry the body's
-SHA-256.
-
-### 5.2 Store on the hub
-
-The TOPOLOGY region is two banks of equal size, each erasable on its own.
-Each bank starts with a 64-byte header:
-
-| Offset | Size | Field |
-|---|---|---|
-| 0 | 1 | commit: `0xC1` (store layout 1) |
-| 1 | 3 | zero |
-| 4 | 4 | sequence u32 LE |
-| 8 | 4 | body length u32 LE |
-| 12 | 32 | SHA-256 of the body |
-| 44 | 4 | CRC-32 over `[1]` followed by bytes 1 to 43 |
-| 48 | 16 | zero |
-
-Bytes 1 to 3 and 48 to 63 are programmed as zero and not checked by a
-reader (bytes 1 to 3 are under the CRC).
-
-The body follows the header. A bank counts when its commit byte is `0xC1`, its
-length fits, its CRC matches and its body's SHA-256 equals the header's.
-The copy is the counted bank with the newer sequence (serial order);
-there is none when no bank counts.
-
-**Write** (image lifecycle `written`, target TOPOLOGY): the host refuses a
-body larger than a bank's capacity before sending any byte, and the hub
-refuses it again before erasing. Otherwise the hub writes the bank that is
-not the copy (bank 0 when there is none) with sequence = copy's + 1 (1
-when none): erase the bank, program the body, program header bytes 1 to
-63, program the commit byte. Number the steps of a write from 0, one per
-erased or programmed byte; the commit byte is step `bank size + body
-length + 63`. A write that stops before that step has completed leaves
-the previous copy, byte for byte; once it has completed, the new one.
-Every later read gives the same answer until the next write (1). A completed write makes
-the previous copy unreachable. The transition is `Absent → Written` when
-no copy existed, `Written → Written` otherwise.
-
-**Read** at the relay's start: a copy whose body does not decode (a layout
-number the hub does not read, or malformed) reads as absent and the
-project's fallback list is used (`relay.children_set { source: Fallback }`);
-a body is applied whole or not at all.
+links) is not read; a decoder re-encodes and compares.
 
 ## 6. Properties
 
@@ -486,7 +442,6 @@ fixed cases in `tests/fixed.rs` name the property they guard.
 | P10 | Region ≤ `RECORD_MAX`; paged reads at every link size reassemble the region; the 0x20 summary fits one page. |
 | P11 | A consumer de-duplicating `(layout, writer, tag, eseq)` against its previous replay never meets one identity with two contents (outside 2.7). |
 | P12 | Identity is a pure function of the id; collisions refused at every carrier width; unknown never matched. |
-| P13 | Topology: stated outcome at every interruption point, previous copy unchanged, round trip with identity, bounds, unsupported or malformed reads as absent, stable reads. |
 | P14 | A call past its budget is abandoned; the boot reaches the decision the state log gives. |
 | P15 | An access to a denied region faults without effect. |
 | P16 | A capability misuse (undeclared window or bus target) faults or is refused. |

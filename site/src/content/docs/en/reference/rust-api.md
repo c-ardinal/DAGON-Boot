@@ -23,7 +23,7 @@ published with these pages; each name below opens its crate.
 | [`dagon-events`](/api/dagon_events/) | DAGON lifecycle events: state machines whose transitions emit events, extensions, ports and the published event state |
 | [`dagon-extension`](/api/dagon_extension/) | DAGON extension manifests (dagon-extension.toml), their validation against the port and event catalogs and the node's definitions, the protection-kind map generators, and the files dagon gen writes from them |
 | [`dagon-format`](/api/dagon_format/) | Byte layouts shared by every DAGON component: image header, manifest, release bundle (`.dgb`), state log, topology canonical binary, plus CRC-32, SHA-256 and the signature verifier interface (`SigVerifier`). All multi-byte fields are little-endian. |
-| [`dagon-host`](/api/dagon_host/) | Host-side procedures shared by the CLI and the browser: discover, status, topology push, apply, rollback, confirm, recover. |
+| [`dagon-host`](/api/dagon_host/) | Host-side procedures shared by the CLI and the browser: discover, status, apply, rollback, confirm, recover. |
 | [`dagon-port`](/api/dagon_port/) | Port contract: what a board provides to DAGON. |
 | [`dagon-proto`](/api/dagon_proto/) | DAGON link v1: frame format (shared by USB CDC, UART and I2C), the command set, status codes, request/response payloads and the I2C mailbox state. |
 | [`dagon-relay`](/api/dagon_relay/) | The relay: how a node reaches the nodes linked to it, independent of any MCU. |

@@ -8,7 +8,7 @@ description: "What the repository holds, where, and how to work on DAGON itself.
 | Path | Contents |
 |---|---|
 | `crates/` | DAGON's crates, listed in [Rust API](/en/reference/rust-api/) |
-| `targets/` | Definitions per MCU (`targets/mcu/*`) and per board (`targets/boards/*`); the firmware of an RP2040 relay node (`targets/rp2040-hub`). The relay itself is MCU-independent, in `crates/dagon-relay`; an MCU definition's `[coordinator]` section decides whether that MCU may relay, and a node relays over the links its definition lists in `[[relay_link]]`, routed by the topology |
+| `targets/` | Definitions per MCU (`targets/mcu/*`) and per board (`targets/boards/*`). The relay itself is MCU-independent, in `crates/dagon-relay`; an MCU definition's `[coordinator]` section decides whether that MCU may relay, and a node relays over the links its definition lists in `[[relay_link]]`, routed by the topology |
 | `samples/` | Sample apps built on the definitions (not part of DAGON) |
 | `web/` | DAGON Console (Svelte, Vite, TypeScript); `web/README.md` lists what it does |
 | `topology/` | Example topologies |

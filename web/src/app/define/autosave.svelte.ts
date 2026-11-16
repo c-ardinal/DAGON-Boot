@@ -82,7 +82,7 @@ export class Autosave {
     return this.chain;
   }
 
-  /** The YAML has every edit (saving first when it does not): 運用 and 親機へ送る use the saved 構成. */
+  /** The YAML has every edit (saving first when it does not): 運用 uses the saved 構成. */
   ready(): Promise<boolean> {
     return this.pending ? this.now() : Promise.resolve(true);
   }

@@ -239,9 +239,8 @@ Each card shows its current → new version and one % for the whole write, then 
 
 1. It checks the signatures.
 2. It checks that the package was built for this topology.
-3. It sends the topology to the hub.
-4. It writes the children and then the hub.
-5. A node runs the new version on trial. If it is not confirmed, its watchdog resets it and it boots the previous version again. A node whose app has one slot has no previous version; what happens then is in [Limitations](/en/explanation/limitations/).
+3. It writes the children and then the hub.
+4. A node runs the new version on trial. If it is not confirmed, its watchdog resets it and it boots the previous version again. A node whose app has one slot has no previous version; what happens then is in [Limitations](/en/explanation/limitations/).
 
 ### Going back
 

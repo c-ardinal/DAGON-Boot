@@ -242,26 +242,19 @@ Generated order at start: `app.starting` → `app.store_opened` (or
 ### 1.4 Relay
 
 The relay is also an app (its own agent emits `app.*`). Its own machine:
-PC link up/down, a quiet window after a relayed request or a display
-request, per-child `Unknown → Present | Absent` from polls and relayed
-replies, and a progress screen. Child links are ports (a child protocol
+PC link up/down and a quiet window after a relayed request. Child links are ports (a child protocol
 extension may relay UDS as well as DAGON frames).
 
 | Event | When | Payload |
 |---|---|---|
 | `relay.pc_up` / `relay.pc_down` / `relay.pc_quiet` | PC link opened / closed / quiet window ended | |
 | `relay.relay_request` | a request to relay received | `link`, `addr`, `cmd` |
-| `relay.child_seen` | a relayed identity/status reply parsed | `index`, `link`, `addr`, `Seen` |
-| `relay.child_found` / `relay.child_lost` / `relay.child_polled` | poll answered after absence / first miss / any poll | `index`, `link`, `addr`, `Seen` |
-| `relay.child_update_progress` / `relay.child_update_result` | relayed transfer reply / relayed switch or confirm reply, or a display request with a final phase | `index`, `done`, `total` / `index`, `outcome` |
-| `relay.children_set` | the sub-node list loaded (topology copy or the project's fallback) | `Subs` |
 | `relay.child_control` | a child's control lines driven / raw bus access | `line`, `level` / `addr`, `len` |
-| `relay.show` / `relay.show_expired` | display request received / progress screen dropped | `Progress` / |
 
 ### 1.5 Host operations
 
 One machine per operation (`apply`, `rollback`, `recover`, `confirm`,
-`provision`, `push_topology`, `build`) with per-node sub-states, plus the
+`provision`, `build`) with per-node sub-states, plus the
 project session and the agent link. The host's transport, signer and
 build runner are ports (2.1).
 
@@ -278,7 +271,6 @@ build runner are ports (2.1).
 | `host.confirm.result` | | `Confirmed \| NotOnTrial \| NeedsChoice` |
 | `host.rollback.*`, `host.recover.*` | same shape as deploy | |
 | `host.provision.started` / `host.provision.recorded` | first install through the ROM; the installed boot image identity recorded | `node`, `boot_sha256` |
-| `host.topology.pushed` | the display copy written to the hub | `sha256` |
 | `host.project.opened` / `host.project.closed` | project session | `path` |
 | `host.agent.linked` / `host.agent.unlinked` | consent recorded / withdrawn | `agent`, `way` |
 | `host.version.read` | VERSION answered or Unsupported; includes the isolation level and the trusted extensions the node reports | `target`, `VersionResp?` |
@@ -302,7 +294,6 @@ never a half-written one that a reader accepts.
 | Installed boot image identity (vendor-stage2 MCUs) | provisioning record in the project | host `provision` | `host.provision.recorded` | written to a temporary file and renamed over the old one |
 | Boot record (retained memory, 5.5) | node RAM or retained registers | boot record: append-only, no state beyond the recorded events | every `boot.*` transition appends one event | required property: a write interrupted at any byte loses at most that event and never makes another one readable as valid; the format that meets it is defined by the executable model (5.5) |
 | Lockup fuse (retained memory, 5.5) | node RAM or retained registers | fuse: `Clear → Armed → Clear` (a call), `Armed → Tripped → Clear` (a lockup, then a clear) | armed and cleared around every sandboxed call; tripped by the next start | required property: no reset at any point forges a fuse for a call that returned or loses one for a call that locked up; the format that meets it is defined by the executable model (5.5) |
-| Topology display copy | hub flash | topology copy: `Absent → Written → Written` (replacement) | `written` with target TOPOLOGY (`app.written`, `host.topology.pushed`) | required property: a replacement interrupted at any byte leaves the hub reading the previous copy or the new one, never a mixture; the `topology-bin` format and write order that meet it are defined by the executable model (5.5) |
 | Agent consent | `~/.dagon/agent.json` | agent link: `Unlinked → Linked → Unlinked` | `host.agent.linked` / `host.agent.unlinked` | temporary file and rename |
 | Project session (open project, release key) | serve process | project: `Closed → Open` | `host.project.opened` / `host.project.closed` | process memory under one lock |
 | Diag step, extension timing, quiet windows, seen tables | RAM only, process-lifetime | not persistent; events only | | |
@@ -389,7 +380,7 @@ other record is refused, not guessed.
 | `boot.halt`, and the events of a boot that hung before `before_jump` or faulted in an extension | boot | up to the point of the halt or hang | the events stay in the record; the first app that runs replays every boot still present, oldest first | VERSION (readable until overwritten) |
 | `boot.slot_chosen`, `attempt_recorded`, `rollback`, `no_image` | boot | yes | boot record, and the state log (`app.trial_started`, `app.rolled_back`) even when the record is missing | VERSION, STATUS |
 | `app.*` | app | yes | `boot_replayed`, `trial_started`, `rolled_back` are themselves replays | replies, relay `child_*` |
-| `relay.*` | relay | yes (the hub app's chain) | | relayed replies, display results |
+| `relay.*` | relay | yes (the hub app's chain) | | relayed requests |
 | `host.*` | host | `on_event` callback (CLI, serve), host extensions | | stream, `--events`, actions |
 
 ## 2. The extension model
@@ -612,8 +603,7 @@ Both live in one `Published<S, N>` that the layer crate (the MCU
 definition, the host) creates, keeps and hands to `compose` by exclusive
 reference, so the chain is its only writer. Display, log and app tasks
 get a `Reader` (receivers, the latest state, the recent ring), which
-only reads. The relay's display state is the same type with the relay's
-snapshot. The boot loader has no publisher: its events go to the boot
+only reads. The boot loader has no publisher: its events go to the boot
 record and to its extensions' handlers.
 
 ### 2.5 Host: event stream, actions, package discovery
@@ -1655,12 +1645,12 @@ untrusted extension linked into a node at level `none`.
 
 ### 5.5 Boot record, MCU identity and compiled topology: requirements and the executable model
 
-Four formats of this model touch retained or persistent data whose
+Three formats of this model touch retained or persistent data whose
 correctness depends on byte-level behaviour under resets, power loss,
 partial writes and version skew: the boot record in retained memory, the
 lockup fuse next to it, the MCU identity carried by the image header,
-the identity reply and VERSION, and the compiled topology's node layout
-and replacement. Prose
+the identity reply, VERSION and the compiled topology's node layout.
+Prose
 cannot show that such a format survives every interleaving of faults;
 an executable model can. These formats are therefore not specified in
 this document. They are designed as a host-side Rust model with
@@ -1779,28 +1769,7 @@ and the limits of each claim.
 
 #### Compiled topology
 
-- **Machine.** `Absent → Written` (first copy) and `Written → Written`
-  (replacement), both through the image lifecycle's `written` with
-  target TOPOLOGY, both emitting `app.written` and `relay.children_set`.
-- **Round trip.** A copy the host pushed reads back on the hub as the
-  same topology (node ids, links, addresses, MCU identities), and
-  `host.topology.pushed` carries its digest, which the hub's
-  `relay.children_set` repeats.
-- **Bounds.** A topology larger than the hub's TOPOLOGY region is
-  refused by the host before any byte is sent (`E_RANGE` is never
-  reached) and by the hub if sent anyway.
-- **Malformed or unsupported.** A copy whose layout number the hub does
-  not read, or that fails its own integrity check, reads as absent, is
-  reported by `relay.children_set { source: Fallback }`, and the project's
-  fallback list is used; it is never partially applied.
-- **Interrupted replacement.** A replacement interrupted at any byte,
-  once or repeatedly, leaves the hub reading exactly the previous copy
-  or exactly the new one; the model states, for every interruption
-  point, which of the two it is, and the outcome is the same on every
-  subsequent read until the next write.
-- **Exact old-copy outcome.** After an interrupted replacement that
-  leaves the previous copy, the previous copy is byte-identical to what
-  it was; after one that completes, the previous copy is unreachable.
+- The body format (`topology-bin`) goes into the release package and the host reads it. A node keeps no copy of the topology. The format is in [retained-formats.md](/en/explanation/retained-formats/) section 5.
 
 #### What stays in prose
 
@@ -1865,6 +1834,8 @@ No extension, event, definition or boot action changes what the boot loader chec
 ## 8. Examples
 
 ### 8.1 Splash and write progress on a display (app)
+
+DAGON draws no screen. It hands an app only the data to draw from: the node's events and the latest `AppSnapshot` (the `phase`, the running `version`, the bytes received `progress`, the write's `percent` as the host told it, and whether the image is on `trial`), and, from the `wiring.rs` that `dagon gen` writes, the node's own entry `NODE` and the list `REACHED` of the nodes its links reach (index, name, link, address). The example below is an app that draws from them.
 
 ```rust
 #[embassy_executor::task]
@@ -2156,8 +2127,7 @@ below keep code and data to it.
    and `disable`, a critical-section `blocking_mutex::Mutex::lock`) in the
    MCU definitions and their boot images (stage0, boot loaders), by resolved
    path, so an alias or a wrapper does not hide
-   one. The functions that mask (the watchdog guard's state update, the
-   relay's shared display state) carry `#[allow(clippy::disallowed_methods)]`
+   one. The functions that mask (the watchdog guard's state update) carry `#[allow(clippy::disallowed_methods)]`
    with their reason, and a test keeps the list and the exemptions as they
    are reviewed.
 3. **Flash operations are hardware facts.** What an erase or program
@@ -2236,8 +2206,7 @@ its own deadline.
 
 Each flash operation masks interrupts for one sector erase or one page program; the slot store reports progress to the
 guard between sectors. The USB controller NAKs the host meanwhile and
-the host retries. The topology copy is read through the same flash
-driver it is written with.
+the host retries.
 
 **ESP32-S3** (`flash_op = "cache-off-masked"`, erase unit one 4 KiB sector unless the board's `[flash]` says otherwise)
 

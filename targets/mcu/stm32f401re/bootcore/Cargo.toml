@@ -42,6 +42,11 @@ cortex-m-rt = "0.7"
 
 ed25519-compact = { version = "2.6", default-features = false, features = ["opt_size"] }
 
+[dev-dependencies]
+# examples/size.rs: the update session the boot core serves, measured with it.
+dagon-agent = { path = "../../../../crates/dagon-agent" }
+dagon-proto = { path = "../../../../crates/dagon-proto" }
+
 [build-dependencies]
 # The board facts and the linked extensions' check from the node's boot folder.
 dagon-topology = { path = "../../../../crates/dagon-topology" }

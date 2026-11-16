@@ -7,6 +7,7 @@ use std::cell::{RefCell, RefMut};
 use crate::layout::{OTA_0, SLOT_A, SLOT_B, SLOT_FACTORY};
 use crate::tests::{store, Store};
 use dagon_agent::{image::State as Image, Agent};
+use dagon_ed25519::Ed25519Compact;
 use dagon_events::{compose, Bounds, Composed, Layer, Nop, Published, Watchdog};
 use dagon_format::header::*;
 use dagon_format::{key_id, sha256, Version};
@@ -64,22 +65,24 @@ fn chain() -> Chain {
 struct Pc {
     /// The slot store, shared with the bench (it plays the 2nd stage).
     store: &'static RefCell<Store>,
-    agent: Agent<&'static RefCell<Store>, Chain>,
+    agent: Agent<&'static RefCell<Store>, Chain, Ed25519Compact>,
     seq: u8,
 }
 
 impl Pc {
     fn config() -> dagon_agent::Config {
-        let mut cfg = crate::config(mode::AGENT, crate::target_tag(TAG));
-        cfg.pubkey = *keypair().pk;
-        cfg
+        crate::config(mode::AGENT, crate::target_tag(TAG))
+    }
+
+    fn verifier() -> Ed25519Compact {
+        Ed25519Compact::new(*keypair().pk)
     }
 
     fn factory() -> Self {
         let store: &'static RefCell<Store> = Box::leak(Box::new(RefCell::new(store())));
         Pc {
             store,
-            agent: Agent::new(Self::config(), store, chain()),
+            agent: Agent::new(Self::config(), Self::verifier(), store, chain()),
             seq: 0,
         }
     }
@@ -87,7 +90,7 @@ impl Pc {
     /// A reset: the 2nd stage boots, the app starts its agent again.
     fn reboot(&mut self) {
         self.store.borrow_mut().ota.boot();
-        self.agent = Agent::new(Self::config(), self.store, chain());
+        self.agent = Agent::new(Self::config(), Self::verifier(), self.store, chain());
     }
 
     fn call(&mut self, cmd: Cmd, payload: &[u8]) -> (Status, Vec<u8>) {

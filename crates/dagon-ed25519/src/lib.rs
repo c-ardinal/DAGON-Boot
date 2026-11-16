@@ -40,27 +40,59 @@ use dagon_format::SigVerifier;
 
 mod small;
 
-/// The Ed25519 verifier built from this crate's own arithmetic.
+/// What a check with [`Ed25519Small`] calls at every step of its
+/// arithmetic (a few hundred times per check, about every hundred thousand
+/// cycles on a Cortex-M0+), so a caller keeps a watchdog fed through a
+/// check that takes seconds on a slow clock. Any `Fn()` is one.
+pub trait Tick {
+    fn tick(&self);
+}
+
+/// No tick: a check that calls nothing ([`Ed25519Small::new`]).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct NoTick;
+
+impl Tick for NoTick {
+    #[inline(always)]
+    fn tick(&self) {}
+}
+
+impl<F: Fn()> Tick for F {
+    fn tick(&self) {
+        self()
+    }
+}
+
+/// The Ed25519 verifier built from this crate's own arithmetic; `T` is
+/// what it calls at every step of a check ([`Tick`]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Ed25519Small {
+pub struct Ed25519Small<T = NoTick> {
     key: [u8; 32],
+    tick: T,
 }
 
 impl Ed25519Small {
     /// Checks under the 32-byte public key `key`. `const`, so the key can
     /// sit in a program's flash as a constant.
     pub const fn new(key: [u8; 32]) -> Self {
-        Self { key }
+        Self { key, tick: NoTick }
     }
 }
 
-impl SigVerifier for Ed25519Small {
+impl<T: Tick> Ed25519Small<T> {
+    /// Checks under `key`, calling `tick` at every step of a check.
+    pub const fn with_tick(key: [u8; 32], tick: T) -> Self {
+        Self { key, tick }
+    }
+}
+
+impl<T: Tick> SigVerifier for Ed25519Small<T> {
     fn key_id(&self) -> [u8; 8] {
         dagon_format::key_id(&self.key)
     }
 
     fn verify(&self, domain: &[u8], msg: &[&[u8]], sig: &[u8; 64]) -> bool {
-        small::verify(&self.key, domain, msg, sig)
+        small::verify(&self.key, domain, msg, sig, &self.tick)
     }
 }
 
@@ -95,6 +127,6 @@ impl SigVerifier for Ed25519Compact {
         for part in msg {
             st.absorb(part);
         }
-        st.verify().is_ok() && small::verify(&self.key, domain, msg, sig)
+        st.verify().is_ok() && small::verify(&self.key, domain, msg, sig, &NoTick)
     }
 }

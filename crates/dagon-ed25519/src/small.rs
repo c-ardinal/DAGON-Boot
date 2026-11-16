@@ -6,6 +6,7 @@
 //! `[S]B - [k]A` is one double-scalar loop (Shamir's trick).
 #![allow(clippy::needless_range_loop)]
 
+use crate::Tick;
 use sha2::{Digest, Sha512};
 
 /// A field element mod p = 2^255 - 19; every limb below 2^16 between
@@ -97,10 +98,11 @@ fn mul(a: &Fe, b: &Fe) -> Fe {
 
 /// a^(p-2) (the inverse), or a^((p-5)/8) with `p2523`, by TweetNaCl's
 /// square-and-multiply chains.
-fn pow(a: &Fe, p2523: bool) -> Fe {
+fn pow(a: &Fe, p2523: bool, tick: &impl Tick) -> Fe {
     let mut c = *a;
     let top = if p2523 { 250 } else { 253 };
     for k in (0..=top).rev() {
+        tick.tick();
         c = mul(&c, &c);
         let skip = if p2523 { k == 1 } else { k == 2 || k == 4 };
         if !skip {
@@ -174,7 +176,7 @@ fn small_order(p: &P) -> bool {
 
 /// -A for the encoding `pk`; `None` unless `pk` is the canonical
 /// encoding of a curve point.
-fn decode_neg(pk: &[u8; 32]) -> Option<P> {
+fn decode_neg(pk: &[u8; 32], tick: &impl Tick) -> Option<P> {
     let y = unpack(pk);
     let mut y_bytes = *pk;
     y_bytes[31] &= 0x7f;
@@ -186,7 +188,7 @@ fn decode_neg(pk: &[u8; 32]) -> Option<P> {
     let num = sub(&num, &ONE);
     let den2 = mul(&den, &den);
     let den6 = mul(&mul(&den2, &den2), &den2);
-    let t = pow(&mul(&mul(&den6, &num), &den), true);
+    let t = pow(&mul(&mul(&den6, &num), &den), true, tick);
     let mut x = mul(&mul(&mul(&mul(&t, &num), &den), &den), &den);
     let is_root = |x: &Fe| pack(&mul(&mul(x, x), &den)) == pack(&num);
     if !is_root(&x) {
@@ -251,13 +253,20 @@ fn bit(s: &[u8], i: usize) -> bool {
 }
 
 /// The crate's predicate (see the crate documentation) for `sig` over
-/// `domain` || `msg` under `pk`.
-pub fn verify(pk: &[u8; 32], domain: &[u8], msg: &[&[u8]], sig: &[u8; 64]) -> bool {
+/// `domain` || `msg` under `pk`, with `tick` called at every step of the
+/// exponentiations and of the double scalar multiplication.
+pub fn verify(
+    pk: &[u8; 32],
+    domain: &[u8],
+    msg: &[&[u8]],
+    sig: &[u8; 64],
+    tick: &impl Tick,
+) -> bool {
     let (r, s) = sig.split_at(32);
     if !below_l(s) {
         return false;
     }
-    let Some(neg_a) = decode_neg(pk) else {
+    let Some(neg_a) = decode_neg(pk, tick) else {
         return false;
     };
     if small_order(&neg_a) {
@@ -280,6 +289,7 @@ pub fn verify(pk: &[u8; 32], domain: &[u8], msg: &[&[u8]], sig: &[u8; 64]) -> bo
     let mut q: P = [ZERO, ONE, ONE, ZERO];
     // S and k are below L < 2^253.
     for i in (0..253).rev() {
+        tick.tick();
         q = padd(&q, &q);
         match (bit(s, i), bit(&k, i)) {
             (true, true) => q = padd(&q, &b_neg_a),
@@ -288,7 +298,7 @@ pub fn verify(pk: &[u8; 32], domain: &[u8], msg: &[&[u8]], sig: &[u8; 64]) -> bo
             (false, false) => {}
         }
     }
-    let zi = pow(&q[2], false);
+    let zi = pow(&q[2], false, tick);
     let mut encoded = pack(&mul(&q[1], &zi));
     encoded[31] ^= parity(&mul(&q[0], &zi)) << 7;
     // R equal to the canonical encoding of [S]B - [k]A: R is canonical and
@@ -375,11 +385,14 @@ mod tests {
                 let mut e = P_BYTES;
                 e[0] += y;
                 e[31] |= sign;
-                assert!(decode_neg(&e).is_none(), "y = p + {y}, sign {sign}");
+                assert!(
+                    decode_neg(&e, &crate::NoTick).is_none(),
+                    "y = p + {y}, sign {sign}"
+                );
                 let mut canonical = [0u8; 32];
                 canonical[0] = y;
                 canonical[31] = sign;
-                if let Some(pt) = decode_neg(&canonical) {
+                if let Some(pt) = decode_neg(&canonical, &crate::NoTick) {
                     named += 1;
                     canonical[31] &= 0x7f;
                     assert_eq!(pack(&pt[1]), canonical);
@@ -391,22 +404,22 @@ mod tests {
         let mut one_neg = [0u8; 32];
         one_neg[0] = 1;
         one_neg[31] = 0x80;
-        assert!(decode_neg(&one_neg).is_none());
+        assert!(decode_neg(&one_neg, &crate::NoTick).is_none());
         let mut one = [0u8; 32];
         one[0] = 1;
-        assert!(decode_neg(&one).is_some());
+        assert!(decode_neg(&one, &crate::NoTick).is_some());
         let mut minus_one = P_BYTES;
         minus_one[0] -= 1;
-        assert!(decode_neg(&minus_one).is_some());
+        assert!(decode_neg(&minus_one, &crate::NoTick).is_some());
         minus_one[31] |= 0x80;
-        assert!(decode_neg(&minus_one).is_none());
+        assert!(decode_neg(&minus_one, &crate::NoTick).is_none());
     }
 
     #[test]
     fn small_order_points() {
         let mut one = [0u8; 32];
         one[0] = 1;
-        assert!(small_order(&decode_neg(&one).unwrap()));
+        assert!(small_order(&decode_neg(&one, &crate::NoTick).unwrap()));
         let b = [BX, BY, ONE, mul(&BX, &BY)];
         assert!(!small_order(&b));
     }

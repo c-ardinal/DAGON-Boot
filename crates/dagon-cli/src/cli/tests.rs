@@ -574,6 +574,16 @@ fn a_parse_error_under_ai_key_never_shows_the_input() {
 }
 
 #[test]
+fn a_parse_error_under_ai_key_shows_no_part_of_a_multiline_input() {
+    let argv = v(&["dagon", "ai", "key", "set", "FAKE-HEAD\n\nFAKE-TAIL-123"]);
+    let e = Cli::try_parse_from(&argv).expect_err("multiline input");
+    assert_eq!(e.exit_code(), 2);
+    let text = parse_error_text(&argv, &e);
+    assert!(!text.contains("FAKE-"), "{text}");
+    assert!(text.contains("Usage: dagon ai key"), "{text}");
+}
+
+#[test]
 fn a_parse_error_elsewhere_keeps_clap_text() {
     let argv = v(&["dagon", "status", "extra-word"]);
     let e = Cli::try_parse_from(&argv).expect_err("status extra-word");

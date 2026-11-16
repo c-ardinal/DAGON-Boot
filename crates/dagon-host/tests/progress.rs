@@ -148,7 +148,8 @@ fn app(mcu: &str, port_kind: &str, tag: &str, slot: u8, v: Version) -> Vec<u8> {
         proto_version: 1,
         capabilities: caps,
     };
-    sign_image(&spec, &[slot ^ 0x5A; 3000], &key()).unwrap()
+    // Over USB too, the bytes take more than ten chunks.
+    sign_image(&spec, &[slot ^ 0x5A; 16 * 1024], &key()).unwrap()
 }
 
 /// `node`'s app on [`NEW`] for each app slot its MCU definition gives (one

@@ -553,7 +553,7 @@ fn hello_request(max: usize) -> [u8; 6] {
 /// Waits before each resend of a plain request.
 pub const RETRY_BACKOFF_MS: [u32; 3] = [50, 100, 200];
 
-/// Commands a resend cannot harm: reads, the hub display, and the transfer
+/// Commands a resend cannot harm: reads, SHOW, and the transfer
 /// and state steps the receiver deduplicates by seq (CONFIRM among them).
 /// Not REBOOT or ENTER_ROM (a node that already reset, or left for its ROM
 /// loader, has no memory of the seq), nor CONF_RUN (a conformance step
@@ -622,7 +622,7 @@ mod tests {
         for c in Cmd::ALL {
             assert_eq!(repeatable(c), !never.contains(&c), "{c:?}");
         }
-        // The rest are reads, the hub display and steps the receiver
+        // The rest are reads, SHOW and steps the receiver
         // deduplicates by seq.
         for c in [
             Cmd::Hello,

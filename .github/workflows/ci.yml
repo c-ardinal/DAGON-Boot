@@ -1,4 +1,5 @@
-# Runs on pull requests and build tags (*-v*) only: the checks that keep the places
+# Runs on pull requests, build tags (*-v*) and pushes to work branches
+# (c<n>u<n>, c<n>u<n>-r<n>; not main or develop): the checks that keep the places
 # holding one fact in step (parity tests), plus the usual lint and test
 # gates. No secrets; the token is read-only (the Xtensa toolchain step reads it
 # so espup's GitHub API calls are not rate-limited).
@@ -11,6 +12,7 @@ on:
   pull_request:
   push:
     tags: ["*-v*"]
+    branches: ["c[0-9]+u[0-9]+", "c[0-9]+u[0-9]+-r[0-9]+"]
 
 permissions:
   contents: read

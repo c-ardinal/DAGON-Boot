@@ -1,14 +1,17 @@
-//! A trusted boot extension (copied from targets/boot-extension-template)
-//! that shows the boot core's steps on the hub's round LCD: a gauge of four
-//! steps and a line of Japanese text, one step per boot event (watchdog
-//! armed, log read, before decision, slot chosen). Nothing is drawn for
-//! `boot.no_image` and `boot.halt`: the boot core's halt blink on the
-//! backlight takes over. The app's display replaces the screen when the app
-//! starts.
+//! The round LCD of the Waveshare RP2040-Touch-LCD-1.28, drawn by the
+//! sample's two programs from one implementation: the panel's commands
+//! ([`gc9a01`]), the Japanese glyphs ([`texts`], `glyphs`), the app's home
+//! screen ([`home`], drawn into a [`frame::Frame`]) and a trusted boot
+//! extension (copied from targets/boot-extension-template) that shows the
+//! boot core's steps: a gauge of four steps and a line of Japanese text,
+//! one step per boot event (watchdog armed, log read, before decision,
+//! slot chosen). Nothing is drawn for `boot.no_image` and `boot.halt`: the
+//! boot core's halt blink on the backlight takes over. The app's display
+//! replaces the screen when the app starts.
 //!
 //! As a trusted extension it takes what it drives itself: the panel's SPI
 //! bus and pins and the microsecond timer straight from the HAL the boot
-//! core runs on (the pins of the hub's board definition, see `hw`), and the
+//! core runs on (the pins of the board definition, see `hw`), and the
 //! backlight through the MCU package's boot LED. Keeping it safe is the
 //! extension's job: nothing else in the boot core uses these.
 //!
@@ -26,8 +29,10 @@
 use dagon_boot::sequence;
 use dagon_events::{Ctx, Event, Extension};
 
+pub mod frame;
 pub mod gc9a01;
 mod glyphs;
+pub mod home;
 pub mod texts;
 
 /// What the boot core links: `boot_wiring.rs` names these two.
@@ -89,6 +94,12 @@ pub const SIZE: u16 = gc9a01::SIZE;
 /// with 8 px to spare (the screen test checks both).
 pub const CELL: u16 = 14;
 
+/// The rows of character `c`, one per `u16`, bit `CELL - 1` the leftmost
+/// pixel; `None` for a character the table lacks (see [`texts`]).
+pub fn glyph(c: char) -> Option<&'static [u16; CELL as usize]> {
+    glyphs::GLYPHS.iter().find(|g| g.0 == c).map(|g| &g.1)
+}
+
 /// A rectangle of panel pixels.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Rect {
@@ -118,8 +129,8 @@ pub const GAUGE: Rect = Rect {
     h: 8,
 };
 
-// RGB565. The hub home screen's colours (the board package's
-// src/screen.rs): black ground, white text, dim grey for what is not lit.
+// RGB565. The home screen's colours ([`home`]): black ground, white text,
+// dim grey for what is not lit.
 pub const BACKGROUND: u16 = 0x0000;
 pub const INK: u16 = 0xFFFF;
 pub const FILLED: u16 = 0xFFFF;
@@ -133,7 +144,7 @@ pub fn text_row(text: &str, row: u16, out: &mut [u8]) {
     let n = text.chars().count() as u16;
     let x0 = (TEXT.w - n.min(TEXT_CELLS) * CELL) / 2;
     for (i, c) in text.chars().take(usize::from(TEXT_CELLS)).enumerate() {
-        let Some((_, rows)) = glyphs::GLYPHS.iter().find(|g| g.0 == c) else {
+        let Some(rows) = glyph(c) else {
             continue;
         };
         let bits = rows[usize::from(row)];
@@ -188,10 +199,11 @@ const _: () = assert!(GAUGE.w <= TEXT.w);
 
 /// After the reset line goes high, the panel takes commands only this much
 /// later; after sleep out, the same before the next command. Both are the
-/// figures of the hub board package's driver (src/gc9a01.rs, `Panel::new`);
-/// the panel datasheet's own values are not verified here.
-pub const RESET_RELEASE_US: u32 = 120_000;
-pub const SLEEP_OUT_US: u32 = 120_000;
+/// figures the app's driver waits ([`gc9a01::RESET_RELEASE_MS`],
+/// [`gc9a01::SLEEP_OUT_MS`]); the panel datasheet's own values are not
+/// verified here.
+pub const RESET_RELEASE_US: u32 = gc9a01::RESET_RELEASE_MS * 1000;
+pub const SLEEP_OUT_US: u32 = gc9a01::SLEEP_OUT_MS * 1000;
 /// Every call returns by this time from its start: the manifest's
 /// `max_run_us` (45 ms) less a 5 ms margin for the last row sent after the
 /// check and the call's own overhead.
@@ -334,7 +346,7 @@ impl Extension for BootScreen {
 #[cfg(target_os = "none")]
 mod hw {
     //! The panel's pins and bus, taken from the HAL. The pin numbers are
-    //! the hub board definition's
+    //! the board definition's
     //! (targets/boards/waveshare-rp2040-touch-lcd-1.28/dagon-board.toml):
     //! lcd_cs GPIO9 (line 44), lcd_dc GPIO8 (line 48), lcd_rst GPIO13
     //! (line 52), bus `lcd` on spi1 with sck GPIO10, mosi GPIO11 at

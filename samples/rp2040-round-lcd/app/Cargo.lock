@@ -280,18 +280,21 @@ dependencies = [
 name = "dagon-board-waveshare-rp2040-touch-lcd-1-28"
 version = "0.1.0"
 dependencies = [
- "dagon-format",
  "dagon-mcu-rp2040",
- "dagon-proto",
- "dagon-relay",
  "dagon-topology",
  "embassy-executor",
- "embassy-futures",
  "embassy-rp",
- "embassy-time",
- "embedded-graphics",
- "heapless 0.9.3",
- "static_cell",
+]
+
+[[package]]
+name = "dagon-boot"
+version = "0.1.0"
+dependencies = [
+ "critical-section",
+ "dagon-core",
+ "dagon-events",
+ "dagon-format",
+ "dagon-port",
 ]
 
 [[package]]
@@ -391,7 +394,6 @@ dependencies = [
 name = "dagon-relay"
 version = "0.1.0"
 dependencies = [
- "dagon-format",
  "dagon-port",
  "dagon-proto",
  "embassy-futures",
@@ -1407,18 +1409,34 @@ dependencies = [
 ]
 
 [[package]]
-name = "rp2040-hub"
+name = "rp2040-round-lcd"
 version = "0.0.0"
 dependencies = [
  "cortex-m-rt",
+ "dagon-agent",
  "dagon-board-waveshare-rp2040-touch-lcd-1-28",
  "dagon-mcu-rp2040",
- "dagon-proto",
- "dagon-relay",
  "embassy-executor",
  "embassy-rp",
+ "embassy-time",
+ "embedded-graphics",
+ "heapless 0.9.3",
  "portable-atomic",
+ "rp2040-round-lcd-screen",
  "static_cell",
+]
+
+[[package]]
+name = "rp2040-round-lcd-screen"
+version = "0.0.0"
+dependencies = [
+ "dagon-boot",
+ "dagon-events",
+ "dagon-format",
+ "dagon-mcu-rp2040",
+ "embassy-rp",
+ "embedded-graphics",
+ "heapless 0.9.3",
 ]
 
 [[package]]

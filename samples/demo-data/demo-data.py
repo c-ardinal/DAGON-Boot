@@ -43,7 +43,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 VERSIONS = {"1.0.0": "release-1.0.dgb", "1.1.0": "release-1.1.dgb"}
 # node id -> (firmware package dir under the repository root, Rust target triple)
 FIRMWARE = {
-    "hub": ("targets/rp2040-hub", "thumbv6m-none-eabi"),
+    "hub": ("samples/rp2040-round-lcd/app", "thumbv6m-none-eabi"),
     "seg": ("samples/f401-app", "thumbv7em-none-eabihf"),
 }
 SLOTS = ("a", "b")

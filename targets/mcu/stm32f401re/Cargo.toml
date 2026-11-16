@@ -52,7 +52,8 @@ cortex-m = { version = "0.7", optional = true }
 defmt = { version = "1", optional = true }
 # The node's published events (`node::agent`), the shared flash driver.
 static_cell = { version = "2", optional = true }
-# Smaller verifier code for every image (the boot core must fit 32,256 bytes).
+# Smaller verifier code for every image (the boot core must fit the smallest
+# boot core slot of dagon-mcu.toml: [[slot_layout]] target "bootcore", capacity).
 ed25519-compact = { version = "2.6", default-features = false, features = ["opt_size"], optional = true }
 
 [build-dependencies]

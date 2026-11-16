@@ -2,7 +2,9 @@
 target = "thumbv7em-none-eabihf"
 
 [target.thumbv7em-none-eabihf]
-# Compact SHA-256 rounds keep the boot core inside its 32,256-byte budget.
+# Compact SHA-256 rounds keep the boot core small: it must fit the smallest
+# boot core slot of the MCU definition ([[slot_layout]] target "bootcore",
+# capacity).
 # --nmagic: otherwise the linker maps the ELF headers into the header gap
 # just below the body (slot + 0x000..0x200).
 rustflags = ["-C", "link-arg=--nmagic", "-C", "link-arg=-Tlink.x", "--cfg", 'sha2_backend_soft="compact"']

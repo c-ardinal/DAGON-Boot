@@ -964,7 +964,6 @@ fn slot_layout_rs(l: &toml::Value) -> String {
         "app" => "APP",
         "bootcore" => "BOOTCORE",
         "agent" => "AGENT",
-        "topology" => "TOPOLOGY",
         other => panic!("[[slot_layout]] target {other:?} is not a target"),
     };
     let slot = match word("slot") {

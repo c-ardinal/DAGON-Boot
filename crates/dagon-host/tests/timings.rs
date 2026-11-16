@@ -428,14 +428,6 @@ fn pins(mcu: &str) -> Vec<Pin> {
                 sectors(0x1002_8000, 32),
                 lim(32 * SECTOR_MS),
             ),
-            (
-                target::TOPOLOGY,
-                0,
-                0,
-                0x1000,
-                sectors(0x1024_8000, 1),
-                lim(SECTOR_MS),
-            ),
         ],
         // ESP32-S3: the detached header's sector first, then the body's
         // 4 KiB sectors (no block erase assumed).
@@ -518,13 +510,12 @@ fn the_builtin_plans_are_pinned() {
                 assert_eq!(timings.erase_limit_ms(t, slot, hdr, body), limit, "{at}");
             }
             for l in layout.slots.iter() {
-                let hdr = if l.target == target::TOPOLOGY { 0 } else { 512 };
                 assert!(
-                    layout.plan(l.target, l.slot, hdr, l.capacity).is_ok(),
+                    layout.plan(l.target, l.slot, 512, l.capacity).is_ok(),
                     "{at}"
                 );
                 assert!(
-                    layout.plan(l.target, l.slot, hdr, l.capacity + 1).is_err(),
+                    layout.plan(l.target, l.slot, 512, l.capacity + 1).is_err(),
                     "{at}"
                 );
             }

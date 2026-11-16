@@ -73,7 +73,8 @@ fn taken(r: Result<(), Refused>) {
 impl BootRun {
     /// Runs the boot up to the decision. Call it right after the watchdog
     /// was armed with `watchdog_ms` (the trial period), before anything
-    /// else reads flash. `verifier` checks a pending image's signature.
+    /// else reads flash. `verifier` checks the signature of the image the
+    /// decision starts, pending or confirmed.
     pub fn start<F: Flash, S: Sink, V: SigVerifier + ?Sized>(
         chain: &mut S,
         flash: &mut F,

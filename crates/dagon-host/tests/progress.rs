@@ -365,7 +365,11 @@ impl World {
 fn topology_transfers(sent: &[Sent]) -> usize {
     sent.iter()
         .filter(|s| s.cmd == Cmd::XferBegin as u8)
-        .filter(|s| XferBegin::parse(&s.payload).unwrap().target == target::TOPOLOGY)
+        .filter(|s| {
+            #[allow(deprecated)]
+            let reserved = target::TOPOLOGY;
+            XferBegin::parse(&s.payload).unwrap().target == reserved
+        })
         .count()
 }
 

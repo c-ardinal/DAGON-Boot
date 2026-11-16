@@ -54,9 +54,11 @@ PATTERNS = (
     r"進み具合の画面",
     r"rp2040-hub",
     r"hub-boot-screen",
+    r"TOPOLOGY (?:region|slot)",
+    r"TOPOLOGYの領域",
+    r"target TOPOLOGY",
+    r"ターゲットTOPOLOGY",
 )
-# Describes a flash region the rp2040 definition still lays out; goes with the region.
-KEPT = {("targets/mcu/rp2040/README.md", "topology display copy")}
 WORDS = re.compile("|".join(PATTERNS), re.IGNORECASE)
 
 
@@ -65,11 +67,7 @@ def found(texts):
     out = []
     for path, text in sorted(texts.items()):
         for n, line in enumerate(text.splitlines(), 1):
-            out.extend(
-                (path, n, m.group(0))
-                for m in WORDS.finditer(line)
-                if (path, m.group(0).lower()) not in KEPT
-            )
+            out.extend((path, n, m.group(0)) for m in WORDS.finditer(line))
     return out
 
 
@@ -103,12 +101,22 @@ class DocsNoScreen(unittest.TestCase):
         self.assertTrue((ROOT / SCREEN_SAMPLE_README).is_file())
 
     def test_planted_words_are_found(self):
-        for word in ("dagon topo push", "the hub's topology copy", "親機へ送る", "`relay.show`"):
+        for word in (
+            "dagon topo push",
+            "the hub's topology copy",
+            "親機へ送る",
+            "`relay.show`",
+            "The TOPOLOGY region is two banks",
+            "`written` with target TOPOLOGY",
+            "TOPOLOGYの領域は",
+        ):
             with self.subTest(word=word):
                 self.assertTrue(found({"site/x.md": word}))
 
     def test_plain_topology_words_are_not_found(self):
-        self.assertEqual(found({"site/x.md": "dagon topo check; the topology-bin body"}), [])
+        self.assertEqual(
+            found({"site/x.md": "dagon topo check; the topology-bin body; target 3 is reserved"}), []
+        )
 
 
 if __name__ == "__main__":

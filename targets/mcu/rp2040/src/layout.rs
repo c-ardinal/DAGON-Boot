@@ -7,7 +7,6 @@
 use dagon_core::boot::SlotLayout;
 use dagon_core::log::LogLayout;
 use dagon_format::header::HEADER_SIZE;
-use dagon_proto::payload::target;
 
 /// Base of the default flash map (XIP).
 pub const XIP_BASE: u32 = crate::DEFAULT_FLASH.0;
@@ -28,10 +27,6 @@ pub const APP_LOG: [u32; 2] = crate::APP_LOG_REGION.0;
 /// Boot core slot starts (the definition's `bootcore` slots, A first):
 /// stage0 starts one, the agent writes a new core into another.
 pub const BL_SLOT: [u32; crate::slots::BOOTCORE.len()] = starts(crate::slots::BOOTCORE);
-/// Display copy of the topology (the definition's topology slot layout,
-/// unsigned).
-pub const TOPOLOGY: u32 = topology().0;
-pub const TOPOLOGY_SIZE: u32 = topology().1;
 
 /// Inline image header at the slot start; the body (vector table) follows.
 pub const HEADER_LEN: u32 = HEADER_SIZE as u32;
@@ -87,17 +82,4 @@ const fn starts<const N: usize>(slots: [(u32, u32); N]) -> [u32; N] {
         i += 1;
     }
     out
-}
-
-/// The topology slot layout: start, capacity.
-const fn topology() -> (u32, u32) {
-    let mut i = 0;
-    while i < crate::SLOT_LAYOUTS.len() {
-        let l = &crate::SLOT_LAYOUTS[i];
-        if l.target == target::TOPOLOGY {
-            return (l.start, l.capacity);
-        }
-        i += 1;
-    }
-    panic!("the RP2040 definition gives the topology a slot layout")
 }

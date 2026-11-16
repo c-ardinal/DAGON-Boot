@@ -73,7 +73,7 @@ path changes persistent image state outside this machine.
 | `confirmed` | app | CONFIRM while on trial, `self_check` healthy | CONFIRMED record / vendor "valid" | `app.confirmed { slot, version }` |
 | `demoted` | app | the other slot's `confirmed` (the log's `confirmed` now names the other slot) | the same CONFIRMED record | `app.demoted { slot, version }` |
 | `rolled_back` | boot | attempts exhausted, or the pending image fails its check | ROLLBACK record / vendor abort | `boot.rollback { from, to, reason }` |
-| `chosen` | boot | the slot to start is final (confirmed, or trial) | none | `boot.slot_chosen { slot, trial, version }` |
+| `chosen` | boot | the slot to start is final (confirmed, or trial), its signature and digest checked | none | `boot.slot_chosen { slot, trial, version }` |
 | `no_image` | boot | no startable slot | none | `boot.no_image { reason }` |
 
 The extra source states of `erase` and `pending_set`, and
@@ -1270,8 +1270,12 @@ The one authentication rule, applied by every verifier in the chain
   a build that opts in). There is no key list on the device and no
   fallback key.
 - **Who verifies what.** The agent verifies an image before `written`
-  and the boot loader before `chosen` on a trial boot (and checks the
-  digest on every boot). A boot loader image is verified under the rule
+  and the boot loader before `chosen` on every boot, for the pending and
+  the confirmed slot alike: the state log carries no key, so a record
+  alone never vouches for an image. Each boot runs one signature check
+  for the slot it starts (two when a pending slot is refused and the
+  confirmed one is checked next). A slot that does not verify never
+  starts, and the boot loader starts no slot the log does not name. A boot loader image is verified under the rule
   by the agent before `written` and again before `pending_set` (the
   SLOT_PENDING record names its header digest).
 
@@ -1287,7 +1291,9 @@ The one authentication rule, applied by every verifier in the chain
   exactly what the host's and the agent's accept. The key is part of
   stage0, which is never updated in the field: replacing the project's
   signing key means rebuilding stage0 with the new key and writing it
-  through the MCU's ROM loader.
+  through the MCU's ROM loader. The boot loader built with the new key
+  starts no app signed with the old one: such an app does not boot
+  until it is written again, signed with the new key.
 
   Stage0 starts only a core the log names: a pending core with starts
   left, else the confirmed core. When the pending core does not check
@@ -1794,7 +1800,7 @@ Numbers and components follow [Versions and releases](/en/explanation/versioning
 | `extension-manifest` | a manifest key's meaning changes or a key the reader refuses is added | `dagon gen` refuses a manifest with a number it does not read, naming both numbers |
 | `boot-program` | an op is added, removed or its fields change | a boot loader that meets an op it does not know treats the whole program as invalid and emits `boot.program_skipped`; `dagon gen` refuses to generate a program for a boot loader whose number does not read it |
 | `boot-record` (and the lockup fuse beside it) | the retained layout changes in a way an older reader would misread (the model's compatibility tests decide, 5.5); a writer's event encoding moves with its `event` number, independently per writer | a reader that does not read the number reports the record as unreadable and still serves raw pages on VERSION 0x21; a reader that does not read one writer's `event` format counts that writer's events and skips their content |
-| `image-header`, `topology-bin` | the MCU identity field or the node layout changes (5.5) | a boot loader, an agent and a hub accept the numbers `compat.toml` lists for them and refuse others by number |
+| `image-header`, `topology-bin` | the MCU identity field or the node layout changes (5.5) | a boot loader and an agent accept the `image-header` numbers `compat.toml` lists for them, and the host the `topology-bin` numbers; each refuses others by number. No node reads `topology-bin` |
 | `action-defs` | the action file's keys change incompatibly | an action file with a number the CLI does not read is reported as not loaded, like an agent definition |
 | `definitions` | a key is added that the reader refuses (the reader rejects unknown keys), or a key's meaning changes | a definition states the number it needs; the CLI reads every number it supports and names both numbers when it refuses one |
 | `wire` | a command's request or reply changes meaning; adding a command keeps it (the unknown-command rule answers `E_UNSUPPORTED`), and no device sends unsolicited frames (the wire is request/response through the relay) | a node that does not implement a command answers `E_UNSUPPORTED`, which the host shows as unknown |

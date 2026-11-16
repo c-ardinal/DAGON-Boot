@@ -1,6 +1,6 @@
-//! Receiver side of an RP2040 app: the APP slots, the app state log, the
-//! boot core slots with the boot core log, and the topology display
-//! copy, behind dagon-agent's `SlotStore`.
+//! Receiver side of an RP2040 app: the APP slots, the app state log and
+//! the boot core slots with the boot core log, behind dagon-agent's
+//! `SlotStore`.
 
 use crate::image;
 use crate::layout::{APP_LOG_LAYOUT, BL_LOG_LAYOUT, STAGE0, STAGE0_SIZE};

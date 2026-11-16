@@ -460,27 +460,27 @@ impl dagon_port::Watchdog for Dog {
 
 /// A slow signature check never outlasts the watchdog: the boot core
 /// checks with stage0's small verifier, which ticks through every step of
-/// the check, and each tick feeds the watchdog the boot core armed. A
-/// pending image's check feeds it hundreds of times.
+/// the check, and each tick feeds the watchdog the boot core armed. The
+/// check of the image a boot starts, pending or confirmed, feeds it
+/// hundreds of times.
 #[test]
 fn the_watchdog_is_fed_through_a_signature_check() {
-    let dog = RefCell::new(Dog::default());
-    dagon_port::Watchdog::start(&mut *dog.borrow_mut(), WDT_MS);
-    let key = *KeyPair::from_seed(Seed::new(SEED)).pk;
-    let feed = || dagon_port::Watchdog::feed(&mut *dog.borrow_mut());
-    let verifier = dagon_ed25519::Ed25519Small::with_tick(key, feed);
-    let mut m = pending_trial();
-    let mut chain = compose_boot(Nop, || 0u64, &[]);
-    let run = BootRun::start(&mut chain, &mut m, &LOG, &SLOTS, &cfg(), &verifier, WDT_MS);
-    assert!(matches!(
-        run.decision(),
-        Decision::Boot {
-            slot: B,
-            trial: true,
-            ..
-        }
-    ));
-    let dog = dog.borrow();
-    assert_eq!(dog.started, [WDT_MS], "armed once, before the check");
-    assert!(dog.feeds >= 700, "{} feeds", dog.feeds);
+    for (mut m, slot, trial) in [(pending_trial(), B, true), (confirmed_only(), A, false)] {
+        let dog = RefCell::new(Dog::default());
+        dagon_port::Watchdog::start(&mut *dog.borrow_mut(), WDT_MS);
+        let key = *KeyPair::from_seed(Seed::new(SEED)).pk;
+        let feed = || dagon_port::Watchdog::feed(&mut *dog.borrow_mut());
+        let verifier = dagon_ed25519::Ed25519Small::with_tick(key, feed);
+        let mut chain = compose_boot(Nop, || 0u64, &[]);
+        let run = BootRun::start(&mut chain, &mut m, &LOG, &SLOTS, &cfg(), &verifier, WDT_MS);
+        let want = Decision::Boot {
+            slot,
+            entry: entry(slot),
+            trial,
+        };
+        assert_eq!(run.decision(), want);
+        let dog = dog.borrow();
+        assert_eq!(dog.started, [WDT_MS], "armed once, before the check");
+        assert!(dog.feeds >= 700, "{} feeds (trial {trial})", dog.feeds);
+    }
 }

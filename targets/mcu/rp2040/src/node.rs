@@ -148,12 +148,7 @@ pub(crate) fn open<B: BoardDef, const N: usize>(
     let mut chip = RpFlash::new(flash);
     let serial = serial(&mut chip);
     let flash = SharedFlash::new(FLASH_DRIVER.init(driver(chip)), &REGIONS);
-    let mut store = AppStore {
-        flash,
-        watch: guard,
-        task,
-        regions: B::ERASE_REGIONS,
-    };
+    let mut store = AppStore::new(flash, guard, task, B::ERASE_REGIONS);
     let trial = on_trial(&store.status());
     guard.install(wdt(watchdog), trial);
     guard.feed();

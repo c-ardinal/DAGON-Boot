@@ -1,6 +1,6 @@
 ---
 title: "Swapping a link"
-description: "Change how a node is linked and send the new topology."
+description: "Change how a node is linked."
 ---
 
 ## In the 構成

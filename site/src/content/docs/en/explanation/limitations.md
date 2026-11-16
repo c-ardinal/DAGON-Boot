@@ -15,6 +15,8 @@ description: "Where the code differs from the design and what DAGON does not do,
 | `agent` | None. | The confirmed app keeps running; the recovery agent cannot be used until it is written again. | The confirmed app (`[writers] agent`) writes it again. |
 | `stage0` | None: DAGON never writes stage0 in the field. | Does not arise: stage0 is not written in the field. | The MCU's ROM loader (`dagon flash`). |
 
+- The boot loader does not relay. A node reached only through a node whose boot loader holds it in update or recovery mode is reached again once that node runs an app: write that node first.
+
 ## Planned
 
 The hub and the boot:
@@ -22,7 +24,7 @@ The hub and the boot:
 - The relay (`dagon-relay`) does not depend on the MCU, and the `[coordinator]` section of an MCU definition decides whether that MCU may relay. A node relays over the links its MCU definition lists in `[[relay_link]]`, and the topology routes each node to one of them. The RP2040 is the only MCU with both that section and the code that runs the relay.
 - DAGON writes the hub and the children beyond it. Nothing beyond a child can be written.
 - Through some USB hubs, the PC does not see the hub again after it updates itself and restarts. Connect the hub directly to a USB port of the PC.
-- The boot loader does not communicate and does not write the app, so on an MCU with a stage0 only the app writes the app (`[writers] app = ["app"]`) and a definition with one app slot does not load there.
+- The boot loaders of the RP2040 and the STM32F401 do not communicate. The MCU definitions name the boot loader a writer of the app (`[writers] app = ["app", "bootcore"]`) and give its listen window (`[boot_receive]`), but the boot loader firmware opens no listen window, serves no update or recovery mode and does not consume UPDATE_STAY; the apps answer REBOOT mode 1 with `E_UNSUPPORTED`. An app with one slot on these MCUs has nothing that writes it again after a cut write. The ESP32-S3's recovery agent receives only when the 2nd stage starts it because no app slot starts: it opens no listen window and answers HELLO with mode 3, not 1 or 2.
 - The measured worst-case verify time of stage0 on the built-in MCUs is not recorded. [Stage0's clock and its verify time](/en/explanation/lifecycle-events/) gives an emulator's estimate for the Cortex-M0+; there is no estimate for the STM32F401's Cortex-M4.
 - On the RP2040 a boot takes about 15 s on a board without a crystal (the ring oscillator, nominally 6.5 MHz) and about 0.8 s with a 12 MHz crystal: stage0 and the boot loader each check one signature with `Ed25519Small` on every boot. The boot loader keeps its watchdog fed through its check. This is by design: the small verifier leaves the boot loader room for the update session.
 - On the RP2040, stage0, the boot loader and the app take their clock from a crystal or from the ring oscillator; they do not take an external clock driven into XIN.

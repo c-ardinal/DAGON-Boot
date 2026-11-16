@@ -18,6 +18,7 @@ SCANNED = (
     "web/src/app/copy.ts",
     "web/README.md",
     "README.md",
+    "README.en.md",
     "targets",
     "crates/dagon-cli/src/cli.rs",
     "crates/dagon-cli/src/cli",

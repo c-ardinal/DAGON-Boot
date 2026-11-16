@@ -24,10 +24,31 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 WEB = ROOT / "web"
 PAGE = ROOT / "crates" / "dagon-cli" / "page"
 SOURCE = PAGE / "SOURCE"
-# Crates compiled into the page's WebAssembly (dagon-wasm and what it uses).
-CRATES = ["dagon-wasm", "dagon-host", "dagon-format", "dagon-proto", "dagon-topology",
-          "dagon-sign", "dagon-romlink", "dagon-port", "dagon-core",
-          "dagon-agent", "dagon-ed25519"]
+WASM_CRATE = ROOT / "crates" / "dagon-wasm"
+
+
+def path_closure(crate):
+    """The folders of `crate` and of every crate it reaches through path
+    dependencies (any kind, build scripts' included), as paths."""
+    import tomllib
+    seen, todo = {}, [crate.resolve()]
+    while todo:
+        d = todo.pop()
+        if d in seen:
+            continue
+        seen[d] = None
+        manifest = tomllib.loads((d / "Cargo.toml").read_text(encoding="utf-8"))
+        tables = [manifest, *manifest.get("target", {}).values()]
+        for t in tables:
+            for kind in ("dependencies", "build-dependencies", "dev-dependencies"):
+                for spec in t.get(kind, {}).values():
+                    if isinstance(spec, dict) and "path" in spec:
+                        todo.append((d / spec["path"]).resolve())
+    return sorted(seen, key=lambda p: p.relative_to(ROOT).parts)
+
+
+# Folders compiled into the page's WebAssembly (dagon-wasm and what it uses).
+CRATES = path_closure(WASM_CRATE)
 WEB_SKIP = {"node_modules", "dist", "pkg", "test-results", "playwright-report"}
 # The definition files dagon-topology embeds (its build.rs discovers them; a
 # test keeps this list equal to what it embeds).
@@ -48,7 +69,7 @@ def source_files():
         if p.is_file() and not WEB_SKIP.intersection(rel):
             files.append(p)
     for c in CRATES:
-        files += in_order(p for p in (ROOT / "crates" / c).rglob("*")
+        files += in_order(p for p in c.rglob("*")
                           if p.is_file() and "target" not in p.relative_to(ROOT).parts)
     files += embedded_files()
     files.append(ROOT / "Cargo.lock")

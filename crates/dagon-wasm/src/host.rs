@@ -355,8 +355,12 @@ pub fn watch_interval_ms() -> u32 {
 }
 
 // `PUBKEY`, the release verification key of a standalone build
-// (`DAGON_PUBKEY`, see build.rs), and `TEST_KEY`.
-include!(concat!(env!("OUT_DIR"), "/pubkey.rs"));
+// (`DAGON_PUBKEY`, see build.rs); the page does not read `TEST_KEY`.
+#[allow(dead_code)]
+mod embedded {
+    include!(concat!(env!("OUT_DIR"), "/pubkey.rs"));
+}
+pub use embedded::PUBKEY;
 
 std::thread_local! {
     /// The developer's key set at run time (the page served by `dagon serve` reads it from its

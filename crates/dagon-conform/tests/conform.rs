@@ -4,7 +4,7 @@
 
 use std::cell::RefCell;
 
-use dagon_agent::{Agent, Config, SlotStore, StoreError, Transition, Writer};
+use dagon_agent::{Agent, Config, SlotStore, StoreError, Transition};
 use dagon_conform::node::{self, NodeSetup, RESPONSE_MAX};
 use dagon_conform::pc::{Channel, Images, NoAnswer, Runner, SetupError};
 use dagon_conform::report::{Progress, Report, Verdict};
@@ -334,7 +334,6 @@ impl FakeNode {
             mode: mode::APP,
             max_payload: max_payload as u16,
             trial_attempts: MAX_ATTEMPTS,
-            writer: Writer::App,
         };
         let mut flash = MemFlash::new();
         flash.erase_works = !faults.erase_does_nothing;

@@ -5,6 +5,11 @@ license.workspace = true
 version = "0.1.0"
 description = "DAGON lifecycle events: state machines whose transitions emit events, extensions, ports and the published event state"
 
+[features]
+# The catalogs keep their machines' and transitions' docs: for the hosted
+# tools that print them (dagon-catalog); a firmware image leaves them out.
+catalog-docs = []
+
 [dependencies]
 dagon-format = { path = "../dagon-format" }
 embassy-sync = "0.8"

@@ -21,10 +21,10 @@ lint = { target = "thumbv7em-none-eabihf", features = ["", "conform"] }
 default = ["node"]
 # The embassy-stm32 parts every image uses: clocks, flash port, IWDG
 # guard; the verifying key from DAGON_PUBKEY (the boot core stops here).
-hal = ["dep:embassy-stm32", "dep:embassy-time", "dep:cortex-m", "dep:ed25519-compact"]
+hal = ["dep:embassy-stm32", "dep:embassy-time", "dep:cortex-m"]
 # Node start-up and the I2C target serving loop (logs through defmt: the
 # app links a defmt logger, e.g. defmt-rtt).
-node = ["hal", "embassy-stm32?/defmt", "dep:embassy-futures", "dep:embassy-executor", "dep:defmt", "dep:static_cell"]
+node = ["hal", "embassy-stm32?/defmt", "dep:embassy-futures", "dep:embassy-executor", "dep:defmt", "dep:static_cell", "dep:dagon-ed25519", "dep:ed25519-compact"]
 # Conformance build: CONF_RUN runs dagon-conform's node-side tests.
 conform = ["node", "dep:dagon-conform"]
 # The final binary's memory.x comes from this package: an APP slot body
@@ -43,6 +43,8 @@ dagon-port = { path = "../../../crates/dagon-port" }
 dagon-proto = { path = "../../../crates/dagon-proto" }
 dagon-mcu-common = { path = "../common" }
 dagon-conform = { path = "../../../crates/dagon-conform", optional = true }
+# The verifier the node's agent checks images with.
+dagon-ed25519 = { path = "../../../crates/dagon-ed25519", features = ["compact"], optional = true }
 # unstable-pac: NACK the own address (I2C CR1.ACK) while a request runs.
 embassy-stm32 = { version = "0.6.0", features = ["stm32f401re", "unstable-pac"], optional = true }
 embassy-time = { version = "0.5", optional = true }
@@ -52,8 +54,8 @@ cortex-m = { version = "0.7", optional = true }
 defmt = { version = "1", optional = true }
 # The node's published events (`node::agent`), the shared flash driver.
 static_cell = { version = "2", optional = true }
-# Smaller verifier code for every image (the boot core must fit the smallest
-# boot core slot of dagon-mcu.toml: [[slot_layout]] target "bootcore", capacity).
+# Smaller verifier code for the node's agent (the boot stages verify with
+# dagon-ed25519's own Ed25519Small).
 ed25519-compact = { version = "2.6", default-features = false, features = ["opt_size"], optional = true }
 
 [build-dependencies]

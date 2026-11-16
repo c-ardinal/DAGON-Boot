@@ -10,6 +10,7 @@
 //! less fails to build, a larger one keeps the rest for the app.
 
 use dagon_agent::{Agent, Config, SlotStore};
+use dagon_ed25519::Ed25519Compact;
 use dagon_events::{Published, Watchdog as Periods};
 use dagon_format::header::{mcu_id, port_kind, target_tag};
 pub use dagon_mcu_common::hooks::{
@@ -61,7 +62,7 @@ pub trait BoardDef: BoardCore {
 
 /// The agent of an RP2040 node; its chain holds the app's extensions and
 /// CONFIRM check.
-pub type AppAgent = Agent<AppStore, NodeChain>;
+pub type AppAgent = Agent<AppStore, NodeChain, Ed25519Compact>;
 
 /// A handle on the one flash driver, held by the slot store and used by the
 /// serving task only. Flash operations run from RAM with XIP
@@ -95,7 +96,6 @@ pub const fn levels<const N: usize>() -> [crate::watchdog::Level; N] {
 /// its topology role (`dagon_proto::payload::role`).
 pub fn config(tag: &str, role: u8) -> Config {
     Config {
-        pubkey: crate::PUBKEY,
         mcu_id: mcu_id::RP2040,
         port_kind: port_kind::SELF_BOOT,
         target_tag: target_tag(tag),
@@ -144,12 +144,7 @@ pub(crate) fn open<B: BoardDef, const N: usize>(
     let mut chip = RpFlash::new(flash);
     let serial = serial(&mut chip);
     let flash = SharedFlash::new(FLASH_DRIVER.init(driver(chip)), &REGIONS);
-    let mut store = AppStore {
-        flash,
-        watch: guard,
-        task,
-        regions: B::ERASE_REGIONS,
-    };
+    let mut store = AppStore::new(flash, guard, task, B::ERASE_REGIONS);
     let trial = on_trial(&store.status());
     guard.install(wdt(watchdog), trial);
     guard.feed();
@@ -165,7 +160,8 @@ pub(crate) fn open<B: BoardDef, const N: usize>(
         now_us,
         periods,
     );
-    let mut agent = Agent::new(config(tag, role), store, chain);
+    let verifier = Ed25519Compact::new(crate::PUBKEY);
+    let mut agent = Agent::new(config(tag, role), verifier, store, chain);
     agent.watchdog_taken(crate::layout::watchdog_ms(trial), guard.trial_policy());
     let board = B::bring_up_port().map(|p| (B::BOARD_ID, p));
     guard.set_trial(finish_start(&mut agent, board, app.confirm));

@@ -114,7 +114,8 @@ pub fn demo_sim(key: &KeyPair, fail: Option<&str>, seed: u64) -> Result<SimRelay
         seg.trial_app = TrialApp::CrashesAtBoot;
     }
     let mut watch = SimNode::new(
-        watch_config(pk),
+        watch_config(),
+        pk,
         SimFlash::esp32s3_4m(seed ^ 2),
         Layout::ESP32S3_WATCH,
     );

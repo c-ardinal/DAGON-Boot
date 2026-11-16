@@ -2,4 +2,7 @@
 target = "thumbv6m-none-eabi"
 
 [target.thumbv6m-none-eabi]
-rustflags = ["-C", "link-arg=--nmagic", "-C", "link-arg=-Tlink.x"]
+# Compact SHA-256 rounds keep the boot core small: it must fit the smallest
+# boot core slot of the MCU definition ([[slot_layout]] target "bootcore",
+# capacity).
+rustflags = ["-C", "link-arg=--nmagic", "-C", "link-arg=-Tlink.x", "--cfg", 'sha2_backend_soft="compact"']

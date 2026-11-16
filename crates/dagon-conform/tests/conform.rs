@@ -9,6 +9,7 @@ use dagon_conform::node::{self, NodeSetup, RESPONSE_MAX};
 use dagon_conform::pc::{Channel, Images, NoAnswer, Runner, SetupError};
 use dagon_conform::report::{Progress, Report, Verdict};
 use dagon_conform::CTS;
+use dagon_ed25519::Ed25519Compact;
 use dagon_events::{compose, Bounds, Composed, Layer, Nop, Published, Watchdog};
 use dagon_format::header::*;
 use dagon_format::statelog::reason;
@@ -52,6 +53,10 @@ const REGIONS: [FlashRegion; 2] = [
 
 fn keypair() -> KeyPair {
     KeyPair::from_seed(Seed::new(SEED))
+}
+
+fn verifier() -> Ed25519Compact {
+    Ed25519Compact::new(*keypair().pk)
 }
 
 fn sign(msg: &[u8]) -> [u8; 64] {
@@ -305,7 +310,7 @@ struct FakeNode {
     cfg: Config,
     /// The slot store, shared with the bench's boot core.
     mem: &'static RefCell<Mem>,
-    agent: Agent<&'static RefCell<Mem>, Chain>,
+    agent: Agent<&'static RefCell<Mem>, Chain, Ed25519Compact>,
     flash: MemFlash,
     max_payload: usize,
     faults: Faults,
@@ -322,7 +327,6 @@ impl FakeNode {
         let max_payload =
             link_limits(link).map_or(dagon_proto::max_payload::UART, |l| l.max_payload);
         let cfg = Config {
-            pubkey: *keypair().pk,
             mcu_id: mcu_id::STM32F401XE,
             port_kind: port_kind::SELF_BOOT,
             target_tag: TAG,
@@ -339,7 +343,7 @@ impl FakeNode {
         }
         let mem: &'static RefCell<Mem> = Box::leak(Box::new(RefCell::new(m)));
         FakeNode {
-            agent: Agent::new(cfg.clone(), mem, chain()),
+            agent: Agent::new(cfg.clone(), verifier(), mem, chain()),
             mem,
             cfg,
             flash,
@@ -394,7 +398,7 @@ impl FakeNode {
             self.now + BOOT_MS
         };
         drop(mem);
-        self.agent = Agent::new(self.cfg.clone(), self.mem, chain());
+        self.agent = Agent::new(self.cfg.clone(), verifier(), self.mem, chain());
     }
 
     /// Rewrites the agent's answer for the injected faults.

@@ -6,6 +6,7 @@ use std::rc::Rc;
 
 use dagon_agent::snapshot::{AppSnapshot, Phase};
 use dagon_agent::{image, requests, session, Agent, Config, SlotStore, StoreError, Transition};
+use dagon_ed25519::Ed25519Compact;
 use dagon_events::{
     compose, Accept, Bounds, Composed, Ctx, Delay, Event, Extension, Health, Layer, Nop, Published,
     Reader, RebootRequest, TrialInfo, UpdateOffer, Watchdog,
@@ -270,7 +271,6 @@ fn chain(probe: Probe) -> Chain {
 
 fn config() -> Config {
     Config {
-        pubkey: *keypair().pk,
         mcu_id: mcu_id::STM32F401XE,
         port_kind: port_kind::SELF_BOOT,
         target_tag: TAG,
@@ -281,10 +281,14 @@ fn config() -> Config {
     }
 }
 
+fn verifier() -> Ed25519Compact {
+    Ed25519Compact::new(*keypair().pk)
+}
+
 struct Node {
     /// The slot store, shared with the bench (it plays the boot core).
     mem: &'static RefCell<Mem>,
-    agent: Agent<&'static RefCell<Mem>, Chain>,
+    agent: Agent<&'static RefCell<Mem>, Chain, Ed25519Compact>,
     /// The agent's published snapshot.
     events: Reader<AppSnapshot, 32>,
     probe: Probe,
@@ -302,7 +306,7 @@ impl Node {
         let events = c.reader();
         Node {
             mem,
-            agent: Agent::new(config(), mem, c),
+            agent: Agent::new(config(), verifier(), mem, c),
             events,
             probe,
             seq: 0,
@@ -315,7 +319,7 @@ impl Node {
         self.probe.seen.borrow_mut().events.clear();
         let c = chain(self.probe.clone());
         self.events = c.reader();
-        self.agent = Agent::new(config(), self.mem, c);
+        self.agent = Agent::new(config(), verifier(), self.mem, c);
     }
 
     /// The published snapshot's phase.
@@ -608,6 +612,7 @@ fn wrong_board_or_key_is_rejected() {
             target_tag: target_tag("other"),
             ..config()
         },
+        verifier(),
         n.mem,
         chain(Probe::default()),
     );

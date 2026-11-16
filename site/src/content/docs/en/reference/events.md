@@ -93,7 +93,7 @@ States: `Empty` (initial), `Written`, `Pending`, `Trial`, `Confirmed`, `Reverted
 
 | Kind | Code | Transition | Payload | Observed | Notes | Description |
 |---|---|---|---|---|---|---|
-| `app.transfer_started` | 0x20 | `erase`: Empty \| Written \| Pending \| Reverted → Empty | `target: u8` (1 B), `slot: u8` (1 B), `len: u32` (4 B) | live, host |  | The slot was erased for a new image (never the running or the confirmed slot). |
+| `app.transfer_started` | 0x20 | `erase`: Empty \| Written \| Pending \| Trial \| Confirmed \| Reverted → Empty | `target: u8` (1 B), `slot: u8` (1 B), `len: u32` (4 B) | live, host |  | The slot was erased for a new image (never the slot the writer runs from; the app never erases its confirmed slot either). |
 | `app.written` | 0x21 | `written`: Empty → Written | `target: u8` (1 B), `slot: u8` (1 B), `version: Version` (4 B) | live, host |  | The body verified and the header written and read back: the slot holds an image. |
 | `app.pending_set` | 0x22 | `pending_set`: Written \| Pending \| Confirmed \| Reverted → Pending | `slot: u8` (1 B), `version: Version` (4 B) | live, host |  | The slot is the one tried on the next boot. |
 | `app.pending_moved` | 0x23 | `pending_moved`: Pending \| Trial → Written | `from: u8` (1 B), `to: u8` (1 B) | live, host |  | Another slot was set pending; this one no longer is. |

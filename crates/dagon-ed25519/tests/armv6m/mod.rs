@@ -14,6 +14,9 @@ const FLASH: u32 = 0x1000_0000;
 const FLASH_LEN: usize = 1 << 20;
 const RAM: u32 = 0x2000_0000;
 const RAM_LEN: usize = 256 * 1024;
+/// Peripheral addresses: a store there is recorded (its cycle count), not
+/// kept.
+const PERIPHERALS: core::ops::Range<u32> = 0x4000_0000..0x6000_0000;
 /// The return address the run starts with: reaching it ends the run.
 const STOP: u32 = 0xFFFF_FFFE;
 
@@ -26,6 +29,11 @@ pub struct Run {
     pub cycles: u64,
     /// The deepest the stack went, bytes.
     pub stack: u32,
+    /// The most cycles from the start to the first store to a peripheral
+    /// address, between two such stores, or from the last to the return.
+    pub longest_between_stores: u64,
+    /// How many stores to a peripheral address the run made.
+    pub peripheral_stores: u64,
 }
 
 struct Cpu {
@@ -39,6 +47,10 @@ struct Cpu {
     cycles: u64,
     instructions: u64,
     sp_min: u32,
+    /// Cycle count at the last peripheral store (0: the start).
+    last_store: u64,
+    longest_between_stores: u64,
+    peripheral_stores: u64,
 }
 
 /// `w` bits of `x` from bit `lo`.
@@ -59,6 +71,13 @@ impl Cpu {
         &mut mem[o..o + len as usize]
     }
 
+    fn peripheral_store(&mut self) {
+        let gap = self.cycles - self.last_store;
+        self.longest_between_stores = self.longest_between_stores.max(gap);
+        self.last_store = self.cycles;
+        self.peripheral_stores += 1;
+    }
+
     fn load(&mut self, a: u32, len: u32) -> u32 {
         self.mem(a, len)
             .iter()
@@ -67,6 +86,10 @@ impl Cpu {
     }
 
     fn store(&mut self, a: u32, len: u32, v: u32) {
+        if PERIPHERALS.contains(&a) {
+            self.peripheral_store();
+            return;
+        }
         assert!(a >= RAM, "store to flash at {a:#x}");
         for (i, b) in self.mem(a, len).iter_mut().enumerate() {
             *b = (v >> (8 * i)) as u8;
@@ -471,6 +494,9 @@ pub fn run(elf: &[u8], r0: u32) -> Run {
         cycles: 0,
         instructions: 0,
         sp_min: u32::MAX,
+        last_store: 0,
+        longest_between_stores: 0,
+        peripheral_stores: 0,
     };
     let (phoff, phentsize, phnum) = (u32_at(0x1C) as usize, u16_at(0x2A), u16_at(0x2C));
     for i in 0..phnum {
@@ -490,10 +516,13 @@ pub fn run(elf: &[u8], r0: u32) -> Run {
     while cpu.r[15] != STOP {
         cpu.step();
     }
+    cpu.peripheral_store();
     Run {
         r0: cpu.r[0],
         instructions: cpu.instructions,
         cycles: cpu.cycles,
         stack: top - cpu.sp_min,
+        longest_between_stores: cpu.longest_between_stores,
+        peripheral_stores: cpu.peripheral_stores - 1,
     }
 }

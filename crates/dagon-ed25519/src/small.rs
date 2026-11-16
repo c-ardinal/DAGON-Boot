@@ -96,19 +96,26 @@ fn mul(a: &Fe, b: &Fe) -> Fe {
 }
 
 /// a^(p-2) (the inverse), or a^((p-5)/8) with `p2523`, by TweetNaCl's
-/// square-and-multiply chains.
-fn pow(a: &Fe, p2523: bool) -> Fe {
-    let mut c = *a;
-    let top = if p2523 { 250 } else { 253 };
-    for k in (0..=top).rev() {
-        c = mul(&c, &c);
-        let skip = if p2523 { k == 1 } else { k == 2 || k == 4 };
-        if !skip {
-            c = mul(&c, a);
+/// square-and-multiply chains; `$tick` at every step.
+macro_rules! pow {
+    ($name:ident $(, $tick:ident: $T:ident)?) => {
+        fn $name$(<$T: Fn() + Copy>)?(a: &Fe, p2523: bool $(, $tick: $T)?) -> Fe {
+            let mut c = *a;
+            let top = if p2523 { 250 } else { 253 };
+            for k in (0..=top).rev() {
+                $($tick();)?
+                c = mul(&c, &c);
+                let skip = if p2523 { k == 1 } else { k == 2 || k == 4 };
+                if !skip {
+                    c = mul(&c, a);
+                }
+            }
+            c
         }
-    }
-    c
+    };
 }
+pow!(pow);
+pow!(pow_ticking, tick: T);
 
 /// The canonical (fully reduced) little-endian bytes of `a`.
 fn pack(a: &Fe) -> [u8; 32] {
@@ -174,36 +181,42 @@ fn small_order(p: &P) -> bool {
 
 /// -A for the encoding `pk`; `None` unless `pk` is the canonical
 /// encoding of a curve point.
-fn decode_neg(pk: &[u8; 32]) -> Option<P> {
-    let y = unpack(pk);
-    let mut y_bytes = *pk;
-    y_bytes[31] &= 0x7f;
-    if pack(&y) != y_bytes {
-        return None;
-    }
-    let num = mul(&y, &y);
-    let den = add(&ONE, &mul(&num, &D));
-    let num = sub(&num, &ONE);
-    let den2 = mul(&den, &den);
-    let den6 = mul(&mul(&den2, &den2), &den2);
-    let t = pow(&mul(&mul(&den6, &num), &den), true);
-    let mut x = mul(&mul(&mul(&mul(&t, &num), &den), &den), &den);
-    let is_root = |x: &Fe| pack(&mul(&mul(x, x), &den)) == pack(&num);
-    if !is_root(&x) {
-        x = mul(&x, &I);
-    }
-    if !is_root(&x) {
-        return None;
-    }
-    let sign = pk[31] >> 7;
-    if sign == 1 && pack(&x) == [0; 32] {
-        return None;
-    }
-    if parity(&x) == sign {
-        x = sub(&ZERO, &x);
-    }
-    Some([x, y, ONE, mul(&x, &y)])
+macro_rules! decode_neg {
+    ($name:ident, $pow:ident $(, $tick:ident: $T:ident)?) => {
+        fn $name$(<$T: Fn() + Copy>)?(pk: &[u8; 32] $(, $tick: $T)?) -> Option<P> {
+            let y = unpack(pk);
+            let mut y_bytes = *pk;
+            y_bytes[31] &= 0x7f;
+            if pack(&y) != y_bytes {
+                return None;
+            }
+            let num = mul(&y, &y);
+            let den = add(&ONE, &mul(&num, &D));
+            let num = sub(&num, &ONE);
+            let den2 = mul(&den, &den);
+            let den6 = mul(&mul(&den2, &den2), &den2);
+            let t = $pow(&mul(&mul(&den6, &num), &den), true $(, $tick)?);
+            let mut x = mul(&mul(&mul(&mul(&t, &num), &den), &den), &den);
+            let is_root = |x: &Fe| pack(&mul(&mul(x, x), &den)) == pack(&num);
+            if !is_root(&x) {
+                x = mul(&x, &I);
+            }
+            if !is_root(&x) {
+                return None;
+            }
+            let sign = pk[31] >> 7;
+            if sign == 1 && pack(&x) == [0; 32] {
+                return None;
+            }
+            if parity(&x) == sign {
+                x = sub(&ZERO, &x);
+            }
+            Some([x, y, ONE, mul(&x, &y)])
+        }
+    };
 }
+decode_neg!(decode_neg, pow);
+decode_neg!(decode_neg_ticking, pow_ticking, tick: T);
 
 /// TweetNaCl's modL: the 64-byte little-endian `x` mod L.
 fn mod_l(x: &mut [i64; 64]) -> [u8; 32] {
@@ -251,50 +264,64 @@ fn bit(s: &[u8], i: usize) -> bool {
 }
 
 /// The crate's predicate (see the crate documentation) for `sig` over
-/// `domain` || `msg` under `pk`.
-pub fn verify(pk: &[u8; 32], domain: &[u8], msg: &[&[u8]], sig: &[u8; 64]) -> bool {
-    let (r, s) = sig.split_at(32);
-    if !below_l(s) {
-        return false;
-    }
-    let Some(neg_a) = decode_neg(pk) else {
-        return false;
-    };
-    if small_order(&neg_a) {
-        return false;
-    }
-    let mut h = Sha512::new();
-    h.update(r);
-    h.update(pk);
-    h.update(domain);
-    for part in msg {
-        h.update(part);
-    }
-    let mut wide = [0i64; 64];
-    for (w, b) in wide.iter_mut().zip(h.finalize().iter()) {
-        *w = *b as i64;
-    }
-    let k = mod_l(&mut wide);
-    let b = [BX, BY, ONE, mul(&BX, &BY)];
-    let b_neg_a = padd(&b, &neg_a);
-    let mut q: P = [ZERO, ONE, ONE, ZERO];
-    // S and k are below L < 2^253.
-    for i in (0..253).rev() {
-        q = padd(&q, &q);
-        match (bit(s, i), bit(&k, i)) {
-            (true, true) => q = padd(&q, &b_neg_a),
-            (true, false) => q = padd(&q, &b),
-            (false, true) => q = padd(&q, &neg_a),
-            (false, false) => {}
+/// `domain` || `msg` under `pk`; `$tick` at every step of the double
+/// scalar multiplication (and of the exponentiations it calls).
+macro_rules! verify {
+    ($name:ident, $decode_neg:ident, $pow:ident $(, $tick:ident: $T:ident)?) => {
+        pub fn $name$(<$T: Fn() + Copy>)?(
+            pk: &[u8; 32],
+            domain: &[u8],
+            msg: &[&[u8]],
+            sig: &[u8; 64]
+            $(, $tick: $T)?
+        ) -> bool {
+            let (r, s) = sig.split_at(32);
+            if !below_l(s) {
+                return false;
+            }
+            let Some(neg_a) = $decode_neg(pk $(, $tick)?) else {
+                return false;
+            };
+            if small_order(&neg_a) {
+                return false;
+            }
+            let mut h = Sha512::new();
+            h.update(r);
+            h.update(pk);
+            h.update(domain);
+            for part in msg {
+                h.update(part);
+            }
+            let mut wide = [0i64; 64];
+            for (w, b) in wide.iter_mut().zip(h.finalize().iter()) {
+                *w = *b as i64;
+            }
+            let k = mod_l(&mut wide);
+            let b = [BX, BY, ONE, mul(&BX, &BY)];
+            let b_neg_a = padd(&b, &neg_a);
+            let mut q: P = [ZERO, ONE, ONE, ZERO];
+            // S and k are below L < 2^253.
+            for i in (0..253).rev() {
+                $($tick();)?
+                q = padd(&q, &q);
+                match (bit(s, i), bit(&k, i)) {
+                    (true, true) => q = padd(&q, &b_neg_a),
+                    (true, false) => q = padd(&q, &b),
+                    (false, true) => q = padd(&q, &neg_a),
+                    (false, false) => {}
+                }
+            }
+            let zi = $pow(&q[2], false $(, $tick)?);
+            let mut encoded = pack(&mul(&q[1], &zi));
+            encoded[31] ^= parity(&mul(&q[0], &zi)) << 7;
+            // R equal to the canonical encoding of [S]B - [k]A: R is canonical and
+            // names that point, so R's order is that point's.
+            encoded[..] == *r && !small_order(&q)
         }
-    }
-    let zi = pow(&q[2], false);
-    let mut encoded = pack(&mul(&q[1], &zi));
-    encoded[31] ^= parity(&mul(&q[0], &zi)) << 7;
-    // R equal to the canonical encoding of [S]B - [k]A: R is canonical and
-    // names that point, so R's order is that point's.
-    encoded[..] == *r && !small_order(&q)
+    };
 }
+verify!(verify, decode_neg, pow);
+verify!(verify_ticking, decode_neg_ticking, pow_ticking, tick: T);
 
 #[cfg(test)]
 mod tests {

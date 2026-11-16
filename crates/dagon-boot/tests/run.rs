@@ -440,3 +440,47 @@ fn extensions_change_no_decision_and_no_write_in_any_state() {
         assert!(overran_at.contains(k), "no state reaches boot.{k}");
     }
 }
+
+/// The boot core's watchdog, as a test sees it: the periods it was started
+/// with and how often it was fed.
+#[derive(Default)]
+struct Dog {
+    started: Vec<u32>,
+    feeds: u32,
+}
+
+impl dagon_port::Watchdog for Dog {
+    fn start(&mut self, timeout_ms: u32) {
+        self.started.push(timeout_ms);
+    }
+    fn feed(&mut self) {
+        self.feeds += 1;
+    }
+}
+
+/// A slow signature check never outlasts the watchdog: the boot core
+/// checks with stage0's small verifier, which ticks through every step of
+/// the check, and each tick feeds the watchdog the boot core armed. A
+/// pending image's check feeds it hundreds of times.
+#[test]
+fn the_watchdog_is_fed_through_a_signature_check() {
+    let dog = RefCell::new(Dog::default());
+    dagon_port::Watchdog::start(&mut *dog.borrow_mut(), WDT_MS);
+    let key = *KeyPair::from_seed(Seed::new(SEED)).pk;
+    let feed = || dagon_port::Watchdog::feed(&mut *dog.borrow_mut());
+    let verifier = dagon_ed25519::Ed25519Small::with_tick(key, feed);
+    let mut m = pending_trial();
+    let mut chain = compose_boot(Nop, || 0u64, &[]);
+    let run = BootRun::start(&mut chain, &mut m, &LOG, &SLOTS, &cfg(), &verifier, WDT_MS);
+    assert!(matches!(
+        run.decision(),
+        Decision::Boot {
+            slot: B,
+            trial: true,
+            ..
+        }
+    ));
+    let dog = dog.borrow();
+    assert_eq!(dog.started, [WDT_MS], "armed once, before the check");
+    assert!(dog.feeds >= 700, "{} feeds", dog.feeds);
+}

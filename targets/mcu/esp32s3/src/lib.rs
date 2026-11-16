@@ -91,7 +91,6 @@ pub const fn target_tag(board_default: &str) -> [u8; 16] {
 /// Agent identity; `mode` is `payload::mode::APP` or `AGENT`.
 pub fn config(mode: u8, target_tag: [u8; 16]) -> Config {
     Config {
-        pubkey: PUBKEY,
         mcu_id: mcu_id::ESP32S3,
         port_kind: port_kind::VENDOR_STAGE2,
         target_tag,

@@ -52,9 +52,8 @@ pub const NODE_I2C_PORT: &str = "i2c0";
 pub const WATCH_UART_PORT: &str = "pio-uart";
 
 /// Hub on RP2040, answering on USB.
-pub fn hub_config(pubkey: [u8; 32]) -> Config {
+pub fn hub_config() -> Config {
     Config {
-        pubkey,
         mcu_id: mcu_id::RP2040,
         port_kind: port_kind::SELF_BOOT,
         target_tag: target_tag("hub-rp2040-lcd"),
@@ -66,9 +65,8 @@ pub fn hub_config(pubkey: [u8; 32]) -> Config {
 }
 
 /// STM32F401 node on I2C.
-pub fn f401_config(pubkey: [u8; 32]) -> Config {
+pub fn f401_config() -> Config {
     Config {
-        pubkey,
         mcu_id: mcu_id::STM32F401XE,
         port_kind: port_kind::SELF_BOOT,
         target_tag: target_tag("seg-f401-7seg"),
@@ -85,12 +83,14 @@ pub fn f401_config(pubkey: [u8; 32]) -> Config {
 /// silent (NACK).
 pub fn demo_hub(pubkey: [u8; 32], seed: u64) -> SimRelay {
     let hub = SimNode::new(
-        hub_config(pubkey),
+        hub_config(),
+        pubkey,
         SimFlash::rp2040_2m(seed),
         Layout::RP2040_HUB,
     );
     let mut f401 = SimNode::new(
-        f401_config(pubkey),
+        f401_config(),
+        pubkey,
         SimFlash::stm32f401xe(seed ^ 1),
         Layout::STM32F401XE,
     );
@@ -102,9 +102,8 @@ pub fn demo_hub(pubkey: [u8; 32], seed: u64) -> SimRelay {
 
 /// ESP32-S3 watch on the PIO UART link (kind V header fields; the slot
 /// handling is simulated like kind S).
-pub fn watch_config(pubkey: [u8; 32]) -> Config {
+pub fn watch_config() -> Config {
     Config {
-        pubkey,
         mcu_id: mcu_id::ESP32S3,
         port_kind: port_kind::VENDOR_STAGE2,
         target_tag: target_tag("watch-s3"),
@@ -157,7 +156,8 @@ pub fn sample_hub(seed: u64) -> SimRelay {
         .provision(sample::SEG_1_0_0, 0)
         .expect("seg fixture fits");
     let mut watch = SimNode::new(
-        watch_config(pk),
+        watch_config(),
+        pk,
         SimFlash::esp32s3_4m(seed ^ 2),
         Layout::ESP32S3_WATCH,
     );

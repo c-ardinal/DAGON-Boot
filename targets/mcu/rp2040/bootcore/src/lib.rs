@@ -4,7 +4,9 @@
 //! confirmed slot starts after a SHA-256 check. dagon-core also requires
 //! each header's `load_addr` to be its slot body (the hub's `Flash` speaks
 //! XIP addresses). Every start arms the watchdog for 8 s before the log is
-//! read; the app keeps feeding it. The core runs on the clock the
+//! read, and feeds it at every step of a signature check (seconds on the
+//! ring oscillator of a board without a crystal); the app keeps feeding
+//! it. The core runs on the clock the
 //! definitions choose for the node (the MCU's `[[bootcore.clock]]` setup
 //! for its board's `[clock]`, the ring oscillator without a crystal). With
 //! nothing startable the watchdog
@@ -30,12 +32,14 @@
 //! `DAGON_TARGET_TAG`); the build fails without them.
 #![no_std]
 
+use core::cell::RefCell;
 use dagon_boot::BootRun;
 use dagon_core::boot::{BootConfig, Decision};
 use dagon_core::bootcore::CLEARED;
-use dagon_ed25519::Ed25519Compact;
+use dagon_ed25519::Ed25519Small;
 use dagon_events::{compose_boot, BootExtension, Extension};
 use dagon_format::header::{self, mcu_id, HEADER_SIZE};
+use dagon_format::SigVerifier;
 use dagon_mcu_rp2040::arm::{jump, led, step, trial};
 use dagon_mcu_rp2040::bl::{self, Settled};
 use dagon_mcu_rp2040::clock::Setup;
@@ -122,13 +126,13 @@ fn hand_back_clocks() {
 /// The header of the app in APP slot `slot` verifies under this core's
 /// key: the part of a new core's own check that proves its verifier and
 /// key accept the project's images.
-fn app_verifies(flash: &mut RpFlash, slot: u8) -> bool {
+fn app_verifies(flash: &mut RpFlash, slot: u8, verifier: &impl SigVerifier) -> bool {
     let mut raw = [0u8; HEADER_SIZE];
     APP_SLOTS
         .slots
         .get(usize::from(slot))
         .is_some_and(|&(base, _)| flash.read(base, &mut raw).is_ok())
-        && header::verify_header(&raw, &VERIFIER).is_ok()
+        && header::verify_header(&raw, verifier).is_ok()
 }
 
 /// Microseconds since reset: the TIMER, which counts the watchdog's tick
@@ -147,9 +151,6 @@ fn now_us() -> u64 {
     }
 }
 
-/// This core's signature verifier, under the key built into it.
-const VERIFIER: Ed25519Compact = Ed25519Compact::new(PUBKEY);
-
 const CONFIG: BootConfig = BootConfig {
     mcu_id: mcu_id::RP2040,
     target_tag: checked_tag(TARGET_TAG),
@@ -167,9 +168,15 @@ pub fn run<E: Extension>(chain: E, limits: &'static [BootExtension]) -> ! {
     let p = embassy_rp::init(CLOCK.hal_config());
     step(7);
     let mut flash = RpFlash::new(p.FLASH);
-    let mut wdt = Watchdog::new(p.WATCHDOG);
+    let wdt = RefCell::new(Watchdog::new(p.WATCHDOG));
     // The boot core's own run is timed like an image on trial.
-    wdt.start(Duration::from_millis(watchdog_ms(true).into()));
+    let period = || Duration::from_millis(watchdog_ms(true).into());
+    wdt.borrow_mut().start(period());
+    // This core's signature verifier, under the key built into it:
+    // stage0's small Ed25519, so the boot core has room for the update
+    // session. It feeds the watchdog at every step of a check, which takes
+    // seconds on the ring oscillator of a board without a crystal.
+    let verifier = Ed25519Small::with_tick(PUBKEY, || wdt.borrow_mut().feed(period()));
     step(8);
     let mut chain = compose_boot(chain, now_us, limits);
     let mut boot = BootRun::start(
@@ -178,13 +185,13 @@ pub fn run<E: Extension>(chain: E, limits: &'static [BootExtension]) -> ! {
         &APP_LOG_LAYOUT,
         &APP_SLOTS,
         &CONFIG,
-        &VERIFIER,
+        &verifier,
         watchdog_ms(true),
     );
     let decision = boot.decision();
     let healthy = !cfg!(feature = "no-confirm")
         && match decision {
-            Decision::Boot { slot, .. } => app_verifies(&mut flash, slot),
+            Decision::Boot { slot, .. } => app_verifies(&mut flash, slot, &verifier),
             Decision::NoImage => false,
         };
     match bl::settle_core(
@@ -197,7 +204,7 @@ pub fn run<E: Extension>(chain: E, limits: &'static [BootExtension]) -> ! {
         Ok(Settled::Confirmed | Settled::RolledBack) => trial::write(CLEARED),
         // On trial and not fit to run the app: stage0 counts this start.
         Err(bl::MustReset) => {
-            wdt.trigger_reset();
+            wdt.borrow_mut().trigger_reset();
             loop {
                 cortex_m::asm::nop();
             }
@@ -206,12 +213,13 @@ pub fn run<E: Extension>(chain: E, limits: &'static [BootExtension]) -> ! {
     if let Decision::Boot { entry, trial, .. } = decision {
         boot.before_jump(&mut chain);
         // The app runs the trial period while on trial, else the confirmed one.
-        wdt.feed(Duration::from_millis(watchdog_ms(trial).into()));
+        wdt.borrow_mut()
+            .feed(Duration::from_millis(watchdog_ms(trial).into()));
         hand_back_clocks();
         jump(entry);
     }
     boot.halt(&mut chain);
-    wdt.stop();
+    wdt.borrow_mut().stop();
     led_init();
     if cfg!(feature = "diag") {
         led::code(9)

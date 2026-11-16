@@ -29,7 +29,7 @@ const YAML: &str = include_str!("../../../topology/sim-pair.yaml");
 
 /// The simulated hub's `target_tag`, as text.
 fn hub_tag() -> String {
-    let tag = dagon_sim::hub_config([0; 32]).target_tag;
+    let tag = dagon_sim::hub_config().target_tag;
     let end = tag.iter().position(|&b| b == 0).unwrap_or(tag.len());
     String::from_utf8_lossy(&tag[..end]).into_owned()
 }
@@ -1072,10 +1072,11 @@ fn one_write_reaches_every_node_of_a_topology_at_the_limit() {
         let mut hub = s.relay.borrow_mut();
         let now = hub.now_ms();
         for i in 0..children {
-            let mut cfg = dagon_sim::f401_config(*key().pk);
+            let mut cfg = dagon_sim::f401_config();
             cfg.target_tag = target_tag(&tag(i));
             let mut n = dagon_sim::SimNode::new(
                 cfg,
+                *key().pk,
                 dagon_sim::SimFlash::stm32f401xe(i as u64),
                 dagon_sim::Layout::STM32F401XE,
             );
@@ -1797,7 +1798,7 @@ fn one_core_sim() -> Sim {
         7,
     );
     let mut hub =
-        dagon_sim::SimNode::new(dagon_sim::hub_config(*key().pk), flash, one_core_layout());
+        dagon_sim::SimNode::new(dagon_sim::hub_config(), *key().pk, flash, one_core_layout());
     hub.provision(&hub_img(0, Version::new(1, 0, 0)), 0)
         .unwrap();
     sim_of(SimRelay::new(hub))

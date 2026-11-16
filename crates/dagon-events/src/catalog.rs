@@ -108,6 +108,7 @@ pub struct Entry {
     pub payload: &'static [Field],
     pub observe: Observe,
     pub flags: Flags,
+    /// The transition's doc; empty without [`crate::CATALOG_DOCS`].
     pub doc: &'static str,
 }
 
@@ -123,6 +124,7 @@ impl Entry {
 pub struct Catalog {
     pub machine: &'static str,
     pub layer: Layer,
+    /// The machine's doc; empty without [`crate::CATALOG_DOCS`].
     pub doc: &'static str,
     pub initial: &'static str,
     pub states: &'static [&'static str],

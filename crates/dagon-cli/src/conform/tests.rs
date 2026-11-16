@@ -308,9 +308,14 @@ fn twelve_of_twelve_through_the_hub() {
 
 #[test]
 fn twelve_of_twelve_on_usb_as_uart() {
-    let mut cfg = f401_config(*key().pk);
+    let mut cfg = f401_config();
     cfg.max_payload = max_payload::UART as u16;
-    let mut node = SimNode::new(cfg, SimFlash::stm32f401xe(5), Layout::STM32F401XE);
+    let mut node = SimNode::new(
+        cfg,
+        *key().pk,
+        SimFlash::stm32f401xe(5),
+        Layout::STM32F401XE,
+    );
     node.provision(&old_image(), 0).unwrap();
     node.trial_wdt_ms = TRIAL_WDT_MS;
     let sim = DirectSim {

@@ -43,7 +43,7 @@ fn image(slot: u8, version: Version, body: &[u8]) -> Vec<u8> {
         min_bootcore_version: Version::new(1, 0, 0),
         payload_sha256: sha256(body),
         key_id: key_id(&kp.pk),
-        target_tag: f401_config([0; 32]).target_tag,
+        target_tag: f401_config().target_tag,
         proto_version: 1,
         capabilities: capabilities::CONFIRM_BY_HUB,
         signature: [0; 64],
@@ -507,9 +507,9 @@ fn power_cut_mid_transfer_keeps_the_confirmed_image() {
 #[test]
 fn uart_node_behind_a_lossy_link() {
     let mut relay = relay_with_f401();
-    let mut cfg = f401_config(*kp().pk);
+    let mut cfg = f401_config();
     cfg.max_payload = max_payload::UART as u16;
-    let mut node = SimNode::new(cfg, SimFlash::stm32f401xe(9), Layout::STM32F401XE);
+    let mut node = SimNode::new(cfg, *kp().pk, SimFlash::stm32f401xe(9), Layout::STM32F401XE);
     node.provision(&image(0, Version::new(2, 0, 0), &[1; 100]), 0)
         .unwrap();
     let mut link = SimLink::new(3);

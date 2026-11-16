@@ -7,6 +7,7 @@
 
 use dagon_agent::image::State as Image;
 use dagon_agent::{Agent, Config, SlotStore};
+use dagon_ed25519::Ed25519Compact;
 use dagon_events::{compose, Bounds, Composed, Layer, Nop, Published, Watchdog};
 use dagon_format::header::*;
 use dagon_format::{key_id, sha256, Version};
@@ -29,7 +30,7 @@ fn kp() -> KeyPair {
 }
 
 fn cfg() -> Config {
-    f401_config(*kp().pk)
+    f401_config()
 }
 
 /// A signed image for `slot` whose version (and so header) is `minor`.
@@ -98,7 +99,7 @@ const OPS: [Op; 7] = [
 struct Model {
     /// The board's handle (the boot core); the agent holds another.
     store: SimStore,
-    agent: Agent<SimStore, Chain>,
+    agent: Agent<SimStore, Chain, Ed25519Compact>,
     seq: u8,
     next: u16,
 }
@@ -120,7 +121,7 @@ impl Model {
         store.provision(0, &image(0, 0)).unwrap();
         assert_eq!(store.boot(), Boot::Run(0));
         Model {
-            agent: Agent::new(cfg(), store.clone(), chain()),
+            agent: Agent::new(cfg(), Ed25519Compact::new(*kp().pk), store.clone(), chain()),
             store,
             seq: 0,
             next: 1,
@@ -131,7 +132,7 @@ impl Model {
     fn copy(&self) -> Self {
         let store = self.store.snapshot();
         Model {
-            agent: Agent::new(cfg(), store.clone(), chain()),
+            agent: Agent::new(cfg(), Ed25519Compact::new(*kp().pk), store.clone(), chain()),
             store,
             seq: self.seq,
             next: self.next,

@@ -558,9 +558,31 @@ pub struct AiTopologyArgs {
     pub model: Option<String>,
 }
 
-/// The text printed for a command-line parse error.
-pub fn parse_error_text(_argv: &[String], e: &clap::Error) -> String {
-    e.to_string()
+/// The text printed for a command-line parse error. Under `ai key` the
+/// message that names the offending input is replaced, since the input may be
+/// a key typed by mistake; the usage and help hint clap prints stay.
+pub fn parse_error_text(argv: &[String], e: &clap::Error) -> String {
+    use clap::error::ErrorKind::{
+        DisplayHelp, DisplayHelpOnMissingArgumentOrSubcommand, DisplayVersion,
+    };
+    let words: Vec<&str> = argv
+        .iter()
+        .skip(1)
+        .map(String::as_str)
+        .filter(|a| !a.starts_with('-'))
+        .take(2)
+        .collect();
+    let text = e.to_string();
+    if words != ["ai", "key"]
+        || matches!(
+            e.kind(),
+            DisplayHelp | DisplayHelpOnMissingArgumentOrSubcommand | DisplayVersion
+        )
+    {
+        return text;
+    }
+    let rest = text.split_once("\n\n").map_or("", |(_, rest)| rest);
+    format!("error: invalid input under `dagon ai key` (not shown, it may be a key)\n\n{rest}")
 }
 
 /// Every visible command's full help, one Markdown section each.

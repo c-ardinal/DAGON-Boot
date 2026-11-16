@@ -611,7 +611,7 @@
 
   /** Buttons whose procedures this page runs; the others show as unavailable. */
   const RUNS: ReadonlySet<Action> = new Set([
-    'connectDiscover', 'connect', 'reselect', 'reconnect', 'push', 'pushAgain', 'scanAgain', 'reload',
+    'connectDiscover', 'connect', 'reselect', 'reconnect', 'reload',
     'chooseFile', 'updateResponding', 'otherFile', 'update', 'useLatest', 'recover', 'recoverAgain', 'defineFix',
   ]);
 
@@ -1092,7 +1092,7 @@
       const gone = Math.max(0, wallMs - op.startedAt);
       return { ...progress, sub: [TIME.elapsed, TIME.clock(gone)] as const };
     }
-    if (op.state === 'scanning' || op.state === 'scanned') return { label: CANVAS.dotFound, value: op.found, name: CANVAS.dotFoundName(op.found) };
+    if (op.state === 'scanning') return { label: CANVAS.dotFound, value: op.found, name: CANVAS.dotFoundName(op.found) };
     // Out of the nodes updating reaches: the others are never watched.
     const n = op.reach.length;
     return { label: CANVAS.dotResponding, value: op.responding, of: n, name: CANVAS.dotRespondingName(op.responding, n) };
@@ -1105,7 +1105,6 @@
           config: d.doc.topo.nodes.length ? d.config : null,
           live: {},
           connected: false,
-          sending: false,
           selected: d.selected,
           onselect: (k: string) => (d.selected = d.selected === k ? null : k),
           chips: defineChips,
@@ -1118,7 +1117,6 @@
           config: op.config,
           live: op.live,
           connected,
-          sending: op.state === 'sending',
           selected: op.selected,
           onselect: (k: string) => op.select(op.selected === k ? null : k),
           chips,
@@ -1345,11 +1343,6 @@
         return void writeOne(undefined, undefined, true);
       case 'defineFix':
         return switchMode('define');
-      case 'push':
-      case 'pushAgain':
-        return void op.push();
-      case 'scanAgain':
-        return void op.discover();
       case 'reload':
         return location.reload();
       default:

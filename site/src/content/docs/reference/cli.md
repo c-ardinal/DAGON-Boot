@@ -113,7 +113,6 @@ Usage: dagon topo <COMMAND>
 Commands:
   check    Validate a topology file
   compile  Write the topology's canonical binary
-  push     Send the topology's canonical binary to the hub
   help     Print this message or the help of the given subcommand(s)
 
 Options:
@@ -154,28 +153,6 @@ Arguments:
 Options:
       --out <BIN>
           Output file [default: the YAML's name with .bin]
-
-      --config <FILE>
-          Project file the defaults come from [default: ./dagon.toml]
-
-  -h, --help
-          Print help
-```
-
-## dagon topo push
-
-```text
-Send the topology's canonical binary to the hub
-
-Usage: dagon topo push [OPTIONS] [YAML]
-
-Arguments:
-  [YAML]
-          Topology YAML [default: topology in dagon.toml]
-
-Options:
-      --port <NAME>
-          Serial port of the hub [default: the USB device c0de:cafe or named "DAGON hub"]
 
       --config <FILE>
           Project file the defaults come from [default: ./dagon.toml]
@@ -371,7 +348,7 @@ Options:
 ```text
 Write a release package to the nodes
 
-Verifies the release, checks it matches the topology, sends the topology to the hub, then updates the children and then the hub.
+Verifies the release, checks it matches the topology, then writes the nodes, the node the PC is connected to last.
 
 Usage: dagon apply [OPTIONS] [DGB]
 

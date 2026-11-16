@@ -56,7 +56,6 @@ function session(t: Transport, clock: LinkClock, fetchAsset: Fetch = site) {
 
 async function silentNode(op: Operate) {
   await op.connect();
-  await op.push();
   await op.round();
   await op.round();
   expect(op.state).toBe('nodesSilent');
@@ -66,7 +65,6 @@ async function stoppedAt(opts: MockOptions, fetchAsset: Fetch = site) {
   const t = new MockTransport(opts);
   const op = session(t, fastClock(), fetchAsset);
   await op.connect();
-  await op.push();
   op.takeFile('sample-1.1.0.dgb', SITE[LATEST_RELEASE]);
   await op.update();
   expect(op.state).toBe('stopped');
@@ -104,7 +102,6 @@ describe('recovery from the page with dagon-host recover', () => {
     expect(before.failCore(0x42, 1, 1, 0)).toBe(true);
     const op = session(sim.transport, sim.clock);
     await op.connect();
-    await op.push();
     await op.round();
     const app = op.live.seg.hello?.activeVersion;
     op.takeFile('sample-core-1.1.0.dgb', repo('crates/dagon-sim/fixtures/sample-core-1.1.0.dgb'));
@@ -118,7 +115,6 @@ describe('recovery from the page with dagon-host recover', () => {
     await op.disconnect();
     const after = session(sim.transport, sim.clock);
     await after.connect();
-    await after.push();
     after.selected = 'node:seg';
     await after.round();
     expect(after.live.seg.responding).toBe(true);
@@ -130,7 +126,6 @@ describe('recovery from the page with dagon-host recover', () => {
     const sim = simulator(13)!;
     const op = session(sim.transport, sim.clock);
     await op.connect();
-    await op.push();
     op.takeFile('sample-core-1.1.0.dgb', repo('crates/dagon-sim/fixtures/sample-core-1.1.0.dgb'));
     await op.update();
     expect(op.state).toBe('done');
@@ -141,7 +136,6 @@ describe('recovery from the page with dagon-host recover', () => {
     const sim = simulator(13)!;
     const op = session(sim.transport, sim.clock);
     await op.connect();
-    await op.push();
     // Apps first: everything runs 1.1.0 on boot core 1.0.0.
     const apps = repo('crates/dagon-sim/fixtures/sample-1.1.0.dgb');
     const both = repo('crates/dagon-sim/fixtures/sample-core-1.1.0.dgb');
@@ -185,7 +179,6 @@ describe('recovery from the page with dagon-host recover', () => {
     // seg's trial from its MCU's definition, as dagon-host takes it.
     op['deps'].trialMs = () => trialMs('stm32f401re');
     await op.connect();
-    await op.push();
     op.toggleSkip('hub');
     op.toggleSkip('watch');
     op.takeFile('sample-core-1.1.0.dgb', repo('crates/dagon-sim/fixtures/sample-core-1.1.0.dgb'));
@@ -213,7 +206,6 @@ describe('recovery from the page with dagon-host recover', () => {
     const sim = simulator(13)!;
     const op = session(sim.transport, sim.clock);
     await op.connect();
-    await op.push();
     const apps = repo('crates/dagon-sim/fixtures/sample-1.1.0.dgb');
     op.takeFile('sample-1.1.0.dgb', apps);
     await op.update();
@@ -225,7 +217,6 @@ describe('recovery from the page with dagon-host recover', () => {
     const sim = simulator(13)!;
     const op = session(sim.transport, sim.clock);
     await op.connect();
-    await op.push();
     const apps = repo('crates/dagon-sim/fixtures/sample-1.1.0.dgb');
     expect(await op.noWrite(apps)).toBe(null);
     op.takeFile('sample-1.1.0.dgb', apps);
@@ -238,7 +229,6 @@ describe('recovery from the page with dagon-host recover', () => {
     const sim = simulator(13)!;
     const op = session(sim.transport, sim.clock);
     await op.connect();
-    await op.push();
     op.takeFile('sample-1.1.0.dgb', repo('crates/dagon-sim/fixtures/sample-1.1.0.dgb'));
     await op.update();
     expect(op.state).toBe('done');
@@ -262,7 +252,6 @@ describe('recovery from the page with dagon-host recover', () => {
     const sim = simulator(13)!;
     const op = session(sim.transport, sim.clock);
     await op.connect();
-    await op.push();
     const file = repo('crates/dagon-sim/fixtures/sample-1.1.0.dgb');
     op.takeFile('sample-1.1.0.dgb', file);
     await op.update();
@@ -293,7 +282,6 @@ describe('recovery from the page with dagon-host recover', () => {
     const sim = simulator(13)!;
     const op = session(sim.transport, sim.clock);
     await op.connect();
-    await op.push();
     const both = repo('crates/dagon-sim/fixtures/sample-core-1.1.0.dgb');
     op.toggleSkip('hub');
     op.toggleSkip('watch');
@@ -331,7 +319,6 @@ describe('recovery from the page with dagon-host recover', () => {
     const sim = simulator(11)!;
     const op = session(sim.transport, sim.clock);
     await op.connect();
-    await op.push();
     await op.round();
     if (at !== 'ready') op.takeFile('sample-1.1.0.dgb', SITE[LATEST_RELEASE]);
     if (at === 'done') await op.update();
@@ -347,7 +334,6 @@ describe('recovery from the page with dagon-host recover', () => {
     const t = new MockTransport({ quiet: ['uart'] });
     const op = session(t, fastClock());
     await op.connect();
-    await op.push();
     if (at === 'fileReady') op.takeFile('sample-1.1.0.dgb', SITE[LATEST_RELEASE]);
     expect(op.state).toBe(at);
     expect(await op.writeNode({ id: 'watch' })).toBe('direct');
@@ -428,7 +414,6 @@ describe('recovery from the page with dagon-host recover', () => {
     const t = new MockTransport();
     const op = session(t, fastClock());
     await op.connect();
-    await op.push();
     op.takeFile('sample-1.1.0.dgb', SITE[LATEST_RELEASE]);
     await op.update();
     expect(op.state).toBe('done');
@@ -486,7 +471,6 @@ describe('recovery from the page with dagon-host recover', () => {
     const t = new MockTransport();
     const op = session(t, fastClock());
     await op.connect();
-    await op.push();
     op.takeFile('sample-1.1.0.dgb', SITE[LATEST_RELEASE]);
     await op.update();
     expect(op.state).toBe('done');
@@ -521,7 +505,6 @@ describe('recovery from the page with dagon-host recover', () => {
     const t = new MockTransport();
     const op = session(t, fastClock());
     await op.connect();
-    await op.push();
     op.takeFile('sample-1.1.0.dgb', SITE[LATEST_RELEASE]);
     await op.update();
     expect(op.state).toBe('done');
@@ -539,14 +522,12 @@ describe('recovery from the page with dagon-host recover', () => {
     const t = new MockTransport();
     const op = session(t, fastClock());
     await op.connect();
-    await op.push();
     expect(await op.useLatest()).toBe(true);
     expect([op.state, op.file?.name]).toEqual(['fileReady', 'latest.dgb']);
 
     const t2 = new MockTransport();
     const op2 = session(t2, fastClock(), nothing);
     await op2.connect();
-    await op2.push();
     expect(await op2.useLatest()).toBe(false);
     expect([op2.state, op2.alert, op2.latestMissing]).toEqual(['ready', ANNOUNCE.A22latest, true]);
 
@@ -554,7 +535,6 @@ describe('recovery from the page with dagon-host recover', () => {
     bad[bad.length - 1] ^= 1;
     const op3 = session(new MockTransport(), fastClock(), async () => bad);
     await op3.connect();
-    await op3.push();
     expect(await op3.useLatest()).toBe(false);
     expect(op3.state).toBe('fileRefused');
   }, 60_000);

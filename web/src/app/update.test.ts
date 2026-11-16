@@ -43,7 +43,6 @@ async function sentTo(opts: MockOptions = {}, keep?: (bytes: Uint8Array) => Prom
     clock: fastClock(),
   });
   await op.connect();
-  await op.push();
   expect(op.state).toBe('ready');
   return { t, op };
 }
@@ -543,7 +542,6 @@ describe('update from the page with dagon-host apply against the mock hub', () =
       clock: fastClock(),
     });
     await op.connect();
-    await op.push();
     await op.handOver();
     expect(op.state).toBe('cliTurn');
     expect(bandOf(op.state, op.ctx).sentence).toBe(BAND.M67.sentence);
@@ -568,7 +566,6 @@ describe('update from the page with dagon-host apply against the mock hub', () =
       clock: fastClock(),
     });
     await op.connect();
-    await op.push();
     await op.handOver();
     await op.cliReturned();
     expect([op.state, op.reconnectNotes]).toEqual(['lost', [{ kind: 'otherHub' }]]);
@@ -597,7 +594,6 @@ describe('update from the page with dagon-host apply against the mock hub', () =
       clock: fastClock(),
     });
     await op.connect();
-    await op.push();
     op.takeFile('sample-1.1.0.dgb', RELEASE);
     t.expected = [];
     await op.update();
@@ -621,7 +617,6 @@ describe('update from the page with dagon-host apply against the mock hub', () =
       clock: fastClock(),
     });
     await op.connect();
-    await op.push();
     await op.handOver();
     await op.cliReturned();
     expect(op.state).toBe('lost');

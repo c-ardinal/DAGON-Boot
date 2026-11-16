@@ -84,18 +84,6 @@ fn todays_invocations() -> Vec<(&'static str, Command)> {
             })),
         ),
         (
-            "topo push",
-            C::Topo(TopoCmd::Push(TopoPushArgs::default())),
-        ),
-        (
-            "topo push t.yaml --port COM5",
-            C::Topo(TopoCmd::Push(TopoPushArgs {
-                yaml: s("t.yaml"),
-                port: s("COM5"),
-                config: None,
-            })),
-        ),
-        (
             "image sign out/watch-good.bin --node watch --version 1.0.0 --out out/watch-good-1.0.0.img",
             C::Image(ImageCmd::Sign(sign(
                 "out/watch-good.bin",

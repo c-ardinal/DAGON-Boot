@@ -71,7 +71,6 @@ fn main() -> ExitCode {
         Command::Key(KeyCmd::Pub { key }) => run(key_pub(key.as_deref())),
         Command::Topo(TopoCmd::Check(a)) => topo_check(a.json, &a.yaml),
         Command::Topo(TopoCmd::Compile(a)) => run(commands::topo_compile(&a)),
-        Command::Topo(TopoCmd::Push(a)) => run(device::topo_push(&a)),
         Command::Image(ImageCmd::Sign(a)) => run(commands::image_sign(&a)),
         Command::Release(ReleaseCmd::Build(a)) => run(commands::release_build(&a)),
         Command::Provision(a) => run(commands::provision(&a)),

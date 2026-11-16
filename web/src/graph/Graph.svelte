@@ -49,8 +49,6 @@
     live: Record<string, Live>;
     /** The hub is connected: the PC link is solid and nodes carry live marks. */
     connected: boolean;
-    /** The configuration is on its way to the hub. */
-    sending: boolean;
     selected: string | null;
     onselect: (key: string) => void;
     chips?: Record<string, Chip>;
@@ -90,7 +88,6 @@
     config,
     live,
     connected,
-    sending,
     selected,
     onselect,
     chips = {},
@@ -611,7 +608,7 @@
         {#each tops as h (h.id)}
           {@const x = at(h.id).x + NODE_W / 2}
           {@const y0 = at(h.id).y - UPLINK_ROOM + 40}
-          <line x1={x} y1={y0} x2={x} y2={at(h.id).y} class="pc-link" class:dashed={!connected || h.id !== firstHub} class:busy={sending && h.id === firstHub} />
+          <line x1={x} y1={y0} x2={x} y2={at(h.id).y} class="pc-link" class:dashed={!connected || h.id !== firstHub} />
           <circle cx={x} cy={y0} r="5" class="end" />
         {/each}
 
@@ -805,17 +802,6 @@
   }
   .pc-link.dashed {
     stroke-dasharray: 4 3;
-  }
-  /* The link that carries the update right now marches from 親機 to 子機. */
-  .pc-link.busy {
-    stroke: var(--c-paper);
-    stroke-dasharray: 6 6;
-    animation: march var(--dur-march) var(--ease-steady) infinite;
-  }
-  @keyframes march {
-    to {
-      stroke-dashoffset: -12;
-    }
   }
   .wire {
     fill: none;
@@ -1325,8 +1311,7 @@
   }
 
   @media (prefers-reduced-motion: reduce) {
-    .crest,
-    .pc-link.busy {
+    .crest {
       animation: none;
     }
   }

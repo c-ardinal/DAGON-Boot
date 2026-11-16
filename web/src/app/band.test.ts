@@ -69,17 +69,6 @@ describe('bottom band', () => {
     expect([b.chip, b.sentence, b.primary?.label]).toEqual([copy.chip, copy.sentence, button]);
   });
 
-  test('found or placed, not yet sent: check the wiring, then send', () => {
-    const b = bandOf('scanned', { hasConfig: true });
-    expect([b.sentence, b.primary?.label]).toEqual([BAND.M10.sentence, BUTTON.push]);
-  });
-
-  test('sending has no button, only how to wait; a failed send offers sending again', () => {
-    expect(bandOf('sending', { hasConfig: true })).toEqual({ ...BAND.M61, primary: null, secondary: [] });
-    const b = bandOf('sendFailed', { hasConfig: true });
-    expect([b.chip, b.primary?.label]).toEqual([BAND.M12.chip, BUTTON.pushAgain]);
-  });
-
   test('watching: choose the update file, or use the latest release', () => {
     const b = bandOf('ready', { hasConfig: true });
     expect([b.sentence, b.primary?.label, b.secondary[0].label]).toEqual([BAND.M13.sentence, BUTTON.chooseFile, BUTTON.useLatest]);
@@ -99,10 +88,6 @@ describe('bottom band', () => {
   test('no node answers at all: writing it is the main action, nothing to update first', () => {
     const b = bandOf('nodesSilent', { hasConfig: true, answering: false }, { stuck: 'ウォッチ', responding: 0 });
     expect([b.primary?.label, b.secondary]).toEqual(['ウォッチへ書き込む', []]);
-  });
-
-  test('sending failed needs the user: a modal, not a toast', () => {
-    expect(connectNotice('sendFailed')).toBe('modal');
   });
 
   test.each([

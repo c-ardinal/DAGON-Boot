@@ -1,5 +1,4 @@
-//! The procedures: discover, status, push_topology, apply, confirm,
-//! rollback, recover.
+//! The procedures: discover, status, apply, confirm, rollback, recover.
 
 use alloc::format;
 use alloc::vec;
@@ -53,7 +52,7 @@ pub struct Discovery {
     pub nodes: Vec<(Target, HelloResp)>,
 }
 
-/// Progress of apply / rollback, also mirrored to the hub LCD with SHOW.
+/// Progress of apply / rollback / recover, for the caller.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Event {
     /// Topology node index.
@@ -62,7 +61,8 @@ pub struct Event {
     pub phase: u8,
     /// The phase's own progress: the bytes of this image during TRANSFER.
     pub percent: u8,
-    /// The node's one progress number (`percent.rs`), what its display is told.
+    /// The node's one progress number (`percent.rs`), what the node being
+    /// written is told during its transfer.
     pub shown: u8,
     /// This run has written an image to the node: false on the last report
     /// of a node left as it was, which is no confirmation of anything.
@@ -85,7 +85,7 @@ pub struct XferTimes {
     /// header chunk (XFER_BEGIN for an image without header). The header's
     /// other requests are in no phase.
     pub erase_ms: u32,
-    /// The image body (XFER_DATA), with the displays' progress updates.
+    /// The image body (XFER_DATA), with the progress the node is told.
     pub data_ms: u32,
     /// XFER_END: the node's digest over what it wrote.
     pub verify_ms: u32,
@@ -179,37 +179,11 @@ impl<T: Transport, C: HostClock> Host<T, C> {
         Ok(Discovery { hub, nodes })
     }
 
-    /// Sends the topology canonical binary to the display copy of the node
-    /// the PC is connected to (timed by that node's limits, [`Host::local`]).
-    /// Without that node ([`Host::local`] an error) nothing is sent.
-    pub async fn push_topology(&mut self, bin: &[u8]) -> Result<(), T::Error> {
-        TopologyView::parse(bin)?;
-        let local = Some(
-            self.local
-                .as_ref()
-                .map_err(|e| Error::Route(e.clone()))?
-                .index,
-        );
-        let hub = self.hello(Target::Local).await?;
-        let mut quiet = |_: Event| {};
-        let xfer = Xfer {
-            tgt: target::TOPOLOGY,
-            slot: 0,
-            hdr: &[],
-            body: bin,
-            show: None,
-            node: local,
-        };
-        self.transfer(Target::Local, &hub, xfer, &mut quiet)
-            .await
-            .map(|_| ())
-    }
-
     /// Checks `bundle` (signature chain under `pubkey`, and that it was built
-    /// for `topology`, the caller's current canonical binary), pushes the
-    /// topology, then updates the nodes: the others in update order, the
-    /// node the PC is connected to last. `nodes` limits the run to these
-    /// topology node indices. Stops at the first node that fails.
+    /// for `topology`, the caller's current canonical binary), then updates
+    /// the nodes: the others in update order, the node the PC is connected
+    /// to last. `nodes` limits the run to these topology node indices. Stops
+    /// at the first node that fails.
     pub async fn apply(
         &mut self,
         bundle: &[u8],
@@ -247,7 +221,7 @@ impl<T: Transport, C: HostClock> Host<T, C> {
     ) -> Result<Vec<NodeOutcome<T::Error>>, T::Error> {
         let (b, topo) = check_release(bundle, topology, pubkey)?;
         // Every target is resolved before the first byte goes out: a route
-        // that fails sends nothing, not even the topology.
+        // that fails sends nothing.
         let local = self
             .local
             .as_ref()
@@ -258,7 +232,6 @@ impl<T: Transport, C: HostClock> Host<T, C> {
             .map(|node| Ok((node, self.target_of(&topo, node)?)))
             .collect::<core::result::Result<Vec<_>, RouteError>>()
             .map_err(Error::Route)?;
-        self.push_topology(topology).await?;
 
         let mut out = Vec::new();
         let mut failed = false;
@@ -313,7 +286,6 @@ impl<T: Transport, C: HostClock> Host<T, C> {
                 times: None,
                 boot_core: false,
             });
-            self.show(node, ph, 0, v, reason(e).as_bytes()).await;
         }
         r
     }
@@ -364,21 +336,20 @@ impl<T: Transport, C: HostClock> Host<T, C> {
         }
         let v = ImageHeader::parse(raw)?.version;
         let (hdr, body) = img.split_at(HEADER_SIZE);
-        self.emit(on_event, node, phase::TRANSFER, 0, v).await;
+        self.report(on_event, node, phase::TRANSFER, 0, v);
         let xfer = Xfer {
             tgt: target::AGENT,
             slot: FACTORY,
             hdr,
             body,
             show: Some((node, v)),
-            node: None,
         };
         let times = self.transfer(to, &st.hello, xfer, on_event).await?;
         let after = self.status(to).await?;
         if after.status.slots[usize::from(FACTORY)].digest16 != want {
             return Err(Error::DigestMismatch);
         }
-        self.emit_verified(on_event, node, v, times).await;
+        self.report_verified(on_event, node, v, times);
         Ok(true)
     }
 
@@ -433,7 +404,7 @@ impl<T: Transport, C: HostClock> Host<T, C> {
         let v = ImageHeader::parse(raw)?.version;
         let (hdr, body) = img.split_at(HEADER_SIZE);
         self.core_write = true;
-        self.emit(on_event, node, phase::TRANSFER, 0, v).await;
+        self.report(on_event, node, phase::TRANSFER, 0, v);
         let hello = self.hello(to).await?;
         let xfer = Xfer {
             tgt: target::BOOTCORE,
@@ -441,7 +412,6 @@ impl<T: Transport, C: HostClock> Host<T, C> {
             hdr,
             body,
             show: Some((node, v)),
-            node: None,
         };
         let times = match self.transfer(to, &hello, xfer, on_event).await {
             Err(Error::Rejected {
@@ -450,7 +420,7 @@ impl<T: Transport, C: HostClock> Host<T, C> {
             }) => return Err(Error::BootCoreRefused),
             r => r?,
         };
-        self.emit_verified(on_event, node, v, times).await;
+        self.report_verified(on_event, node, v, times);
         let mut p = [0u8; 2];
         SetPending {
             target: target::BOOTCORE,
@@ -459,7 +429,7 @@ impl<T: Transport, C: HostClock> Host<T, C> {
         .encode(&mut p)
         .expect("2 bytes");
         self.call(to, Cmd::SetPending, &p, VERIFY_MS).await?;
-        self.emit(on_event, node, phase::REBOOT, 0, v).await;
+        self.report(on_event, node, phase::REBOOT, 0, v);
         match self
             .call(to, Cmd::Reboot, &[reboot_mode::NORMAL], REQUEST_MS)
             .await
@@ -488,7 +458,7 @@ impl<T: Transport, C: HostClock> Host<T, C> {
                 reason: after.last_reason,
             });
         }
-        self.emit(on_event, node, phase::CONFIRM, 100, v).await;
+        self.report(on_event, node, phase::CONFIRM, 100, v);
         Ok(true)
     }
 
@@ -513,13 +483,7 @@ impl<T: Transport, C: HostClock> Host<T, C> {
                     "node {node}: app {running} not written, it is what the node runs"
                 ));
             }
-            // With nothing written there is nothing confirmed to show.
-            if self.write.wrote() {
-                self.emit(on_event, node, phase::CONFIRM, 100, running)
-                    .await;
-            } else {
-                self.report(on_event, node, phase::CONFIRM, 100, running);
-            }
+            self.report(on_event, node, phase::CONFIRM, 100, running);
             return Ok(running);
         }
         let slots = slots_of(b, node, image_kind::APP);
@@ -533,17 +497,16 @@ impl<T: Transport, C: HostClock> Host<T, C> {
         let h = ImageHeader::parse(raw)?;
         let v = h.version;
         let (hdr, body) = img.split_at(HEADER_SIZE);
-        self.emit(on_event, node, phase::TRANSFER, 0, v).await;
+        self.report(on_event, node, phase::TRANSFER, 0, v);
         let xfer = Xfer {
             tgt: target::APP,
             slot,
             hdr,
             body,
             show: Some((node, v)),
-            node: None,
         };
         let times = self.transfer(to, &st.hello, xfer, on_event).await?;
-        self.emit_verified(on_event, node, v, times).await;
+        self.report_verified(on_event, node, v, times);
         self.switch_and_confirm(to, slot, v, node, on_event).await?;
         Ok(v)
     }
@@ -564,7 +527,7 @@ impl<T: Transport, C: HostClock> Host<T, C> {
         let mut p = [0u8; 2];
         sp.encode(&mut p).expect("2 bytes");
         self.call(to, Cmd::SetPending, &p, VERIFY_MS).await?;
-        self.emit(on_event, node, phase::REBOOT, 0, v).await;
+        self.report(on_event, node, phase::REBOOT, 0, v);
         // Not resent: a node that already reset has forgotten the seq and
         // would reboot again. A lost reply is settled by the HELLO polls.
         match self
@@ -579,7 +542,7 @@ impl<T: Transport, C: HostClock> Host<T, C> {
         if h.trial {
             self.confirm_trial(to, v).await?;
         }
-        self.emit(on_event, node, phase::CONFIRM, 100, v).await;
+        self.report(on_event, node, phase::CONFIRM, 100, v);
         Ok(())
     }
 
@@ -751,21 +714,18 @@ impl<T: Transport, C: HostClock> Host<T, C> {
             erase: &map.erase,
             regions: &regions,
         };
-        self.emit(on_event, node, phase::ROM, 0, v).await;
+        self.report(on_event, node, phase::ROM, 0, v);
         let stats = {
             let mut link = crate::rom::HubRom::new(self, on_event, node, v);
             dagon_romlink::flash(&mut link, &plan).await
         };
         let stats = match stats {
             Ok(s) => s,
-            Err(e) => {
-                self.show(node, phase::FAILED, 0, v, b"ROM FAILED").await;
-                return Err(Error::Rom(e));
-            }
+            Err(e) => return Err(Error::Rom(e)),
         };
         self.set_applied(to, v);
         self.await_version(to, v).await?;
-        self.emit(on_event, node, phase::CONFIRM, 100, v).await;
+        self.report(on_event, node, phase::CONFIRM, 100, v);
         Ok((RecoverPath::Rom(stats), v))
     }
 
@@ -804,9 +764,8 @@ impl<T: Transport, C: HostClock> Host<T, C> {
             hdr,
             body,
             show,
-            node,
         } = x;
-        let erase = match show.map(|(n, _)| n).or(node) {
+        let erase = match show.map(|(n, _)| n) {
             Some(n) => self.erase_wait_ms(n, tgt, slot, hdr.len() as u32, body.len() as u32),
             None => ERASE_FALLBACK_MS,
         };
@@ -816,10 +775,9 @@ impl<T: Transport, C: HostClock> Host<T, C> {
             total_len: (hdr.len() + body.len()) as u32,
             hdr_len: hdr.len() as u16,
         };
-        // The hub's display already hears every number from `emit`. The tell
-        // comes before XFER_BEGIN, so the number is there when the node's
-        // display turns to the transfer, after the erase.
-        let mut tell = show.filter(|_| to != Target::Local);
+        // The tell comes before XFER_BEGIN, so the number is there when the
+        // node's app turns to the transfer, after the erase.
+        let mut tell = show;
         let mut told = None;
         self.tell(to, &mut tell, &mut told).await;
         let mut p = [0u8; 8];
@@ -851,7 +809,7 @@ impl<T: Transport, C: HostClock> Host<T, C> {
             if pct >= shown + PERCENT_STEP {
                 shown = pct - pct % PERCENT_STEP;
                 if let Some((node, v)) = show {
-                    self.emit(on_event, node, phase::TRANSFER, shown, v).await;
+                    self.report(on_event, node, phase::TRANSFER, shown, v);
                 }
                 self.tell(to, &mut tell, &mut told).await;
             }
@@ -892,22 +850,8 @@ impl<T: Transport, C: HostClock> Host<T, C> {
         Ok(())
     }
 
-    /// Reports `ev` and shows it on the hub LCD (best effort: the hub may be
-    /// rebooting).
-    pub(crate) async fn emit(
-        &mut self,
-        on_event: &mut dyn FnMut(Event),
-        node: u8,
-        ph: u8,
-        percent: u8,
-        version: Version,
-    ) {
-        let shown = self.report(on_event, node, ph, percent, version);
-        self.show(node, ph, shown, version, &[]).await;
-    }
-
-    /// Reports `ev` to the caller only; returns its number.
-    fn report(
+    /// Reports `ev` to the caller; returns its number.
+    pub(crate) fn report(
         &mut self,
         on_event: &mut dyn FnMut(Event),
         node: u8,
@@ -931,7 +875,7 @@ impl<T: Transport, C: HostClock> Host<T, C> {
     }
 
     /// VERIFY of an image written in `times`.
-    async fn emit_verified(
+    fn report_verified(
         &mut self,
         on_event: &mut dyn FnMut(Event),
         node: u8,
@@ -950,7 +894,6 @@ impl<T: Transport, C: HostClock> Host<T, C> {
             times: Some(times),
             boot_core: self.core_write,
         });
-        self.show(node, phase::VERIFY, shown, version, &[]).await;
     }
 
     /// The node's one number for this report, and the moment it was reckoned.
@@ -964,18 +907,6 @@ impl<T: Transport, C: HostClock> Host<T, C> {
         (shown, now)
     }
 
-    /// SHOW on the hub LCD, best effort.
-    async fn show(&mut self, node: u8, ph: u8, percent: u8, version: Version, text: &[u8]) {
-        let show = Show {
-            node,
-            phase: ph,
-            percent,
-            version,
-            text,
-        };
-        let _ = self.show_to(Target::Local, &show).await;
-    }
-
     /// One SHOW, never resent.
     async fn show_to(&mut self, to: Target, show: &Show<'_>) -> Result<(), T::Error> {
         let mut p = [0u8; 7 + payload::SHOW_TEXT_MAX];
@@ -986,7 +917,7 @@ impl<T: Transport, C: HostClock> Host<T, C> {
     }
 
     /// Tells the node being written its one number when it moved, for its
-    /// own display. A display must not cost a write: one try per step. An
+    /// app, the connected node and a linked one alike. Telling must not cost a write: one try per step. An
     /// agent that predates it answers `Unsupported` and is told nothing more
     /// for this image. A lost one is told again at the next step, so the
     /// number does not freeze; a link that truly failed is the next transfer
@@ -1120,7 +1051,7 @@ pub enum RecoverPath {
     Rom(dagon_romlink::Stats),
 }
 
-/// Short LCD text for a failed update (ASCII, at most 32 bytes).
+/// Short text naming why an update failed (ASCII, at most 32 bytes).
 pub fn reason<E>(e: &Error<E>) -> &'static str {
     match e {
         Error::Rejected { status, .. } => match status {
@@ -1152,8 +1083,6 @@ struct Xfer<'a> {
     body: &'a [u8],
     /// Node index and version for progress events.
     show: Option<(u8, Version)>,
-    /// The target's topology index when `show` names none (its timings).
-    node: Option<u8>,
 }
 
 /// What [`Host::discover`] asks over `links`: each target and its wait.

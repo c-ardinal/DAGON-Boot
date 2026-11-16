@@ -1,7 +1,7 @@
 // In-memory hub for development and tests: the sample hub plus the
 // 7-segment node (I2C 0x42) and the watch (UART), answering in the
 // dagon-proto frame format. It covers what the page drives: HELLO, STATUS,
-// RELAY to the two nodes, the topology transfer and the update steps
+// RELAY to the two nodes and the update steps
 // (XFER_BEGIN/HDR/DATA/END, SET_PENDING, REBOOT, CONFIRM, SHOW). Images are
 // not checked here; dagon-host checks the release before sending.
 import { CMD, FLAG_RESP, MAX_PAYLOAD_USB, STATUS_OK, encodeFrame, parseFrame } from './frame.ts';
@@ -23,7 +23,6 @@ const CMD_REBOOT = 0x21;
 const CMD_CONFIRM = 0x22;
 const CMD_SHOW = 0x41;
 const CMD_RELAY = 0x50;
-const TARGET_TOPOLOGY = 3;
 const RELAY_HEAD_LEN = 4;
 const CHUNK_HEAD = 4;
 const HDR_VERSION_AT = 0x018;
@@ -74,12 +73,10 @@ interface Device {
   confirmed: number;
   /** The last reboot fell back to the previous slot. */
   fellBack?: boolean;
-  /** Transfer in progress: target slot (or the topology), header and body bytes. */
+  /** Transfer in progress: target slot, header and body bytes. */
   xfer: { target: number; slot: number; hdr: number[]; body: number[] } | null;
   /** Slot to run on the next REBOOT. */
   pending: number | null;
-  /** The hub's display copy of the topology. */
-  topology: Uint8Array | null;
 }
 
 /** Device keys: `hub`, `i2c:<addr>`, `uart`. */
@@ -104,7 +101,7 @@ const aConfirmed = (): Slot[] => [
 ];
 
 function device(hello: HelloResp, slots = aConfirmed()): Device {
-  return { hello, slots, active: 0, confirmed: 0, xfer: null, pending: null, topology: null };
+  return { hello, slots, active: 0, confirmed: 0, xfer: null, pending: null };
 }
 
 /** Start state of the sample: every device on 1.0.0 in slot A; the watch also has its factory image. */
@@ -151,11 +148,6 @@ export class MockTransport implements Transport {
   readonly reboots: DeviceKey[] = [];
   /** Failing opens left while the rebooting hub is away. */
   private away = 0;
-  /** The last topology the hub received in full. */
-  get received(): Uint8Array | null {
-    return this.devices.get('hub')!.topology;
-  }
-
   constructor(private readonly opts: MockOptions = {}) {
     this.devices = sampleDevices(opts.hello ?? SAMPLE_HUB_HELLO);
     this.quiet = new Set(opts.quiet);
@@ -262,7 +254,7 @@ async function answer(dev: Device, cmd: number, p: Uint8Array, fallBack: boolean
     case CMD_XFER_DATA:
       return chunk(dev, cmd, p);
     case CMD_XFER_END:
-      if (refuse !== undefined && dev.xfer?.target !== TARGET_TOPOLOGY) {
+      if (refuse !== undefined) {
         dev.xfer = null;
         return Uint8Array.of(refuse);
       }
@@ -303,12 +295,8 @@ async function end(dev: Device): Promise<Uint8Array> {
   if (!x) return Uint8Array.of(STATUS_STATE);
   dev.xfer = null;
   const body = new Uint8Array(x.body);
-  if (x.target === TARGET_TOPOLOGY) {
-    dev.topology = body;
-  } else {
-    const version = new DataView(new Uint8Array(x.hdr).buffer).getUint32(HDR_VERSION_AT, true);
-    dev.slots[x.slot] = { state: SLOT_WRITTEN, version };
-  }
+  const version = new DataView(new Uint8Array(x.hdr).buffer).getUint32(HDR_VERSION_AT, true);
+  dev.slots[x.slot] = { state: SLOT_WRITTEN, version };
   const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', body));
   return withStatus(STATUS_OK, digest);
 }

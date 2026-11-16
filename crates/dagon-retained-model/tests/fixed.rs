@@ -10,12 +10,10 @@ use dagon_retained_model::mem::{Mem, Survives};
 use dagon_retained_model::record::{
     self, Geometry, Ring, Writer, RECORD_MAX, V1 as RecV1, V1_SIZE,
 };
-use dagon_retained_model::topology::{self, BodyCodec, BodyV2, Store};
 use dagon_retained_model::world_fuse::{self as wf, FuseWorld};
 use dagon_retained_model::world_record::{
     self as wr, Config, End::*, Op, RecordWorld, Stage, Ver::*,
 };
-use dagon_retained_model::world_topology::{self as wt, TopologyWorld};
 use dagon_retained_model::world_trial::{self as wtr, TrialWorld};
 
 const SEED: u64 = 0x5EED_F1C5;
@@ -581,7 +579,7 @@ fn other_fuse_layout_is_ignored() {
     assert!(s.disabled.is_empty());
 }
 
-// --- MCU identity and topology --------------------------------------------
+// --- MCU identity --------------------------------------------------------
 
 /// P12: refusal at every carrier width with both ids named, unknown values
 /// never matched, round trip through the topology node.
@@ -608,49 +606,6 @@ fn identity_load_and_match() {
         Err(LoadError::Collision { a, b, .. }) => assert_ne!(a, b),
         other => panic!("{other:?}"),
     }
-}
-
-/// P13: a replacement interrupted after every byte of erase and program,
-/// on top of a previous copy; then a completed one.
-#[test]
-fn topology_cut_after_every_byte() {
-    let c = wt::Config {
-        bank: 1024,
-        random_start: false,
-    };
-    let body = BodyV2.encode(&wt::topology(2)).unwrap();
-    let store = Store {
-        base: 16,
-        bank: 1024,
-    };
-    let last = store.commit_step(body.len()) as u32 + 2;
-    for k in 0..=last {
-        let ops = vec![
-            wt::Op::Push { topo: 1, cut: None },
-            wt::Op::Push {
-                topo: 2,
-                cut: Some(k),
-            },
-            wt::Op::Push {
-                topo: 2,
-                cut: Some(k / 2),
-            },
-            wt::Op::Push { topo: 3, cut: None },
-        ];
-        ok::<TopologyWorld>(&c, &ops);
-    }
-}
-
-/// Bounds: a topology over the bank is refused before any byte.
-#[test]
-fn topology_too_large_is_refused() {
-    let store = Store { base: 0, bank: 128 };
-    let body = BodyV2.encode(&wt::topology(5)).unwrap();
-    assert!(body.len() > store.capacity());
-    assert_eq!(
-        topology::host_plan(&store, &body),
-        Err(topology::Refused::TooLarge)
-    );
 }
 
 /// The shrinker reduces a failure to the operations it needs.

@@ -1,7 +1,6 @@
 //! A node's one progress number over its whole write, from the first byte to
-//! its confirmation. The hub's display and the display of the node being
-//! written (SHOW) and every caller read this one calculation, so they never
-//! disagree.
+//! its confirmation. The node being written (SHOW) and every caller read
+//! this one calculation, so they never disagree.
 //!
 //! The transfer and the trial weigh as long as each takes: the transfer's time
 //! is projected from the bytes sent so far, the trial's is the MCU definition's

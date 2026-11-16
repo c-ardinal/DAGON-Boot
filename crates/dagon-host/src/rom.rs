@@ -195,8 +195,8 @@ pub fn regions<'a>(
     out
 }
 
-/// The hub's NRST/BOOT0 and raw I2C, with progress mirrored as events and
-/// SHOW phase ROM.
+/// The connected node's NRST/BOOT0 and raw I2C, with progress reported
+/// as events of phase ROM.
 pub(crate) struct HubRom<'h, T: Transport, C: HostClock> {
     pub host: &'h mut Host<T, C>,
     pub on_event: &'h mut dyn FnMut(Event),
@@ -291,8 +291,7 @@ impl<T: Transport, C: HostClock> RomLink for HubRom<'_, T, C> {
         self.shown = percent - percent % STEP;
         let (node, v, p) = (self.node, self.version, self.shown);
         self.host
-            .emit(&mut *self.on_event, node, phase::ROM, p, v)
-            .await;
+            .report(&mut *self.on_event, node, phase::ROM, p, v);
     }
 }
 

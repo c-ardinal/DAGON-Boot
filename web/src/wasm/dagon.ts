@@ -158,7 +158,6 @@ export interface Host {
   /** VERSION; null when the node's agent predates it. */
   version(to: Target): Promise<VersionResp | null>;
   discover(): Promise<Discovery>;
-  pushTopology(bin: Uint8Array): Promise<void>;
   watch(to: Target): Promise<WatchRound>;
   /** `dagon apply`; rejects with a Refusal (or a reason) when nothing was sent. */
   /**
@@ -190,7 +189,6 @@ export function newHost(link: HostLink): Host {
     bootCoreStatus: (t) => h.boot_core_status(t),
     version: (t) => h.version(t),
     discover: () => h.discover(),
-    pushTopology: (bin) => h.push_topology(bin),
     watch: (t) => h.watch(t),
     setTimings: (yaml) => h.setTimings(yaml),
     clearTimings: () => h.clearTimings(),

@@ -42,8 +42,6 @@ pub struct Layout {
     /// APP slots, index = slot (A, then B when the MCU definition gives
     /// one): (start, length), header inline at the slot start, body at +512.
     pub slots: &'static [(u32, u32)],
-    /// Hub display copy of the topology (body only), if this board keeps one.
-    pub topology: Option<(u32, u32)>,
     /// Factory (spare) slot, reported as STATUS slot 2: the recovery
     /// agent's slot (transfer target AGENT, header inline in this model),
     /// first written by [`SimStore::provision_factory`]; never a boot
@@ -72,7 +70,6 @@ impl Layout {
         bootcore: (0x0800_0000, 0x4000),
         log: (0x0800_4000, 0x4000),
         slots: &[(0x0802_0000, 0x2_0000), (0x0804_0000, 0x2_0000)],
-        topology: None,
         factory: None,
         cores: Some(Cores {
             slots: &[(0x0801_0000, 0x1_0000), (0x0806_0000, 0x2_0000)],
@@ -90,7 +87,6 @@ impl Layout {
         bootcore: (0x1000_0000, 0x1_0000),
         log: (0x1001_0000, 0x1000),
         slots: &[(0x1002_0000, 0x8_0000), (0x100A_0000, 0x8_0000)],
-        topology: Some((0x1012_0000, 0x1_0000)),
         factory: None,
         cores: Some(Cores {
             slots: &[(0x1013_0000, 0x1_0000), (0x1014_0000, 0x1_0000)],
@@ -108,7 +104,6 @@ impl Layout {
         bootcore: (0x0000_0000, 0x1_0000),
         log: (0x0001_0000, 0x1000),
         slots: &[(0x0011_0000, 0x10_0000), (0x0021_0000, 0x10_0000)],
-        topology: None,
         factory: Some((0x0031_0000, 0x0F_0000)),
         cores: None,
     };
@@ -276,7 +271,6 @@ impl SimStore {
                 let (a, l) = self.layout.factory.ok_or(StoreError::Unsupported)?;
                 Ok((a + HEADER_SIZE as u32, l - HEADER_SIZE as u32))
             }
-            target::TOPOLOGY if slot == 0 => self.layout.topology.ok_or(StoreError::Unsupported),
             _ => Err(StoreError::Unsupported),
         }
     }

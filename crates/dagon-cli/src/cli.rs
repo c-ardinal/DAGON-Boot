@@ -64,8 +64,8 @@ pub enum Command {
     Status(StatusArgs),
     /// Write a release package to the nodes
     ///
-    /// Verifies the release, checks it matches the topology, sends the topology
-    /// to the hub, then updates the children and then the hub.
+    /// Verifies the release, checks it matches the topology, then writes the
+    /// nodes, the node the PC is connected to last.
     Apply(ApplyArgs),
     /// Run the 12 conformance tests on a node
     ///
@@ -158,8 +158,6 @@ pub enum TopoCmd {
     Check(TopoCheckArgs),
     /// Write the topology's canonical binary
     Compile(TopoCompileArgs),
-    /// Send the topology's canonical binary to the hub
-    Push(TopoPushArgs),
 }
 
 #[derive(Debug, Default, PartialEq, Args)]
@@ -178,16 +176,6 @@ pub struct TopoCompileArgs {
     /// Output file [default: the YAML's name with .bin]
     #[arg(long, value_name = "BIN")]
     pub out: Option<String>,
-    #[arg(long, value_name = "FILE", help = CONFIG)]
-    pub config: Option<String>,
-}
-
-#[derive(Debug, Default, PartialEq, Args)]
-pub struct TopoPushArgs {
-    #[arg(value_name = "YAML", help = TOPOLOGY)]
-    pub yaml: Option<String>,
-    #[arg(long, value_name = "NAME", help = HUB_PORT)]
-    pub port: Option<String>,
     #[arg(long, value_name = "FILE", help = CONFIG)]
     pub config: Option<String>,
 }

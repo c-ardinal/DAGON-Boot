@@ -9,6 +9,7 @@ use std::sync::{Arc, Mutex};
 
 use dagon_agent::snapshot::{AppSnapshot, Phase};
 use dagon_agent::{Agent, SlotStore};
+use dagon_ed25519::Ed25519Compact;
 use dagon_events::{BoardBringUp, Ctx, Event, Extension, Health, Published, TrialInfo, Watchdog};
 use dagon_format::header::*;
 use dagon_format::{key_id, sha256, Version};
@@ -87,7 +88,7 @@ fn start_with(
     store: &SimStore,
     board: Option<BoardExtension>,
     app: App,
-) -> (Agent<SimStore, NodeChain>, AppEvents) {
+) -> (Agent<SimStore, NodeChain, Ed25519Compact>, AppEvents) {
     let events = Box::leak(Box::new(Published::new()));
     let (chain, reader) = node_chain(
         events,
@@ -97,11 +98,12 @@ fn start_with(
         || 0,
         Watchdog::new(4_000, 8_000),
     );
-    let agent = Agent::new(f401_config(sample::PUBKEY), store.clone(), chain);
+    let verifier = Ed25519Compact::new(sample::PUBKEY);
+    let agent = Agent::new(f401_config(), verifier, store.clone(), chain);
     (agent, reader)
 }
 
-fn start(store: &SimStore, app: App) -> Agent<SimStore, NodeChain> {
+fn start(store: &SimStore, app: App) -> Agent<SimStore, NodeChain, Ed25519Compact> {
     start_with(store, None, app).0
 }
 
@@ -146,7 +148,12 @@ struct Wire {
 }
 
 impl Wire {
-    fn call(&mut self, a: &mut Agent<SimStore, NodeChain>, cmd: Cmd, payload: &[u8]) -> Status {
+    fn call(
+        &mut self,
+        a: &mut Agent<SimStore, NodeChain, Ed25519Compact>,
+        cmd: Cmd,
+        payload: &[u8],
+    ) -> Status {
         self.seq = self.seq.wrapping_add(1);
         let mut buf = vec![0u8; 300];
         let n = Frame {
@@ -163,7 +170,13 @@ impl Wire {
     }
 
     /// Sends `part` from chunk `from` on, 200 bytes a chunk.
-    fn chunks(&mut self, a: &mut Agent<SimStore, NodeChain>, cmd: Cmd, part: &[u8], from: usize) {
+    fn chunks(
+        &mut self,
+        a: &mut Agent<SimStore, NodeChain, Ed25519Compact>,
+        cmd: Cmd,
+        part: &[u8],
+        from: usize,
+    ) {
         let mut b = vec![0u8; 300];
         for (i, chunk) in part.chunks(200).enumerate().skip(from) {
             let c = XferChunk {
@@ -176,7 +189,7 @@ impl Wire {
     }
 
     /// The transfer up to its first body chunk.
-    fn begin(&mut self, a: &mut Agent<SimStore, NodeChain>, slot: u8, img: &[u8]) {
+    fn begin(&mut self, a: &mut Agent<SimStore, NodeChain, Ed25519Compact>, slot: u8, img: &[u8]) {
         let mut b = vec![0u8; 300];
         let begin = XferBegin {
             target: target::APP,
@@ -192,12 +205,17 @@ impl Wire {
     }
 
     /// The rest of a transfer [`Wire::begin`] started.
-    fn rest(&mut self, a: &mut Agent<SimStore, NodeChain>, img: &[u8]) {
+    fn rest(&mut self, a: &mut Agent<SimStore, NodeChain, Ed25519Compact>, img: &[u8]) {
         self.chunks(a, Cmd::XferData, &img[HEADER_SIZE..], 1);
         assert_eq!(self.call(a, Cmd::XferEnd, &[]), Status::Ok);
     }
 
-    fn transfer(&mut self, a: &mut Agent<SimStore, NodeChain>, slot: u8, img: &[u8]) {
+    fn transfer(
+        &mut self,
+        a: &mut Agent<SimStore, NodeChain, Ed25519Compact>,
+        slot: u8,
+        img: &[u8],
+    ) {
         self.begin(a, slot, img);
         self.rest(a, img);
     }

@@ -27,5 +27,7 @@ verify-time = []
 [dev-dependencies]
 critical-section = { version = "1", features = ["std"] }
 dagon-sim = { path = "../../../crates/dagon-sim" }
+# The agents of the tests verify with the key the simulator's images are signed under.
+dagon-ed25519 = { path = "../../../crates/dagon-ed25519", features = ["compact"] }
 # tests/start.rs signs the update it sends.
 ed25519-compact = { version = "2.6", default-features = false }

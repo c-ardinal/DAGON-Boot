@@ -120,11 +120,11 @@ describe('every API path the Console calls is in the server route table', () => 
   });
 
   test('no other source calls the API', () => {
-    const files = (dir: URL): string[] => readdirSync(dir, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? files(new URL(`${e.name}/`, dir)) : [new URL(e.name, dir).pathname]));
+    const files = (dir: URL): URL[] => readdirSync(dir, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? files(new URL(`${e.name}/`, dir)) : [new URL(e.name, dir)]));
     const callers = files(new URL('../', import.meta.url))
-      .filter((f) => /\.(ts|svelte)$/.test(f) && !/\.test\.ts$|agentMock|wasm\/pkg/.test(f) && !sources.some((s) => f.endsWith(`/${s}`)))
-      .filter((f) => /fetch\(\s*[`'"]\/v1\/|\b(?:api|call|json)(?:<[^>(]*>)?\(\s*'(?:GET|POST|PUT|DELETE)'/.test(new TextDecoder().decode(readFileSync(f.replace(/^\/([A-Za-z]:)/, '$1')))));
-    expect(callers.map((f) => f.split('/src/')[1])).toEqual([]);
+      .filter((f) => /\.(ts|svelte)$/.test(f.pathname) && !/\.test\.ts$|agentMock|wasm\/pkg/.test(f.pathname) && !sources.some((s) => f.pathname.endsWith(`/${s}`)))
+      .filter((f) => /fetch\(\s*[`'"]\/v1\/|\b(?:api|call|json)(?:<[^>(]*>)?\(\s*'(?:GET|POST|PUT|DELETE)'/.test(new TextDecoder().decode(readFileSync(f))));
+    expect(callers.map((f) => f.pathname.split('/src/')[1])).toEqual([]);
   });
 
   test.each(calls.map((c) => [`${c.method} ${c.path}`, c] as const))('%s', (_n, c) => {
@@ -183,6 +183,7 @@ describe('the YAML the Console writes reads back as the same topology', () => {
   });
 
   test('the full document has every constraint kind to lose', () => {
-    expect(Object.keys((topo_parse(FULL) as Topo).constraints!.reduce((a, c) => ({ ...a, ...c }), {})).sort()).toEqual(['lockstep', 'min_bootcore', 'requires']);
+    const constraints = (topo_parse(FULL) as { constraints: Record<string, unknown>[] }).constraints;
+    expect(constraints.flatMap((c) => Object.keys(c)).sort()).toEqual(['lockstep', 'min_bootcore', 'requires']);
   });
 });

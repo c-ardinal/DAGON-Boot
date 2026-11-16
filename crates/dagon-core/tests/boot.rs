@@ -142,6 +142,101 @@ fn bad_signature_rolls_back() {
     assert_eq!(state(&mut m).last_reason, reason::SIG_INVALID);
 }
 
+/// Image for `slot` whose signature does not verify; header digest, format
+/// and body are all consistent, as anyone who can write flash can lay down.
+fn forged(slot: u8) -> ([u8; HEADER_SIZE], Vec<u8>) {
+    let (mut hdr, body) = image(slot, 0);
+    hdr[0x1C0] ^= 1;
+    (hdr, body)
+}
+
+#[test]
+fn confirmed_slot_with_bad_signature_is_not_started() {
+    let mut m = Mem::new();
+    let a = install(&mut m, A, &forged(A));
+    write_log(&mut m, 0, 1, &[(kind::PROVISION, a), (kind::CONFIRMED, a)]);
+    assert_eq!(boot(&mut m), Decision::NoImage);
+    assert_eq!(m.writes, 0);
+}
+
+#[test]
+fn every_start_runs_one_signature_check() {
+    let v = Counting::new();
+    let mut m = with_pending_b();
+    for _ in 0..3 {
+        let (d, checks) = boot_counted(&mut m, &v);
+        assert!(matches!(
+            d,
+            Decision::Boot {
+                slot: B,
+                trial: true,
+                ..
+            }
+        ));
+        assert_eq!(checks, 1, "pending start");
+    }
+    // Trials exhausted: B is not checked again, A is checked before it starts.
+    for _ in 0..2 {
+        let (d, checks) = boot_counted(&mut m, &v);
+        assert!(matches!(
+            d,
+            Decision::Boot {
+                slot: A,
+                trial: false,
+                ..
+            }
+        ));
+        assert_eq!(checks, 1, "confirmed start");
+    }
+}
+
+#[test]
+fn pending_bad_signature_rolls_back_to_a_verified_slot() {
+    let v = Counting::new();
+    let mut m = Mem::new();
+    let a = install(&mut m, A, &image(A, 0));
+    let b = install(&mut m, B, &forged(B));
+    write_log(
+        &mut m,
+        0,
+        1,
+        &[
+            (kind::PROVISION, a),
+            (kind::CONFIRMED, a),
+            (kind::SLOT_PENDING, b),
+        ],
+    );
+    let (d, checks) = boot_counted(&mut m, &v);
+    assert!(matches!(
+        d,
+        Decision::Boot {
+            slot: A,
+            trial: false,
+            ..
+        }
+    ));
+    // B refused, then A checked before it starts.
+    assert_eq!(checks, 2);
+    let s = state(&mut m);
+    assert_eq!((s.pending, s.last_reason), (None, reason::SIG_INVALID));
+    // Both slots refused: nothing starts, and no other slot is tried.
+    let mut m = Mem::new();
+    let a = install(&mut m, A, &forged(A));
+    let b = install(&mut m, B, &forged(B));
+    write_log(
+        &mut m,
+        0,
+        1,
+        &[
+            (kind::PROVISION, a),
+            (kind::CONFIRMED, a),
+            (kind::SLOT_PENDING, b),
+        ],
+    );
+    assert_eq!(boot(&mut m), Decision::NoImage);
+    assert_eq!(state(&mut m).last_reason, reason::SIG_INVALID);
+}
+
 #[test]
 fn image_bound_to_other_slot_is_refused() {
     let mut m = Mem::new();

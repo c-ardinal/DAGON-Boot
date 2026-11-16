@@ -43,6 +43,12 @@ at = 536965120
 size = 2048
 writer = "bootcore"
 
+[boot_receive]
+listen_window_ms = 50
+
+[boot_receive.kinds]
+i2c = true
+
 [[bootcore.clock]]
 in_hz = 16000000
 out_hz = 84000000
@@ -1008,5 +1014,5 @@ chip = "STM32F401RETx"
 kind = "probe-rs"
 
 [writers]
-app = ["app"]
+app = ["app", "bootcore"]
 bootcore = ["app"]

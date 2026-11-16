@@ -593,11 +593,11 @@ mod tests {
         assert!(seen > 0);
     }
 
-    /// The stage0 size check (scripts/stage0_size.py) builds each stage0
-    /// once per board of its MCU, from that board's boot folder
-    /// `stage0/size/<board>/`: a node named `size` on the board, without
-    /// overrides, as `dagon gen` writes it, with its hashes. `DAGON_BLESS=1`
-    /// rewrites them.
+    /// The size checks (scripts/stage0_size.py, scripts/bootcore_size.py)
+    /// build each stage0 and boot core once per board of its MCU, from that
+    /// board's boot folder `stage0/size/<board>/`: a node named `size` on
+    /// the board, without overrides, as `dagon gen` writes it, with its
+    /// hashes and its stamp. `DAGON_BLESS=1` rewrites them.
     #[test]
     fn the_stage0_size_folders_carry_their_node_definitions() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../targets/mcu");
@@ -612,8 +612,9 @@ mod tests {
                 seen += 1;
                 let dir = stage0.join("size").join(&b.id);
                 let manifest = format!(
-                    "# The stage0 size check's boot folder (scripts/stage0_size.py): a node\n\
-                     # named `size` on board {b}, without overrides. Written by\n\
+                    "# The size checks' boot folder (scripts/stage0_size.py,\n\
+                     # scripts/bootcore_size.py): a node named `size` on board\n\
+                     # {b}, without overrides. Written by\n\
                      # dagon-topology's tests (DAGON_BLESS=1).\n\
                      [package]\nname = \"dagon-stage0-size\"\nversion = \"0.0.0\"\n\
                      edition = \"2021\"\npublish = false\n\n\
@@ -633,6 +634,8 @@ mod tests {
                 let f = BootFolder::read(&dir).unwrap();
                 assert_eq!(f.meta.board.as_deref(), Some(b.id.as_str()));
                 check_defs(&dir).unwrap();
+                blessed(&dir.join(STAMP_FILE), &stamp_text(&f.stamp().unwrap()));
+                f.verify_stamp().unwrap();
             }
         }
         assert!(seen > 0);

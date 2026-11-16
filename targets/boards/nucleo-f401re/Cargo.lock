@@ -193,7 +193,6 @@ name = "dagon-agent"
 version = "0.1.0"
 dependencies = [
  "critical-section",
- "dagon-ed25519",
  "dagon-events",
  "dagon-format",
  "dagon-port",
@@ -284,6 +283,7 @@ dependencies = [
  "dagon-agent",
  "dagon-conform",
  "dagon-core",
+ "dagon-ed25519",
  "dagon-events",
  "dagon-format",
  "dagon-mcu-build",

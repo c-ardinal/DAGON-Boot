@@ -3,10 +3,11 @@
 definitions and the MCU packages' build generates for the relay.
 
 Production Rust (tests and `#[cfg(test)]` modules left out) under
-crates/*/src and the MCU and board packages that build the relay
-(targets/mcu, the board templates) writes no such address as a literal,
-in code or in a comment that speaks of a ROM or its loader; an event
-declaration (`Name = 0x.. {`) is a number of its own, not an address.
+crates/*/src, the MCU packages (targets/mcu) and the board packages'
+sources and templates writes no such address as a literal, hexadecimal
+or decimal, in code, nor in hexadecimal in a comment that speaks of a ROM
+or its loader; an event declaration (`Name = 0x.. {`) is a number of its
+own, not an address.
 
     python -m unittest discover -s scripts -p "test_rom_addr.py"
 """
@@ -19,6 +20,7 @@ from test_relay import is_test_path, production
 
 DEFINITIONS = sorted((ROOT / "targets" / "mcu").glob("*/dagon-mcu.toml"))
 HEX = re.compile(r"(?<![\w.])0[xX]([0-9A-Fa-f_]+)(?:u8|u16|u32|usize)?(?!\w)")
+DEC = re.compile(r"(?<![\w.])([1-9][0-9_]*)(?:u8|u16|u32|usize)?(?![\w.])")
 EVENT = re.compile(r"\b[A-Z]\w*\s*=\s*0[xX][0-9A-Fa-f_]+\s*\{")
 ABOUT_ROM = re.compile(r"\bROM\b|\bloader\b", re.IGNORECASE)
 COMMENT = re.compile(r"//+!?(.*)")
@@ -43,13 +45,18 @@ def in_scope(path):
         return len(parts) > 2 and parts[2] == "src"
     if parts[:2] == ["targets", "mcu"]:
         return True
-    return parts[:2] == ["targets", "boards"] and "template" in parts
+    return parts[:2] == ["targets", "boards"] and ("template" in parts or "src" in parts)
 
 
-def hits(text, addrs):
-    """The literals of `text` whose value is one of `addrs`."""
-    return [m.group(0) for m in HEX.finditer(text)
-            if int(m.group(1).replace("_", ""), 16) in addrs]
+def hits(text, addrs, decimal=False):
+    """The hexadecimal (and with `decimal`, decimal) literals of `text`
+    whose value is one of `addrs`."""
+    out = [m.group(0) for m in HEX.finditer(text)
+           if int(m.group(1).replace("_", ""), 16) in addrs]
+    if decimal:
+        out += [m.group(0) for m in DEC.finditer(text)
+                if int(m.group(1).replace("_", "")) in addrs]
+    return out
 
 
 def problems(texts, addrs):
@@ -58,7 +65,7 @@ def problems(texts, addrs):
         if not in_scope(path):
             continue
         code = EVENT.sub(" ", production(code_only(text)))
-        for lit in hits(code, addrs):
+        for lit in hits(code, addrs, decimal=True):
             out.append(f"{path}: a ROM loader address written as a literal: {lit}")
         prod_text = production(text)
         for m in COMMENT.finditer(prod_text):
@@ -92,6 +99,8 @@ class RomAddr(unittest.TestCase):
             ("crates/dagon-relay/src/lib.rs", f"fn f() -> u8 {{ {a:#04X}u8 }}\n"),
             ("crates/dagon-sim/src/rom.rs", f"/// The loader answers at {a:#x}.\nfn g() {{}}\n"),
             ("targets/mcu/rp2040/src/relay.rs", f"const A: u8 = {a:#04x};\n"),
+            ("crates/dagon-host/src/rom.rs", f"const A: u8 = {a};\n"),
+            ("targets/boards/nucleo-f401re/src/lib.rs", f"const A: u8 = {a:#04x};\n"),
             ("targets/boards/waveshare-rp2040-touch-lcd-1.28/template/src/main.rs",
              f"const A: u8 = {a:#04x};\n"),
         ]:
@@ -106,6 +115,7 @@ class RomAddr(unittest.TestCase):
             ("crates/dagon-topology/src/defs/tests_x.rs", f"const A: u8 = {a:#04x};\n"),
             ("crates/dagon-agent/src/lib.rs", f"emits Thing = {a:#04x} {{ slot: u8 }}\n"),
             ("crates/dagon-relay/src/lib.rs", f"const B: u8 = {a + 1:#04x};\n// a byte {a:#04x}\n"),
+            ("crates/dagon-relay/src/lib.rs", f"const C: f32 = {a}.5;\nconst D: u8 = 1{a};\n"),
             ("samples/f401-app/src/seg.rs", f"const A: u8 = {a:#04x};\n"),
         ]:
             with self.subTest(path=path):

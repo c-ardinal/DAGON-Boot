@@ -5,7 +5,9 @@
 #![forbid(unsafe_code)]
 
 pub mod field;
+pub mod handler;
 pub mod payload;
+pub mod plant;
 pub mod table;
 
 pub use table::Cmd;
@@ -29,6 +31,15 @@ pub mod max_payload {
     pub const USB: usize = 1088;
     pub const UART: usize = 1024;
     pub const I2C: usize = 256;
+    /// The least of them: every node's HELLO and CAPS answers fit it.
+    pub const SMALLEST: usize = {
+        let a = if USB < UART { USB } else { UART };
+        if a < I2C {
+            a
+        } else {
+            I2C
+        }
+    };
 }
 
 pub const fn frame_len(payload_len: usize) -> usize {
@@ -302,12 +313,13 @@ mod tests {
 
     #[test]
     fn command_and_status_tables() {
-        assert_eq!(Cmd::ALL.len(), 17);
+        assert_eq!(Cmd::ALL.len(), 18);
+        assert_eq!(Cmd::from_u8(0x04), Some(Cmd::Caps));
         assert_eq!(Cmd::from_u8(0x03), Some(Cmd::Version));
         assert_eq!(Cmd::from_u8(0x24), Some(Cmd::EnterRom));
         assert_eq!(Status::ALL.len(), 13);
         assert_eq!(Cmd::from_u8(0x15), Some(Cmd::XferHdr));
-        assert_eq!(Cmd::from_u8(0x04), None);
+        assert_eq!(Cmd::from_u8(0x06), None);
         assert_eq!(Status::from_u8(0x0F), Some(Status::Timeout));
         assert_eq!(Status::from_u8(0x04), Some(Status::Field));
     }

@@ -69,6 +69,10 @@ commands! {
     /// What the node runs: stage0, boot loader and app versions, wire
     /// version, MCU id (`payload::VersionResp`).
     Version = 0x03, idempotent: true, req: NONE, resp: msg(0, &version::RESP, false);
+    /// What the node knows of one command it serves: the fields of its
+    /// request and of its response (`payload::CapsResp`). A command the
+    /// node does not serve answers `Status::Unsupported`.
+    Caps = 0x04, idempotent: true, req: msg(1, &[], false), resp: msg(0, &caps::RESP, false);
     /// To a node's boot core while its listen window is open: stay in
     /// update mode instead of starting the app. A boot core already in
     /// update mode answers OK; an app answers `Status::State`.
@@ -108,7 +112,46 @@ pub mod hello {
     /// 1: running on trial.
     pub const TRIAL: FieldSpec = FieldSpec::opt(6, 1, 1);
     pub const KEY_ID: FieldSpec = FieldSpec::opt(7, 8, 8);
-    pub const RESP: [FieldSpec; 7] = [ROLE, PORT_KIND, MCU_ID, MODE, ACTIVE_VERSION, TRIAL, KEY_ID];
+    /// The commands the node serves, as the set of their numbers
+    /// (`payload::CmdSet`), with room for every number a command can
+    /// have. Left out: the node does not say.
+    pub const CMDS: FieldSpec = FieldSpec::opt(8, 1, 32);
+    pub const RESP: [FieldSpec; 8] = [
+        ROLE,
+        PORT_KIND,
+        MCU_ID,
+        MODE,
+        ACTIVE_VERSION,
+        TRIAL,
+        KEY_ID,
+        CMDS,
+    ];
+}
+
+/// CAPS. Request core: `cmd u8`, the command asked about. The response
+/// has no core.
+pub mod caps {
+    use super::{FieldSpec, FIELD_NUM_MAX};
+    use crate::max_payload;
+
+    /// Bytes of a set of field numbers (`payload::FieldSet`).
+    pub const FIELD_SET_LEN: u8 = (FIELD_NUM_MAX / 8 + 1) as u8;
+    /// The fields the node reads in the command's request.
+    pub const REQ_FIELDS: FieldSpec = FieldSpec::opt(1, 1, FIELD_SET_LEN);
+    /// The fields the node may send in the command's response.
+    pub const RESP_FIELDS: FieldSpec = FieldSpec::opt(2, 1, FIELD_SET_LEN);
+    /// Bytes of one tunnel entry: `link u8`, `tunnel_mtu u16`.
+    pub const TUNNEL_LEN: u8 = 3;
+    /// The entries a response has room for on the smallest link, beside
+    /// its status, both field sets and this field's key and two length
+    /// bytes.
+    pub const TUNNEL_MAX: u8 = ((max_payload::SMALLEST - 1 - 2 * (2 + FIELD_SET_LEN as usize) - 3)
+        / TUNNEL_LEN as usize) as u8;
+    /// From a node that relays, for RELAY: per link the longest inner
+    /// frame it forwards, packed.
+    pub const TUNNEL_MTU: FieldSpec =
+        FieldSpec::opt(3, TUNNEL_LEN, TUNNEL_MAX * TUNNEL_LEN).packed(TUNNEL_LEN);
+    pub const RESP: [FieldSpec; 3] = [REQ_FIELDS, RESP_FIELDS, TUNNEL_MTU];
 }
 
 /// STATUS. No core in either direction.
@@ -259,9 +302,12 @@ pub const COMMON: [FieldSpec; 2] = [error::BAD_FIELD, error::WIRE];
 /// The body of every non-OK response.
 pub const ERROR: MsgSpec = msg(0, &COMMON, false);
 
+/// The highest number a field of the table has.
+pub const FIELD_NUM_MAX: u16 = 63;
+
 /// What the table promises, checked when it is built: no command at the
 /// reserved number or at another's, fields rising by number within 1 to
-/// 63 and no more of them than the reader holds.
+/// [`FIELD_NUM_MAX`] and no more of them than the reader holds.
 const fn well_formed() -> bool {
     let mut i = 0;
     while i < Cmd::ALL.len() {
@@ -292,7 +338,7 @@ const fn fields_ok(f: &[FieldSpec]) -> bool {
     while i < f.len() {
         let s = f[i];
         let rising = i == 0 || f[i - 1].num < s.num;
-        if !rising || s.num == 0 || s.num > 63 || s.min > s.max || s.elem == 0 {
+        if !rising || s.num == 0 || s.num > FIELD_NUM_MAX || s.min > s.max || s.elem == 0 {
             return false;
         }
         i += 1;

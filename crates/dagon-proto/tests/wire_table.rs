@@ -344,6 +344,7 @@ fn typed(cmd: Cmd, resp: bool) -> Typed {
                 trial: true,
                 key_id: [7; 8],
                 max_payload: 256,
+                cmds: CmdSet::EMPTY,
             };
             (
                 enc(|b| m.encode(b).unwrap()),
@@ -381,6 +382,27 @@ fn typed(cmd: Cmd, resp: bool) -> Typed {
             (
                 enc(|b| m.encode(b).unwrap()),
                 Box::new(|b| dbg(VersionResp::parse(b))),
+            )
+        }
+        (Cmd::Caps, false) => (
+            enc(|b| encode_caps_req(Cmd::Relay as u8, b).unwrap()),
+            Box::new(|b| dbg(parse_caps_req(b))),
+        ),
+        (Cmd::Caps, true) => {
+            let links = [(1u8, 268u16), (2, 1031)];
+            let mut packed = [0u8; 8];
+            let m = CapsResp {
+                req_fields: FieldSet::EMPTY.with(1).with(2),
+                resp_fields: FieldSet::EMPTY.with(1),
+                tunnel_mtu: TunnelMtus::pack(
+                    links.map(|(link, mtu)| TunnelMtu { link, mtu }),
+                    &mut packed,
+                )
+                .unwrap(),
+            };
+            (
+                enc(|b| m.encode(b).unwrap()),
+                Box::new(|b| dbg(CapsResp::parse(b))),
             )
         }
         (Cmd::XferBegin, false) => {
@@ -589,6 +611,8 @@ fn golden_cores_and_samples() {
             " 040101 060100 080102 0A0103 0C0409000000")),
         (Cmd::Version, false, 0, ""),
         (Cmd::Version, true, 0, "020403000201 0C020300 140403000201 160B0000000000000000000000 181000000000000000000000000000000000 1A0102"),
+        (Cmd::Caps, false, 1, "50"),
+        (Cmd::Caps, true, 0, "020106 040102 0606 010C01 020704"),
         (Cmd::Stay, false, 0, ""),
         (Cmd::Stay, true, 0, ""),
         (Cmd::XferBegin, false, 5, "00 00100000 030101 05020002"),

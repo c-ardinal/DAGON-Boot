@@ -9,8 +9,8 @@ use crate::field::{
     read, shortest, shortest_value, FieldSpec, FieldWriter, MsgSpec, Parsed, Refusal,
 };
 use crate::table::{
-    conf_run, confirm, error, hello, i2c_raw, reboot, relay, set_pending, show, status, subctl,
-    version, xfer_begin, xfer_end, ERROR,
+    caps, conf_run, confirm, error, hello, i2c_raw, reboot, relay, set_pending, show, status,
+    subctl, version, xfer_begin, xfer_end, ERROR,
 };
 use crate::{Cmd, FrameError, Status};
 use dagon_format::Version;
@@ -141,6 +141,92 @@ impl SlotState {
     }
 }
 
+/// A set of numbers below `8 * N`: bit `n % 8` of byte `n / 8` is set for
+/// each number `n` in it. On the wire its trailing zero bytes are left
+/// out, so a set has one encoding, and an empty set is no field at all.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Bits<const N: usize>([u8; N]);
+
+/// Command numbers (HELLO's `cmds`).
+pub type CmdSet = Bits<32>;
+
+/// Field numbers of one message (CAPS).
+pub type FieldSet = Bits<{ caps::FIELD_SET_LEN as usize }>;
+
+impl<const N: usize> Bits<N> {
+    pub const EMPTY: Self = Bits([0; N]);
+
+    /// The set with `n` in it; a number the set has no room for is left
+    /// out.
+    pub const fn with(mut self, n: u8) -> Self {
+        let i = (n / 8) as usize;
+        if i < N {
+            self.0[i] |= 1 << (n % 8);
+        }
+        self
+    }
+
+    /// Everything in either set.
+    pub const fn union(mut self, other: Self) -> Self {
+        let mut i = 0;
+        while i < N {
+            self.0[i] |= other.0[i];
+            i += 1;
+        }
+        self
+    }
+
+    pub fn has(&self, n: u8) -> bool {
+        let byte = self.0.get(usize::from(n / 8));
+        byte.is_some_and(|b| b & (1 << (n % 8)) != 0)
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.as_bytes().is_empty()
+    }
+
+    /// The numbers in it, rising.
+    pub fn iter(&self) -> impl Iterator<Item = u8> + '_ {
+        (0..=u8::MAX).filter(|n| self.has(*n))
+    }
+
+    /// Its bytes on the wire.
+    pub fn as_bytes(&self) -> &[u8] {
+        let n = self.0.iter().rposition(|b| *b != 0).map_or(0, |i| i + 1);
+        self.0.get(..n).unwrap_or(&[])
+    }
+
+    /// `Status::Arg` for a last byte of zero (not the set's one encoding)
+    /// and for more bytes than the set has.
+    pub fn from_bytes(b: &[u8]) -> Result<Self, Status> {
+        let mut set = Self::EMPTY;
+        let room = set.0.get_mut(..b.len()).ok_or(Status::Arg)?;
+        if b.last().is_none_or(|last| *last == 0) {
+            return Err(Status::Arg);
+        }
+        room.copy_from_slice(b);
+        Ok(set)
+    }
+
+    /// The set a field carries; empty when it was left out.
+    fn of(p: &Parsed<'_>, f: &FieldSpec) -> Result<Self, Status> {
+        p.field(f).map_or(Ok(Self::EMPTY), Self::from_bytes)
+    }
+}
+
+impl FieldSet {
+    /// The numbers of `fields`.
+    pub const fn of_fields(fields: &[FieldSpec]) -> Self {
+        let mut set = Self::EMPTY;
+        let mut i = 0;
+        while i < fields.len() {
+            set = set.with(fields[i].num as u8);
+            i += 1;
+        }
+        set
+    }
+}
+
 fn rd<'a>(b: &'a [u8], spec: &'a MsgSpec) -> Result<Parsed<'a>, Status> {
     read(b, spec).map_err(Status::from)
 }
@@ -222,7 +308,10 @@ pub struct HelloReq {
 
 impl HelloReq {
     pub fn parse(b: &[u8]) -> Result<Self, Status> {
-        let p = rd(b, &Cmd::Hello.spec().req)?;
+        Self::of(&rd(b, &Cmd::Hello.spec().req)?)
+    }
+    /// From a request the reader accepted.
+    pub fn of(p: &Parsed<'_>) -> Result<Self, Status> {
         Ok(HelloReq {
             proto_ver: u32::from_le_bytes(at(p.core, 0)?),
             max_payload: u16::from_le_bytes(at(p.core, 4)?),
@@ -250,11 +339,18 @@ pub struct HelloResp {
     pub trial: bool,
     pub key_id: [u8; 8],
     pub max_payload: u16,
+    /// The commands the node serves, from its handler table
+    /// (`handler::cmds`). Empty (left out on the wire): it does not say.
+    pub cmds: CmdSet,
 }
+
+// A reply (the status byte before the body) fits the smallest link.
+const _: () = assert!(HelloResp::MAX_LEN < crate::max_payload::SMALLEST);
+const _: () = assert!(CapsResp::MAX_LEN < crate::max_payload::SMALLEST);
 
 impl HelloResp {
     /// The longest body this crate writes.
-    pub const MAX_LEN: usize = 6 + 4 * 3 + 4 + 6 + 10;
+    pub const MAX_LEN: usize = 6 + 4 * 3 + 4 + 6 + 10 + 2 + hello::CMDS.max as usize;
 
     pub fn parse(b: &[u8]) -> Result<Self, Status> {
         let p = rd(b, &Cmd::Hello.spec().resp)?;
@@ -275,6 +371,7 @@ impl HelloResp {
                 _ => return Err(Status::Arg),
             },
             key_id: need(&p, &hello::KEY_ID)?,
+            cmds: CmdSet::of(&p, &hello::CMDS)?,
         })
     }
     pub fn encode(&self, out: &mut [u8]) -> Result<usize, FrameError> {
@@ -288,6 +385,9 @@ impl HelloResp {
             .field(&hello::ACTIVE_VERSION, &self.active_version.to_le_bytes())?
             .field(&hello::TRIAL, &[self.trial as u8])?
             .field(&hello::KEY_ID, &self.key_id)?;
+        if !self.cmds.is_empty() {
+            w.field(&hello::CMDS, self.cmds.as_bytes())?;
+        }
         Ok(w.len())
     }
 }
@@ -373,11 +473,12 @@ impl StatusResp {
 /// response shape). A device that keeps no such slots answers
 /// `Status::Unsupported`.
 pub fn parse_status_req(b: &[u8]) -> Result<u8, Status> {
-    byte(
-        &rd(b, &Cmd::Status.spec().req)?,
-        &status::TARGET,
-        target::APP,
-    )
+    status_req_of(&rd(b, &Cmd::Status.spec().req)?)
+}
+
+/// The same from a request the reader accepted.
+pub fn status_req_of(p: &Parsed<'_>) -> Result<u8, Status> {
+    byte(p, &status::TARGET, target::APP)
 }
 
 pub fn encode_status_req(t: u8, out: &mut [u8]) -> Result<usize, FrameError> {
@@ -573,6 +674,124 @@ impl VersionResp {
     }
 }
 
+/// CAPS request: the number of the command asked about.
+pub fn parse_caps_req(b: &[u8]) -> Result<u8, Status> {
+    caps_req_of(&rd(b, &Cmd::Caps.spec().req)?)
+}
+
+/// The same from a request the reader accepted.
+pub fn caps_req_of(p: &Parsed<'_>) -> Result<u8, Status> {
+    let [cmd] = at(p.core, 0)?;
+    Ok(cmd)
+}
+
+pub fn encode_caps_req(cmd: u8, out: &mut [u8]) -> Result<usize, FrameError> {
+    let mut w = FieldWriter::new(out);
+    w.put(&[cmd])?;
+    Ok(w.len())
+}
+
+/// The longest inner frame a relaying node forwards over one of its links.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TunnelMtu {
+    /// RELAY `link`.
+    pub link: u8,
+    pub mtu: u16,
+}
+
+const TUNNEL_LEN: usize = caps::TUNNEL_LEN as usize;
+
+/// The tunnel entries of a CAPS response, as they are packed in it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TunnelMtus<'a>(&'a [u8]);
+
+impl<'a> TunnelMtus<'a> {
+    /// What a node that does not relay, or any node about another command
+    /// than RELAY, sends: nothing.
+    pub const NONE: Self = TunnelMtus(&[]);
+
+    /// `entries` packed into `buf`. Refused when `buf` is too small or
+    /// they are more than a response carries (`caps::TUNNEL_MAX`).
+    pub fn pack(
+        entries: impl IntoIterator<Item = TunnelMtu>,
+        buf: &'a mut [u8],
+    ) -> Result<Self, FrameError> {
+        let mut w = FieldWriter::new(buf);
+        for e in entries {
+            w.put(&[e.link])?.put(&e.mtu.to_le_bytes())?;
+        }
+        let n = w.len();
+        if n > usize::from(caps::TUNNEL_MTU.max) {
+            return Err(FrameError::Field);
+        }
+        Ok(TunnelMtus(buf.get(..n).unwrap_or(&[])))
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = TunnelMtu> + 'a {
+        self.0.chunks_exact(TUNNEL_LEN).filter_map(|x| {
+            Some(TunnelMtu {
+                link: *x.first()?,
+                mtu: u16::from_le_bytes(at(x, 1).ok()?),
+            })
+        })
+    }
+
+    /// The entry of `link`.
+    pub fn of_link(&self, link: u8) -> Option<u16> {
+        self.iter().find(|e| e.link == link).map(|e| e.mtu)
+    }
+}
+
+/// CAPS response body: what the node knows of the command asked about.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CapsResp<'a> {
+    /// The fields it reads in the command's request. A must field outside
+    /// this set is refused with `Status::Field`.
+    pub req_fields: FieldSet,
+    /// The fields it may send in the command's response.
+    pub resp_fields: FieldSet,
+    pub tunnel_mtu: TunnelMtus<'a>,
+}
+
+impl<'a> CapsResp<'a> {
+    /// The longest body: both sets and every tunnel entry.
+    pub const MAX_LEN: usize = Self::FIELDS_LEN + 3 + caps::TUNNEL_MTU.max as usize;
+    /// The longest body without tunnel entries.
+    pub const FIELDS_LEN: usize = 2 * (2 + caps::FIELD_SET_LEN as usize);
+
+    /// The fields of `cmd` in the command table this node is built with.
+    pub const fn of(cmd: Cmd) -> CapsResp<'static> {
+        CapsResp {
+            req_fields: FieldSet::of_fields(cmd.spec().req.fields),
+            resp_fields: FieldSet::of_fields(cmd.spec().resp.fields),
+            tunnel_mtu: TunnelMtus::NONE,
+        }
+    }
+
+    pub fn parse(b: &'a [u8]) -> Result<Self, Status> {
+        let p = rd(b, &Cmd::Caps.spec().resp)?;
+        Ok(CapsResp {
+            req_fields: FieldSet::of(&p, &caps::REQ_FIELDS)?,
+            resp_fields: FieldSet::of(&p, &caps::RESP_FIELDS)?,
+            tunnel_mtu: TunnelMtus(p.field(&caps::TUNNEL_MTU).unwrap_or(&[])),
+        })
+    }
+
+    pub fn encode(&self, out: &mut [u8]) -> Result<usize, FrameError> {
+        let mut w = FieldWriter::new(out);
+        if !self.req_fields.is_empty() {
+            w.field(&caps::REQ_FIELDS, self.req_fields.as_bytes())?;
+        }
+        if !self.resp_fields.is_empty() {
+            w.field(&caps::RESP_FIELDS, self.resp_fields.as_bytes())?;
+        }
+        if !self.tunnel_mtu.0.is_empty() {
+            w.field(&caps::TUNNEL_MTU, self.tunnel_mtu.0)?;
+        }
+        Ok(w.len())
+    }
+}
+
 /// XFER_BEGIN request. `total_len` = `hdr_len` + body length; XFER_HDR
 /// offsets run over the header, XFER_DATA offsets over the body, both from 0.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -586,14 +805,17 @@ pub struct XferBegin {
 
 impl XferBegin {
     pub fn parse(b: &[u8]) -> Result<Self, Status> {
-        let p = rd(b, &Cmd::XferBegin.spec().req)?;
+        Self::of(&rd(b, &Cmd::XferBegin.spec().req)?)
+    }
+    /// From a request the reader accepted.
+    pub fn of(p: &Parsed<'_>) -> Result<Self, Status> {
         let [target] = at(p.core, 0)?;
-        let [slot] = need(&p, &xfer_begin::SLOT)?;
+        let [slot] = need(p, &xfer_begin::SLOT)?;
         Ok(XferBegin {
             target,
             slot,
             total_len: u32::from_le_bytes(at(p.core, 1)?),
-            hdr_len: val(&p, &xfer_begin::HDR_LEN)?.map_or(0, u16::from_le_bytes),
+            hdr_len: val(p, &xfer_begin::HDR_LEN)?.map_or(0, u16::from_le_bytes),
         })
     }
     pub fn encode(&self, out: &mut [u8]) -> Result<usize, FrameError> {
@@ -621,7 +843,10 @@ impl<'a> XferChunk<'a> {
     pub const OVERHEAD: usize = 4 + 1;
 
     pub fn parse(b: &'a [u8]) -> Result<Self, Status> {
-        let p = rd(b, &Cmd::XferData.spec().req)?;
+        Self::of(&rd(b, &Cmd::XferData.spec().req)?)
+    }
+    /// From a request the reader accepted.
+    pub fn of(p: &Parsed<'a>) -> Result<Self, Status> {
         Ok(XferChunk {
             offset: u32::from_le_bytes(at(p.core, 0)?),
             data: p.bulk,
@@ -666,9 +891,12 @@ pub struct SetPending {
 
 impl SetPending {
     pub fn parse(b: &[u8]) -> Result<Self, Status> {
-        let p = rd(b, &Cmd::SetPending.spec().req)?;
+        Self::of(&rd(b, &Cmd::SetPending.spec().req)?)
+    }
+    /// From a request the reader accepted.
+    pub fn of(p: &Parsed<'_>) -> Result<Self, Status> {
         let [target] = at(p.core, 0)?;
-        let [slot] = need(&p, &set_pending::SLOT)?;
+        let [slot] = need(p, &set_pending::SLOT)?;
         Ok(SetPending { target, slot })
     }
     pub fn encode(&self, out: &mut [u8]) -> Result<usize, FrameError> {
@@ -682,8 +910,12 @@ impl SetPending {
 /// REBOOT request: its `mode` ([`reboot_mode`]; left out on the wire for
 /// a normal restart).
 pub fn parse_reboot(b: &[u8]) -> Result<u8, Status> {
-    let p = rd(b, &Cmd::Reboot.spec().req)?;
-    byte(&p, &reboot::MODE, reboot_mode::NORMAL)
+    reboot_of(&rd(b, &Cmd::Reboot.spec().req)?)
+}
+
+/// The same from a request the reader accepted.
+pub fn reboot_of(p: &Parsed<'_>) -> Result<u8, Status> {
+    byte(p, &reboot::MODE, reboot_mode::NORMAL)
 }
 
 pub fn encode_reboot(mode: u8, out: &mut [u8]) -> Result<usize, FrameError> {
@@ -694,8 +926,12 @@ pub fn encode_reboot(mode: u8, out: &mut [u8]) -> Result<usize, FrameError> {
 
 /// CONFIRM request: its `target` (left out on the wire for the app).
 pub fn parse_confirm(b: &[u8]) -> Result<u8, Status> {
-    let p = rd(b, &Cmd::Confirm.spec().req)?;
-    byte(&p, &confirm::TARGET, target::APP)
+    confirm_of(&rd(b, &Cmd::Confirm.spec().req)?)
+}
+
+/// The same from a request the reader accepted.
+pub fn confirm_of(p: &Parsed<'_>) -> Result<u8, Status> {
+    byte(p, &confirm::TARGET, target::APP)
 }
 
 pub fn encode_confirm(t: u8, out: &mut [u8]) -> Result<usize, FrameError> {
@@ -721,13 +957,16 @@ impl<'a> Show<'a> {
     pub const MAX_LEN: usize = 1 + 3 + 3 + 6 + 2 + SHOW_TEXT_MAX;
 
     pub fn parse(b: &'a [u8]) -> Result<Self, Status> {
-        let p = rd(b, &Cmd::Show.spec().req)?;
+        Self::of(&rd(b, &Cmd::Show.spec().req)?)
+    }
+    /// From a request the reader accepted.
+    pub fn of(p: &Parsed<'a>) -> Result<Self, Status> {
         let [phase] = at(p.core, 0)?;
         Ok(Show {
-            node: byte(&p, &show::NODE, 0)?,
+            node: byte(p, &show::NODE, 0)?,
             phase,
-            percent: byte(&p, &show::PERCENT, 0)?,
-            version: val(&p, &show::VERSION)?.map_or(Version::default(), Version::from_le_bytes),
+            percent: byte(p, &show::PERCENT, 0)?,
+            version: val(p, &show::VERSION)?.map_or(Version::default(), Version::from_le_bytes),
             text: p.field(&show::TEXT).unwrap_or(&[]),
         })
     }
@@ -761,12 +1000,15 @@ impl<'a> Relay<'a> {
     pub const OVERHEAD_MAX: usize = 1 + 3 + 4 + 1;
 
     pub fn parse(b: &'a [u8]) -> Result<Self, Status> {
-        let p = rd(b, &Cmd::Relay.spec().req)?;
+        Self::of(&rd(b, &Cmd::Relay.spec().req)?)
+    }
+    /// From a request the reader accepted.
+    pub fn of(p: &Parsed<'a>) -> Result<Self, Status> {
         let [link] = at(p.core, 0)?;
         Ok(Relay {
             link,
-            addr: byte(&p, &relay::ADDR, link::UART_ADDR)?,
-            timeout_ms: val(&p, &relay::TIMEOUT_MS)?.map(u16::from_le_bytes),
+            addr: byte(p, &relay::ADDR, link::UART_ADDR)?,
+            timeout_ms: val(p, &relay::TIMEOUT_MS)?.map(u16::from_le_bytes),
             inner: p.bulk,
         })
     }
@@ -814,9 +1056,12 @@ pub struct SubCtl {
 
 impl SubCtl {
     pub fn parse(b: &[u8]) -> Result<Self, Status> {
-        let p = rd(b, &Cmd::SubCtl.spec().req)?;
-        let [n] = need(&p, &subctl::NRST)?;
-        let [b0] = need(&p, &subctl::BOOT0)?;
+        Self::of(&rd(b, &Cmd::SubCtl.spec().req)?)
+    }
+    /// From a request the reader accepted.
+    pub fn of(p: &Parsed<'_>) -> Result<Self, Status> {
+        let [n] = need(p, &subctl::NRST)?;
+        let [b0] = need(p, &subctl::BOOT0)?;
         if n > nrst::PULSE || b0 > boot0::HIGH {
             return Err(Status::Arg);
         }
@@ -839,7 +1084,10 @@ pub struct EnterRom {
 
 impl EnterRom {
     pub fn parse(b: &[u8]) -> Result<Self, Status> {
-        let p = rd(b, &Cmd::EnterRom.spec().req)?;
+        Self::of(&rd(b, &Cmd::EnterRom.spec().req)?)
+    }
+    /// From a request the reader accepted.
+    pub fn of(p: &Parsed<'_>) -> Result<Self, Status> {
         let [method] = at(p.core, 0)?;
         if !matches!(method, rom_method::FORCE_DOWNLOAD_BOOT | rom_method::PMIC) {
             return Err(Status::Arg);
@@ -869,9 +1117,12 @@ impl<'a> I2cRaw<'a> {
     pub const OVERHEAD_MAX: usize = 4 + 1;
 
     pub fn parse(b: &'a [u8]) -> Result<Self, Status> {
-        let p = rd(b, &Cmd::I2cRaw.spec().req)?;
+        Self::of(&rd(b, &Cmd::I2cRaw.spec().req)?)
+    }
+    /// From a request the reader accepted.
+    pub fn of(p: &Parsed<'a>) -> Result<Self, Status> {
         Ok(I2cRaw {
-            read_len: val(&p, &i2c_raw::READ_LEN)?.map_or(0, u16::from_le_bytes),
+            read_len: val(p, &i2c_raw::READ_LEN)?.map_or(0, u16::from_le_bytes),
             data: p.bulk,
         })
     }
@@ -893,11 +1144,14 @@ pub struct ConfRunReq {
 
 impl ConfRunReq {
     pub fn parse(b: &[u8]) -> Result<Self, Status> {
-        let p = rd(b, &Cmd::ConfRun.spec().req)?;
+        Self::of(&rd(b, &Cmd::ConfRun.spec().req)?)
+    }
+    /// From a request the reader accepted.
+    pub fn of(p: &Parsed<'_>) -> Result<Self, Status> {
         let [test_id] = at(p.core, 0)?;
         Ok(ConfRunReq {
             test_id,
-            param: val(&p, &conf_run::PARAM)?.map_or(0, u32::from_le_bytes),
+            param: val(p, &conf_run::PARAM)?.map_or(0, u32::from_le_bytes),
         })
     }
     pub fn encode(&self, out: &mut [u8]) -> Result<usize, FrameError> {
@@ -949,6 +1203,8 @@ const _: () = assert!(version::APP_SLOTS.max as usize == VersionSlots::<3>::LEN)
 
 #[cfg(test)]
 mod tests {
+    extern crate std;
+
     use super::*;
 
     fn hello(m: u8) -> HelloResp {
@@ -962,7 +1218,65 @@ mod tests {
             trial: true,
             key_id: [9; 8],
             max_payload: 256,
+            cmds: CmdSet::from_bytes(&[0xFF; 32]).unwrap(),
         }
+    }
+
+    #[test]
+    fn a_set_has_one_encoding() {
+        let set = CmdSet::EMPTY.with(1).with(0x41).with(0x71);
+        assert_eq!(set.as_bytes().len(), 15, "to the byte of its highest");
+        assert_eq!(CmdSet::from_bytes(set.as_bytes()), Ok(set));
+        assert_eq!(set.iter().collect::<std::vec::Vec<_>>(), [1, 0x41, 0x71]);
+        assert!(set.has(0x41) && !set.has(0x42) && !set.has(0xFF));
+        assert_eq!(CmdSet::EMPTY.as_bytes(), &[] as &[u8]);
+        assert_eq!(CmdSet::from_bytes(&[]), Err(Status::Arg));
+        assert_eq!(CmdSet::from_bytes(&[2, 0]), Err(Status::Arg), "zero tail");
+        assert_eq!(CmdSet::from_bytes(&[1; 33]), Err(Status::Arg));
+        assert_eq!(FieldSet::EMPTY.with(64), FieldSet::EMPTY, "no room");
+        assert_eq!(
+            CmdSet::EMPTY.with(3).union(CmdSet::EMPTY.with(9)),
+            CmdSet::EMPTY.with(9).with(3)
+        );
+    }
+
+    #[test]
+    fn caps_round_trips_and_names_the_tables_fields() {
+        let mut b = [0u8; 1 + CapsResp::MAX_LEN];
+        let n = encode_caps_req(Cmd::Relay as u8, &mut b).unwrap();
+        assert_eq!(parse_caps_req(&b[..n]), Ok(Cmd::Relay as u8));
+        let c = CapsResp::of(Cmd::Relay);
+        assert_eq!(c.req_fields, FieldSet::EMPTY.with(1).with(2));
+        assert_eq!(c.resp_fields, FieldSet::EMPTY);
+        let mut packed = [0u8; 255];
+        let links = [(1u8, 268u16), (2, 1031)];
+        let entries = links.map(|(link, mtu)| TunnelMtu { link, mtu });
+        let with = CapsResp {
+            tunnel_mtu: TunnelMtus::pack(entries, &mut packed).unwrap(),
+            ..c
+        };
+        let n = with.encode(&mut b).unwrap();
+        let back = CapsResp::parse(&b[..n]).unwrap();
+        assert_eq!(back, with);
+        assert_eq!(back.tunnel_mtu.of_link(2), Some(1031));
+        assert_eq!(back.tunnel_mtu.of_link(3), None);
+        // No more entries than a response on the smallest link carries.
+        let most = usize::from(caps::TUNNEL_MAX);
+        let many = |n: usize| {
+            (0..n).map(|i| TunnelMtu {
+                link: i as u8,
+                mtu: 1,
+            })
+        };
+        let mut room = [0u8; 300];
+        let full = CapsResp {
+            req_fields: FieldSet::from_bytes(&[0xFF; 8]).unwrap(),
+            resp_fields: FieldSet::from_bytes(&[0xFF; 8]).unwrap(),
+            tunnel_mtu: TunnelMtus::pack(many(most), &mut room).unwrap(),
+        };
+        assert_eq!(full.encode(&mut b), Ok(CapsResp::MAX_LEN));
+        let mut room = [0u8; 300];
+        assert!(TunnelMtus::pack(many(most + 1), &mut room).is_err());
     }
 
     #[test]

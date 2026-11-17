@@ -62,6 +62,7 @@ fn hello_resp() -> HelloResp {
         trial: true,
         key_id: KEY_ID,
         max_payload: max_payload::I2C as u16,
+        cmds: CmdSet::EMPTY,
     }
 }
 
@@ -113,6 +114,79 @@ fn hello_vectors() {
             (34, &[0x0C, 1, 1]),                      // field 6: trial
             (37, &[0x0E, 8]),                         // field 7: key id
             (39, &KEY_ID),
+        ],
+    );
+    assert_crc(&file);
+}
+
+/// HELLO from a node that says what it serves, and CAPS about one of those
+/// commands. `frame_hello_resp.bin` is the answer of a node that does not
+/// say, and stays byte for byte what it was.
+#[test]
+fn capability_vectors() {
+    let served = [Cmd::Hello, Cmd::Status, Cmd::Version, Cmd::Caps, Cmd::Relay];
+    let resp = HelloResp {
+        cmds: served.iter().fold(CmdSet::EMPTY, |s, c| s.with(*c as u8)),
+        ..hello_resp()
+    };
+    let file = golden(
+        "frame_hello_resp_cmds.bin",
+        &frame(flags::RESP, 0x01, Cmd::Hello, |b| resp.encode(b).unwrap()),
+    );
+    let f = decode(&file);
+    let (st, body) = split_status(f.payload).unwrap();
+    assert_eq!(st, Status::Ok);
+    assert_eq!(HelloResp::parse(body).unwrap(), resp);
+    expect_at(
+        &file,
+        &[
+            (0, &[0xDA, 0x6F, 2, flags::RESP, 1, 0x01, 52, 0]),
+            (37, &[0x0E, 8]), // field 7: key id, as without `cmds`
+            (39, &KEY_ID),
+            // field 8: cmds 0x01 to 0x04 in byte 0, 0x50 in byte 10
+            (47, &[0x10, 11, 0x1E, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x01]),
+        ],
+    );
+    assert_crc(&file);
+
+    let file = golden(
+        "frame_caps_req.bin",
+        &frame(0, 0x16, Cmd::Caps, |b| {
+            encode_caps_req(Cmd::Relay as u8, b).unwrap()
+        }),
+    );
+    let f = decode(&file);
+    assert_eq!(parse_caps_req(f.payload), Ok(Cmd::Relay as u8));
+    expect_at(&file, &[(0, &[0xDA, 0x6F, 2, 0, 0x16, 0x04, 1, 0, 0x50])]);
+    assert_crc(&file);
+
+    let links = [(1u8, 268u16), (2, 1031)];
+    let mut packed = [0u8; 6];
+    let caps = CapsResp {
+        tunnel_mtu: TunnelMtus::pack(
+            links.map(|(link, mtu)| TunnelMtu { link, mtu }),
+            &mut packed,
+        )
+        .unwrap(),
+        ..CapsResp::of(Cmd::Relay)
+    };
+    let file = golden(
+        "frame_caps_resp.bin",
+        &frame(flags::RESP, 0x16, Cmd::Caps, |b| caps.encode(b).unwrap()),
+    );
+    let f = decode(&file);
+    let (st, body) = split_status(f.payload).unwrap();
+    assert_eq!(st, Status::Ok);
+    assert_eq!(CapsResp::parse(body).unwrap(), caps);
+    expect_at(
+        &file,
+        &[
+            (0, &[0xDA, 0x6F, 2, flags::RESP, 0x16, 0x04, 12, 0]),
+            (8, &[0x00]),           // status OK
+            (9, &[0x02, 1, 0x06]),  // field 1: request fields 1 and 2
+            (12, &[0x06, 6]),       // field 3: tunnel entries
+            (14, &[1, 0x0C, 0x01]), // link 1: 268
+            (17, &[2, 0x07, 0x04]), // link 2: 1031
         ],
     );
     assert_crc(&file);

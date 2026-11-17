@@ -977,6 +977,20 @@ fn the_rom_path_reaches_the_loader_at_its_definitions_address() {
     assert_eq!(v, Version::new(1, 1, 0));
 }
 
+/// The host takes the ROM path to the node the hub's I2C ROM link reaches
+/// whether or not the hub's end names the reset and boot lines, as
+/// `dagon gen` gives the hub that node's loader address.
+#[test]
+fn the_rom_path_follows_the_rom_link_without_named_lines() {
+    let s = sim();
+    wipe_seg(&s);
+    let topo = topology(&yaml().replace(", nrst: 18, boot: 28", ""));
+    assert_eq!(
+        block_on(host(&s).write_path(SEG, &topo, &roms())).unwrap(),
+        WritePath::Rom
+    );
+}
+
 /// A silent node with a ROM entry waits for the confirmation: nothing is
 /// erased, no line moves and no ROM event goes out before it.
 #[test]

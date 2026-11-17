@@ -34,7 +34,7 @@ use alloc::vec;
 use alloc::vec::Vec;
 use dagon_format::{FormatError, Version};
 use dagon_port::timeout::{EraseLayout, EraseRegion, NodeTimings, SlotLayout, REQUEST_MS};
-use dagon_proto::payload::{HelloReq, HelloResp, Relay};
+use dagon_proto::payload::{self, HelloReq, HelloResp, Relay};
 use dagon_proto::{find_sof, flags, max_payload, split_status, Cmd, Frame, FrameError, Status};
 
 /// What becomes of the link to the hub while the hub reboots.
@@ -285,7 +285,7 @@ impl<T: Transport, C: HostClock> Host<T, C> {
         match to {
             Target::Local => up,
             Target::Linked { max_payload, .. } => usize::from(max_payload)
-                .min(up.saturating_sub(Relay::HEAD_LEN + dagon_proto::frame_len(0))),
+                .min(up.saturating_sub(Relay::OVERHEAD_MAX + dagon_proto::frame_len(0))),
         }
     }
 
@@ -494,11 +494,10 @@ impl<T: Transport, C: HostClock> Host<T, C> {
                     let relay = Relay {
                         link,
                         addr,
-                        timeout_ms: timeout_ms.min(u16::MAX as u32) as u16,
+                        timeout_ms: Some(timeout_ms.min(u16::MAX as u32) as u16),
                         inner: &inner,
                     };
-                    let mut p = vec![0u8; Relay::HEAD_LEN + inner.len()];
-                    relay.encode(&mut p).expect("sized for the frame");
+                    let p = request(|b| relay.encode(b));
                     let frame = encode(fl, outer, Cmd::Relay as u8, &p);
                     self.exchange(outer, Cmd::Relay, &frame, timeout_ms + REQUEST_MS)
                         .await
@@ -539,15 +538,22 @@ impl<T: Transport, C: HostClock> Host<T, C> {
     }
 }
 
-fn hello_request(max: usize) -> [u8; 6] {
-    let mut b = [0u8; 6];
-    HelloReq {
+fn hello_request(max: usize) -> Vec<u8> {
+    let hello = HelloReq {
         proto_ver: dagon_proto::PROTO_VERSION as u32,
         max_payload: max.min(u16::MAX as usize) as u16,
-    }
-    .encode(&mut b)
-    .expect("6 bytes");
-    b
+    };
+    request(|b| hello.encode(b))
+}
+
+/// The request payload `enc` writes.
+pub(crate) fn request(
+    enc: impl FnOnce(&mut [u8]) -> core::result::Result<usize, FrameError>,
+) -> Vec<u8> {
+    let mut p = vec![0u8; max_payload::USB];
+    let n = enc(&mut p).expect("a request fits the largest payload");
+    p.truncate(n);
+    p
 }
 
 /// Waits before each resend of a plain request.
@@ -555,22 +561,10 @@ pub const RETRY_BACKOFF_MS: [u32; 3] = [50, 100, 200];
 
 /// Commands a resend cannot harm: reads, SHOW, and the transfer
 /// and state steps the receiver deduplicates by seq (CONFIRM among them).
-/// Not REBOOT or ENTER_ROM (a node that already reset, or left for its ROM
-/// loader, has no memory of the seq), nor CONF_RUN (a conformance step
-/// acts on the node every time it runs), nor the hub's line and raw I2C
-/// controls (no seq memory on the hub side).
+/// The command table says which (`dagon_proto::table::CmdSpec::idempotent`).
 fn repeatable(cmd: Cmd) -> bool {
-    !NEVER_RESENT.contains(&cmd)
+    cmd.spec().idempotent
 }
-
-/// Commands whose second run is not the first one's answer.
-const NEVER_RESENT: [Cmd; 5] = [
-    Cmd::Reboot,
-    Cmd::EnterRom,
-    Cmd::ConfRun,
-    Cmd::SubCtl,
-    Cmd::I2cRaw,
-];
 
 fn encode(fl: u8, seq: u8, cmd: u8, payload: &[u8]) -> Vec<u8> {
     let mut out = vec![0u8; dagon_proto::frame_len(payload.len())];
@@ -591,7 +585,8 @@ fn relayed<E>(resp: &[u8], max: usize, seq: u8, cmd: Cmd) -> Result<Vec<u8>, E> 
     if status != Status::Ok {
         return Err(Error::Relay(status));
     }
-    let (f, _) = Frame::decode(body, max).map_err(|_| Error::BadResponse)?;
+    let inner = payload::parse_bulk_resp(Cmd::Relay, body).map_err(|_| Error::BadResponse)?;
+    let (f, _) = Frame::decode(inner, max).map_err(|_| Error::BadResponse)?;
     if f.flags & flags::RESP == 0 || f.seq != seq || f.cmd != cmd as u8 {
         return Err(Error::BadResponse);
     }

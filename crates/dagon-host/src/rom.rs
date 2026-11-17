@@ -10,7 +10,7 @@ use dagon_format::statelog::{self, kind, reason, slot, FaceHeader, Record};
 use dagon_format::{sha256, FormatError, ImageHeader};
 use dagon_port::timeout::REQUEST_MS;
 use dagon_port::{BusError, I2cBus, Nrst, SubControl};
-use dagon_proto::payload::{phase, I2cRaw};
+use dagon_proto::payload::{self, phase, I2cRaw, SubCtl};
 use dagon_proto::{Cmd, Status};
 use dagon_romlink::{Region, RomLink, FRAME_TIMEOUT_MS};
 
@@ -228,17 +228,17 @@ impl<T: Transport, C: HostClock> HubRom<'_, T, C> {
             read_len: buf.len() as u16,
             data,
         };
-        let mut p = vec![0u8; 4 + data.len()];
-        req.encode(&mut p).map_err(|_| BusError::Io)?;
+        let p = crate::request(|b| req.encode(b));
         let body = self
             .host
             .call(Target::Local, Cmd::I2cRaw, &p, self.timeout)
             .await
             .map_err(bus_error)?;
+        let body = payload::parse_bulk_resp(Cmd::I2cRaw, &body).map_err(|_| BusError::Io)?;
         if body.len() != buf.len() {
             return Err(BusError::Io);
         }
-        buf.copy_from_slice(&body);
+        buf.copy_from_slice(body);
         Ok(())
     }
 }
@@ -257,13 +257,13 @@ impl<T: Transport, C: HostClock> I2cBus for HubRom<'_, T, C> {
 
 impl<T: Transport, C: HostClock> SubControl for HubRom<'_, T, C> {
     async fn set_lines(&mut self, nrst: Nrst, boot0_high: bool) -> Result<(), BusError> {
+        let lines = SubCtl {
+            nrst: nrst as u8,
+            boot0: boot0_high as u8,
+        };
+        let p = crate::request(|b| lines.encode(b));
         self.host
-            .call(
-                Target::Local,
-                Cmd::SubCtl,
-                &[nrst as u8, boot0_high as u8],
-                REQUEST_MS,
-            )
+            .call(Target::Local, Cmd::SubCtl, &p, REQUEST_MS)
             .await
             .map(|_| ())
             .map_err(bus_error)

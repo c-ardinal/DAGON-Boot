@@ -13,7 +13,10 @@ fn rust_sources(dir: &Path, out: &mut Vec<PathBuf>) {
         let p = e.path();
         let name = e.file_name().to_string_lossy().into_owned();
         if p.is_dir() {
-            if !matches!(name.as_str(), "target" | "tests" | "node_modules" | ".git") {
+            if !matches!(
+                name.as_str(),
+                "target" | "tests" | "benches" | "node_modules" | ".git"
+            ) {
                 rust_sources(&p, out);
             }
         } else if name.ends_with(".rs") && !name.starts_with("tests") {
@@ -161,9 +164,13 @@ const ENTRY_WORDS: [&str; 7] = [
     "SET_PENDING",
 ];
 
-fn is_wire_name(name: &str) -> bool {
+/// The words of [`WIRE_WORDS`] shipped Rust may not give a number: there
+/// `field`, `key` and `wire` name many things that are not on the wire.
+const RUST_WIRE_WORDS: [&str; 3] = ["cmd", "command", "status"];
+
+fn is_wire_name(name: &str, words: &[&str]) -> bool {
     let lower = name.to_ascii_lowercase();
-    WIRE_WORDS.iter().any(|w| lower.contains(w)) || name.starts_with("F_")
+    words.iter().any(|w| lower.contains(w)) || name.starts_with("F_")
 }
 
 fn starts_with_number(s: &str) -> bool {
@@ -182,8 +189,8 @@ const COMPARES: [&str; 4] = ["===", "!==", "==", "!="];
 /// Whether one line gives a wire name a number: a declaration, assignment
 /// or entry (`name = N`, `name: N`), or a comparison of it with a literal
 /// on either side. `entries`: also the all-capitals entries of the files
-/// that speak the wire.
-fn line_names_a_wire_number(line: &str, entries: bool) -> bool {
+/// that speak the wire. `words`: what makes a name the wire's.
+fn line_names_a_wire_number(line: &str, entries: bool, words: &[&str]) -> bool {
     let b = line.as_bytes();
     let word = |c: u8| c.is_ascii_alphanumeric() || c == b'_';
     let mut i = 0;
@@ -200,7 +207,7 @@ fn line_names_a_wire_number(line: &str, entries: bool) -> bool {
         let entry = entries
             && name.bytes().all(|c| c.is_ascii_uppercase() || c == b'_')
             && ENTRY_WORDS.iter().any(|p| name.starts_with(p));
-        if !(is_wire_name(name) || entry) || name.as_bytes()[0].is_ascii_digit() {
+        if !(is_wire_name(name, words) || entry) || name.as_bytes()[0].is_ascii_digit() {
             continue;
         }
         let rest = line[i..].trim_start();
@@ -210,8 +217,17 @@ fn line_names_a_wire_number(line: &str, entries: bool) -> bool {
             }
             continue;
         }
-        let set = (rest.starts_with('=') && !rest.starts_with("=>")) || rest.starts_with(':');
-        if set && starts_with_number(&rest[1..]) {
+        // `name = N`, `name: N`, and the typed `name: Type = N`.
+        fn set(v: &str) -> Option<&str> {
+            v.strip_prefix('=').filter(|v| !v.starts_with(['=', '>']))
+        }
+        let typed = rest.strip_prefix(':').and_then(|v| {
+            set(v.trim_start_matches(|c: char| {
+                c.is_ascii_alphanumeric() || "_ <>[]|.&'".contains(c)
+            }))
+        });
+        let value = set(rest).or(typed).or(rest.strip_prefix(':'));
+        if value.is_some_and(starts_with_number) {
             return true;
         }
         // The literal first: `0x01 === frame.cmd`.
@@ -239,7 +255,7 @@ fn wire_numbers(text: &str, entries: bool) -> Vec<usize> {
         if code.starts_with("//") || code.starts_with('*') || code.starts_with("/*") {
             continue;
         }
-        let mut hit = line_names_a_wire_number(l, entries);
+        let mut hit = line_names_a_wire_number(l, entries, &WIRE_WORDS);
         if depth > 0 {
             let case = code.strip_prefix("case ").is_some_and(starts_with_number);
             hit |= case;
@@ -247,7 +263,7 @@ fn wire_numbers(text: &str, entries: bool) -> Vec<usize> {
             depth = depth.saturating_sub(l.matches('}').count());
         } else if let Some(at) = l.find("switch") {
             let head = l[at..].split('{').next().unwrap_or("");
-            if is_wire_name(head) {
+            if is_wire_name(head, &WIRE_WORDS) {
                 depth = l[at..].matches('{').count().max(1);
                 depth = depth.saturating_sub(l[at..].matches('}').count());
             }
@@ -306,6 +322,9 @@ fn the_page_holds_no_command_status_or_field_number() {
         "const F_SLOT = 1;",
         "export const CMD = { STATUS: 2 };",
         "const cmdHello = 1;",
+        "const cmdHello: number = 1;",
+        "let status: number = 3;",
+        "export const CMD_XFER: Readonly<number> = 0x10;",
         "const fieldSlot = 1;",
         "let wireVersion = 2;",
         "  protoVer: 2,",
@@ -380,31 +399,51 @@ fn the_page_holds_no_command_status_or_field_number() {
 }
 
 /// Shipped Rust outside dagon-proto compares no command or status with a
-/// literal and declares no command or status number of its own.
+/// literal on either side and gives no command or status name a number of
+/// its own: every crate, target and sample is read, whether it names
+/// dagon_proto or not.
 #[test]
 fn shipped_rust_writes_no_command_or_status_number() {
-    let framed: Vec<String> = shipped()
-        .into_iter()
-        .filter(|(name, code)| !name.starts_with(PROTO) && code.contains("dagon_proto"))
-        .map(|(name, _)| name)
-        .collect();
+    let rust = |l: &str| line_names_a_wire_number(l, false, &RUST_WIRE_WORDS);
+    for planted in [
+        "const CMD_HELLO: u8 = 1;",
+        "pub(crate) const CMD_XFER_BEGIN: u8 = 0x10;",
+        "static STATUS_BUSY: u8 = 4;",
+        "    if 0x01 == frame.cmd {",
+        "    if frame.cmd != 0x02 {",
+        "    let status: u8 = 3;",
+    ] {
+        assert!(rust(planted), "not caught: {planted}");
+    }
+    for fine in [
+        "    if frame.cmd == Cmd::Hello as u8 {",
+        "fn reply(status: u8) -> Frame {",
+        "    let cmd: u8 = frame.cmd;",
+        "const HDR_LEN: usize = 16;",
+    ] {
+        assert!(!rust(fine), "caught: {fine}");
+    }
+    // (file, the exact code, why its number is not the wire's)
+    const NOT_WIRE: [(&str, &str, &str); 3] = [
+        (
+            "crates/dagon-agent/src/lib.rs",
+            "emits StatusAsked = 0x32 {}",
+            "the agent's own event-log code",
+        ),
+        (
+            "crates/dagon-cli/src/serve/http.rs",
+            "status: 200,",
+            "dagon serve's HTTP response status",
+        ),
+        (
+            "samples/esp32s3-app/src/display.rs",
+            "const OP_COMMAND: u8 = 0x02;",
+            "the CO5300 display's SPI opcode",
+        ),
+    ];
     let hits = offenders(|name, l| {
-        let lower = l.to_ascii_lowercase();
-        let compared = ["cmd ==", "cmd !=", "status ==", "status !="]
-            .iter()
-            .any(|c| lower.split(c).skip(1).any(starts_with_number));
-        // The name a const or static declares, and a literal as its value.
-        let declared = ["const ", "static "].iter().any(|k| {
-            lower.split(k).nth(1).is_some_and(|d| {
-                let (name, value) = d.split_once('=').unwrap_or((d, ""));
-                let name = name.split(':').next().unwrap_or("");
-                let wire = ["cmd", "command", "status"]
-                    .iter()
-                    .any(|w| name.contains(w));
-                wire && starts_with_number(value)
-            })
-        });
-        framed.iter().any(|f| f == name) && (compared || declared)
+        let allowed = NOT_WIRE.iter().any(|(f, c, _)| *f == name && l.contains(c));
+        !name.starts_with(PROTO) && !allowed && rust(l)
     });
     assert!(hits.is_empty(), "{hits:?}");
 }

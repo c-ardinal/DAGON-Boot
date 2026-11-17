@@ -328,11 +328,13 @@ struct ScriptedPc<'a> {
     requests: &'a Frames,
     replies: &'a Frames,
     frame: Vec<u8>,
+    /// The uplink's largest payload.
+    max: usize,
 }
 
 impl Link for ScriptedPc<'_> {
     fn max_payload(&self) -> usize {
-        max_payload::USB
+        self.max
     }
     fn reconnect(&self) -> Reconnect {
         Reconnect::Reenumerates
@@ -510,6 +512,7 @@ fn the_relay_serves_the_pc_over_its_links() {
         requests: &requests,
         replies: &replies,
         frame: Vec::new(),
+        max: max_payload::USB,
     };
     let pc = Pc {
         requests: &requests,
@@ -646,6 +649,7 @@ fn a_relay_without_a_recovery_answers_i2c_raw_unsupported() {
         requests: &requests,
         replies: &replies,
         frame: Vec::new(),
+        max: max_payload::USB,
     };
     let pc = Pc {
         requests: &requests,
@@ -665,6 +669,106 @@ fn a_relay_without_a_recovery_answers_i2c_raw_unsupported() {
     };
     let (mut serving, mut scenario) = (std::pin::pin!(serving), std::pin::pin!(scenario));
     let workers: Vec<Pin<&mut dyn Future<Output = ()>>> = vec![serving.as_mut()];
+    run(&clock, &bus, workers, scenario.as_mut());
+}
+
+/// Over an uplink smaller than the link it relays to, the tunnel is what a
+/// RELAY on the uplink carries: an inner frame over it, or one that is not a
+/// whole frame of this wire, is refused with E_ARG and nothing reaches the
+/// link.
+#[test]
+fn the_relay_refuses_what_it_cannot_carry_before_forwarding() {
+    let (bus, sim_ports) = sample_bus();
+    let clock = VirtualClock::default();
+    let stream_port: Port<[u8; frame_len(max_payload::UART)]> = Port::new(&LINKS[1]);
+    let links = [LinkRoute {
+        link: LINKS[1],
+        port: Some(&stream_port),
+    }];
+    let (requests, replies) = (Frames::new(), Frames::new());
+    let asked = Rc::new(RefCell::new(Vec::new()));
+    let (own, _app) = agent();
+    let relay: Relay<'_, _, SimLines<'_>, _, _> = Relay {
+        agent: own,
+        links: &links,
+        recovery: None,
+        watch: NoWatchdog,
+        clock: clock.clone(),
+        config: Config::default(),
+    };
+    let up = ScriptedPc {
+        requests: &requests,
+        replies: &replies,
+        frame: Vec::new(),
+        max: max_payload::I2C,
+    };
+    let pc = Pc {
+        requests: &requests,
+        replies: &replies,
+        seq: Cell::new(0),
+    };
+    // I2C uplink, UART link: the I2C payload less the RELAY around it.
+    let mtu = max_payload::I2C - RelayReq::OVERHEAD_MAX;
+    let frame = |len: usize| {
+        let mut f = vec![0u8; len];
+        finish(&mut f, 0, 0x5A, 0x7F, len - frame_len(0)).unwrap();
+        f
+    };
+    let scenario = async {
+        let over = frame(mtu + 1);
+        // The request itself fits the uplink.
+        assert!(RelayReq::OVERHEAD_MAX - 3 + over.len() <= max_payload::I2C);
+        assert_eq!(
+            pc.relay(STREAM, STREAM_ADDR, 300, &over).await.0,
+            Status::Arg
+        );
+        let mut bad_crc = frame(32);
+        bad_crc[12] ^= 1;
+        assert_eq!(
+            pc.relay(STREAM, STREAM_ADDR, 300, &bad_crc).await.0,
+            Status::Arg
+        );
+        let mut other_wire = frame(32);
+        other_wire[2] ^= 0x80;
+        assert_eq!(
+            pc.relay(STREAM, STREAM_ADDR, 300, &other_wire).await.0,
+            Status::Arg
+        );
+        let mut trailing = frame(32);
+        trailing.push(0);
+        assert_eq!(
+            pc.relay(STREAM, STREAM_ADDR, 300, &trailing).await.0,
+            Status::Arg
+        );
+        assert!(asked.borrow().is_empty(), "nothing reached the link");
+
+        // At the tunnel's size the frame goes through.
+        let (s, body) = pc.relay(STREAM, STREAM_ADDR, 300, &frame(mtu)).await;
+        assert_eq!(s, Status::Ok);
+        assert!(Frame::decode(&body, max_payload::UART).is_ok());
+        assert_eq!(asked.borrow().len(), 1);
+    };
+    let serving = async move {
+        serve(relay, up).await;
+    };
+    let on_stream = async {
+        let mut l = SimNodeLink {
+            bus: &bus,
+            clock: clock.clone(),
+            id: STREAM,
+            addressed: false,
+            port: sim_ports[1],
+            asked: asked.clone(),
+        };
+        run_link(&mut l, &stream_port, NoWatchdog, task::link(0)).await;
+    };
+    let (mut serving, mut on_stream, mut scenario) = (
+        std::pin::pin!(serving),
+        std::pin::pin!(on_stream),
+        std::pin::pin!(scenario),
+    );
+    let workers: Vec<Pin<&mut dyn Future<Output = ()>>> =
+        vec![serving.as_mut(), on_stream.as_mut()];
     run(&clock, &bus, workers, scenario.as_mut());
 }
 

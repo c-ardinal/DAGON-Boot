@@ -103,8 +103,10 @@ what = "target thumbv6m-none-eabi"
 line = "thumbv6m-none-eabi"
 
 [execution]
+erased_value = 255
 flash_op = "xip-off-masked"
 masked_max_us = "unmeasured"
+write_unit = 1
 
 [[execution.erase_regions]]
 len = 4194304
@@ -504,6 +506,7 @@ start = 269778944
 target = "app"
 
 [stage0]
+head_bytes = 256
 key = "flash"
 region_bytes = 16384
 

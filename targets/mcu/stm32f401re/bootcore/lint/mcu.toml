@@ -95,8 +95,10 @@ what = "ST-LINK probe connected"
 prefix = "["
 
 [execution]
+erased_value = 255
 flash_op = "fetch-stall"
 masked_max_us = "unmeasured"
+write_unit = 4
 
 [[execution.erase_regions]]
 len = 65536
@@ -989,6 +991,7 @@ start = 134479872
 target = "app"
 
 [stage0]
+head_bytes = 0
 key = "flash"
 region_bytes = 16384
 

@@ -60,7 +60,7 @@ pub struct Port<B: ?Sized = [u8]> {
 /// largest payload, and at least one frame of its kind's maximum
 /// ([`link_limits`]), the frames a driver of that kind receives.
 pub const fn fits_link(link: &RelayLinkDef, n: usize) -> bool {
-    let own = n == crate::cmd::buffer_len(link);
+    let own = n == link.buffer_len();
     match link_limits(link.kind) {
         Some(l) => own && n >= frame_len(l.max_payload),
         None => own,

@@ -43,7 +43,7 @@ impl Extension for AppExt {
         "test-app"
     }
     fn on_event(&mut self, e: &Event<'_>, _: &Ctx<'_>) {
-        let k = e.kind();
+        let k = kind_name(e);
         let k = if e.is_replayed() {
             format!("{}replay:{k}", self.prefix)
         } else {
@@ -469,4 +469,12 @@ fn the_snapshot_shows_a_rollback() {
         (s.phase, s.version, s.trial),
         (Phase::RolledBack, Version::new(1, 0, 0), false)
     );
+}
+
+/// The kind's name as a log display shows it, looked up from its code.
+fn kind_name(e: &dagon_events::Event<'_>) -> &'static str {
+    [&dagon_agent::MACHINES, &dagon_events::MACHINES]
+        .iter()
+        .find_map(|m| m.entry(e.layer(), e.kind()))
+        .map_or("?", |x| x.kind)
 }

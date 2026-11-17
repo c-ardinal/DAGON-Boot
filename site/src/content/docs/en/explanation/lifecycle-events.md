@@ -376,8 +376,16 @@ neither `Copy` nor `Clone`, so only the declaring crate builds one; the
 owned compact form of every payload and its decoding (2.4); `CATALOG`
 (machine, states, and per transition: from, to, trigger, kind, code,
 payload fields with their bytes, the `observe` paths, the `action` and
-`retired` flags); and a test per machine that drives every transition
-from every state and replays its record. Per crate it defines the
+`retired` flags); the transition table generated from the declaration
+(`StateId`, `Trigger` and `State::leaves(Trigger)`), which code that must
+know whether a transition will follow asks instead of comparing names;
+`REPLAY`, the machine's record decoder that replay takes; and a test per
+machine that drives every transition from every state, replays its
+record and checks the table against the catalog. An event carries only
+its layer, its kind's code (`Event::kind()`, a `u8`) and its payload, so
+an image that delivers events links no catalog name; names are looked up
+from the code only where a person reads them (a log display,
+`dagon_catalog::name`, and the generated pages). Per crate it defines the
 `MACHINES` static, which the catalog registry (`dagon-catalog`) lists;
 a test there fails while a crate that depends on `dagon-events` is
 missing. A state no transition reaches, a transition without `emits` or

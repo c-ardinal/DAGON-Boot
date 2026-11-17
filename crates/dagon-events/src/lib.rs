@@ -26,7 +26,7 @@ mod ports;
 mod published;
 
 pub use board::{BoardBringUp, BusError, Device, Shared};
-pub use catalog::{Catalog, Entry, Field, Flags, Layer, Machines, Observe};
+pub use catalog::{Catalog, Entry, Field, Flags, Layer, Machines, Observe, Replay};
 pub use compact::Compact;
 pub use compose::{
     compose, compose_boot, compose_unpublished, BootComposed, BootExtension, Bounds, Clock,

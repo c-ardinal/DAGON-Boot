@@ -5,6 +5,11 @@ license.workspace = true
 version = "0.1.0"
 description = "The boot core's sequence as a state machine: every step from the armed watchdog to the jump or the halt is an event the boot core's extensions observe"
 
+[features]
+# The boot core images' memory copy and fill, one byte at a time, in place
+# of the compiler's larger routines (bare-metal builds only).
+small-mem = []
+
 [dependencies]
 dagon-core = { path = "../dagon-core" }
 dagon-events = { path = "../dagon-events" }

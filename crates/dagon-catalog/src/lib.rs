@@ -20,9 +20,9 @@ use std::fmt::Write;
 use dagon_events::Machines;
 pub use dagon_events::EVENT_FORMAT;
 
-/// The boot kind that reports an extension call over its time limit: the
-/// boot core delivers it to its observers once per such call.
-pub const BOOT_OVERRAN_KIND: &str = dagon_events::boot_extensions::ExtensionOverran::ENTRY.kind;
+/// The code of the boot kind that reports an extension call over its time
+/// limit: the boot core delivers it to its observers once per such call.
+pub const BOOT_OVERRAN: u8 = dagon_events::boot_extensions::ExtensionOverran::ENTRY.code;
 /// What host tools validate against: the catalog types, the ports and the
 /// decision points.
 pub use dagon_events::{
@@ -47,6 +47,16 @@ pub fn machines() -> Vec<Catalog> {
         .iter()
         .flat_map(|m| m.catalogs().iter().copied())
         .collect()
+}
+
+/// The display name of the event of kind `code` in `layer` (`app.confirmed`),
+/// as the Events page shows it: events carry only their layer and code, and
+/// a log display names them here. `None` for a kind no catalog has.
+pub fn name(layer: Layer, code: u8) -> Option<String> {
+    REGISTRY
+        .iter()
+        .find_map(|m| m.entry(layer, code))
+        .map(|e| format!("{}.{}", layer.name(), e.kind))
 }
 
 /// Faults across machines that one machine's declaration cannot see: two

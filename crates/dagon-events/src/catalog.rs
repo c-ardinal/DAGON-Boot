@@ -129,11 +129,13 @@ pub struct Catalog {
     pub initial: &'static str,
     pub states: &'static [&'static str],
     pub entries: &'static [Entry],
-    /// Decodes a record of this machine into its payload and hands it to
-    /// the callback; `false` when the record is not this machine's or does
-    /// not decode. Used by [`crate::Composed::replay`].
+    /// The machine's `REPLAY` ([`Replay`]).
     #[doc(hidden)]
     pub __replay: Replay,
+    /// The machine's generated transition table, by state index and
+    /// event code ([`Catalog::leaves`]).
+    #[doc(hidden)]
+    pub __transits: fn(u8, u8) -> Option<bool>,
 }
 
 /// The machines one crate declares: the `MACHINES` static
@@ -159,15 +161,35 @@ impl Machines {
     pub const fn catalogs(&self) -> &'static [Catalog] {
         self.catalogs
     }
+
+    /// The entry of kind `code` in `layer`, for a display or a tool that
+    /// names an event (codes are unique within a layer).
+    pub fn entry(&self, layer: Layer, code: u8) -> Option<&'static Entry> {
+        self.catalogs
+            .iter()
+            .filter(|c| c.layer == layer)
+            .find_map(|c| c.entry(code))
+    }
 }
 
-/// See [`Catalog::__replay`].
-#[doc(hidden)]
+/// A machine's record decoder (its generated `REPLAY`): decodes a record
+/// of the machine into its payload and hands it to the callback; `false`
+/// when the record is not the machine's, is not replayable, or does not
+/// decode. [`crate::Composed::replay`] takes the decoders of the machines
+/// it reads, so an image links no catalog to replay.
 pub type Replay = fn(&crate::EventRecord, &mut dyn FnMut(&dyn crate::Payload)) -> bool;
 
 impl Catalog {
     pub fn entry(&self, code: u8) -> Option<&'static Entry> {
         self.entries.iter().find(|e| e.code == code)
+    }
+
+    /// Whether the transition emitting kind `code` leaves the state at
+    /// index `state` of `states`, read from the machine's generated
+    /// transition table (`State::leaves`); `None` for a state or code the
+    /// machine does not have.
+    pub fn leaves(&self, state: u8, code: u8) -> Option<bool> {
+        (self.__transits)(state, code)
     }
 }
 

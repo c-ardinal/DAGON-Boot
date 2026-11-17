@@ -263,9 +263,13 @@ impl Plan<'_> {
                 self.ranges = [None, None];
                 return Some(Err(PlanError::Uncovered { addr: at as u32 }));
             };
-            let unit = u64::from(g.unit.max(1));
-            let addr = u64::from(g.start) + (at - u64::from(g.start)) / unit * unit;
-            self.at = addr + unit;
+            // `at` lies inside the region, so its offset fits 32 bits and
+            // the division is a 32-bit one (no 64-bit divider is linked);
+            // only the sums can pass 2^32.
+            let unit = g.unit.max(1);
+            let off = (at - u64::from(g.start)) as u32;
+            let addr = u64::from(g.start) + u64::from(off / unit * unit);
+            self.at = addr + u64::from(unit);
             Some(Ok(EraseOp {
                 addr: addr as u32,
                 len: g.unit,
@@ -497,6 +501,91 @@ mod tests {
             LAYOUT.plan(1, 1, 512, 0x1_0000).err(),
             Some(PlanError::Uncovered { addr: 0x2_5000 })
         );
+    }
+
+    /// `Plan::step` as written with 64-bit offsets and division: the
+    /// definition its 32-bit form must reproduce bit for bit.
+    fn step_wide(
+        regions: &[EraseRegion],
+        ranges: &mut [Option<ByteRange>; 2],
+        range: &mut usize,
+        at: &mut u64,
+    ) -> Option<Result<EraseOp, PlanError>> {
+        let end = |r: ByteRange| u64::from(r.start) + u64::from(r.len);
+        while !ranges.get(*range)?.is_some_and(|r| *at < end(r)) {
+            *range += 1;
+            *at = ranges
+                .get(*range)
+                .copied()
+                .flatten()
+                .map_or(0, |r| r.start.into());
+        }
+        let a = *at;
+        let Some(g) = regions
+            .iter()
+            .find(|g| a >= u64::from(g.start) && a < u64::from(g.start) + u64::from(g.len))
+        else {
+            *ranges = [None, None];
+            return Some(Err(PlanError::Uncovered { addr: a as u32 }));
+        };
+        let unit = u64::from(g.unit.max(1));
+        let addr = u64::from(g.start) + (a - u64::from(g.start)) / unit * unit;
+        *at = addr + unit;
+        Some(Ok(EraseOp {
+            addr: addr as u32,
+            len: g.unit,
+            max_ms: g.unit_max_ms,
+        }))
+    }
+
+    /// At the ends of the 32-bit address space, with units of 0, 1 and
+    /// `u32::MAX` and ranges of the largest length, every step equals
+    /// the 64-bit definition's.
+    #[test]
+    fn plan_steps_match_the_wide_definition_at_the_range_limits() {
+        const TOP: u32 = u32::MAX;
+        let region = |start, len, unit| EraseRegion {
+            start,
+            len,
+            unit,
+            unit_max_ms: 7,
+        };
+        let layouts: [&[EraseRegion]; 6] = [
+            &[region(0, TOP, 0x1000)],
+            &[region(0, TOP, 0)],
+            &[region(0, TOP, TOP)],
+            &[region(TOP - 0x2fff, 0x3000, 0x1000)],
+            &[region(TOP - 0xfff, TOP, 0x1000), region(0, 0x1000, 3)],
+            &[region(0x8000_0000, 0x8000_0000, 0x3)],
+        ];
+        let range = |start, len| Some(ByteRange { start, len });
+        let ranges = [
+            [range(0, TOP), None],
+            [range(TOP - 0x1fff, 0x2000), range(0, 5)],
+            [range(TOP, 1), None],
+            [range(TOP - 2, TOP), range(TOP - 1, TOP)],
+            [None, range(0x8000_0001, 0x10)],
+            [range(0x7fff_ffff, 2), None],
+            [None, None],
+        ];
+        for regions in layouts {
+            for r in ranges {
+                let mut plan = Plan {
+                    regions,
+                    ranges: r,
+                    range: 0,
+                    at: r[0].map_or(0, |r| r.start.into()),
+                };
+                let (mut wr, mut wi, mut wa) = (r, 0, plan.at);
+                for n in 0..64 {
+                    let wide = step_wide(regions, &mut wr, &mut wi, &mut wa);
+                    assert_eq!(plan.step(), wide, "{regions:?} {r:?} step {n}");
+                    if wide.is_none() {
+                        break;
+                    }
+                }
+            }
+        }
     }
 
     #[test]

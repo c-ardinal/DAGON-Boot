@@ -78,10 +78,13 @@ impl Extension for Probe {
         self.name
     }
     fn on_event(&mut self, e: &Event<'_>, _: &Ctx<'_>) {
-        self.seen
-            .borrow_mut()
-            .push(format!("{}:{}.{}", self.name, e.layer().name(), e.kind()));
-        if e.kind() == self.slow_on {
+        self.seen.borrow_mut().push(format!(
+            "{}:{}.{}",
+            self.name,
+            e.layer().name(),
+            kind_name(e)
+        ));
+        if kind_name(e) == self.slow_on {
             self.clock.set(self.clock.get() + self.cost_us);
         }
     }
@@ -483,4 +486,12 @@ fn the_watchdog_is_fed_through_a_signature_check() {
         assert_eq!(dog.started, [WDT_MS], "armed once, before the check");
         assert!(dog.feeds >= 700, "{} feeds (trial {trial})", dog.feeds);
     }
+}
+
+/// The kind's name as a log display shows it, looked up from its code.
+fn kind_name(e: &dagon_events::Event<'_>) -> &'static str {
+    [&dagon_boot::MACHINES, &dagon_events::MACHINES]
+        .iter()
+        .find_map(|m| m.entry(e.layer(), e.kind()))
+        .map_or("?", |x| x.kind)
 }

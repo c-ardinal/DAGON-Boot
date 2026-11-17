@@ -21,9 +21,15 @@ stage0 size check builds from (`stage0_size.size_folder`): the board puts
 its boot LED, halt pattern and clock into the boot core. The image is what
 the signer takes from the ELF (`dagon_sign::image::payload_from_file`):
 from the lowest to the highest address its loadable segments fill.
+
+An image also fails when it links a name of the event catalogs (read from
+the Events page they generate): firmware decides on event codes and a
+generated transition table, and names are looked up only where a person
+reads them.
 """
 import os
 import pathlib
+import re
 import struct
 import subprocess
 import sys
@@ -34,6 +40,9 @@ import stage0_size
 MCU = stage0_size.MCU
 PT_LOAD = 1
 EXAMPLE = "size"
+# The page the event catalogs generate (dagon-catalog's docs test).
+EVENTS_PAGE = stage0_size.ROOT / "site" / "src" / "content" / "docs" / "en" / "reference" / "events.md"
+NAME_MIN = 6
 
 
 def budget(mcu_id: str) -> int | None:
@@ -61,6 +70,41 @@ def image_bytes(elf: bytes) -> int:
     return max(e for _, e in spans) - min(s for s, _ in spans)
 
 
+def image_data(elf: bytes) -> bytes:
+    """The bytes of the ELF32 little-endian image's loadable segments, in
+    address order: what is written to flash."""
+    phoff, = struct.unpack_from("<I", elf, 0x1C)
+    phentsize, phnum = struct.unpack_from("<HH", elf, 0x2A)
+    parts = []
+    for i in range(phnum):
+        p_type, p_offset, _, p_paddr, p_filesz = struct.unpack_from(
+            "<IIIII", elf, phoff + i * phentsize)
+        if p_type == PT_LOAD and p_filesz:
+            parts.append((p_paddr, elf[p_offset:p_offset + p_filesz]))
+    return b"".join(d for _, d in sorted(parts))
+
+
+def catalog_names(page: pathlib.Path = EVENTS_PAGE) -> set[str]:
+    """Every name the event catalogs hold, read from the Events page they
+    generate: machines, states, kinds and transition methods. Names shorter
+    than `NAME_MIN` are left out, as short words occur by chance in code
+    bytes; a linked catalog carries its long names with its short ones."""
+    names = set()
+    for line in page.read_text(encoding="utf-8").splitlines():
+        if m := re.match(r"### Machine `(\w+)`", line):
+            names.add(m[1])
+        elif line.startswith("States: "):
+            names.update(re.findall(r"`(\w+)`", line))
+        elif m := re.match(r"\| `\w+\.(\w+)` \| 0x[0-9a-f]+ \| `(\w+)`", line):
+            names.update(m.groups())
+    return {n for n in names if len(n) >= NAME_MIN}
+
+
+def linked_names(data: bytes, names: set[str]) -> list[str]:
+    """The catalog names `data` contains."""
+    return sorted(n for n in names if n.encode() in data)
+
+
 def verdict(used: int, size: int) -> str | None:
     """Why `used` bytes do not pass in a `size`-byte slot (None: they do)."""
     return f"{used} bytes, over its {size}-byte slot" if used > size else None
@@ -72,10 +116,15 @@ def check(elf_path: pathlib.Path, mcu_id: str, label: str = "") -> list[str]:
     name = f"{mcu_id} boot core{label}"
     if size is None:
         return [f"{name}: the definition has no boot core slot"]
-    used = image_bytes(elf_path.read_bytes())
-    print(f"{name}: {used} of {size} bytes ({size - used} free)")
+    elf = elf_path.read_bytes()
+    used = image_bytes(elf)
+    print(f"{name}: {used} of {size} bytes ({size - used} free)", flush=True)
     why = verdict(used, size)
-    return [f"{name}: {why}"] if why else []
+    out = [f"{name}: {why}"] if why else []
+    linked = linked_names(image_data(elf), catalog_names())
+    if linked:
+        out.append(f"{name}: links event catalog names {', '.join(linked)}")
+    return out
 
 
 def mcus() -> list[str]:

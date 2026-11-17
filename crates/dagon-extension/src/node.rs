@@ -203,16 +203,16 @@ fn capabilities(def: &McuDef, board: Option<&BoardDef>, m: &Manifest) -> Result<
 /// report (`dagon_events::compose_boot` calls an extension for these
 /// only).
 fn boot_observes(m: &Manifest, known: &Known) -> (u64, bool) {
-    let mut kinds: Vec<&str> = m
+    let mut kinds: Vec<u8> = m
         .observes
         .iter()
         .flat_map(|o| known.matching(o))
         .filter(|k| k.layer == Layer::Boot && k.live)
-        .map(|k| k.kind)
+        .map(|k| k.code)
         .collect();
     kinds.sort_unstable();
     kinds.dedup();
-    let overran = kinds.contains(&dagon_catalog::BOOT_OVERRAN_KIND);
+    let overran = kinds.contains(&dagon_catalog::BOOT_OVERRAN);
     let events = kinds.len() - usize::from(overran);
     (events as u64, overran)
 }

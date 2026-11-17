@@ -77,7 +77,7 @@ impl SigVerifier for Ed25519Small {
     }
 
     fn verify(&self, domain: &[u8], msg: &[&[u8]], sig: &[u8; 64]) -> bool {
-        small::verify(&self.key, domain, msg, sig)
+        small::verify(&self.key, domain, msg, sig, &|| {})
     }
 }
 
@@ -87,7 +87,7 @@ impl<F: Fn() + Copy> SigVerifier for Ed25519Small<F> {
     }
 
     fn verify(&self, domain: &[u8], msg: &[&[u8]], sig: &[u8; 64]) -> bool {
-        small::verify_ticking(&self.key, domain, msg, sig, self.tick)
+        small::verify(&self.key, domain, msg, sig, &self.tick)
     }
 }
 
@@ -122,6 +122,6 @@ impl SigVerifier for Ed25519Compact {
         for part in msg {
             st.absorb(part);
         }
-        st.verify().is_ok() && small::verify(&self.key, domain, msg, sig)
+        st.verify().is_ok() && small::verify(&self.key, domain, msg, sig, &|| {})
     }
 }

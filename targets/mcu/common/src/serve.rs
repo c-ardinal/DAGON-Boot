@@ -279,6 +279,14 @@ mod tests {
         }
     }
 
+    /// The kind's name as a log display shows it, looked up from its code.
+    fn kind_name(e: &dagon_events::Event<'_>) -> &'static str {
+        [&dagon_agent::MACHINES, &dagon_events::MACHINES]
+            .iter()
+            .find_map(|m| m.entry(e.layer(), e.kind()))
+            .map_or("?", |x| x.kind)
+    }
+
     /// An app extension that records the events it sees and asks for a
     /// reboot delay.
     #[derive(Clone, Default)]
@@ -292,7 +300,7 @@ mod tests {
             "probe"
         }
         fn on_event(&mut self, e: &Event<'_>, _: &Ctx<'_>) {
-            self.seen.borrow_mut().push(e.kind());
+            self.seen.borrow_mut().push(kind_name(e));
         }
         fn allow_reboot_now(&mut self, _: &RebootRequest, _: &Ctx<'_>) -> Option<Delay> {
             Some(Delay::After(self.delay_ms))

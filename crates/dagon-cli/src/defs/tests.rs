@@ -12,7 +12,7 @@ use crate::config::{read_topology, Config};
 
 /// An MCU no DAGON source knows: probe-rs writer, A/B app slots.
 const FAKE_MCU: &str = r#"
-format = 2
+format = 3
 id = "fake-m0"
 name = "FAKE-M0"
 wire_id = 0x7F01
@@ -93,7 +93,7 @@ hint = "SWD probe"
 
 const FAKE_BOARD: &str = r#"
 [board.fake-board]
-format = 2
+format = 3
 product = "Fake Board"
 mcu = "fake-m0"
 flash_bytes = 0x20_0000

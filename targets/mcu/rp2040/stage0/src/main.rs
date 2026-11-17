@@ -44,7 +44,8 @@ use panic_halt as _;
 
 #[link_section = ".boot2"]
 #[used]
-static BOOT2: [u8; 256] = rp2040_boot2::BOOT_LOADER_GENERIC_03H;
+static BOOT2: [u8; dagon_mcu_rp2040::STAGE0_HEAD_LEN as usize] =
+    rp2040_boot2::BOOT_LOADER_GENERIC_03H;
 
 /// The version mark the agent's VERSION reads (`dagon_format::stage0`):
 /// this package's Cargo.toml version.

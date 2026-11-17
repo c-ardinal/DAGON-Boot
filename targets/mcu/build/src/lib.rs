@@ -650,6 +650,7 @@ fn constants_rs(t: &toml::Table) -> String {
 
     out += &stage0_key_place_rs(t);
     out += &stage0_internal_hz_rs(t);
+    out += &flash_write_rs(t);
 
     let (masked, masked_known) = fact(required(t, "execution", "masked_max_us"), "masked_max_us");
     out += "/// Longest DAGON's own code masks interrupts, us (`[execution]\n";
@@ -794,6 +795,35 @@ fn stage0_internal_hz_rs(t: &toml::Table) -> String {
     )
 }
 
+/// The flash's write unit and erased value (`[execution] write_unit`,
+/// `erased_value`) and, for a definition with `[stage0]`, the head the boot
+/// ROM reads before stage0 (`[stage0] head_bytes`). Hardware facts with no
+/// default: a definition without one is refused, naming the key.
+fn flash_write_rs(t: &toml::Table) -> String {
+    let unit = int(required(t, "execution", "write_unit"), "write_unit");
+    let erased = int(required(t, "execution", "erased_value"), "erased_value");
+    let erased = u8::try_from(erased).expect("dagon-mcu.toml: [execution] erased_value fits a u8");
+    let mut out = format!(
+        "/// Bytes one flash write covers (`[execution] write_unit`).\n\
+         pub const WRITE_UNIT: u32 = {unit};\n\
+         /// The byte erased flash reads as (`[execution] erased_value`).\n\
+         pub const ERASED_VALUE: u8 = {erased:#x};\n"
+    );
+    if t.contains_key("stage0") {
+        out += &format!(
+            "/// Bytes at the start of stage0's region the boot ROM reads before\n\
+             /// stage0 (`[stage0] head_bytes`); 0: none.\n\
+             pub const STAGE0_HEAD_LEN: u32 = {:#x};\n",
+            stage0_head_of(t)
+        );
+    }
+    out
+}
+
+fn stage0_head_of(t: &toml::Table) -> u32 {
+    int(required(t, "stage0", "head_bytes"), "head_bytes")
+}
+
 fn array_in<'a>(v: &'a toml::Value, key: &str) -> &'a [toml::Value] {
     v.get(key)
         .and_then(|v| v.as_array())
@@ -870,15 +900,16 @@ fn stage0_region_of(text: &str) -> (u32, u32) {
 }
 
 /// Writes `$OUT_DIR/memory.x` for stage0: `STAGE0` is its whole region
-/// ([`stage0_region`]); its first `head` bytes are the `HEAD` region (a
-/// block the boot ROM reads before stage0, such as the RP2040's boot2;
-/// 0: none) placed by `head_sections`, `FLASH` the rest; RAM at
+/// ([`stage0_region`]); its first `[stage0] head_bytes` are the `HEAD`
+/// region (a block the boot ROM reads before stage0, such as the RP2040's
+/// boot2; none when 0) placed by `head_sections`, `FLASH` the rest; RAM at
 /// `ram`/`ram_len`; with [`STAGE0_ASSERT`].
-pub fn stage0_memory_x(head: u32, head_sections: &str, ram: u32, ram_len: u32) {
-    let region = stage0_region();
+pub fn stage0_memory_x(head_sections: &str, ram: u32, ram_len: u32) {
+    let text = node_definition_text();
+    let t: toml::Table = text.parse().expect("dagon-mcu.toml");
     write_memory_x(&stage0_memory_text(
-        region,
-        head,
+        stage0_region_of(&text),
+        stage0_head_of(&t),
         head_sections,
         (ram, ram_len),
     ));
@@ -1063,7 +1094,7 @@ mod tests {
 
     const DEF: &str = "[watchdog]\ntrial_attempts = 3\ntrial_ms = 4000\nconfirmed_ms = 8000\n\
                        range_ms = { min = 1, max = 9000 }\n\
-                       [execution]\nmasked_max_us = 50\n\
+                       [execution]\nmasked_max_us = 50\nwrite_unit = 4\nerased_value = 0xFF\n\
                        erase_regions = [{ start = 0x0, len = 0x4000, unit = 0x1000, unit_max_ms = 400 },\n\
                        { start = 0x4000, len = 0x8000, unit = 0x4000, unit_max_ms = 900 }]\n\
                        [conformance]\nscratch = { at = 0x100, size = 0x10 }\n\
@@ -1173,14 +1204,16 @@ mod tests {
         let want = "pub const STAGE0_KEY_PLACE: &str = \"flash\";\n";
         let clock = "[[stage0.clock]]\nsource = \"internal\"\nout_hz = 6_500_000\n";
         for stage0 in [
-            "[stage0]\nregion_bytes = 0x4000\n",
-            "[stage0]\nkey = \"flash\"\n",
+            "[stage0]\nregion_bytes = 0x4000\nhead_bytes = 0\n",
+            "[stage0]\nkey = \"flash\"\nhead_bytes = 0\n",
         ] {
             let rs = definition_rs(&format!("{DEF}{stage0}{clock}"));
             assert!(rs.contains(want), "{rs}");
         }
         let otp = std::panic::catch_unwind(|| {
-            definition_rs(&format!("{DEF}[stage0]\nkey = \"otp\"\n{clock}"))
+            definition_rs(&format!(
+                "{DEF}[stage0]\nkey = \"otp\"\nhead_bytes = 0\n{clock}"
+            ))
         });
         let msg = *otp.unwrap_err().downcast::<String>().unwrap();
         assert!(msg.contains("cannot read a key from that place"), "{msg}");
@@ -1288,7 +1321,7 @@ mod tests {
     #[test]
     fn stage0_internal_hz_comes_from_the_internal_setup() {
         let rs = definition_rs(&format!(
-            "{DEF}[stage0]\n[[stage0.clock]]\nsource = \"crystal\"\nin_hz = 12\nout_hz = 125\n\
+            "{DEF}[stage0]\nhead_bytes = 0\n[[stage0.clock]]\nsource = \"crystal\"\nin_hz = 12\nout_hz = 125\n\
              [[stage0.clock]]\nsource = \"internal\"\nout_hz = 6_500_000\n"
         ));
         assert!(
@@ -1296,7 +1329,8 @@ mod tests {
             "{rs}"
         );
         assert!(!definition_rs(DEF).contains("STAGE0_INTERNAL_HZ"));
-        let none = std::panic::catch_unwind(|| definition_rs(&format!("{DEF}[stage0]\n")));
+        let none =
+            std::panic::catch_unwind(|| definition_rs(&format!("{DEF}[stage0]\nhead_bytes = 0\n")));
         let msg = *none.unwrap_err().downcast::<&str>().unwrap();
         assert!(msg.contains("no internal [[stage0.clock]]"), "{msg}");
     }
@@ -1332,8 +1366,9 @@ mod tests {
     #[test]
     fn stage0_memory_holds_the_region_and_its_assertion() {
         let def = "[layout]\nstage0 = { at = 0x1000_0000, size = 0x4000 }\n\
-                   [stage0]\nregion_bytes = 0x4000\n";
+                   [stage0]\nregion_bytes = 0x4000\nhead_bytes = 0x100\n";
         assert_eq!(stage0_region_of(def), (0x1000_0000, 0x4000));
+        assert_eq!(stage0_head_of(&def.parse().unwrap()), 0x100);
         let x = stage0_memory_text(
             (0x1000_0000, 0x4000),
             0x100,
@@ -1384,7 +1419,7 @@ mod tests {
 
     /// A definition with every layout fact the generated module carries:
     /// boot core slot B written before A, one app slot.
-    const LAYOUT: &str = "format = 2\nid = \"m\"\nwire_id = 0x0042\n\
+    const LAYOUT: &str = "format = 3\nid = \"m\"\nwire_id = 0x0042\n\
                           ram = { at = 0x2000_0000, size = 0x1_0000 }\n\
                           [[flash_map]]\nname = \"m-1m\"\nxip = true\nbase = 0x1000_0000\nbytes = 0x10_0000\n\
                           [layout]\nstage0 = { at = 0x1000_0000, size = 0x4000 }\n\
@@ -1395,7 +1430,7 @@ mod tests {
                           [[slot]]\nimage = \"app\"\nbinding = \"a\"\nheader = \"inline\"\nat = 0x1003_0000\nsize = 0x1_0000\n\
                           [watchdog]\ntrial_attempts = 3\ntrial_ms = 4000\nconfirmed_ms = 8000\n\
                        range_ms = { min = 1, max = 9000 }\n\
-                          [execution]\nmasked_max_us = 50\n\
+                          [execution]\nmasked_max_us = 50\nwrite_unit = 1\nerased_value = 0xFF\n\
                           erase_regions = [{ start = 0x1000_0000, len = 0x10_0000, unit = 0x1000, unit_max_ms = 400 }]\n\
                           [boot.record]\nat = 0x2000_F000\nsize = 0x800\n";
 
@@ -1478,12 +1513,12 @@ mod tests {
     /// table the definition names; the table itself is generated too.
     #[test]
     fn a_partition_slot_takes_the_partition_table() {
-        let def = "format = 2\nid = \"e\"\nwire_id = 3\npartitions = \"p.csv\"\n\
+        let def = "format = 3\nid = \"e\"\nwire_id = 3\npartitions = \"p.csv\"\n\
                    [[flash_map]]\nname = \"e-16m\"\nxip = false\nbase = 0x0\nbytes = 0x100_0000\n\
                    [[slot]]\nimage = \"app\"\nbinding = \"any\"\nheader = \"detached\"\npartition = \"ota_0\"\n\
                    [watchdog]\ntrial_attempts = 3\ntrial_ms = 4000\nconfirmed_ms = 4000\n\
                    range_ms = { min = 1, max = 9000 }\n\
-                   [execution]\nmasked_max_us = 50\n\
+                   [execution]\nmasked_max_us = 50\nwrite_unit = 4\nerased_value = 0xFF\n\
                    erase_regions = [{ start = 0x0, len = 0x100_0000, unit = 0x1000, unit_max_ms = 500 }]\n";
         let csv = "# Name, Type, SubType, Offset, Size\n\
                    otadata, data, ota, 0x00D000, 0x2000\n\
@@ -1517,15 +1552,15 @@ mod tests {
     /// for this package's MCU, in this package's definition format.
     #[test]
     fn the_node_definition_is_the_packages_mcu_in_its_format() {
-        let own = "format = 2\nid = \"m\"\n";
+        let own = "format = 3\nid = \"m\"\n";
         assert_eq!(
-            same_mcu(own, "format = 2\nid = \"m\"\nwire_id = 1\n"),
+            same_mcu(own, "format = 3\nid = \"m\"\nwire_id = 1\n"),
             Ok(())
         );
-        let e = same_mcu(own, "format = 2\nid = \"other\"\n").unwrap_err();
+        let e = same_mcu(own, "format = 3\nid = \"other\"\n").unwrap_err();
         assert!(e.contains("'other'") && e.contains("'m'"), "{e}");
-        let e = same_mcu(own, "format = 3\nid = \"m\"\n").unwrap_err();
-        assert!(e.contains("format 3") && e.contains("format 2"), "{e}");
+        let e = same_mcu(own, "format = 4\nid = \"m\"\n").unwrap_err();
+        assert!(e.contains("format 4") && e.contains("format 3"), "{e}");
         let e = same_mcu(own, "id = \"m\"\n").unwrap_err();
         assert!(e.contains("format 1"), "{e}");
         assert!(same_mcu(own, "not toml [").is_err());
@@ -1607,5 +1642,354 @@ mod tests {
     #[should_panic(expected = "[watchdog] range_ms is missing")]
     fn a_definition_without_the_watchdog_range_is_refused() {
         definition_rs(&DEF.replace("range_ms = { min = 1, max = 9000 }\n", ""));
+    }
+
+    /// The panic message of `f`.
+    fn refusal(f: impl FnOnce() -> String + std::panic::UnwindSafe) -> String {
+        let e = std::panic::catch_unwind(f).expect_err("refused");
+        e.downcast_ref::<String>()
+            .cloned()
+            .or_else(|| e.downcast_ref::<&str>().map(|s| s.to_string()))
+            .unwrap_or_default()
+    }
+
+    /// The flash's write unit and erased value (`[execution]`) and the
+    /// stage0 head length (`[stage0] head_bytes`) are generated; each is a
+    /// hardware fact with no default, so a definition without it is
+    /// refused, naming the key.
+    #[test]
+    fn the_flash_write_facts_come_from_the_definition() {
+        let stage0 = "[stage0]\nregion_bytes = 0x4000\nhead_bytes = 0x100\n\
+                      [[stage0.clock]]\nsource = \"internal\"\nout_hz = 6_500_000\n";
+        let rs = definition_rs(&format!("{DEF}{stage0}"));
+        for want in [
+            "pub const WRITE_UNIT: u32 = 4;\n",
+            "pub const ERASED_VALUE: u8 = 0xff;\n",
+            "pub const STAGE0_HEAD_LEN: u32 = 0x100;\n",
+        ] {
+            assert!(rs.contains(want), "{want}\n{rs}");
+        }
+        assert!(!definition_rs(DEF).contains("STAGE0_HEAD_LEN"));
+        for (line, key) in [
+            ("write_unit = 4\n", "[execution] write_unit"),
+            ("erased_value = 0xFF\n", "[execution] erased_value"),
+        ] {
+            let def = DEF.replace(line, "");
+            let msg = refusal(move || definition_rs(&def));
+            assert!(msg.contains(&format!("{key} is missing")), "{msg}");
+        }
+        let def = format!("{DEF}{}", stage0.replace("head_bytes = 0x100\n", ""));
+        let msg = refusal(move || definition_rs(&def));
+        assert!(msg.contains("[stage0] head_bytes is missing"), "{msg}");
+        let def = DEF.replace("erased_value = 0xFF", "erased_value = 0x100");
+        let msg = refusal(move || definition_rs(&def));
+        assert!(msg.contains("erased_value"), "{msg}");
+    }
+
+    /// The numeric literals of Rust source `src` a layout file may not
+    /// hold: every one outside comments, strings, characters and
+    /// `#[cfg(test)]` items but 0, 1, a shift amount and a tuple field.
+    fn own_literals(src: &str) -> Vec<String> {
+        let code = without_tests(&blank_text(src));
+        let b = code.as_bytes();
+        let mut out = Vec::new();
+        let mut i = 0;
+        while i < b.len() {
+            let starts = b[i].is_ascii_digit()
+                && (i == 0 || !(b[i - 1].is_ascii_alphanumeric() || b[i - 1] == b'_'));
+            if !starts {
+                i += 1;
+                continue;
+            }
+            let at = i;
+            while i < b.len() && (b[i].is_ascii_alphanumeric() || b[i] == b'_') {
+                i += 1;
+            }
+            let before = code[..at].trim_end();
+            let field = before.ends_with('.') && !before.ends_with("..");
+            if field || before.ends_with("<<") || before.ends_with(">>") {
+                continue;
+            }
+            let lit = code[at..i].replace('_', "");
+            let digits = [
+                "usize", "u64", "u32", "u16", "u8", "isize", "i64", "i32", "i16", "i8",
+            ]
+            .iter()
+            .find_map(|s| lit.strip_suffix(s))
+            .unwrap_or(&lit);
+            let value = match digits.get(..2) {
+                Some("0x") => u64::from_str_radix(&digits[2..], 16).ok(),
+                Some("0b") => u64::from_str_radix(&digits[2..], 2).ok(),
+                _ => digits.parse::<u64>().ok(),
+            };
+            if !matches!(value, Some(0 | 1)) {
+                out.push(code[at..i].to_string());
+            }
+        }
+        out
+    }
+
+    /// `src` with comments, string and character literals blanked.
+    fn blank_text(src: &str) -> String {
+        let b = src.as_bytes();
+        let mut out = b.to_vec();
+        let mut i = 0;
+        let blank = |out: &mut Vec<u8>, from: usize, to: usize| {
+            for c in &mut out[from..to] {
+                if *c != b'\n' {
+                    *c = b' ';
+                }
+            }
+        };
+        while i < b.len() {
+            let rest = &b[i..];
+            let end = if rest.starts_with(b"//") {
+                i + rest.iter().position(|&c| c == b'\n').unwrap_or(rest.len())
+            } else if rest.starts_with(b"/*") {
+                i + 2 + src[i + 2..].find("*/").map_or(rest.len() - 2, |e| e + 2)
+            } else if rest[0] == b'"' {
+                let mut j = i + 1;
+                while j < b.len() && b[j] != b'"' {
+                    j += if b[j] == b'\\' { 2 } else { 1 };
+                }
+                j + 1
+            } else if rest[0] == b'\''
+                && (rest.get(2) == Some(&b'\'') || rest.get(1) == Some(&b'\\'))
+            {
+                i + 1
+                    + rest[1..]
+                        .iter()
+                        .skip(1)
+                        .position(|&c| c == b'\'')
+                        .map_or(0, |e| e + 2)
+            } else {
+                i += 1;
+                continue;
+            };
+            let end = end.min(b.len());
+            blank(&mut out, i, end);
+            i = end;
+        }
+        String::from_utf8(out).unwrap()
+    }
+
+    /// `code` without each `#[cfg(test)]` item (up to its closing brace or
+    /// semicolon).
+    fn without_tests(code: &str) -> String {
+        let mut out = String::new();
+        let mut rest = code;
+        while let Some(at) = rest.find("#[cfg(test)]") {
+            out += &rest[..at];
+            let item = &rest[at..];
+            let mut depth = 0;
+            let mut end = item.len();
+            for (k, c) in item.char_indices() {
+                match c {
+                    '{' => depth += 1,
+                    '}' if depth == 1 => {
+                        end = k + 1;
+                        break;
+                    }
+                    '}' => depth -= 1,
+                    ';' if depth == 0 => {
+                        end = k + 1;
+                        break;
+                    }
+                    _ => {}
+                }
+            }
+            rest = &item[end..];
+        }
+        out + rest
+    }
+
+    /// The files of an MCU package that state its flash layout.
+    const LAYOUT_FILES: [&str; 3] = ["src/layout.rs", "src/flash.rs", "build.rs"];
+
+    /// No MCU package's layout, flash port or build script holds a number
+    /// of its own: each takes the generated constants (`definition.rs`),
+    /// so a hand-written copy of a definition value fails here.
+    #[test]
+    fn layout_files_hold_no_number_of_their_own() {
+        let mut found = Vec::new();
+        for pkg in mcu_packages() {
+            for rel in LAYOUT_FILES {
+                let Ok(src) = fs::read_to_string(pkg.join(rel)) else {
+                    continue;
+                };
+                for lit in own_literals(&src) {
+                    found.push(format!(
+                        "{}/{rel}: {lit}",
+                        pkg.file_name().unwrap().to_string_lossy()
+                    ));
+                }
+            }
+        }
+        assert!(
+            found.is_empty(),
+            "numbers outside the definition:\n{}",
+            found.join("\n")
+        );
+    }
+
+    /// The scan finds a planted copy and passes what is allowed.
+    #[test]
+    fn the_number_scan_finds_a_planted_copy() {
+        assert_eq!(
+            own_literals("pub const WRITE_UNIT: u32 = 4;\nconst E: u8 = 0xFF;\nlet b = [0u8; 8];"),
+            ["4", "0xFF", "8"]
+        );
+        let allowed = "// 0x100 bytes\nconst A: u32 = 0; let b = 1u8; let c = 1 << 8; x.2;\n\
+                       let s = \"0x100\"; let c = '7'; fn f<'d>() {}\n\
+                       #[cfg(test)]\nmod tests { const T: u32 = 0x1000_8000; }\n\
+                       #[cfg(test)]\nconst U: u32 = 42;\n";
+        assert!(
+            own_literals(allowed).is_empty(),
+            "{:?}",
+            own_literals(allowed)
+        );
+        assert_eq!(
+            own_literals(&format!("{allowed}const V: u32 = 0x200;")),
+            ["0x200"]
+        );
+    }
+
+    /// `bytes` as the README tables write a size.
+    fn size_text(bytes: u32) -> String {
+        const KIB: u32 = 1 << 10;
+        const MIB: u32 = 1 << 20;
+        match bytes {
+            b if b % MIB == 0 => format!("{} MiB", b / MIB),
+            b if b % KIB == 0 => format!("{} KiB", b / KIB),
+            b => format!("{b} B"),
+        }
+    }
+
+    /// The flash table of an MCU package's README, from its definition:
+    /// stage0 (with its head), the state log faces, the conformance
+    /// scratch and every slot the node receives into, by address.
+    fn flash_table(d: &Definition) -> String {
+        let mut rows: Vec<(u32, String, String)> = Vec::new();
+        if let Some((at, size)) = d.stage0() {
+            let head = d.t.get("stage0").and_then(|s| s.get("head_bytes"));
+            let what = match head.map_or(0, |h| int(h, "head_bytes")) {
+                0 => "stage0".to_string(),
+                h => format!("{} head the boot ROM reads, then stage0", size_text(h)),
+            };
+            rows.push((at, size_text(size), what));
+        }
+        let logs = [
+            ("app", d.log("app_log")),
+            ("boot core", d.log("bootcore_log")),
+        ];
+        if logs[0].1.is_some() && logs[0].1 == logs[1].1 {
+            let (faces, size) = logs[0].1.unwrap();
+            let what = "state log faces A/B (app and boot core records)".to_string();
+            rows.push((faces[0], format!("2 x {}", size_text(size)), what));
+        } else {
+            for (name, log) in logs {
+                if let Some((faces, size)) = log {
+                    let what = format!("{name} state log faces A/B");
+                    rows.push((faces[0], format!("2 x {}", size_text(size)), what));
+                }
+            }
+        }
+        let scratch = d.t.get("conformance").and_then(|c| c.get("scratch"));
+        if let Some((at, size)) = scratch.and_then(|s| region(s, "[conformance] scratch")) {
+            rows.push((at, size_text(size), "conformance scratch".into()));
+        }
+        for l in array(&d.t, "slot_layout") {
+            let word = |k: &str| text(l, k, "[[slot_layout]]");
+            let num = |k: &str| int(l.get(k).expect("[[slot_layout]]"), k);
+            let (target, slot) = (word("target"), word("slot"));
+            let (start, capacity) = (num("start"), num("capacity"));
+            let name = match target {
+                "bootcore" => "boot core",
+                t => t,
+            };
+            let slot_name = match slot {
+                "factory" => "factory".to_string(),
+                s => s.to_ascii_uppercase(),
+            };
+            let row = match l.get("header").and_then(|h| h.get("detached")) {
+                Some(at) => (
+                    start,
+                    size_text(capacity),
+                    format!(
+                        "{name} slot {slot_name}, header at 0x{:08X}",
+                        int(at, "detached")
+                    ),
+                ),
+                None => {
+                    let size = d
+                        .slot_rows()
+                        .into_iter()
+                        .find(|(i, _, (at, _))| i == target && *at == start)
+                        .map_or(capacity, |(_, _, (_, size))| size);
+                    let header = size - capacity;
+                    (
+                        start,
+                        size_text(size),
+                        format!(
+                            "{name} slot {slot_name}: {header}-byte header, body at 0x{:08X}",
+                            start + header
+                        ),
+                    )
+                }
+            };
+            rows.push(row);
+        }
+        rows.sort_by_key(|r| r.0);
+        let mut out = String::from("| Address | Size | Content |\n|---|---|---|\n");
+        for (at, size, what) in rows {
+            out += &format!("| 0x{at:08X} | {size} | {what} |\n");
+        }
+        out
+    }
+
+    /// The flash table of `readme`: from its header row to the blank line.
+    fn readme_table(readme: &str) -> Option<&str> {
+        let at = readme.find("| Address | Size | Content |")?;
+        let end = readme[at..]
+            .find("\n\n")
+            .map_or(readme.len(), |e| at + e + 1);
+        Some(&readme[at..end])
+    }
+
+    /// Each MCU package's README shows its built-in definition's flash
+    /// layout as [`flash_table`] writes it.
+    #[test]
+    fn every_readme_flash_table_is_the_definitions() {
+        let mut wrong = Vec::new();
+        for pkg in mcu_packages() {
+            let text = fs::read_to_string(pkg.join("dagon-mcu.toml")).unwrap();
+            let d = Definition::parse(&text, |rel| fs::read_to_string(pkg.join(rel)).unwrap());
+            let want = flash_table(&d);
+            let readme = fs::read_to_string(pkg.join("README.md"))
+                .unwrap()
+                .replace("\r\n", "\n");
+            if readme_table(&readme) != Some(want.as_str()) {
+                wrong.push(format!(
+                    "{}/README.md: the table is\n{want}",
+                    pkg.file_name().unwrap().to_string_lossy()
+                ));
+            }
+        }
+        assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+    }
+
+    /// A README table that differs from the definition is found.
+    #[test]
+    fn a_planted_readme_address_is_found() {
+        let d = layout();
+        let want = flash_table(&d);
+        assert!(
+            want.contains("| 0x10000000 | 16 KiB | stage0 |\n"),
+            "{want}"
+        );
+        let readme = format!("# x\n\n{want}\nmore\n");
+        assert_eq!(readme_table(&readme), Some(want.as_str()));
+        let planted = readme.replace("0x10000000", "0x10000100");
+        assert_ne!(readme_table(&planted), Some(want.as_str()));
     }
 }

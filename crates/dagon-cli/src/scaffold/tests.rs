@@ -895,7 +895,7 @@ fn new_gen_build_rp2040_hub_by_mcu() {
         1,
     );
     let board = "[board.rp2040-with-crystal]
-format = 2
+format = 3
 product = \"An RP2040 board with a 12 MHz crystal\"
 mcu = \"rp2040\"
 flash_bytes = 0x40_0000
@@ -1266,8 +1266,8 @@ fn a_project_slot_override_reaches_the_firmware() {
             "this package is for MCU 'rp2040'",
         ),
         (
-            good.replace("format = 2", "format = 3"),
-            "this package reads definition format 2",
+            good.replace("format = 3", "format = 4"),
+            "this package reads definition format 3",
         ),
     ] {
         assert_ne!(bad, good);

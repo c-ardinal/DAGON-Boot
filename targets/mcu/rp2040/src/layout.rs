@@ -17,13 +17,11 @@ pub const MIN_FLASH_SIZE: usize = crate::DEFAULT_FLASH.1 as usize;
 /// erase_regions`).
 pub const SECTOR: u32 = crate::ERASE_REGIONS[0].unit;
 
-/// boot2 (256 B) + stage0.
+/// boot2 (`crate::STAGE0_HEAD_LEN`) + stage0.
 pub const STAGE0: u32 = crate::STAGE0_REGION.0;
 pub const STAGE0_SIZE: u32 = crate::STAGE0_REGION.1;
-/// The second stage the boot ROM loads (RP2040 datasheet section 2.8.1.3).
-pub const BOOT2_LEN: u32 = 0x100;
-pub const BL_LOG: [u32; 2] = crate::BOOTCORE_LOG_REGION.0;
-pub const APP_LOG: [u32; 2] = crate::APP_LOG_REGION.0;
+pub const BL_LOG: [u32; crate::BOOTCORE_LOG_REGION.0.len()] = crate::BOOTCORE_LOG_REGION.0;
+pub const APP_LOG: [u32; crate::APP_LOG_REGION.0.len()] = crate::APP_LOG_REGION.0;
 /// Boot core slot starts (the definition's `bootcore` slots, A first):
 /// stage0 starts one, the agent writes a new core into another.
 pub const BL_SLOT: [u32; crate::slots::BOOTCORE.len()] = starts(crate::slots::BOOTCORE);

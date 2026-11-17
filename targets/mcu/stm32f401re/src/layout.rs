@@ -90,26 +90,39 @@ pub const SCRATCH_SECTOR_LEN: u32 = scratch().1;
 /// boot core slot and each APP slot, each erased in the unit of the
 /// definition's erase region it starts in. Reads are allowed anywhere in
 /// flash; stage0's region is never erased or written through the port.
-pub const FLASH_REGIONS: [FlashRegion; 2 + CORE_SLOTS.len() + crate::slots::APP.len()] = {
-    let mut out = [region(0, 0); 2 + CORE_SLOTS.len() + crate::slots::APP.len()];
-    assert!(
-        LOG.faces[1] == LOG.faces[0] + LOG.face_len,
-        "the state log faces are adjacent"
-    );
-    out[0] = region(LOG.faces[0], 2 * LOG.face_len);
-    out[1] = region(SCRATCH_SECTOR, SCRATCH_SECTOR_LEN);
+pub const FLASH_REGIONS: [FlashRegion; REGION_COUNT] = {
+    let mut out = [region(0, 0); REGION_COUNT];
     let mut i = 0;
-    while i < CORE_SLOTS.len() {
-        out[2 + i] = region(CORE_SLOTS[i].0, CORE_SLOTS[i].1);
+    while i < LOG_AND_SCRATCH.len() {
+        out[i] = LOG_AND_SCRATCH[i];
         i += 1;
     }
     let mut j = 0;
-    while j < crate::slots::APP.len() {
-        out[2 + i + j] = region(crate::slots::APP[j].0, crate::slots::APP[j].1);
+    while j < CORE_SLOTS.len() {
+        out[i + j] = region(CORE_SLOTS[j].0, CORE_SLOTS[j].1);
         j += 1;
+    }
+    let mut k = 0;
+    while k < crate::slots::APP.len() {
+        out[i + j + k] = region(crate::slots::APP[k].0, crate::slots::APP[k].1);
+        k += 1;
     }
     out
 };
+
+/// The regions besides the slots: both log faces as one, and the scratch.
+const LOG_AND_SCRATCH: &[FlashRegion] = &[
+    {
+        assert!(
+            LOG.faces[1] == LOG.faces[0] + LOG.face_len,
+            "the state log faces are adjacent"
+        );
+        region(LOG.faces[0], LOG.faces[1] + LOG.face_len - LOG.faces[0])
+    },
+    region(SCRATCH_SECTOR, SCRATCH_SECTOR_LEN),
+];
+
+const REGION_COUNT: usize = LOG_AND_SCRATCH.len() + CORE_SLOTS.len() + crate::slots::APP.len();
 
 /// A writable region erased in the unit of the erase region it starts in.
 const fn region(start: u32, len: u32) -> FlashRegion {
@@ -117,8 +130,8 @@ const fn region(start: u32, len: u32) -> FlashRegion {
         start,
         len,
         erase_size: erase_unit(start),
-        write_size: 4,
-        erased_value: 0xFF,
+        write_size: crate::WRITE_UNIT,
+        erased_value: crate::ERASED_VALUE,
     }
 }
 

@@ -79,6 +79,11 @@ pub struct Execution {
     /// its own, never a flash operation), in microseconds.
     pub masked_max_us: Fact,
     pub flash_op: FlashOp,
+    /// Bytes one flash write covers: every write starts and ends on a
+    /// multiple of it (a power of two dividing every erase unit).
+    pub write_unit: u32,
+    /// The value every byte of erased flash reads as.
+    pub erased_value: u8,
     /// The flash DAGON erases in, by region: each region's erase unit and
     /// that unit's worst-case erase time. Every erase DAGON plans takes
     /// whole units of the region holding the address
@@ -138,7 +143,20 @@ pub(super) fn execution(m: &McuDef) -> Result<(), String> {
         masked.is_some_and(|v| v == 0 || v > MASKED_MAX_US_LIMIT),
         || format!("execution.masked_max_us must be 1..={MASKED_MAX_US_LIMIT}"),
     )?;
-    erase_regions(&e.erase_regions, m, "execution.erase_regions")
+    erase_regions(&e.erase_regions, m, "execution.erase_regions")?;
+    let unit = e.write_unit;
+    fail(!unit.is_power_of_two(), || {
+        format!("execution.write_unit {unit} must be a power of two")
+    })?;
+    for (i, r) in e.erase_regions.iter().enumerate() {
+        fail(r.unit % unit != 0, || {
+            format!(
+                "execution.write_unit {unit} does not divide execution.erase_regions[{i}].unit {}",
+                r.unit
+            )
+        })?;
+    }
+    Ok(())
 }
 
 /// Erase regions (`key`, an MCU's or a board's for MCU `m`): not empty,

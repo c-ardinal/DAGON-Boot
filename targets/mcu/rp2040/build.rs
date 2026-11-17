@@ -2,8 +2,8 @@
 //! Always: generates the layout constants from the MCU definition the node
 //! build is given (`dagon_mcu_build::definition`). For a target build,
 //! writes the final binary's memory.x from that definition:
-//! - `image-stage0`: boot2 (256 B) + stage0 in the region the definition
-//!   gives (`[layout] stage0`, `[stage0] region_bytes`), with the link-time
+//! - `image-stage0`: boot2 (`[stage0] head_bytes`) + stage0 in the region
+//!   the definition gives (`[layout] stage0`, `[stage0] region_bytes`), with the link-time
 //!   check that the image leaves 1/16 of it free;
 //! - `image-bootcore`: body of boot core slot A (B with `slot-b`), after the
 //!   512-byte header;
@@ -14,10 +14,8 @@ use std::env;
 
 use dagon_format::header::HEADER_SIZE;
 
-/// The second stage the RP2040 boot ROM loads from the start of flash and
-/// checks: 256 bytes (RP2040 datasheet section 2.8.1.3).
-const BOOT2_LEN: u32 = 0x100;
-
+/// Places boot2, the second stage the RP2040 boot ROM loads from the start
+/// of flash, in the stage0 head (`[stage0] head_bytes`).
 const BOOT2_SECTION: &str =
     "SECTIONS {\n  .boot2 ORIGIN(HEAD) :\n  {\n    KEEP(*(.boot2));\n  } > HEAD\n}\n";
 
@@ -46,7 +44,7 @@ fn main() {
         .expect("the RP2040 definition gives its boot record");
     let ram_len = record - ram;
     if feature("IMAGE_STAGE0") {
-        dagon_mcu_build::stage0_memory_x(BOOT2_LEN, BOOT2_SECTION, ram, ram_len);
+        dagon_mcu_build::stage0_memory_x(BOOT2_SECTION, ram, ram_len);
         return;
     }
     let image = if feature("IMAGE_BOOTCORE") {

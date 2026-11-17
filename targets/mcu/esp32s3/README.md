@@ -116,14 +116,26 @@ and the node tag from the generated `wiring.rs`.
   `vendor/PROVENANCE.md`); the factory firmware is a binary of the board
   package, since it needs the board's pins.
 
+## Flash layout (the built-in definition)
+
+The slots DAGON receives into, as flash offsets in `partitions.csv`
+(the table is the definition's; a test in `targets/mcu/build` writes it):
+
+| Address | Size | Content |
+|---|---|---|
+| 0x00010000 | 1 MiB | agent slot factory, header at 0x00712000 |
+| 0x00110000 | 3 MiB | app slot A, header at 0x00710000 |
+| 0x00410000 | 3 MiB | app slot B, header at 0x00711000 |
+| 0x0071F000 | 4 KiB | conformance scratch |
+
 ## Receiver (`store::EspStore`)
 
 - Body: written to the OTA partition of the slot (A = ota_0, B = ota_1) from
   its start; only the erase units the body covers are erased (64 KiB block
   erases where aligned, the watchdog fed between them).
-- Header: detached, 512 B at the start of a 4 KiB sector in the `dagon`
-  partition (type 0x40): +0x0000 A, +0x1000 B, +0x2000 factory. It is erased
-  before the body and written last.
+- Header: detached, 512 B at the start of its own sector in the `dagon`
+  partition (type 0x40), at the address the flash layout below gives. It is
+  erased before the body and written last.
 - SET_PENDING: an otadata trial entry (state New) for the slot, including the
   slot of the previously confirmed version (going back needs no transfer).
 - CONFIRM: the running otadata entry becomes Valid (read back).

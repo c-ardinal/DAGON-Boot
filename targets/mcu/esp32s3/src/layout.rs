@@ -12,7 +12,8 @@ pub const MIN_FLASH_SIZE: u32 = table_end().next_power_of_two();
 /// The erase unit of the MCU's first erase region (`[execution]
 /// erase_regions`).
 pub const ERASE_UNIT: u32 = crate::ERASE_REGIONS[0].unit;
-pub const WRITE_UNIT: u32 = 4;
+/// The flash write unit (`[execution] write_unit`).
+pub const WRITE_UNIT: u32 = crate::WRITE_UNIT;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Partition {
@@ -95,10 +96,11 @@ const fn table_end() -> u32 {
     end
 }
 
-/// Boot-selection slot numbers (`dagon_port::BootSelectV`).
-pub const SLOT_A: u8 = 0;
-pub const SLOT_B: u8 = 1;
-pub const SLOT_FACTORY: u8 = 2;
+/// Boot-selection slot numbers (`dagon_port::BootSelectV`), the state
+/// log's.
+pub const SLOT_A: u8 = dagon_format::statelog::slot::A;
+pub const SLOT_B: u8 = dagon_format::statelog::slot::B;
+pub const SLOT_FACTORY: u8 = dagon_format::statelog::slot::FACTORY;
 
 /// App partition of a boot-selection slot.
 pub fn app_partition(slot: u8) -> Option<Partition> {
@@ -126,15 +128,25 @@ const fn region(p: Partition) -> FlashRegion {
         len: p.size,
         erase_size: ERASE_UNIT,
         write_size: WRITE_UNIT,
-        erased_value: 0xFF,
+        erased_value: crate::ERASED_VALUE,
     }
 }
 
 /// What DAGON may erase and write: both OTA slots, the dagon partition and
 /// factory (the recovery agent's partition, written only under a confirmed
 /// OTA app). The 2nd stage, partition table and otadata stay out of reach.
-pub const REGIONS: [FlashRegion; 4] =
-    [region(OTA_0), region(OTA_1), region(DAGON), region(FACTORY)];
+pub const REGIONS: [FlashRegion; WRITABLE.len()] = {
+    let mut out = [region(OTA_0); WRITABLE.len()];
+    let mut i = 0;
+    while i < WRITABLE.len() {
+        out[i] = region(WRITABLE[i]);
+        i += 1;
+    }
+    out
+};
+
+/// The partitions of [`REGIONS`], in its order.
+const WRITABLE: &[Partition] = &[OTA_0, OTA_1, DAGON, FACTORY];
 
 /// The region that wholly contains `addr..addr + len`.
 pub fn region_for(addr: u32, len: u32) -> Option<&'static FlashRegion> {

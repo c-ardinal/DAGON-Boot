@@ -191,7 +191,10 @@ never erases the log before a REBOOT. STAY and REBOOT mode 1 keep it in
 update mode; REBOOT mode 0 leaves it, and so do 60 s without a request
 when STAY or UPDATE_STAY brought it there. Recovery mode has no app to
 start, so the boot loader stays in it. While the app runs it refuses STAY
-(`E_STATE`). Outside update mode the boot stages never erase. Readers
+(`E_STATE`). Outside update mode the boot stages never erase. The boot
+loader's session writes only the image kinds the MCU definition's
+`[writers]` lists for it (the app); a transfer of any other kind is
+refused with `E_UNSUPPORTED` before anything is erased. Readers
 that predate these records skip them and an agent that predates STAY
 answers `E_UNSUPPORTED`, so `wire` and `state-log` keep their numbers.
 The boot loader does not relay ([Limitations](/en/explanation/limitations/)).

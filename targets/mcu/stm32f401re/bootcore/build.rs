@@ -50,7 +50,14 @@ fn link_build(board: Option<&BoardDef>) {
                  match $addr.or({addr:?}) {{\n            \
                  Some(a) => Some(dagon_mcu_stm32f401re::boot_link::I2cPort::new(\n                \
                  $p.{ctl}, $p.{}, $p.{}, a, embassy_stm32::pac::{ctl}, $cycles,\n            )),\n            \
-                 None => None,\n        }}\n    }};\n}}\n",
+                 None => None,\n        }}\n    }};\n}}\n\n\
+                 /// The link's event line, masked while the boot core waits on it; taken\n\
+                 /// anyway, it masks itself and returns: the wake-up it stands for.\n\
+                 #[no_mangle]\nextern \"C\" fn {ctl}_EV() {{\n    \
+                 cortex_m::peripheral::NVIC::mask(embassy_stm32::interrupt::Interrupt::{ctl}_EV);\n}}\n\n\
+                 /// The link's error line, the same way.\n\
+                 #[no_mangle]\nextern \"C\" fn {ctl}_ER() {{\n    \
+                 cortex_m::peripheral::NVIC::mask(embassy_stm32::interrupt::Interrupt::{ctl}_ER);\n}}\n",
                 mcu.listen_window_ms(LinkKind::I2c),
                 bus.id,
                 up(&bus.scl),

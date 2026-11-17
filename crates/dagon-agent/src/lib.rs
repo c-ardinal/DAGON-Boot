@@ -598,6 +598,10 @@ pub mod writer {
         const TARGET: u8;
         /// Whether it is the app.
         const APP: bool;
+        /// The XFER targets it writes: every image kind the MCU
+        /// definitions' `[writers]` list it for (checked against them by
+        /// a test). Any other target is refused before anything is erased.
+        const WRITES: &'static [u8];
     }
 
     /// The app, running from an APP slot.
@@ -609,11 +613,13 @@ pub mod writer {
     impl Writer for App {
         const TARGET: u8 = target::APP;
         const APP: bool = true;
+        const WRITES: &'static [u8] = &[target::APP, target::BOOTCORE, target::AGENT];
     }
 
     impl Writer for BootCore {
         const TARGET: u8 = target::BOOTCORE;
         const APP: bool = false;
+        const WRITES: &'static [u8] = &[target::APP];
     }
 
     mod sealed {

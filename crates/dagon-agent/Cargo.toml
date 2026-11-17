@@ -25,4 +25,6 @@ critical-section = { version = "1.1", features = ["std"] }
 dagon-agent = { path = ".", features = ["store-tests"] }
 dagon-core = { path = "../dagon-core" }
 dagon-ed25519 = { path = "../dagon-ed25519", features = ["compact"] }
+# tests/writers.rs: each writer's targets against the MCU definitions' [writers].
+dagon-topology = { path = "../dagon-topology" }
 ed25519-compact = { version = "2.6", default-features = false }

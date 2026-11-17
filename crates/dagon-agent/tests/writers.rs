@@ -514,8 +514,8 @@ fn each_writer_is_kept_from_the_slot_it_runs_from() {
     let mut core = Bench::<_, writer::BootCore>::new(ed25519(&kp), Mem::new(1, 1));
     assert_eq!(
         core.transfer(target::BOOTCORE, 0, &c),
-        Status::State,
-        "the boot core runs from its only slot"
+        Status::Unsupported,
+        "no MCU's [writers] lists the boot core for a boot core slot"
     );
     let mut app = Bench::<_, writer::App>::new(ed25519(&kp), Mem::new(1, 1));
     assert_eq!(
@@ -569,7 +569,8 @@ fn the_boot_core_serves_none_of_the_app_only_requests() {
     let p = begin(target::AGENT, 2, HEADER_SIZE as u16);
     // This store keeps no agent slot; the app finds no room for it.
     assert_eq!(app.call(Cmd::XferBegin, &p), Status::Unsupported);
-    assert_eq!(core.call(Cmd::XferBegin, &p), Status::Arg);
+    // No MCU's [writers] lists the boot core for the recovery agent.
+    assert_eq!(core.call(Cmd::XferBegin, &p), Status::Unsupported);
 }
 
 /// XFER_BEGIN of 600 bytes into `slot` of `t` with `hdr` header bytes.
@@ -1011,7 +1012,8 @@ fn an_old_hosts_write_through_the_boot_core_writes_the_app_but_never_the_running
             ok(Cmd::Status),
             ok(Cmd::Hello),
             (Cmd::Show, Status::Unsupported),
-            (Cmd::XferBegin, Status::State),
+            // The boot core writes no boot core slot ([writers]).
+            (Cmd::XferBegin, Status::Unsupported),
         ];
         assert_eq!(log, want, "mode {m}");
         assert!(!reboot, "the node stays in mode {m}");
@@ -1024,4 +1026,67 @@ fn an_old_hosts_write_through_the_boot_core_writes_the_app_but_never_the_running
         assert_eq!(mem.status[1].slots[0].state, SlotState::Confirmed);
         assert_eq!(mem.status[0].slots[0].state, SlotState::Confirmed);
     }
+}
+
+/// A writer writes only the image kinds the MCU definitions' `[writers]`
+/// list it for: the boot core no boot core slot, not even the inactive one
+/// of two, refused at XFER_BEGIN before anything is erased, and its
+/// SET_PENDING for one refused too.
+#[test]
+fn the_boot_core_writes_only_what_writers_lists_for_it() {
+    let kp = keypair();
+    let c = image(
+        Shape {
+            kind: image_kind::BOOTCORE,
+            ..Shape::app(slot_binding::B)
+        },
+        &body(),
+        &kp,
+    );
+    let mut core = Bench::<_, writer::BootCore>::new(ed25519(&kp), Mem::new(2, 2));
+    assert_eq!(core.transfer(target::BOOTCORE, 1, &c), Status::Unsupported);
+    assert!(
+        !core
+            .mem
+            .borrow()
+            .bodies
+            .contains_key(&(target::BOOTCORE, 1)),
+        "nothing erased"
+    );
+    assert_eq!(core.set_pending(target::BOOTCORE, 1), Status::Unsupported);
+    let mut app = Bench::<_, writer::App>::new(ed25519(&kp), Mem::new(2, 2));
+    assert_eq!(
+        app.transfer(target::BOOTCORE, 1, &c),
+        Status::Ok,
+        "the app writes it"
+    );
+}
+
+/// Each writer's targets are what the built-in MCU definitions' `[writers]`
+/// list that kind for, no more and no fewer.
+#[test]
+fn the_writers_targets_are_the_definitions() {
+    use dagon_topology::defs::{ImageKind, Registry};
+    use std::collections::BTreeSet;
+    let reg = Registry::builtin();
+    let target_of = |k: ImageKind| match k {
+        ImageKind::App => target::APP,
+        ImageKind::Bootcore => target::BOOTCORE,
+        ImageKind::Agent => target::AGENT,
+        ImageKind::Stage0 => unreachable!("stage0 is not written in the field"),
+    };
+    let listed = |w: ImageKind| -> BTreeSet<u8> {
+        reg.mcus()
+            .iter()
+            .flat_map(|m| m.writers.iter())
+            .filter(|(_, by)| by.contains(&w))
+            .map(|(&k, _)| target_of(k))
+            .collect()
+    };
+    let of = |t: &[u8]| t.iter().copied().collect::<BTreeSet<u8>>();
+    assert_eq!(of(<writer::App as Writer>::WRITES), listed(ImageKind::App));
+    assert_eq!(
+        of(<writer::BootCore as Writer>::WRITES),
+        listed(ImageKind::Bootcore)
+    );
 }

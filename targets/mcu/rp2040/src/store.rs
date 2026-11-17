@@ -211,6 +211,17 @@ impl SlotStore for AppStore {
         Ok(())
     }
 
+    /// The hand-over to the boot core's update mode
+    /// ([`crate::bl::request_update_mode`]); `Unsupported` (E_UNSUPPORTED)
+    /// when the boot core receives on no link.
+    fn request_update_mode(&mut self) -> Result<(), StoreError> {
+        let receives = crate::clock::boot_core_receives();
+        crate::bl::request_update_mode(&mut self.flash, receives).map_err(|e| match e {
+            crate::bl::HandOverError::Unsupported => StoreError::Unsupported,
+            crate::bl::HandOverError::Log(_) => StoreError::Flash,
+        })
+    }
+
     /// Stage0's version mark in its region (`dagon_format::stage0`).
     fn stage0_version(&mut self) -> Option<Version> {
         stage0::find(STAGE0, STAGE0_SIZE, |a, b| self.flash.read(a, b).is_ok())

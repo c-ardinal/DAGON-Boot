@@ -240,6 +240,17 @@ body); that app writes the boot core again. With one boot core slot the
 app's agent refuses a boot core transfer while the app is on trial.
 Stage0 halts only when there is no such app.
 
+The boot core receives on the board's DAGON buses (`dagon = true`): its
+I2C bus as a target at the node's address in the topology (else the
+board's `[default_link] addr`), its UART bus
+(a hardware UART or a PIO). Right after its start it listens on them for
+the listen window the MCU definition gives; a STAY there, or the app's
+hand-over (REBOOT mode 1 writes UPDATE_STAY), keeps it in update mode,
+which it leaves on REBOOT or after 60 s without a request. With nothing
+to start it serves recovery mode. In both modes it also serves USB, as
+the same USB device the app presents, on a board with a crystal (the
+48 MHz USB clock); USB takes no part in the window.
+
 ## Boot images
 
 `stage0/` and `bootcore/` are DAGON's boot images for this MCU (their

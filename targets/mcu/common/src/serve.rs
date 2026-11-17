@@ -1,4 +1,5 @@
-//! The serving loop of a node's agent over any [`Link`]: wait for a request
+//! The serving loop of a node's session over any [`Link`], the app's or
+//! the boot core's (the writer `W`): wait for a request
 //! frame, answer it, and after the reply to REBOOT let the reply leave,
 //! wait the delay `allow_reboot_now` asked for and hand the reset to the
 //! caller. What differs between MCUs (watchdog reports, a conformance build
@@ -6,14 +7,15 @@
 //! loop reports the link and every request to the agent's chain
 //! (`app.link_up`, `app.link_down`, `app.request`, `app.replied`).
 
-use dagon_agent::{reply_status, Agent, AppChain, SlotStore, IDLE_TIMEOUT_MS};
+use dagon_agent::writer::App;
+use dagon_agent::{reply_status, Agent, AppChain, SlotStore, Writer, IDLE_TIMEOUT_MS};
 use dagon_format::SigVerifier;
 
 use crate::link::{Link, LinkError};
 
 /// What the serving loop asks of its MCU.
 #[allow(async_fn_in_trait)]
-pub trait ServeHost<S: SlotStore, X: AppChain, V: SigVerifier> {
+pub trait ServeHost<S: SlotStore, X: AppChain, V: SigVerifier, W: Writer = App> {
     /// Milliseconds on a monotonic clock.
     fn now_ms(&self) -> u64;
     /// Waiting for a request (no deadline of its own).
@@ -29,12 +31,12 @@ pub trait ServeHost<S: SlotStore, X: AppChain, V: SigVerifier> {
     fn on_request(&mut self) {}
     /// Answers `request` before the agent does (a conformance build);
     /// `None` leaves it to the agent.
-    fn intercept(&mut self, _agent: &mut Agent<S, X, V>, _request: &[u8]) -> Option<&[u8]> {
+    fn intercept(&mut self, _agent: &mut Agent<S, X, V, W>, _request: &[u8]) -> Option<&[u8]> {
         None
     }
     /// The request (command `cmd`) was answered (e.g. trial state re-read,
     /// timing log).
-    fn after(&mut self, _agent: &mut Agent<S, X, V>, _cmd: u8) {}
+    fn after(&mut self, _agent: &mut Agent<S, X, V, W>, _cmd: u8) {}
     /// A read failed (logging); the loop goes on.
     fn on_error(&mut self, _e: LinkError) {}
     /// Waits `ms` before a reset. The loop has reported itself idle, so
@@ -60,13 +62,18 @@ pub enum Exit {
 /// a reply cannot be written or the link closes (`app.link_down`). A reboot
 /// follows only a reply that was written and flushed; otherwise the node
 /// keeps serving and the peer's retry gets the same reply again.
-pub async fn serve<L, S, X, V, H>(link: &mut L, agent: &mut Agent<S, X, V>, host: &mut H) -> Exit
+pub async fn serve<L, S, X, V, W, H>(
+    link: &mut L,
+    agent: &mut Agent<S, X, V, W>,
+    host: &mut H,
+) -> Exit
 where
     L: Link,
     S: SlotStore,
     X: AppChain,
     V: SigVerifier,
-    H: ServeHost<S, X, V>,
+    W: Writer,
+    H: ServeHost<S, X, V, W>,
 {
     let (via, addr) = (link.kind().code(), link.addr());
     let mut up = false;

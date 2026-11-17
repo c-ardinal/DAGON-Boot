@@ -77,6 +77,10 @@ fbdiv = 125
 postdiv1 = 6
 postdiv2 = 2
 refdiv = 1
+usb_fbdiv = 120
+usb_postdiv1 = 6
+usb_postdiv2 = 5
+usb_refdiv = 1
 
 [connection]
 hint = "BOOT を押しながら USB をつないでから、書き込んでください。"

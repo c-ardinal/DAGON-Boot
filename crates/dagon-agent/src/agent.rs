@@ -408,6 +408,12 @@ impl<S: SlotStore, X: AppChain, V: SigVerifier, W: Writer> Agent<S, X, V, W> {
         self.images.keep_room()
     }
 
+    /// Whether this writer writes image kind `t` ([`Writer::WRITES`]); a
+    /// target that names no image kind is left to the target checks.
+    fn writer_writes(&self, t: u8) -> bool {
+        !matches!(t, target::APP | target::BOOTCORE | target::AGENT) || W::WRITES.contains(&t)
+    }
+
     /// Whether this session writes: the app's always, the boot core's only
     /// in update or recovery mode. Outside them the boot core erases and
     /// writes nothing, its log included, and refuses with E_STATE.
@@ -419,6 +425,9 @@ impl<S: SlotStore, X: AppChain, V: SigVerifier, W: Writer> Agent<S, X, V, W> {
     fn offer_guards(&mut self, req: &XferBegin) -> Result<u32, Status> {
         if !self.writes() {
             return Err(Status::State);
+        }
+        if !self.writer_writes(req.target) {
+            return Err(Status::Unsupported);
         }
         let body_len = req.body_len().ok_or(Status::Arg)?;
         let ab = matches!(req.slot, SLOT_A | SLOT_B);
@@ -644,6 +653,9 @@ impl<S: SlotStore, X: AppChain, V: SigVerifier, W: Writer> Agent<S, X, V, W> {
     fn switch(&mut self, req: SetPending) -> Handled {
         if !self.writes() {
             return Err(Status::State);
+        }
+        if !self.writer_writes(req.target) {
+            return Err(Status::Unsupported);
         }
         let t = req.target;
         if !matches!(t, target::APP | target::BOOTCORE) || !matches!(req.slot, SLOT_A | SLOT_B) {

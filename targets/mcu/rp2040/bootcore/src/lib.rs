@@ -10,8 +10,8 @@
 //! it. The core runs on the clock the
 //! definitions choose for the node (the MCU's `[[bootcore.clock]]` setup
 //! for its board's `[clock]`, the ring oscillator without a crystal). With
-//! nothing startable the watchdog
-//! stops and the board's boot LED shows its halt pattern (`[boot] led`,
+//! nothing startable and no link to receive on (recovery mode, below) the
+//! watchdog stops and the board's boot LED shows its halt pattern (`[boot] led`,
 //! `halt`; reinstall with BOOTSEL + UF2). In the `diag` build a panic
 //! blinks the code of the last step (6 before HAL init, 7 after it, 8
 //! deciding) and nothing startable blinks code 9.
@@ -31,9 +31,25 @@
 //! boot event, each call timed against its `max_run_us`, and takes the
 //! board facts and the node's tag from that folder (`DAGON_BOOT_CRATE`,
 //! `DAGON_TARGET_TAG`); the build fails without them.
+//!
+//! Receiving (design DES-RB-030): right after its start the core opens
+//! the links of the board's DAGON buses (an I2C target at the node's topology
+//! address, a UART) and, when the app handed over (REBOOT mode 1, an
+//! UPDATE_STAY consumed here with UPDATE_DONE) or a STAY arrives on them
+//! within the listen window, serves the update session before it decides
+//! anything; it leaves for a normal restart on REBOOT or after 60 s
+//! without a request. When nothing can be started it serves the session in
+//! recovery mode instead of halting. In both modes it also serves USB on a
+//! clock setup with the USB PLL (a crystal); USB takes no part in the
+//! window, being enumerated first. A node with neither a DAGON bus nor the
+//! USB clock receives nothing, takes no hand-over and halts with nothing
+//! startable. The session is dagon-agent's with the boot core writer, its
+//! checks fed through the same watchdog-feeding verifier; every wait
+//! sleeps until an interrupt.
 #![no_std]
 
-use core::cell::RefCell;
+mod receive;
+
 use dagon_boot::BootRun;
 use dagon_core::boot::{BootConfig, Decision};
 use dagon_core::bootcore::CLEARED;
@@ -42,6 +58,8 @@ use dagon_events::{compose_boot, BootExtension, Extension};
 use dagon_format::header::mcu_id;
 use dagon_mcu_rp2040::arm::{jump, led, step, trial};
 use dagon_mcu_rp2040::bl::{self, Settled};
+use dagon_mcu_rp2040::boot_receive::{self, Entry};
+
 use dagon_mcu_rp2040::clock::Setup;
 use dagon_mcu_rp2040::flash::RpFlash;
 use dagon_mcu_rp2040::layout::{watchdog_ms, APP_LOG_LAYOUT, APP_SLOTS};
@@ -56,13 +74,18 @@ use panic_halt as _;
 pub use cortex_m_rt::entry as __entry;
 
 /// The boot core's `main` for the node whose generated `boot_wiring.rs`
-/// is the module `$wiring`: its extension chain and their time limits.
+/// is the module `$wiring`: its extension chain and their time limits,
+/// and the node's I2C target address from the topology (`LINK_ADDR`).
 #[macro_export]
 macro_rules! boot {
     ($wiring:ident) => {
         #[$crate::__entry]
         fn main() -> ! {
-            $crate::run($wiring::BOOT_CHAIN, $wiring::BOOT_EXTENSIONS)
+            $crate::run(
+                $wiring::BOOT_CHAIN,
+                $wiring::BOOT_EXTENSIONS,
+                $wiring::LINK_ADDR,
+            )
         }
     };
 }
@@ -138,6 +161,56 @@ fn now_us() -> u64 {
     }
 }
 
+fn period() -> Duration {
+    Duration::from_millis(watchdog_ms(true).into())
+}
+
+/// Runs `f` on the watchdog. embassy-rp's `Watchdog` keeps no state of its
+/// own (each call writes the WATCHDOG and PSM registers), and only the boot
+/// core's thread-mode code calls this, never an interrupt, so a handle per
+/// call shares nothing and needs no lock.
+fn with_wdt(f: impl FnOnce(&mut Watchdog)) {
+    // SAFETY: see above; no other driver owns the watchdog in the boot core.
+    let wdt = unsafe { embassy_rp::peripherals::WATCHDOG::steal() };
+    f(&mut Watchdog::new(wdt));
+}
+
+/// A full trial period from now.
+fn feed() {
+    with_wdt(|w| w.feed(period()));
+}
+
+/// Resets through the watchdog, so stage0 sees the start end.
+fn reset() -> ! {
+    with_wdt(Watchdog::trigger_reset);
+    loop {
+        cortex_m::asm::nop();
+    }
+}
+
+/// This core's signature verifier, under the key built into it: stage0's
+/// small Ed25519, one copy for the boot decision and the update session.
+/// It feeds the watchdog at every step of a check, which takes seconds on
+/// the ring oscillator of a board without a crystal.
+type Verifier = Ed25519Small<fn()>;
+const VERIFIER: Verifier = Ed25519Small::with_tick(PUBKEY, feed as fn());
+
+// The links besides USB, from the board's DAGON buses (build.rs).
+include!(concat!(env!("OUT_DIR"), "/link.rs"));
+
+/// Whether the core receives before it decides anything (the app handed
+/// over, else a STAY in the listen window on the I2C and UART links; USB
+/// takes no part in the window), and the STAY its session answers first.
+/// Never inlined, so a debugger can time this step on the hardware (the
+/// boot time it adds).
+#[inline(never)]
+fn receive_step(
+    flash: &mut RpFlash,
+    links: &mut receive::BootLinks,
+) -> Option<(Entry, Option<dagon_agent::update_mode::Stay>)> {
+    receive::step(flash, links, LISTEN_WINDOW_MS)
+}
+
 const CONFIG: BootConfig = BootConfig {
     mcu_id: mcu_id::RP2040,
     target_tag: checked_tag(TARGET_TAG),
@@ -145,8 +218,9 @@ const CONFIG: BootConfig = BootConfig {
 };
 
 /// One boot with `chain` (the node's boot extensions, in order; their
-/// time limits and observed events in `limits`).
-pub fn run<E: Extension>(chain: E, limits: &'static [BootExtension]) -> ! {
+/// time limits and observed events in `limits`); the I2C link answers at
+/// `link_addr` (`None`: the board's `[default_link] addr`).
+pub fn run<E: Extension>(chain: E, limits: &'static [BootExtension], link_addr: Option<u8>) -> ! {
     // The diag panic handler blinks the selected LED.
     if let Some(gpio) = board_def::BOOT_LED_GPIO {
         led::select(gpio, board_def::BOOT_LED_ACTIVE_HIGH);
@@ -155,16 +229,17 @@ pub fn run<E: Extension>(chain: E, limits: &'static [BootExtension]) -> ! {
     let p = embassy_rp::init(CLOCK.hal_config());
     step(7);
     let mut flash = RpFlash::new(p.FLASH);
-    let wdt = RefCell::new(Watchdog::new(p.WATCHDOG));
     // The boot core's own run is timed like an image on trial.
-    let period = || Duration::from_millis(watchdog_ms(true).into());
-    wdt.borrow_mut().start(period());
-    // This core's signature verifier, under the key built into it:
-    // stage0's small Ed25519, so the boot core has room for the update
-    // session. It feeds the watchdog at every step of a check, which takes
-    // seconds on the ring oscillator of a board without a crystal.
-    let verifier = Ed25519Small::with_tick(PUBKEY, || wdt.borrow_mut().feed(period()));
+    Watchdog::new(p.WATCHDOG).start(period());
+    let verifier = VERIFIER;
     step(8);
+    let mut links = boot_receive::Links::new(None, open_i2c!(p, link_addr), open_uart!(p));
+    if let Some((entry, stay)) = receive_step(&mut flash, &mut links) {
+        receive::serve(p.USB, flash, links, entry, stay)
+    }
+    // The window is over: the I2C target stops answering its address, so
+    // the bus is not held while the slow checks below run.
+    dagon_mcu_rp2040::boot_links::pause_i2c();
     let mut chain = compose_boot(chain, now_us, limits);
     let mut boot = BootRun::start(
         &mut chain,
@@ -187,23 +262,21 @@ pub fn run<E: Extension>(chain: E, limits: &'static [BootExtension]) -> ! {
         Ok(Settled::Nothing) => {}
         Ok(Settled::Confirmed | Settled::RolledBack) => trial::write(CLEARED),
         // On trial and not fit to run the app: stage0 counts this start.
-        Err(bl::MustReset) => {
-            wdt.borrow_mut().trigger_reset();
-            loop {
-                cortex_m::asm::nop();
-            }
-        }
+        Err(bl::MustReset) => reset(),
     }
     if let Decision::Boot { entry, trial, .. } = decision {
         boot.before_jump(&mut chain);
         // The app runs the trial period while on trial, else the confirmed one.
-        wdt.borrow_mut()
-            .feed(Duration::from_millis(watchdog_ms(trial).into()));
+        with_wdt(|w| w.feed(Duration::from_millis(watchdog_ms(trial).into())));
+        dagon_mcu_rp2040::boot_links::release();
         hand_back_clocks();
         jump(entry);
     }
     boot.halt(&mut chain);
-    wdt.borrow_mut().stop();
+    if CLOCK.has_usb() || links.any() {
+        receive::serve(p.USB, flash, links, Entry::Recovery, None)
+    }
+    with_wdt(Watchdog::stop);
     led_init();
     if cfg!(feature = "diag") {
         led::code(9)

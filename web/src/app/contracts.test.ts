@@ -68,25 +68,52 @@ function topLevel(t: string, ch: string): number {
   return -1;
 }
 
-/** Calls of api/call/json('METHOD', path, ..), start('kind', path, ..), projectCall(path, ..) and fetch('/v1/path', { method }), with their top-level arguments. */
-function callsIn(src: string): { name: string; args: string[] }[] {
-  const out: { name: string; args: string[] }[] = [];
+/** The top-level comma-separated parts of `src` from `from` up to the bracket that closes there, and that bracket's index (-1 when none). */
+function partsUntilClose(src: string, from: number): { parts: string[]; end: number } {
+  const parts: string[] = [];
+  let depth = 0;
+  for (let i = from; i < src.length; i++) {
+    const c = src[i];
+    if (c === "'" || c === '"' || c === '`') i += literalsOf(src.slice(i))[0].length + 1;
+    else if ('([{'.includes(c)) depth++;
+    else if (')]}'.includes(c) && depth-- === 0) return (parts.push(src.slice(from, i)), { parts, end: i });
+    else if (c === ',' && depth === 0) (parts.push(src.slice(from, i)), (from = i + 1));
+  }
+  return { parts, end: -1 };
+}
+
+/** Whether `t` spreads anything (`...`) outside its string literals. */
+function hasSpread(t: string): boolean {
+  for (let i = 0; i < t.length; i++) {
+    if (t[i] === "'" || t[i] === '"' || t[i] === '`') i += literalsOf(t.slice(i))[0].length + 1;
+    else if (t.startsWith('...', i)) return true;
+  }
+  return false;
+}
+
+/** The properties of `s` when it is exactly one object literal of `key: value` and shorthand `key` entries, else null (a spread, a computed key, a method or anything else). */
+function propsOf(s: string): Map<string, string> | null {
+  const t = s.trim();
+  if (!t.startsWith('{')) return null;
+  const { parts, end } = partsUntilClose(t, 1);
+  if (end !== t.length - 1) return null;
+  const props = new Map<string, string>();
+  for (const p of parts.map((x) => x.trim()).filter((x, i) => x !== '' || i < parts.length - 1)) {
+    const m = /^(\w+)\s*(?::([\s\S]*))?$/.exec(p);
+    if (!m || props.has(m[1])) return null;
+    props.set(m[1], m[2] ?? m[1]);
+  }
+  return props;
+}
+
+/** Calls of api/call/json('METHOD', path, ..), start('kind', path, ..), projectCall(path, ..) and fetch('/v1/path', { method }), with where the name starts and their top-level arguments. */
+function callsIn(src: string): { name: string; at: number; args: string[] }[] {
+  const out: { name: string; at: number; args: string[] }[] = [];
   for (const m of src.matchAll(/\b(api|call|json|start|projectCall|fetch)(?:<[^>(]*>)?\(/g)) {
-    const args: string[] = [];
-    let depth = 0;
-    let from = m.index! + m[0].length;
-    for (let i = from; i < src.length; i++) {
-      const c = src[i];
-      if (c === "'" || c === '"' || c === '`') i += literalsOf(src.slice(i))[0].length + 1;
-      else if ('([{'.includes(c)) depth++;
-      else if (')]}'.includes(c) && depth-- === 0) {
-        args.push(src.slice(from, i));
-        break;
-      } else if (c === ',' && depth === 0) (args.push(src.slice(from, i)), (from = i + 1));
-    }
+    const args = partsUntilClose(src, m.index! + m[0].length).parts;
     const first = args[0] ?? '';
     // A definition has `name: type` parameters, and a call with no argument (r.json()) carries no path.
-    if (!/^\s*\w+\s*:/.test(first) && !(args.length === 1 && first.trim() === '')) out.push({ name: m[1], args });
+    if (!/^\s*\w+\s*:/.test(first) && !(args.length === 1 && first.trim() === '')) out.push({ name: m[1], at: m.index!, args });
   }
   return out;
 }
@@ -122,17 +149,33 @@ function readCalls(file: string, src: string): Read {
     return arms.some((a) => a === null) ? null : arms.flatMap((a) => a!);
   };
 
+  /** `(...a) => fetch(...a)`: hands every argument on unchanged, so it is no call of its own. */
+  const isSpreadPassthrough = (call: { at: number; args: string[] }): boolean => {
+    const rest = /^\s*\.\.\.(\w+)\s*$/.exec(call.args[0]);
+    return call.args.length === 1 && rest !== null && new RegExp(`\\(\\s*\\.\\.\\.${rest[1]}\\s*\\)\\s*=>\\s*$`).test(src.slice(0, call.at));
+  };
+  /** fetch(`/v1/${path}`, { method, .. }) inside a wrapper whose method and path parameters are forwarded: its callers are read. */
+  const isWrapperFetch = (args: string[]): boolean => {
+    const path = /^`\/v1\/\$\{(\w+)\}`$/.exec(args[0].trim());
+    const method = args.length === 2 && !hasSpread(args[1]) ? propsOf(args[1])?.get('method')?.trim() : undefined;
+    return path !== null && forwarded.has(path[1]) && method !== undefined && forwardedMethods.has(method);
+  };
+  /** The method and paths of fetch(path) or fetch(path, { method: 'M', .. }); null for any other form. */
+  const fetchOf = (args: string[]): { method: string; paths: string[] } | null => {
+    if (args.length > 2 || args.some(hasSpread)) return null;
+    const method = args[1] === undefined ? 'GET' : methodOf(propsOf(args[1])?.get('method'));
+    const paths = pathsOf(args[0]);
+    if (method === null || paths === null || !paths.length || paths.some((p) => !p.startsWith('/v1/') || p.includes('${'))) return null;
+    return { method, paths: paths.map((p) => p.slice('/v1/'.length)) };
+  };
+
   for (const call of callsIn(src)) {
     const shown = `${file}: ${call.name}(${call.args.join(', ')})`;
     if (call.name === 'fetch') {
-      // fetch('/v1/topology', { method: 'PUT', .. }); the wrapper's own `/v1/${path}` and a forwarded `...args` are not calls.
-      const expr = call.args[0].trim();
-      if (expr.startsWith('...') || expr === '`/v1/${path}`') continue;
-      const opts = call.args[1];
-      const method = opts === undefined ? 'GET' : (new RegExp(`method:\\s*(['"\`])(${METHODS})\\1`).exec(opts)?.[2] ?? (/^\s*\{(?![^}]*method)/.test(opts) ? 'GET' : null));
-      const paths = pathsOf(expr);
-      if (method === null || paths === null || !paths.length || paths.some((p) => !p.startsWith('/v1/'))) unreadable.push(shown);
-      else for (const p of paths) calls.push({ file, method, path: p.slice('/v1/'.length) });
+      if (isSpreadPassthrough(call) || isWrapperFetch(call.args)) continue;
+      const read = fetchOf(call.args);
+      if (read === null) unreadable.push(shown);
+      else for (const path of read.paths) calls.push({ file, method: read.method, path });
       continue;
     }
     const helper = call.name === 'start' || call.name === 'projectCall';
@@ -175,6 +218,14 @@ describe('the reader of the Console calls', () => {
   });
 
   test.each([
+    ['a fetch wrapper forwarding its method and path', "call(method: string, path: string) { return this.d.fetch(`/v1/${path}`, { method, headers }); }\nthis.call('GET', 'q')", ['GET q']],
+    ['a fetch handing all its arguments on', 'const f = (...a) => fetch(...a);', []],
+  ])('%s is not a call; its callers are', (_n, src, want) => {
+    expect(read(src).unreadable).toEqual([]);
+    expect(found(src)).toEqual(want);
+  });
+
+  test.each([
     ['a method that is a call', "this.call(verb(), 'a')"],
     ['a method that is not a literal', "this.call(verb, 'a')"],
     ['a method that is not an HTTP one', 'this.call("FETCH", "a")'],
@@ -186,6 +237,19 @@ describe('the reader of the Console calls', () => {
     ['a fetch of a variable', 'this.d.fetch(url, { method: "GET" })'],
     ['a fetch with a method that is not a literal', "this.d.fetch('/v1/a', { method: m })"],
     ['a fetch outside /v1/', "this.d.fetch('/other', { method: 'GET' })"],
+    ['a fetch of spread arguments', 'this.d.fetch(...args)'],
+    ['a fetch spreading arguments it was not handed', 'const f = (...a) => fetch(...b);'],
+    ['a fetch of a template path', "this.d.fetch(`/v1/${path}`, { method: 'GET' })"],
+    ['a fetch of a forwarded template path with a fixed method', "call(method: string, path: string) { return this.d.fetch(`/v1/${path}`, { method: 'GET' }); }"],
+    ['a fetch with a method that is not a literal among other keys', "this.d.fetch('/v1/a', { headers: { a: 'b' }, method: m })"],
+    ['a fetch of spread options', "this.d.fetch('/v1/a', { ...opts })"],
+    ['a fetch of spread options and a method', "this.d.fetch('/v1/a', { ...opts, method: 'GET' })"],
+    ['a fetch with a spread inside its options', "this.d.fetch('/v1/a', { headers: { ...h }, method: 'GET' })"],
+    ['a fetch of options in a variable', "this.d.fetch('/v1/a', opts)"],
+    ['a fetch with options and no method', "this.d.fetch('/v1/a', { headers })"],
+    ['a fetch with the method only in a nested object', "this.d.fetch('/v1/a', { headers: { method: 'PUT' } })"],
+    ['a fetch with a computed key', "this.d.fetch('/v1/a', { [k]: v, method: 'GET' })"],
+    ['a fetch with a third argument', "this.d.fetch('/v1/a', { method: 'GET' }, x)"],
     ['a start with a path that is not a literal', "this.start('gen', where, {}, 'x')"],
     ['a projectCall with a path that is not a literal', 'this.projectCall(where, {}, false)'],
   ])('%s is unreadable, not skipped', (_n, src) => {

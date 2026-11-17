@@ -158,6 +158,12 @@ pub struct TopoLink {
 }
 
 impl TopoLink {
+    /// Whether the link reaches a node's vendor ROM I2C loader: an I2C bus
+    /// link whose ROM entry is [`rom_entry::STM32_I2C_ROM`].
+    pub fn reaches_rom_i2c(&self) -> bool {
+        self.iface == iface::I2C_BUS && self.rom_entry == rom_entry::STM32_I2C_ROM
+    }
+
     /// The end at `node`, if the link has one there.
     pub fn end(&self, node: u8) -> Option<&TopoEnd> {
         self.ends.iter().find(|e| e.node == node)
@@ -352,6 +358,23 @@ impl<'a> TopologyView<'a> {
         assert!(i < self.link_count());
         let off = HEAD_SIZE + NODE_SIZE * self.node_count() + LINK_SIZE * i;
         TopoLink::parse(&self.raw[off..off + LINK_SIZE])
+    }
+
+    /// The ROM recovery peer of `node`: the node at the other end of the
+    /// first link of `node` that reaches a ROM I2C loader
+    /// ([`TopoLink::reaches_rom_i2c`]) whose MCU has one
+    /// (`has_loader(mcu_id)`). The relay at `node` is built for that
+    /// loader's address; the host takes the ROM path to a node only as a
+    /// peer. The reset and boot lines are not part of it: the board wires
+    /// them.
+    pub fn rom_peer(&self, node: u8, has_loader: impl Fn(u16) -> bool) -> Option<u8> {
+        (0..self.link_count())
+            .map(|i| self.link(i))
+            .filter(TopoLink::reaches_rom_i2c)
+            .filter_map(|l| l.other(node).map(|e| e.node))
+            .find(|&p| {
+                usize::from(p) < self.node_count() && has_loader(self.node(usize::from(p)).mcu_id)
+            })
     }
 
     /// Panics if `i >= constraint_count()`.

@@ -1,5 +1,5 @@
 import { decodeHelloResp, encodeHelloReq, wireVersion } from '../wasm/dagon.ts';
-import { CMD, MAX_PAYLOAD_USB, STATUS_OK, encodeFrame, newFrameStream, parseFrame } from './frame.ts';
+import { CMD, encodeFrame, newFrameStream, parseFrame, STATUS, WIRE } from './frame.ts';
 import { ROLE_HUB, type HelloResp } from './hello.ts';
 
 /**
@@ -85,11 +85,11 @@ export async function probeHello(port: SerialPort, waitMs = PROBE_MS): Promise<H
     return null;
   }
   try {
-    const req = encodeHelloReq({ protoVer: wireVersion(), maxPayload: MAX_PAYLOAD_USB });
+    const req = encodeHelloReq({ protoVer: wireVersion(), maxPayload: WIRE.MAX_PAYLOAD_USB });
     await t.write(encodeFrame({ flags: 0, seq: 0, cmd: CMD.HELLO, payload: req }));
     const raw = await t.read(waitMs);
     const f = raw && parseFrame(raw);
-    if (!f || f.cmd !== CMD.HELLO || f.payload[0] !== STATUS_OK) return null;
+    if (!f || f.cmd !== CMD.HELLO || f.payload[0] !== STATUS.OK) return null;
     return decodeHelloResp(f.payload.subarray(1));
   } catch {
     return null;
@@ -142,7 +142,7 @@ const CDC_BAUD = 115200;
 export class WebSerialTransport implements Transport {
   /** Web Serial reaches the hub's USB CDC port, which goes away on its reboot. */
   maxPayload(): number {
-    return MAX_PAYLOAD_USB;
+    return WIRE.MAX_PAYLOAD_USB;
   }
 
   reconnectKind(): ReconnectKind {

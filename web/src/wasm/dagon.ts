@@ -3,8 +3,14 @@
 // file has to free WASM memory.
 import init, {
   FrameCutter,
-  PayloadWriter,
-  payload_read,
+  hello_response_body,
+  request_read,
+  response_digest,
+  response_next_offset,
+  response_relay,
+  response_status,
+  response_status_slots,
+  wire,
   WasmHost,
   frame_encode,
   hello_decode,
@@ -209,45 +215,118 @@ export function encodeFrameBytes(flags: number, seq: number, cmd: number, payloa
   return frame_encode(flags, seq, cmd, payload);
 }
 
-/** A payload taken apart by dagon-proto's reader (a response's after its status byte). */
-export interface PayloadParts {
-  core: Uint8Array;
-  /** Field values by number; a field that was not sent is absent. */
-  fields: Map<number, Uint8Array>;
-  bulk: Uint8Array;
+/** The wire's numbers the page names, as dagon-proto has them (dagon_wasm::Wire). */
+export interface WireNumbers {
+  cmdHello: number;
+  cmdStatus: number;
+  cmdXferBegin: number;
+  cmdXferData: number;
+  cmdXferEnd: number;
+  cmdXferHdr: number;
+  cmdSetPending: number;
+  cmdReboot: number;
+  cmdConfirm: number;
+  cmdShow: number;
+  cmdRelay: number;
+  statusOk: number;
+  statusUnsupported: number;
+  statusArg: number;
+  statusField: number;
+  statusState: number;
+  statusTimeout: number;
+  flagResp: number;
+  headerLen: number;
+  crcLen: number;
+  maxPayloadUsb: number;
+  maxPayloadUart: number;
+  maxPayloadI2c: number;
 }
 
-/** Reads the payload of a `cmd` request or response; throws on a malformed one. `numbers`: the fields to take. */
-export function readPayload(cmd: number, response: boolean, payload: Uint8Array, numbers: number[] = []): PayloadParts {
-  const p = payload_read(cmd, response, payload);
-  try {
-    const fields = new Map<number, Uint8Array>();
-    for (const n of numbers) {
-      const v = p.field(n);
-      if (v) fields.set(n, v);
-    }
-    return { core: p.core, fields, bulk: p.bulk };
-  } finally {
-    p.free();
-  }
-}
+let numbers: WireNumbers | undefined;
 
-/** Writes the payload of a `cmd` request or response with dagon-proto's writer; fields in rising number order. */
-export function writePayload(
-  cmd: number,
-  response: boolean,
-  parts: { core?: Uint8Array; fields?: [number, Uint8Array][]; bulk?: Uint8Array },
-): Uint8Array {
-  const w = new PayloadWriter(cmd, response);
+/** Read once, when first asked (dagon-wasm is loaded by then). */
+export function wireNumbers(): WireNumbers {
+  if (numbers) return numbers;
+  const w = wire();
   try {
-    if (parts.core) w.core(parts.core);
-    for (const [n, v] of parts.fields ?? []) w.field(n, v);
-    if (parts.bulk) w.bulk(parts.bulk);
-    return w.finish();
+    numbers = {
+      cmdHello: w.cmd_hello,
+      cmdStatus: w.cmd_status,
+      cmdXferBegin: w.cmd_xfer_begin,
+      cmdXferData: w.cmd_xfer_data,
+      cmdXferEnd: w.cmd_xfer_end,
+      cmdXferHdr: w.cmd_xfer_hdr,
+      cmdSetPending: w.cmd_set_pending,
+      cmdReboot: w.cmd_reboot,
+      cmdConfirm: w.cmd_confirm,
+      cmdShow: w.cmd_show,
+      cmdRelay: w.cmd_relay,
+      statusOk: w.status_ok,
+      statusUnsupported: w.status_unsupported,
+      statusArg: w.status_arg,
+      statusField: w.status_field,
+      statusState: w.status_state,
+      statusTimeout: w.status_timeout,
+      flagResp: w.flag_resp,
+      headerLen: w.header_len,
+      crcLen: w.crc_len,
+      maxPayloadUsb: w.max_payload_usb,
+      maxPayloadUart: w.max_payload_uart,
+      maxPayloadI2c: w.max_payload_i2c,
+    };
+    return numbers;
   } finally {
     w.free();
   }
 }
+
+/** A request read by dagon-proto's reader; only the members of its command mean something. */
+export interface WireRequest {
+  /** The response payload that refuses the request; null when it reads. */
+  refusal: Uint8Array | null;
+  target: number;
+  slot: number;
+  offset: number;
+  link: number;
+  addr: number;
+  /** A chunk's data, or a RELAY's inner frame. */
+  bulk: Uint8Array;
+}
+
+/** Reads a request for the in-memory hub: malformed, an unknown must field and an unserved command come back as `refusal`. */
+export function readRequest(cmd: number, payload: Uint8Array): WireRequest {
+  const r = request_read(cmd, payload);
+  try {
+    const refusal = r.refusal;
+    return { refusal: refusal.length ? refusal : null, target: r.target, slot: r.slot, offset: r.offset, link: r.link, addr: r.addr, bulk: r.bulk };
+  } finally {
+    r.free();
+  }
+}
+
+/** Response payloads for the in-memory hub, written by dagon-proto's writer. */
+export const respond = {
+  status: (status: number): Uint8Array => response_status(status),
+  helloBody: (h: HelloResp): Uint8Array =>
+    hello_response_body(h.protoVer, h.role, h.portKind, h.mcuId, h.mode, h.activeVersion, h.trial, h.keyId, h.maxPayload),
+  slots: (
+    slots: { state: number; version: number; digest16: Uint8Array }[],
+    rest: { active: number; confirmed: number; attempts: number; lastReason: number; logGeneration: number },
+  ): Uint8Array =>
+    response_status_slots(
+      Uint8Array.from(slots.map((s) => s.state)),
+      Uint32Array.from(slots.map((s) => s.version)),
+      Uint8Array.from(slots.flatMap((s) => [...s.digest16])),
+      rest.active,
+      rest.confirmed,
+      rest.attempts,
+      rest.lastReason,
+      rest.logGeneration,
+    ),
+  nextOffset: (next: number): Uint8Array => response_next_offset(next),
+  digest: (sha256: Uint8Array): Uint8Array => response_digest(sha256),
+  relay: (frame: Uint8Array): Uint8Array => response_relay(frame),
+};
 
 /** Stream cutter: SOF search, length and CRC checks are dagon-proto's. */
 export interface FrameStream {

@@ -455,6 +455,9 @@ where
             let hub = connected(t).unwrap_or("hub");
             format!("the hub does not answer; write it directly: dagon flash {hub}")
         }
+        dagon_host::Error::WireVersion { peer } => {
+            crate::versions::wire_warning("the hub", peer.into()).unwrap_or(format!("{e:?}"))
+        }
         e => format!("{e:?}"),
     })?;
     let mut answering = Vec::new();

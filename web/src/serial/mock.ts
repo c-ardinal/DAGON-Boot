@@ -3,37 +3,17 @@
 // dagon-proto frame format. It covers what the page drives: HELLO, STATUS,
 // RELAY to the two nodes and the update steps
 // (XFER_BEGIN/HDR/DATA/END, SET_PENDING, REBOOT, CONFIRM, SHOW). Images are
-// not checked here; dagon-host checks the release before sending. Payloads
-// are read and written by dagon-proto's field reader and writer (dagon-wasm);
-// only the field numbers of dagon_proto::table are named here.
-import { CMD, FLAG_RESP, MAX_PAYLOAD_USB, STATUS_OK, encodeFrame, parseFrame } from './frame.ts';
+// not checked here; dagon-host checks the release before sending. Every
+// request is read by dagon-proto's reader before the hub acts on it, and
+// every response is written by its writer (dagon-wasm): no command, status
+// or field number and no payload layout is written here.
+import { CMD, encodeFrame, parseFrame, STATUS, WIRE } from './frame.ts';
 import { ROLE_HUB, ROLE_NODE, encodeHelloResp, versionRaw, type HelloResp } from './hello.ts';
 import { FrameQueue, type Transport } from './transport.ts';
 import sampleYaml from '../../../topology/sample.yaml?raw';
-import { readPayload, topo_targets, writePayload, type Target } from '../wasm/dagon.ts';
+import { readRequest, respond, topo_targets, wireVersion, type Target, type WireRequest } from '../wasm/dagon.ts';
 
-const STATUS_UNSUPPORTED = 0x02;
-const STATUS_ARG = 0x03;
-const STATUS_STATE = 0x05;
-const STATUS_TIMEOUT = 0x0f;
-const CMD_XFER_BEGIN = 0x10;
-const CMD_XFER_DATA = 0x11;
-const CMD_XFER_END = 0x12;
-const CMD_XFER_HDR = 0x15;
-const CMD_SET_PENDING = 0x20;
-const CMD_REBOOT = 0x21;
-const CMD_CONFIRM = 0x22;
-const CMD_SHOW = 0x41;
-const CMD_RELAY = 0x50;
-/** dagon_proto::table field numbers. */
-const F_SLOT = 1;
-const F_RELAY_ADDR = 1;
-const F_SHA256 = 1;
-/** RELAY addr of a link without addresses (dagon_proto::payload::link::UART_ADDR). */
-const UART_ADDR = 0xff;
 const HDR_VERSION_AT = 0x018;
-const MAX_PAYLOAD_I2C = 256;
-const MAX_PAYLOAD_UART = 1024;
 const SLOT_EMPTY = 0;
 const SLOT_WRITTEN = 1;
 const SLOT_PENDING = 2;
@@ -47,7 +27,9 @@ const V100 = versionRaw(1, 0, 0);
 
 /** The sample hub: 1.0.0, confirmed, sample key id. */
 export const SAMPLE_HUB_HELLO: HelloResp = {
-  protoVer: 2,
+  get protoVer() {
+    return wireVersion();
+  },
   role: ROLE_HUB,
   portKind: 1,
   mcuId: 1,
@@ -55,7 +37,9 @@ export const SAMPLE_HUB_HELLO: HelloResp = {
   activeVersion: V100,
   trial: false,
   keyId: KEY_ID,
-  maxPayload: MAX_PAYLOAD_USB,
+  get maxPayload() {
+    return WIRE.MAX_PAYLOAD_USB;
+  },
 };
 
 const node = (portKind: number, mcuId: number, maxPayload: number): HelloResp => ({
@@ -116,8 +100,8 @@ function sampleDevices(hub: HelloResp): Map<DeviceKey, Device> {
   watch[2] = { state: SLOT_WRITTEN, version: V100 };
   return new Map<DeviceKey, Device>([
     ['hub', device(hub)],
-    ['i2c:66', device(node(1, 2, MAX_PAYLOAD_I2C))],
-    ['uart', device(node(2, 3, MAX_PAYLOAD_UART), watch)],
+    ['i2c:66', device(node(1, 2, WIRE.MAX_PAYLOAD_I2C))],
+    ['uart', device(node(2, 3, WIRE.MAX_PAYLOAD_UART), watch)],
   ]);
 }
 
@@ -145,7 +129,8 @@ export interface MockOptions {
 
 export class MockTransport implements Transport {
   private readonly queue = new FrameQueue();
-  private readonly devices: Map<DeviceKey, Device>;
+  /** Made when first used: the wire's numbers come from dagon-wasm, loaded by then. */
+  private made?: Map<DeviceKey, Device>;
   private readonly quiet: Set<DeviceKey>;
   private isOpen = false;
   private refuse: Partial<Record<DeviceKey, number>>;
@@ -155,14 +140,20 @@ export class MockTransport implements Transport {
   /** Failing opens left while the rebooting hub is away. */
   private away = 0;
   constructor(private readonly opts: MockOptions = {}) {
-    this.devices = sampleDevices(opts.hello ?? SAMPLE_HUB_HELLO);
     this.quiet = new Set(opts.quiet);
     this.refuse = { ...opts.refuse };
     this.hubAway = opts.hubAway ?? 2;
-    for (const k of opts.factory ?? []) {
-      const d = this.devices.get(k);
+  }
+
+  private get devices(): Map<DeviceKey, Device> {
+    if (this.made) return this.made;
+    const made = sampleDevices(this.opts.hello ?? SAMPLE_HUB_HELLO);
+    for (const k of this.opts.factory ?? []) {
+      const d = made.get(k);
       if (d) d.hello = { ...d.hello, mode: MODE_AGENT };
     }
+    this.made = made;
+    return made;
   }
 
   /** Makes a node stop or start answering. */
@@ -207,13 +198,14 @@ export class MockTransport implements Transport {
   async write(raw: Uint8Array): Promise<void> {
     if (!this.isOpen) throw new Error('port not open');
     if (this.opts.silent) return;
-    const req = parseFrame(raw);
+    const frame = parseFrame(raw);
+    const req = readRequest(frame.cmd, frame.payload);
     const hub = this.devices.get('hub')!;
-    const body = req.cmd === CMD_RELAY ? await this.relay(req.payload) : await answer(hub, req.cmd, req.payload, this.fellBack('hub'), this.refuse.hub);
-    const resp = encodeFrame({ flags: FLAG_RESP, seq: req.seq, cmd: req.cmd, payload: body });
+    const body = req.refusal ?? (frame.cmd === CMD.RELAY ? await this.relay(req) : await answer(hub, frame.cmd, req, this.fellBack('hub'), this.refuse.hub));
+    const resp = encodeFrame({ flags: WIRE.FLAG_RESP, seq: frame.seq, cmd: frame.cmd, payload: body });
     // Only the hub's own HELLO waits, so the checking state shows without slowing a scan.
-    setTimeout(() => this.queue.put(resp), req.cmd === CMD.HELLO ? (this.opts.delayMs ?? 0) : 0);
-    if (req.cmd === CMD_REBOOT && body[0] === STATUS_OK) {
+    setTimeout(() => this.queue.put(resp), frame.cmd === CMD.HELLO ? (this.opts.delayMs ?? 0) : 0);
+    if (frame.cmd === CMD.REBOOT && body[0] === STATUS.OK) {
       this.reboots.push('hub');
       this.away = this.hubAway;
     }
@@ -227,23 +219,16 @@ export class MockTransport implements Transport {
     return this.opts.fallBack?.includes(key) ?? false;
   }
 
-  private async relay(p: Uint8Array): Promise<Uint8Array> {
-    let req;
-    try {
-      req = readPayload(CMD_RELAY, false, p, [F_RELAY_ADDR]);
-    } catch {
-      return Uint8Array.of(STATUS_ARG);
-    }
-    const link = req.core[0];
-    const addr = req.fields.get(F_RELAY_ADDR)?.[0] ?? UART_ADDR;
-    const key = deviceAt(link, addr);
+  private async relay(req: WireRequest): Promise<Uint8Array> {
+    const key = deviceAt(req.link, req.addr);
     const dev = key && !this.quiet.has(key) ? this.devices.get(key) : undefined;
-    if (!key || !dev) return Uint8Array.of(STATUS_TIMEOUT);
+    if (!key || !dev) return respond.status(STATUS.TIMEOUT);
     const inner = parseFrame(req.bulk);
-    const body = await answer(dev, inner.cmd, inner.payload, this.fellBack(key), this.refuse[key]);
-    if (inner.cmd === CMD_REBOOT) this.reboots.push(key);
-    const resp = encodeFrame({ flags: FLAG_RESP, seq: inner.seq, cmd: inner.cmd, payload: body });
-    return withStatus(STATUS_OK, writePayload(CMD_RELAY, true, { bulk: resp }));
+    const innerReq = readRequest(inner.cmd, inner.payload);
+    const body = innerReq.refusal ?? (await answer(dev, inner.cmd, innerReq, this.fellBack(key), this.refuse[key]));
+    if (inner.cmd === CMD.REBOOT && body[0] === STATUS.OK) this.reboots.push(key);
+    const resp = encodeFrame({ flags: WIRE.FLAG_RESP, seq: inner.seq, cmd: inner.cmd, payload: body });
+    return respond.relay(resp);
   }
 }
 
@@ -253,70 +238,65 @@ function helloOf(dev: Device): HelloResp {
 
 const SLOT_REVERTED = 5;
 
-async function answer(dev: Device, cmd: number, p: Uint8Array, fallBack: boolean, refuse?: number): Promise<Uint8Array> {
+/** Answers a request dagon-proto's reader accepted (`req`): the response payload. */
+async function answer(dev: Device, cmd: number, req: WireRequest, fallBack: boolean, refuse?: number): Promise<Uint8Array> {
+  const ok = respond.status(STATUS.OK);
+  const state = respond.status(STATUS.STATE);
   switch (cmd) {
     case CMD.HELLO:
-      return withStatus(STATUS_OK, encodeHelloResp(helloOf(dev)));
+      return Uint8Array.of(STATUS.OK, ...encodeHelloResp(helloOf(dev)));
     case CMD.STATUS:
-      return withStatus(STATUS_OK, encodeStatus(dev));
-    case CMD_XFER_BEGIN: {
-      const begin = readPayload(cmd, false, p, [F_SLOT]);
-      dev.xfer = { target: begin.core[0], slot: begin.fields.get(F_SLOT)![0], hdr: [], body: [] };
-      return Uint8Array.of(STATUS_OK);
-    }
-    case CMD_XFER_HDR:
-    case CMD_XFER_DATA:
-      return chunk(dev, cmd, p);
-    case CMD_XFER_END:
+      return encodeStatus(dev);
+    case CMD.XFER_BEGIN:
+      dev.xfer = { target: req.target, slot: req.slot, hdr: [], body: [] };
+      return ok;
+    case CMD.XFER_HDR:
+    case CMD.XFER_DATA:
+      return chunk(dev, cmd, req);
+    case CMD.XFER_END:
       if (refuse !== undefined) {
         dev.xfer = null;
-        return Uint8Array.of(refuse);
+        return respond.status(refuse);
       }
       return end(dev);
-    case CMD_SET_PENDING: {
-      const slot = readPayload(cmd, false, p, [F_SLOT]).fields.get(F_SLOT)![0];
-      if (dev.slots[slot]?.state !== SLOT_WRITTEN) return Uint8Array.of(STATUS_STATE);
-      dev.pending = slot;
-      dev.slots[slot].state = SLOT_PENDING;
-      return Uint8Array.of(STATUS_OK);
-    }
-    case CMD_REBOOT:
+    case CMD.SET_PENDING:
+      if (dev.slots[req.slot]?.state !== SLOT_WRITTEN) return state;
+      dev.pending = req.slot;
+      dev.slots[req.slot].state = SLOT_PENDING;
+      return ok;
+    case CMD.REBOOT:
       reboot(dev, fallBack);
-      return Uint8Array.of(STATUS_OK);
-    case CMD_CONFIRM:
-      if (dev.active === dev.confirmed) return Uint8Array.of(STATUS_STATE);
+      return ok;
+    case CMD.CONFIRM:
+      if (dev.active === dev.confirmed) return state;
       dev.slots[dev.confirmed].state = SLOT_WRITTEN;
       dev.slots[dev.active].state = SLOT_CONFIRMED;
       dev.confirmed = dev.active;
-      return Uint8Array.of(STATUS_OK);
-    case CMD_SHOW:
-      return Uint8Array.of(STATUS_OK);
+      return ok;
+    case CMD.SHOW:
+      return ok;
     default:
-      return Uint8Array.of(STATUS_UNSUPPORTED);
+      return respond.status(STATUS.UNSUPPORTED);
   }
 }
 
-function chunk(dev: Device, cmd: number, p: Uint8Array): Uint8Array {
+function chunk(dev: Device, cmd: number, req: WireRequest): Uint8Array {
   const x = dev.xfer;
-  if (!x) return Uint8Array.of(STATUS_STATE);
-  const into = cmd === CMD_XFER_HDR ? x.hdr : x.body;
-  // Core: the offset; bulk: the data.
-  const req = readPayload(cmd, false, p);
-  const offset = new DataView(req.core.buffer, req.core.byteOffset).getUint32(0, true);
-  if (offset !== into.length) return Uint8Array.of(STATUS_ARG);
+  if (!x) return respond.status(STATUS.STATE);
+  const into = cmd === CMD.XFER_HDR ? x.hdr : x.body;
+  if (req.offset !== into.length) return respond.status(STATUS.ARG);
   into.push(...req.bulk);
-  return withStatus(STATUS_OK, writePayload(cmd, true, { core: u32(into.length) }));
+  return respond.nextOffset(into.length);
 }
 
 async function end(dev: Device): Promise<Uint8Array> {
   const x = dev.xfer;
-  if (!x) return Uint8Array.of(STATUS_STATE);
+  if (!x) return respond.status(STATUS.STATE);
   dev.xfer = null;
   const body = new Uint8Array(x.body);
   const version = new DataView(new Uint8Array(x.hdr).buffer).getUint32(HDR_VERSION_AT, true);
   dev.slots[x.slot] = { state: SLOT_WRITTEN, version };
-  const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', body));
-  return withStatus(STATUS_OK, writePayload(CMD_XFER_END, true, { fields: [[F_SHA256, digest]] }));
+  return respond.digest(new Uint8Array(await crypto.subtle.digest('SHA-256', body)));
 }
 
 /** Runs the pending slot on trial; a device that falls back stays on its previous slot. */
@@ -334,41 +314,23 @@ function reboot(dev: Device, fallBack: boolean): void {
   dev.slots[next].state = SLOT_TRYING;
 }
 
-const SLOT_LEN = 21;
 const LOG_GENERATION = 12;
 /** STATUS last_reason after a fall back (dagon_format::statelog::reason). */
 const REASON_TRIAL_EXHAUSTED = 3;
+const DIGEST16_LEN = 16;
 
-/** STATUS body, fields 1 to 6: 3 packed slots {state, version, digest16}, active, confirmed, attempts, last_reason, log_generation. */
+/** The OK STATUS response of `dev`: a written slot shows a digest of its own. */
 function encodeStatus(dev: Device): Uint8Array {
-  const slots = new Uint8Array(3 * SLOT_LEN);
-  const dv = new DataView(slots.buffer);
-  dev.slots.forEach((s, i) => {
-    slots[i * SLOT_LEN] = s.state;
-    dv.setUint32(i * SLOT_LEN + 1, s.version, true);
-    if (s.state !== SLOT_EMPTY) slots.fill(0xa4 + i, i * SLOT_LEN + 5, i * SLOT_LEN + SLOT_LEN);
+  const slots = dev.slots.map((s, i) => ({
+    state: s.state,
+    version: s.version,
+    digest16: new Uint8Array(DIGEST16_LEN).fill(s.state === SLOT_EMPTY ? 0 : 0xa4 + i),
+  }));
+  return respond.slots(slots, {
+    active: dev.active,
+    confirmed: dev.confirmed,
+    attempts: 0,
+    lastReason: dev.fellBack ? REASON_TRIAL_EXHAUSTED : 0,
+    logGeneration: LOG_GENERATION,
   });
-  return writePayload(CMD.STATUS, true, {
-    fields: [
-      [1, slots],
-      [2, Uint8Array.of(dev.active)],
-      [3, Uint8Array.of(dev.confirmed)],
-      [4, Uint8Array.of(0)],
-      [5, Uint8Array.of(dev.fellBack ? REASON_TRIAL_EXHAUSTED : 0)],
-      [6, u32(LOG_GENERATION)],
-    ],
-  });
-}
-
-function u32(v: number): Uint8Array {
-  const out = new Uint8Array(4);
-  new DataView(out.buffer).setUint32(0, v, true);
-  return out;
-}
-
-function withStatus(status: number, body: Uint8Array): Uint8Array {
-  const out = new Uint8Array(1 + body.length);
-  out[0] = status;
-  out.set(body, 1);
-  return out;
 }

@@ -65,6 +65,11 @@ dagon-mcu-build = { path = "../build" }
 dagon-format = { path = "../../../crates/dagon-format" }
 
 [dev-dependencies]
+# tests/bootcore_receive.rs: the boot core's session over the simulator's
+# store, on the link kinds the definition lets the boot core receive on.
+dagon-agent = { path = "../../../crates/dagon-agent" }
+dagon-events = { path = "../../../crates/dagon-events" }
+dagon-topology = { path = "../../../crates/dagon-topology" }
 dagon-ed25519 = { path = "../../../crates/dagon-ed25519", features = ["compact"] }
 dagon-sim = { path = "../../../crates/dagon-sim" }
 ed25519-compact = { version = "2.6", default-features = false }

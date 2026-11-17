@@ -346,6 +346,7 @@ dependencies = [
  "dagon-proto",
  "dagon-relay",
  "dagon-sim",
+ "dagon-topology",
  "ed25519-compact",
  "embassy-executor",
  "embassy-rp",

@@ -11,9 +11,8 @@ mod wiring {
     pub const BOOT_EXTENSIONS: &[dagon_events::BootExtension] = &[];
     pub type BootChain = dagon_events::Nop;
     pub const BOOT_CHAIN: BootChain = dagon_events::Nop;
+    /// No address from a topology: the board's default.
+    pub const LINK_ADDR: Option<u8> = None;
 }
 
-#[dagon_rp2040_bootcore::__entry]
-fn main() -> ! {
-    dagon_rp2040_bootcore::run(wiring::BOOT_CHAIN, wiring::BOOT_EXTENSIONS)
-}
+dagon_rp2040_bootcore::boot!(wiring);

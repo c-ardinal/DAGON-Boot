@@ -8,7 +8,8 @@
 //!
 //! The links the boot core receives on besides USB (`link.rs`) are the
 //! board's DAGON buses (`dagon = true`): its I2C bus as a target at the
-//! board's `[default_link] addr`, and its UART bus at the bus's `baud`
+//! node's address from the topology (`LINK_ADDR` of its boot wiring, given
+//! to `open_i2c!`), else the board's `[default_link] addr`, and its UART bus at the bus's `baud`
 //! (else `[default_link] baud`), each with the listen window the node's
 //! MCU definition gives its kind (its `mcu.toml` in the boot folder, the
 //! project's overrides applied). A node without such a bus opens no link
@@ -72,7 +73,7 @@ fn link_build(board: Option<&BoardDef>) {
     let mcu: McuDef = toml::from_str(&text).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
     let id = board.map_or("", |b| b.id.as_str());
     let default = board.and_then(|b| b.default_link.as_ref());
-    let i2c = dagon_bus(board, BusKind::I2c).and_then(|bus| Some((bus, default?.addr?)));
+    let i2c = dagon_bus(board, BusKind::I2c).map(|bus| (bus, default.and_then(|d| d.addr)));
     let uart = dagon_bus(board, BusKind::Uart).map(|bus| {
         let baud = bus.baud.or(default.and_then(|d| d.baud));
         (
@@ -97,23 +98,26 @@ fn link_build(board: Option<&BoardDef>) {
             );
             let _ = write!(
                 rs,
-                "/// The board's DAGON bus `{}` as the boot core's I2C target at {addr:#04x}.\n\
+                "/// The board's DAGON bus `{}` as the boot core's I2C target, at the\n\
+                 /// node's address from the topology, else the board's {addr:?}.\n\
                  pub type I2cLink = dagon_mcu_rp2040::boot_links::I2cTarget<'static, embassy_rp::peripherals::{ctl}>;\n\
-                 macro_rules! open_i2c {{\n    ($p:ident) => {{{{\n        \
-                 let mut c = embassy_rp::i2c_slave::Config::default();\n        \
-                 c.addr = {addr:#04x};\n        c.general_call = false;\n        \
-                 let bus = embassy_rp::i2c_slave::I2cSlave::new($p.{ctl}, $p.{}, $p.{}, LinkIrqs, c);\n        \
-                 Some(dagon_mcu_rp2040::boot_links::I2cTarget::new(bus, embassy_rp::pac::{ctl}, {addr:#04x}))\n    \
-                 }}}};\n}}\n",
+                 macro_rules! open_i2c {{\n    ($p:ident, $addr:expr) => {{\n        \
+                 match dagon_mcu_rp2040::boot_receive::link_addr($addr, {addr:?}) {{\n            Some(a) => {{\n                \
+                 let mut c = embassy_rp::i2c_slave::Config::default();\n                \
+                 c.addr = u16::from(a);\n                c.general_call = false;\n                \
+                 let bus = embassy_rp::i2c_slave::I2cSlave::new($p.{ctl}, $p.{}, $p.{}, LinkIrqs, c);\n                \
+                 Some(dagon_mcu_rp2040::boot_links::I2cTarget::new(bus, embassy_rp::pac::{ctl}, a))\n            \
+                 }}\n            None => None,\n        }}\n    }};\n}}\n",
                 bus.id,
                 pin(id, &bus.scl),
                 pin(id, &bus.sda),
             );
         }
         None => rs.push_str(
-            "/// No DAGON I2C bus with an address: no I2C link.\n\
+            "/// No DAGON I2C bus: no I2C link.\n\
              pub type I2cLink = dagon_mcu_rp2040::boot_receive::NoLink;\n\
-             macro_rules! open_i2c {\n    ($p:ident) => {\n        None::<I2cLink>\n    };\n}\n",
+             macro_rules! open_i2c {\n    ($p:ident, $addr:expr) => {{\n        \
+             let _: Option<u8> = $addr;\n        None::<I2cLink>\n    }};\n}\n",
         ),
     }
     match uart {

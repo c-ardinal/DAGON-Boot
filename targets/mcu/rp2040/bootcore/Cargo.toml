@@ -45,9 +45,8 @@ dagon-format = { path = "../../../../crates/dagon-format" }
 dagon-port = { path = "../../../../crates/dagon-port" }
 embassy-rp = { version = "0.10.0", features = ["rp2040", "critical-section-impl", "boot2-none", "unstable-pac", "time-driver"] }
 embassy-time = "0.5"
-# Update and recovery mode: one serving task on a thread-mode executor
-# (it sleeps between events), its reads bounded by a timer.
-embassy-executor = { version = "0.10", features = ["platform-cortex-m", "executor-thread"] }
+# Update and recovery mode: the links' futures polled together between
+# sleeps (join).
 embassy-futures = "0.1"
 static_cell = "2"
 cortex-m = "0.7"

@@ -33,7 +33,7 @@
 //! `DAGON_TARGET_TAG`); the build fails without them.
 //!
 //! Receiving (design DES-RB-030): right after its start the core opens
-//! the links of the board's DAGON buses (an I2C target at the board's
+//! the links of the board's DAGON buses (an I2C target at the node's topology
 //! address, a UART) and, when the app handed over (REBOOT mode 1, an
 //! UPDATE_STAY consumed here with UPDATE_DONE) or a STAY arrives on them
 //! within the listen window, serves the update session before it decides
@@ -59,6 +59,7 @@ use dagon_format::header::mcu_id;
 use dagon_mcu_rp2040::arm::{jump, led, step, trial};
 use dagon_mcu_rp2040::bl::{self, Settled};
 use dagon_mcu_rp2040::boot_receive::{self, Entry};
+
 use dagon_mcu_rp2040::clock::Setup;
 use dagon_mcu_rp2040::flash::RpFlash;
 use dagon_mcu_rp2040::layout::{watchdog_ms, APP_LOG_LAYOUT, APP_SLOTS};
@@ -73,13 +74,18 @@ use panic_halt as _;
 pub use cortex_m_rt::entry as __entry;
 
 /// The boot core's `main` for the node whose generated `boot_wiring.rs`
-/// is the module `$wiring`: its extension chain and their time limits.
+/// is the module `$wiring`: its extension chain and their time limits,
+/// and the node's I2C target address from the topology (`LINK_ADDR`).
 #[macro_export]
 macro_rules! boot {
     ($wiring:ident) => {
         #[$crate::__entry]
         fn main() -> ! {
-            $crate::run($wiring::BOOT_CHAIN, $wiring::BOOT_EXTENSIONS)
+            $crate::run(
+                $wiring::BOOT_CHAIN,
+                $wiring::BOOT_EXTENSIONS,
+                $wiring::LINK_ADDR,
+            )
         }
     };
 }
@@ -192,49 +198,17 @@ const VERIFIER: Verifier = Ed25519Small::with_tick(PUBKEY, feed as fn());
 // The links besides USB, from the board's DAGON buses (build.rs).
 include!(concat!(env!("OUT_DIR"), "/link.rs"));
 
-/// How often the listen window looks at its clock: the window ends at
-/// most this long after its time.
-const LISTEN_TICK: Duration = Duration::from_millis(5);
-
-/// Whether the core receives before it decides anything
-/// (`boot_receive::receive_step`: the app handed over, else a STAY in the
-/// listen window on the I2C and UART links). USB takes no part in the
-/// window. Never inlined, so a debugger can time this step on the hardware
-/// (the boot time it adds).
+/// Whether the core receives before it decides anything (the app handed
+/// over, else a STAY in the listen window on the I2C and UART links; USB
+/// takes no part in the window), and the STAY its session answers first.
+/// Never inlined, so a debugger can time this step on the hardware (the
+/// boot time it adds).
 #[inline(never)]
 fn receive_step(
     flash: &mut RpFlash,
-    links: receive::BootLinks,
-) -> (Option<Entry>, receive::BootLinks) {
-    let receives = CLOCK.has_usb() || links.any();
-    let mut ticked = receive::Ticked::new(links, LISTEN_TICK);
-    let step = boot_receive::receive_step(
-        flash,
-        &mut ticked,
-        receives,
-        LISTEN_WINDOW_MS,
-        receive::now_ms,
-    );
-    let entry = sleep_on(step);
-    (entry, ticked.into_inner())
-}
-
-/// Runs `f` to its end, sleeping (WFE) between its events: with
-/// SEVONPEND every interrupt that becomes pending (the links', the
-/// timer's) wakes the core, and it polls `f` again.
-fn sleep_on<F: core::future::Future>(f: F) -> F::Output {
-    // SAFETY: the boot core's thread-mode code is the only user of SCB here.
-    unsafe { cortex_m::Peripherals::steal() }
-        .SCB
-        .set_sevonpend();
-    let mut f = core::pin::pin!(f);
-    let mut cx = core::task::Context::from_waker(core::task::Waker::noop());
-    loop {
-        if let core::task::Poll::Ready(v) = f.as_mut().poll(&mut cx) {
-            return v;
-        }
-        cortex_m::asm::wfe();
-    }
+    links: &mut receive::BootLinks,
+) -> Option<(Entry, Option<dagon_agent::update_mode::Stay>)> {
+    receive::step(flash, links, LISTEN_WINDOW_MS)
 }
 
 const CONFIG: BootConfig = BootConfig {
@@ -244,8 +218,9 @@ const CONFIG: BootConfig = BootConfig {
 };
 
 /// One boot with `chain` (the node's boot extensions, in order; their
-/// time limits and observed events in `limits`).
-pub fn run<E: Extension>(chain: E, limits: &'static [BootExtension]) -> ! {
+/// time limits and observed events in `limits`); the I2C link answers at
+/// `link_addr` (`None`: the board's `[default_link] addr`).
+pub fn run<E: Extension>(chain: E, limits: &'static [BootExtension], link_addr: Option<u8>) -> ! {
     // The diag panic handler blinks the selected LED.
     if let Some(gpio) = board_def::BOOT_LED_GPIO {
         led::select(gpio, board_def::BOOT_LED_ACTIVE_HIGH);
@@ -258,11 +233,13 @@ pub fn run<E: Extension>(chain: E, limits: &'static [BootExtension]) -> ! {
     Watchdog::new(p.WATCHDOG).start(period());
     let verifier = VERIFIER;
     step(8);
-    let links = boot_receive::Links::new(None, open_i2c!(p), open_uart!(p));
-    let (entry, links) = receive_step(&mut flash, links);
-    if let Some(entry) = entry {
-        receive::serve(p.USB, flash, links, entry)
+    let mut links = boot_receive::Links::new(None, open_i2c!(p, link_addr), open_uart!(p));
+    if let Some((entry, stay)) = receive_step(&mut flash, &mut links) {
+        receive::serve(p.USB, flash, links, entry, stay)
     }
+    // The window is over: the I2C target stops answering its address, so
+    // the bus is not held while the slow checks below run.
+    dagon_mcu_rp2040::boot_links::pause_i2c();
     let mut chain = compose_boot(chain, now_us, limits);
     let mut boot = BootRun::start(
         &mut chain,
@@ -297,7 +274,7 @@ pub fn run<E: Extension>(chain: E, limits: &'static [BootExtension]) -> ! {
     }
     boot.halt(&mut chain);
     if CLOCK.has_usb() || links.any() {
-        receive::serve(p.USB, flash, links, Entry::Recovery)
+        receive::serve(p.USB, flash, links, Entry::Recovery, None)
     }
     with_wdt(Watchdog::stop);
     led_init();

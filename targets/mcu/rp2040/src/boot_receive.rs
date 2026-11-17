@@ -137,7 +137,12 @@ impl<U: Link, I: Link, T: Link> Link for Links<U, I, T> {
     }
     /// The next frame on any open link; with none open, never.
     async fn read_frame(&mut self) -> Result<&[u8], LinkError> {
-        let read = select3(read(&mut self.usb), read(&mut self.i2c), read(&mut self.uart)).await;
+        let read = select3(
+            read(&mut self.usb),
+            read(&mut self.i2c),
+            read(&mut self.uart),
+        )
+        .await;
         let (from, r) = match read {
             Either3::First(r) => (Kind::UsbCdc, r),
             Either3::Second(r) => (Kind::I2c, r),

@@ -60,7 +60,9 @@ pub struct Wfe {
 impl Wfe {
     pub fn new() -> Self {
         // SAFETY: the boot core's thread-mode code is the only user of SCB.
-        unsafe { cortex_m::Peripherals::steal() }.SCB.set_sevonpend();
+        unsafe { cortex_m::Peripherals::steal() }
+            .SCB
+            .set_sevonpend();
         Wfe { timer: None }
     }
 }

@@ -726,12 +726,17 @@ pub struct McuDef {
     /// the reached end's address from the topology, on a kind with addresses; `{ fixed = N }`, N
     /// 0 to 255: the one peer of a kind without addresses) and `max_payload` (1 up to the protocol
     /// maximum of the port's kind). An MCU package's build generates them as its `RELAY_LINKS`,
-    /// and the PC reads the same entries.
+    /// and the PC reads the same entries. The relay keeps, per link, a buffer of one frame of its
+    /// `max_payload` (`RELAY_LINK_BUFFERS`) and no more; the build stops when that buffer cannot
+    /// hold the largest frame of the link's kind. Data longer than the buffer (a RELAY's inner
+    /// frame, the data I2C_RAW writes and the length it reads) is refused with `E_ARG`, never
+    /// cut. The I2C_RAW limit is the buffer of the link used for recovery.
     #[serde(default, rename = "relay_link")]
     pub relay_links: Vec<RelayLinkSpec>,
-    /// `[relay]`: the relaying app firmware of the MCU package, `ram_bytes` the static RAM
-    /// (`.bss` and `.data`) it may take. CI builds the package's relay firmware
-    /// (`examples/relay.rs`) and fails above it; an MCU with `[[relay_link]]` gives it.
+    /// The budget of the relaying app firmware: `ram_bytes` (static RAM, `.bss` plus `.data`, in
+    /// bytes; 1 up to the MCU's RAM size). Only an MCU with `[[relay_link]]` gives it. CI builds
+    /// the MCU package's `examples/relay.rs`, measures it and fails above this value
+    /// (`scripts/relay_ram.py`).
     pub relay: Option<RelayFirmware>,
     /// How the user connects it for a write: `label`, `hint`.
     pub connection: Connection,

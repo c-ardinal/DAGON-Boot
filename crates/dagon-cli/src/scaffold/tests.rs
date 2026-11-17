@@ -1281,11 +1281,24 @@ fn a_project_slot_override_reaches_the_firmware() {
 
     // A node definition of another MCU or format is refused, even with
     // hashes that match it.
-    use dagon_topology::defs::boot_folder::{defs_text, BOARD_FILE, DEFS_FILE, MCU_FILE};
+    use dagon_topology::defs::boot_folder::{defs_text, DEFS_FILE, MCU_FILE};
     let good = std::fs::read_to_string(&mcu_toml).unwrap();
-    let board = std::fs::read_to_string(dir.join("boot/hub").join(BOARD_FILE)).unwrap();
     let defs = dir.join("boot/hub").join(DEFS_FILE);
     let good_defs = std::fs::read_to_string(&defs).unwrap();
+    // Every line gen wrote, the node definition's hashing `mcu`.
+    let rehashed = |mcu: &str| -> String {
+        let own = format!("  {MCU_FILE}");
+        good_defs
+            .lines()
+            .map(|l| {
+                if l.ends_with(&own) {
+                    defs_text(&[(MCU_FILE, mcu)])
+                } else {
+                    format!("{l}\n")
+                }
+            })
+            .collect()
+    };
     for (bad, says) in [
         (
             good.replace("id = \"rp2040\"", "id = \"stm32f401re\""),
@@ -1297,7 +1310,7 @@ fn a_project_slot_override_reaches_the_firmware() {
         ),
     ] {
         assert_ne!(bad, good);
-        std::fs::write(&defs, defs_text(&[(MCU_FILE, &bad), (BOARD_FILE, &board)])).unwrap();
+        std::fs::write(&defs, rehashed(&bad)).unwrap();
         std::fs::write(&mcu_toml, bad).unwrap();
         let mut log = Vec::new();
         let r = crate::nodebuild::build_nodes(

@@ -812,7 +812,7 @@ mod tests {
                 src: &src,
                 check_boot_graph: false,
                 link_addr: &|_| None,
-                recovery_mcu: &|id| crate::scaffold::recovery_mcu(&t, id).map(str::to_string),
+                recovery_mcu: &|id| dagon_topology::recovery_peer_mcu(&reg, &t, id),
             };
             write_nodes(&reg, &p, &t.nodes, &[], &[], &Extensions::default()).unwrap()
         };
@@ -831,8 +831,8 @@ mod tests {
         assert!(!base.join("boot/seg").join(RECOVERY_FILE).exists());
         assert!(recovery_rom_addr_rs(&base.join("boot/seg")).contains(none));
 
-        // The hub no longer drives the F401's reset and boot lines.
-        gen(&crate::scaffold::SAMPLE.replace(", nrst: 18, boot: 28", ""));
+        // The hub's I2C link no longer enters a ROM loader.
+        gen(&crate::scaffold::SAMPLE.replace("      rom_entry: stm32-i2c-rom\n", ""));
         check_defs(&hub).unwrap();
         assert!(!hub.join(RECOVERY_FILE).exists());
         assert!(recovery_rom_addr_rs(&hub).contains(none));

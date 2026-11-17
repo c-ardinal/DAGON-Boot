@@ -7,8 +7,11 @@
 //! a flash operation.
 //!
 //! Between events the core sleeps in [`Port::wait`] (WFE): the I2C event
-//! interrupt is raised in the peripheral but left disabled in the NVIC, so
-//! with SEVONPEND its pending bit wakes the core without a handler; the
+//! interrupt is raised in the peripheral but masked in the NVIC ([`I2cPort::new`]
+//! masks it and the error line again after the HAL unmasked them), so
+//! with SEVONPEND its pending bit wakes the core without a handler (the
+//! boot core still gives both lines a handler that masks its own line,
+//! should one ever be taken); the
 //! SysTick, one-shot for the time asked and with an empty handler in the
 //! boot core, wakes it otherwise. DBGMCU DBG_SLEEP keeps HCLK running in
 //! sleep, so the boot core's cycle counter keeps the time. Dropping the
@@ -63,6 +66,11 @@ impl I2cPort {
         cfg.scl_pullup = true;
         let target = I2c::new_blocking(peri, scl, sda, cfg)
             .into_slave_multimaster(SlaveAddrConfig::basic(addr));
+        // embassy-stm32 0.6.0 unmasks both lines even for a blocking driver
+        // (src/i2c/mod.rs:198-199, `I2c::new_inner`). Unmasked, the event
+        // line would be taken as an exception instead of only waking WFE.
+        NVIC::mask(T::EventInterrupt::IRQ);
+        NVIC::mask(T::ErrorInterrupt::IRQ);
         core().SCB.set_sevonpend();
         pac::DBGMCU.cr().modify(|w| w.set_dbg_sleep(true));
         I2cPort {

@@ -1002,18 +1002,37 @@ pub fn check_release<'a, E>(
 
 /// An STM32F401 on I2C whose link enters the ROM loader through NRST/BOOT0.
 /// The ROM map for `node` when it is reached through its ROM I2C loader:
-/// it is the ROM recovery peer of a node ([`TopologyView::rom_peer`], the
-/// relay's choice too) and `roms` has a map for its MCU.
+/// `roms` has a map for its MCU, and a ROM I2C link joins it to a relay
+/// built for its loader's address: the address of that relay's ROM
+/// recovery peer ([`TopologyView::rom_peer`], the relay's choice too). A
+/// relay with several ROM links reaches every peer whose loader answers at
+/// that one address.
 fn rom_map<'m>(topo: &TopologyView<'_>, node: u8, roms: &'m [RomMap]) -> Option<&'m RomMap> {
     if (node as usize) >= topo.node_count() {
         return None;
     }
+    let map_of = |n: u8| {
+        let mcu = topo.node(usize::from(n)).mcu_id;
+        roms.iter().find(|m| m.wire_id == mcu)
+    };
+    let map = map_of(node)?;
     let has_loader = |w: u16| roms.iter().any(|m| m.wire_id == w);
-    let peer = (0..topo.node_count())
+    let linked = |r: u8| {
+        (0..topo.link_count())
+            .map(|i| topo.link(i))
+            .filter(|l| l.reaches_rom_i2c())
+            .any(|l| l.other(r).is_some_and(|e| e.node == node))
+    };
+    let relayed = (0..topo.node_count())
         .filter_map(|r| u8::try_from(r).ok())
-        .any(|r| topo.rom_peer(r, has_loader) == Some(node));
-    let mcu = topo.node(node as usize).mcu_id;
-    roms.iter().find(|m| peer && m.wire_id == mcu)
+        .any(|r| {
+            linked(r)
+                && topo
+                    .rom_peer(r, has_loader)
+                    .and_then(map_of)
+                    .is_some_and(|p| p.addr == map.addr)
+        });
+    relayed.then_some(map)
 }
 
 /// What [`Host::recover`] needs: the release, the current topology binary,

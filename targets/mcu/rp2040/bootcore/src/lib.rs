@@ -10,8 +10,8 @@
 //! it. The core runs on the clock the
 //! definitions choose for the node (the MCU's `[[bootcore.clock]]` setup
 //! for its board's `[clock]`, the ring oscillator without a crystal). With
-//! nothing startable the watchdog
-//! stops and the board's boot LED shows its halt pattern (`[boot] led`,
+//! nothing startable and no link to receive on (recovery mode, below) the
+//! watchdog stops and the board's boot LED shows its halt pattern (`[boot] led`,
 //! `halt`; reinstall with BOOTSEL + UF2). In the `diag` build a panic
 //! blinks the code of the last step (6 before HAL init, 7 after it, 8
 //! deciding) and nothing startable blinks code 9.
@@ -31,9 +31,26 @@
 //! boot event, each call timed against its `max_run_us`, and takes the
 //! board facts and the node's tag from that folder (`DAGON_BOOT_CRATE`,
 //! `DAGON_TARGET_TAG`); the build fails without them.
+//!
+//! Update and recovery mode (design DES-RB-030): when the app handed over
+//! (REBOOT mode 1, an UPDATE_STAY consumed here with UPDATE_DONE) the core
+//! serves the update session before it decides anything, and leaves for
+//! a normal restart on REBOOT or after 60 s without a request; when
+//! nothing can be started it serves the session in recovery mode instead
+//! of halting. It receives on USB, the one link kind of this MCU that
+//! carries requests to the node: it takes no part in the listen window
+//! (USB is enumerated first) and needs the 48 MHz USB clock, so it
+//! receives only on a clock setup with the USB PLL (a crystal); on the
+//! ring oscillator a hand-over is not taken and nothing startable halts.
+//! The session is dagon-agent's with the boot core writer, its
+//! checks fed through the same watchdog-feeding verifier.
 #![no_std]
 
+mod receive;
+
 use core::cell::RefCell;
+use critical_section::Mutex;
+use dagon_agent::bootcore::Entry;
 use dagon_boot::BootRun;
 use dagon_core::boot::{BootConfig, Decision};
 use dagon_core::bootcore::CLEARED;
@@ -138,6 +155,47 @@ fn now_us() -> u64 {
     }
 }
 
+/// The watchdog, started at once: the boot core's own run is timed like
+/// an image on trial.
+static WDT: Mutex<RefCell<Option<Watchdog>>> = Mutex::new(RefCell::new(None));
+
+fn period() -> Duration {
+    Duration::from_millis(watchdog_ms(true).into())
+}
+
+fn with_wdt(f: impl FnOnce(&mut Watchdog)) {
+    critical_section::with(|cs| WDT.borrow_ref_mut(cs).as_mut().map(f));
+}
+
+/// A full trial period from now.
+fn feed() {
+    with_wdt(|w| w.feed(period()));
+}
+
+/// Resets through the watchdog, so stage0 sees the start end.
+fn reset() -> ! {
+    with_wdt(Watchdog::trigger_reset);
+    loop {
+        cortex_m::asm::nop();
+    }
+}
+
+/// This core's signature verifier, under the key built into it: stage0's
+/// small Ed25519, one copy for the boot decision and the update session.
+/// It feeds the watchdog at every step of a check, which takes seconds on
+/// the ring oscillator of a board without a crystal.
+type Verifier = Ed25519Small<fn()>;
+const VERIFIER: Verifier = Ed25519Small::with_tick(PUBKEY, feed as fn());
+
+/// Whether the core receives before it decides anything: the app handed
+/// over. It opens no listen window: USB, the one link it receives on,
+/// takes no part in one. Never inlined, so a debugger can time this step
+/// on the hardware (the boot time it adds).
+#[inline(never)]
+fn receive_step(flash: &mut RpFlash) -> Option<Entry> {
+    (CLOCK.has_usb() && bl::handed_over(flash)).then_some(Entry::HandOver)
+}
+
 const CONFIG: BootConfig = BootConfig {
     mcu_id: mcu_id::RP2040,
     target_tag: checked_tag(TARGET_TAG),
@@ -155,16 +213,14 @@ pub fn run<E: Extension>(chain: E, limits: &'static [BootExtension]) -> ! {
     let p = embassy_rp::init(CLOCK.hal_config());
     step(7);
     let mut flash = RpFlash::new(p.FLASH);
-    let wdt = RefCell::new(Watchdog::new(p.WATCHDOG));
-    // The boot core's own run is timed like an image on trial.
-    let period = || Duration::from_millis(watchdog_ms(true).into());
-    wdt.borrow_mut().start(period());
-    // This core's signature verifier, under the key built into it:
-    // stage0's small Ed25519, so the boot core has room for the update
-    // session. It feeds the watchdog at every step of a check, which takes
-    // seconds on the ring oscillator of a board without a crystal.
-    let verifier = Ed25519Small::with_tick(PUBKEY, || wdt.borrow_mut().feed(period()));
+    let mut wdt = Watchdog::new(p.WATCHDOG);
+    wdt.start(period());
+    critical_section::with(|cs| WDT.borrow_ref_mut(cs).replace(wdt));
+    let verifier = VERIFIER;
     step(8);
+    if let Some(entry) = receive_step(&mut flash) {
+        receive::serve(p.USB, flash, entry)
+    }
     let mut chain = compose_boot(chain, now_us, limits);
     let mut boot = BootRun::start(
         &mut chain,
@@ -187,23 +243,20 @@ pub fn run<E: Extension>(chain: E, limits: &'static [BootExtension]) -> ! {
         Ok(Settled::Nothing) => {}
         Ok(Settled::Confirmed | Settled::RolledBack) => trial::write(CLEARED),
         // On trial and not fit to run the app: stage0 counts this start.
-        Err(bl::MustReset) => {
-            wdt.borrow_mut().trigger_reset();
-            loop {
-                cortex_m::asm::nop();
-            }
-        }
+        Err(bl::MustReset) => reset(),
     }
     if let Decision::Boot { entry, trial, .. } = decision {
         boot.before_jump(&mut chain);
         // The app runs the trial period while on trial, else the confirmed one.
-        wdt.borrow_mut()
-            .feed(Duration::from_millis(watchdog_ms(trial).into()));
+        with_wdt(|w| w.feed(Duration::from_millis(watchdog_ms(trial).into())));
         hand_back_clocks();
         jump(entry);
     }
     boot.halt(&mut chain);
-    wdt.borrow_mut().stop();
+    if CLOCK.has_usb() {
+        receive::serve(p.USB, flash, Entry::Recovery)
+    }
+    with_wdt(Watchdog::stop);
     led_init();
     if cfg!(feature = "diag") {
         led::code(9)

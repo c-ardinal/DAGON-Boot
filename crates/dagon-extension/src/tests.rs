@@ -722,7 +722,7 @@ fn the_boot_budget_counts_every_call_the_boot_core_makes() {
     let seq = k
         .kinds
         .iter()
-        .filter(|x| x.layer == Layer::Boot && x.live && x.kind != dagon_catalog::BOOT_OVERRAN_KIND)
+        .filter(|x| x.layer == Layer::Boot && x.live && x.code != dagon_catalog::BOOT_OVERRAN)
         .count() as u64;
     let all = m("all", "\"boot.*\"");
     let watch = m("watch", "\"boot.extension_overran\"");

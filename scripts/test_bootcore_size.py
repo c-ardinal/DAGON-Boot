@@ -2,6 +2,7 @@
 slots, an image is measured as the signer flattens it, and one over its
 slot fails."""
 import pathlib
+import struct
 import tempfile
 import tomllib
 import unittest
@@ -9,6 +10,13 @@ import unittest
 import bootcore_size
 import stage0_size
 from test_stage0_size import elf
+
+
+def loaded(data):
+    """An ELF32 image of one loadable segment holding `data`."""
+    head = bytearray(elf([(1, 0x1000_0000, len(data))]))
+    struct.pack_into("<I", head, 52 + 4, len(head))
+    return bytes(head) + data
 
 
 class BootcoreSize(unittest.TestCase):
@@ -65,6 +73,23 @@ class BootcoreSize(unittest.TestCase):
             bootcore_size.image_bytes(b"MZ" + bytes(60))
         with self.assertRaises(ValueError):
             bootcore_size.image_bytes(elf([]))
+
+    def test_the_catalog_names_come_from_the_events_page(self):
+        names = bootcore_size.catalog_names()
+        # A machine, a state, a kind and a transition method of the page.
+        for n in ("sequence", "WatchdogArmed", "trial_started", "pending_set"):
+            self.assertIn(n, names)
+        self.assertTrue(all(len(n) >= bootcore_size.NAME_MIN for n in names))
+
+    def test_an_image_that_links_a_catalog_name_fails(self):
+        mcu = bootcore_size.bootcore_mcus()[0]
+        with tempfile.TemporaryDirectory() as d:
+            path = pathlib.Path(d) / "boot"
+            path.write_bytes(loaded(bytes(64)))
+            self.assertEqual(bootcore_size.check(path, mcu), [])
+            path.write_bytes(loaded(b"xxtrial_started".ljust(64, b"\0")))
+            self.assertEqual(bootcore_size.check(path, mcu),
+                             [f"{mcu} boot core: links event catalog names trial_started"])
 
     def test_an_image_over_its_slot_fails_and_one_that_fills_it_passes(self):
         mcu = bootcore_size.bootcore_mcus()[0]

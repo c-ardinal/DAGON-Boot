@@ -4,13 +4,17 @@
 //! generated `boot_wiring.rs`). [`BootRun`] runs it around dagon-core's
 //! decision, which the chain only observes.
 #![no_std]
-#![forbid(unsafe_code)]
+// Unsafe only in `mem`, the C memory routines of a boot core image.
+#![deny(unsafe_code)]
 
 use dagon_core::boot::{decide, BootConfig, Decision, SlotLayout};
 use dagon_core::log::{Log, LogLayout};
 use dagon_events::{Refused, Sink};
 use dagon_format::SigVerifier;
 use dagon_port::Flash;
+
+#[cfg(any(test, all(feature = "small-mem", target_os = "none")))]
+pub mod mem;
 
 // Links the standard library's critical section on hosted targets.
 #[cfg(not(target_os = "none"))]

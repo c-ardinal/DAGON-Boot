@@ -2,7 +2,7 @@
 //! transition delivers its event to, replay, and the bounded decision
 //! calls.
 
-use crate::catalog::{Catalog, Layer};
+use crate::catalog::{Layer, Replay};
 use crate::decisions;
 use crate::event::{Event, EventRecord, Payload};
 use crate::extension::{
@@ -287,8 +287,7 @@ impl BootExtension {
 
     /// Whether it observes `e`: a boot event whose code it lists.
     pub fn observes(&self, e: &Event<'_>) -> bool {
-        let entry = e.entry();
-        entry.layer == Layer::Boot && self.codes.contains(&entry.code)
+        e.layer() == Layer::Boot && self.codes.contains(&e.kind())
     }
 }
 
@@ -394,16 +393,16 @@ pub struct Unreadable;
 
 impl<H: Head, B: Extension, U: Extension, C> Composed<H, B, U, C> {
     /// Re-emits a record an earlier stage kept (the boot record, the state
-    /// log) as its typed event with `replayed: true`, decoded through the
-    /// catalog of the machine that declared it. Only kinds the catalog
-    /// marks `replay` and not `retired` are replayed. `Unreadable` when no
-    /// catalog in `machines` reads it (another layer, an unknown or
-    /// non-replayable kind, a value from a newer writer). A layer-start
-    /// API.
-    pub fn replay(&mut self, machines: &[Catalog], rec: &EventRecord) -> Result<(), Unreadable> {
+    /// log) as its typed event with `replayed: true`, decoded by the
+    /// [`Replay`] of the machine that declared it (its `REPLAY`). Only
+    /// kinds the catalog marks `replay` and not `retired` are replayed.
+    /// `Unreadable` when no decoder in `machines` reads it (another layer,
+    /// an unknown or non-replayable kind, a value from a newer writer). A
+    /// layer-start API.
+    pub fn replay(&mut self, machines: &[Replay], rec: &EventRecord) -> Result<(), Unreadable> {
         let parts = &mut self.parts;
         let mut deliver = |p: &dyn Payload| parts.send(&Event::replayed(p));
-        if machines.iter().any(|m| (m.__replay)(rec, &mut deliver)) {
+        if machines.iter().any(|m| m(rec, &mut deliver)) {
             Ok(())
         } else {
             Err(Unreadable)

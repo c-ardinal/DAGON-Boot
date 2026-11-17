@@ -3,7 +3,7 @@
 use core::any::Any;
 use core::fmt;
 
-use crate::catalog::{Entry, Layer};
+use crate::catalog::Layer;
 use crate::PAYLOAD_BYTES;
 
 /// An event payload: one of the payload types [`crate::state_machine!`]
@@ -16,17 +16,23 @@ use crate::PAYLOAD_BYTES;
 /// macro can also name; such code is in the trusted base, and an
 /// extension that did so would still hold no chain to deliver into.
 ///
-/// It has no `Debug` supertrait: an `&dyn Payload` would carry the
-/// formatter in its vtable into every image that delivers events, the boot
-/// cores included, whose flash budget has no room for it. Each generated
-/// payload type is `Debug` on its own.
+/// It has no `Debug` supertrait and names no catalog entry: an `&dyn
+/// Payload` would carry the formatter, or the catalog's names, in its
+/// vtable into every image that delivers events, the boot cores included.
+/// An event is its layer, its kind's code and its payload bytes; names are
+/// looked up from the code only where a person reads them
+/// ([`crate::Machines::entry`]). Each generated payload type is `Debug` on
+/// its own.
 ///
 /// ```compile_fail,E0277
 /// #[derive(Debug)]
 /// struct Forged;
 /// impl dagon_events::Payload for Forged {
-///     fn entry(&self) -> &'static dagon_events::Entry {
-///         &dagon_events::decisions::ExtensionOverran::ENTRY
+///     fn layer(&self) -> dagon_events::Layer {
+///         dagon_events::Layer::App
+///     }
+///     fn kind(&self) -> u8 {
+///         dagon_events::decisions::ExtensionOverran::ENTRY.code
 ///     }
 ///     fn compact(&self) -> [u8; 16] {
 ///         [0; 16]
@@ -34,8 +40,10 @@ use crate::PAYLOAD_BYTES;
 /// }
 /// ```
 pub trait Payload: crate::sealed::SealedPayload + Any {
-    /// The catalog entry of the transition that emits it.
-    fn entry(&self) -> &'static Entry;
+    /// The layer of the machine that emits it.
+    fn layer(&self) -> Layer;
+    /// Its kind's code within the layer ([`crate::Entry::code`]).
+    fn kind(&self) -> u8;
     /// The owned form ([`EventRecord::payload`]): the fields in order.
     fn compact(&self) -> [u8; PAYLOAD_BYTES];
 }
@@ -51,10 +59,9 @@ pub struct Event<'a> {
 
 impl fmt::Debug for Event<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let e = self.entry();
         f.debug_struct("Event")
-            .field("layer", &e.layer)
-            .field("kind", &e.kind)
+            .field("layer", &self.layer())
+            .field("kind", &self.kind())
             .field("payload", &self.payload.compact())
             .field("replayed", &self.replayed)
             .finish()
@@ -78,17 +85,15 @@ impl<'a> Event<'a> {
         }
     }
 
-    pub fn entry(&self) -> &'static Entry {
-        self.payload.entry()
-    }
-
     pub fn layer(&self) -> Layer {
-        self.entry().layer
+        self.payload.layer()
     }
 
-    /// The kind within its layer (`confirmed` for `app.confirmed`).
-    pub fn kind(&self) -> &'static str {
-        self.entry().kind
+    /// The kind's code within its layer ([`crate::Entry::code`]): compare
+    /// it with a payload type's `ENTRY.code`, or read the payload with
+    /// [`Event::get`].
+    pub fn kind(&self) -> u8 {
+        self.payload.kind()
     }
 
     pub fn is_replayed(&self) -> bool {
@@ -104,10 +109,9 @@ impl<'a> Event<'a> {
     /// The owned form, numbered `seq` by whoever keeps it (see
     /// [`EventRecord::seq`]).
     pub fn record(&self, seq: u32) -> EventRecord {
-        let e = self.entry();
         EventRecord {
-            layer: e.layer.code(),
-            kind: e.code,
+            layer: self.layer().code(),
+            kind: self.kind(),
             flags: if self.replayed {
                 EventRecord::REPLAYED
             } else {
@@ -147,20 +151,24 @@ impl EventRecord {
 }
 
 /// A transition called from a state it does not leave from. The state is
-/// unchanged and nothing is emitted.
+/// unchanged and nothing is emitted. The transition is named by its
+/// event's layer and code, the state by its index in the catalog's
+/// `states` (the machine's `StateId`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Refused {
-    pub machine: &'static str,
-    pub trigger: &'static str,
-    pub state: &'static str,
+    pub layer: Layer,
+    pub kind: u8,
+    pub state: u8,
 }
 
 impl fmt::Display for Refused {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "{}: {} is not a transition from {}",
-            self.machine, self.trigger, self.state
+            "{} {:#04x}: not a transition from state {}",
+            self.layer.name(),
+            self.kind,
+            self.state
         )
     }
 }

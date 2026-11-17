@@ -67,9 +67,9 @@ state_machine! {
     }
 }
 
-/// Records every event it sees: (kind, owned form, replayed).
+/// Records every event it sees: (kind code, owned form, replayed).
 #[derive(Default)]
-struct Log(Vec<(&'static str, EventRecord, bool)>);
+struct Log(Vec<(u8, EventRecord, bool)>);
 
 impl Extension for Log {
     fn id(&self) -> &'static str {
@@ -155,6 +155,60 @@ fn the_catalog_is_the_declaration() {
     assert_eq!(c.entry(0x14).unwrap().from, ["*"]);
 }
 
+/// The transition table generated from the declaration (`State::leaves`)
+/// says what the catalog says, for every state and transition.
+#[test]
+fn the_generated_transition_table_agrees_with_the_catalog() {
+    use transfer::{State, Trigger};
+    let c = transfer::CATALOG;
+    let states = [
+        State::Idle,
+        State::Header { slot: 0, len: 0 },
+        State::Body {
+            slot: 0,
+            len: 0,
+            next: 0,
+        },
+    ];
+    let triggers = [
+        Trigger::offered,
+        Trigger::header_ok,
+        Trigger::written,
+        Trigger::aborted,
+        Trigger::reset,
+    ];
+    for (i, s) in states.iter().enumerate() {
+        assert_eq!(s.id() as usize, i);
+        for (t, e) in triggers.iter().zip(c.entries) {
+            let named = e.from.contains(&"*") || e.from.contains(&c.states[i]);
+            assert_eq!(s.leaves(*t), named, "{} from {}", e.trigger, c.states[i]);
+            assert_eq!(c.leaves(i as u8, e.code), Some(named));
+        }
+    }
+    assert_eq!(c.leaves(3, 0x10), None, "no such state");
+    assert_eq!(c.leaves(0, 0x7f), None, "no such transition");
+}
+
+/// An event names its kind by its layer and code.
+#[test]
+fn an_event_carries_its_layer_and_code() {
+    struct Seen(Vec<(Layer, u8)>);
+    impl Extension for Seen {
+        fn id(&self) -> &'static str {
+            "seen"
+        }
+        fn on_event(&mut self, e: &Event<'_>, _: &Ctx<'_>) {
+            self.0.push((e.layer(), e.kind()));
+        }
+    }
+    let mut seen = Seen(Vec::new());
+    let mut out = compose_unpublished(Layer::App, Nop, &mut seen);
+    let mut m = transfer::Machine::new();
+    m.offered(&mut out, 1, 2).unwrap();
+    drop(out);
+    assert_eq!(seen.0, [(Layer::App, transfer::UpdateOffered::ENTRY.code)]);
+}
+
 #[test]
 fn a_transition_delivers_its_event_then_moves() {
     let mut log = Log::default();
@@ -165,26 +219,30 @@ fn a_transition_delivers_its_event_then_moves() {
     m.header_ok(&mut out).unwrap();
     m.written(&mut out, 0x0102_0304).unwrap();
     let r = m.offered(&mut out, 2, 1).unwrap_err();
+    // The refused transition is its event's code, the state its index.
     assert_eq!(
         r,
         Refused {
-            machine: "transfer",
-            trigger: "offered",
-            state: "Body"
+            layer: Layer::App,
+            kind: 0x10,
+            state: 2
         }
     );
-    assert_eq!(
-        r.to_string(),
-        "transfer: offered is not a transition from Body"
-    );
+    assert_eq!(r.to_string(), "app 0x10: not a transition from state 2");
     m.aborted(&mut out, Cause::Store).unwrap();
     assert!(m.aborted(&mut out, Cause::Idle).is_err());
     m.reset(&mut out).unwrap();
     drop(out);
 
     let kinds: Vec<_> = log.0.iter().map(|(k, _, _)| *k).collect();
+    assert_eq!(kinds, [0x10, 0x11, 0x12, 0x13, 0x14]);
+    // Where a person reads them, the names come from the catalog.
+    let names: Vec<_> = kinds
+        .iter()
+        .map(|&k| transfer::CATALOG.entry(k).unwrap().kind)
+        .collect();
     assert_eq!(
-        kinds,
+        names,
         [
             "update_offered",
             "header_verified",
@@ -230,7 +288,7 @@ fn a_record_replays_as_its_typed_event() {
     let results: Vec<_> = first
         .0
         .iter()
-        .map(|(_, rec, _)| out.replay(&[decisions::CATALOG, transfer::CATALOG], rec))
+        .map(|(_, rec, _)| out.replay(&[decisions::REPLAY, transfer::REPLAY], rec))
         .collect();
     // Only `transfer_progress` is marked `replay` and not retired:
     // live/host-only kinds and the retired one are refused.
@@ -245,13 +303,13 @@ fn a_record_replays_as_its_typed_event() {
     let progress = first.0[2].1;
     let mut rec = progress;
     rec.payload[8] = 9; // `last`'s presence byte
-    assert_eq!(out.replay(&[transfer::CATALOG], &rec), Err(Unreadable));
+    assert_eq!(out.replay(&[transfer::REPLAY], &rec), Err(Unreadable));
     let mut rec = progress;
     rec.kind = 0x7F;
-    assert_eq!(out.replay(&[transfer::CATALOG], &rec), Err(Unreadable));
+    assert_eq!(out.replay(&[transfer::REPLAY], &rec), Err(Unreadable));
     let mut rec = progress;
     rec.layer = Layer::Host.code();
-    assert_eq!(out.replay(&[transfer::CATALOG], &rec), Err(Unreadable));
+    assert_eq!(out.replay(&[transfer::REPLAY], &rec), Err(Unreadable));
     assert_eq!(out.replay(&[], &progress), Err(Unreadable));
     assert_eq!(seen.borrow().len(), 1);
 }

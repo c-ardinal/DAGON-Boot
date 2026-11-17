@@ -233,9 +233,9 @@ impl Extension for Probe {
     }
     fn on_event(&mut self, e: &Event<'_>, _: &Ctx<'_>) {
         let k = if e.is_replayed() {
-            format!("replay:{}", e.kind())
+            format!("replay:{}", kind_name(e))
         } else {
-            e.kind().to_string()
+            kind_name(e).to_string()
         };
         self.seen.borrow_mut().events.push(k);
     }
@@ -980,4 +980,12 @@ fn a_restart_reads_the_slots_again() {
         ["starting", "store_opened", "replay:trial_started"]
     );
     assert!(n.agent.images().on_trial());
+}
+
+/// The kind's name as a log display shows it, looked up from its code.
+fn kind_name(e: &dagon_events::Event<'_>) -> &'static str {
+    [&dagon_agent::MACHINES, &dagon_events::MACHINES]
+        .iter()
+        .find_map(|m| m.entry(e.layer(), e.kind()))
+        .map_or("?", |x| x.kind)
 }

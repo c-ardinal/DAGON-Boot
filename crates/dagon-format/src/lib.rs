@@ -41,21 +41,28 @@ pub enum FormatError {
 }
 
 /// CRC-32 (IEEE 802.3: reflected polynomial 0xEDB88320, init and final XOR 0xFFFFFFFF).
+///
+/// Four bits per table step: a 64-byte table instead of 1 KiB in every
+/// image. On a node it checks state log records and frames, a few hundred
+/// bytes at most, where the byte-wide table's speed is not needed.
 pub fn crc32(data: &[u8]) -> u32 {
     let mut crc = 0xFFFF_FFFFu32;
     for &b in data {
-        crc = CRC_TABLE[((crc ^ b as u32) & 0xFF) as usize] ^ (crc >> 8);
+        crc ^= u32::from(b);
+        crc = CRC_TABLE[(crc & 0xF) as usize] ^ (crc >> 4);
+        crc = CRC_TABLE[(crc & 0xF) as usize] ^ (crc >> 4);
     }
     crc ^ 0xFFFF_FFFF
 }
 
-const CRC_TABLE: [u32; 256] = {
-    let mut table = [0u32; 256];
+/// The CRC of each 4-bit value, shifted through 4 bits.
+const CRC_TABLE: [u32; 16] = {
+    let mut table = [0u32; 16];
     let mut i = 0;
-    while i < 256 {
+    while i < 16 {
         let mut c = i as u32;
         let mut k = 0;
-        while k < 8 {
+        while k < 4 {
             c = if c & 1 != 0 {
                 0xEDB8_8320 ^ (c >> 1)
             } else {
@@ -131,6 +138,38 @@ mod tests {
     fn crc32_check_value() {
         assert_eq!(crc32(b"123456789"), 0xCBF4_3926);
         assert_eq!(crc32(b""), 0);
+    }
+
+    /// The same CRC computed one bit at a time, the definition.
+    fn crc32_bitwise(data: &[u8]) -> u32 {
+        let mut crc = 0xFFFF_FFFFu32;
+        for &b in data {
+            crc ^= u32::from(b);
+            for _ in 0..8 {
+                crc = if crc & 1 != 0 {
+                    0xEDB8_8320 ^ (crc >> 1)
+                } else {
+                    crc >> 1
+                };
+            }
+        }
+        crc ^ 0xFFFF_FFFF
+    }
+
+    #[test]
+    fn crc32_matches_the_bitwise_definition_and_uses_a_16_entry_table() {
+        // Known answers beyond the check value (IEEE 802.3 CRC-32).
+        assert_eq!(crc32(b"a"), 0xE8B7_BE43);
+        assert_eq!(
+            crc32(b"The quick brown fox jumps over the lazy dog"),
+            0x414F_A339
+        );
+        // Every byte value at every position of a run, and every length.
+        let data: [u8; 512] = core::array::from_fn(|i| if i < 256 { i as u8 } else { !(i as u8) });
+        for n in 0..data.len() {
+            assert_eq!(crc32(&data[..n]), crc32_bitwise(&data[..n]), "{n} bytes");
+        }
+        assert_eq!(core::mem::size_of_val(&CRC_TABLE), 16 * 4);
     }
 
     #[test]

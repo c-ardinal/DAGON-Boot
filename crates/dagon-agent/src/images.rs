@@ -1,7 +1,7 @@
 //! The image lifecycle machine around the board's slot store: the only
 //! holder of the store's mutators, and the read-only view apps get.
 
-use dagon_events::{compose_unpublished, Catalog, EventRecord, Layer, Nop, Payload, Refused, Sink};
+use dagon_events::{compose_unpublished, EventRecord, Layer, Nop, Payload, Refused, Replay, Sink};
 use dagon_format::header::HEADER_SIZE;
 use dagon_format::Version;
 use dagon_proto::payload::{target, SlotState, StatusResp};
@@ -97,24 +97,9 @@ pub(crate) struct ImageStore<S> {
     view: ImageView,
 }
 
-/// Whether `trigger` leaves from `state`, read from the machine's catalog
-/// so a store call is made only when its transition will follow.
-fn allows(trigger: &str, state: image::State) -> bool {
-    allows_in(&image::CATALOG, trigger, state.name())
-}
-
-fn allows_core(trigger: &str, state: core_image::State) -> bool {
-    allows_in(&core_image::CATALOG, trigger, state.name())
-}
-
-fn allows_in(cat: &Catalog, trigger: &str, state: &str) -> bool {
-    cat.entries
-        .iter()
-        .filter(|e| e.trigger == trigger)
-        .any(|e| e.from.iter().any(|f| *f == "*" || *f == state))
-}
-
-/// A transition [`allows`] admitted cannot be refused.
+/// A transition the machine's generated table (`State::leaves`) admitted
+/// before the store call, so the call is made only when its transition
+/// will follow, cannot be refused.
 fn done(r: Result<(), Refused>) {
     debug_assert!(r.is_ok(), "{r:?}");
 }
@@ -241,7 +226,7 @@ impl<S: SlotStore> ImageStore<S> {
                         to: cs.active,
                         reason: cs.last_reason,
                     };
-                    replay(chain, &core_image::CATALOG, &p);
+                    replay(chain, core_image::REPLAY, &p);
                 }
             }
         }
@@ -263,7 +248,7 @@ impl<S: SlotStore> ImageStore<S> {
                 _ => None,
             };
             if let Some(p) = payload {
-                replay(chain, &image::CATALOG, p);
+                replay(chain, image::REPLAY, p);
             }
         }
     }
@@ -350,8 +335,8 @@ impl<S: SlotStore> ImageStore<S> {
         out: &mut impl Sink,
     ) -> Result<(), Status> {
         let ok = match t {
-            target::BOOTCORE => allows_core("erase", self.core(slot)?.state()),
-            _ => allows("erase", self.machine(t, slot)?.state()),
+            target::BOOTCORE => self.core(slot)?.state().leaves(core_image::Trigger::erase),
+            _ => self.machine(t, slot)?.state().leaves(image::Trigger::erase),
         };
         if !ok {
             return Err(Status::State);
@@ -404,8 +389,14 @@ impl<S: SlotStore> ImageStore<S> {
         out: &mut impl Sink,
     ) -> Result<(), Status> {
         let ok = match t {
-            target::BOOTCORE => allows_core("written", self.core(slot)?.state()),
-            _ => allows("written", self.machine(t, slot)?.state()),
+            target::BOOTCORE => self
+                .core(slot)?
+                .state()
+                .leaves(core_image::Trigger::written),
+            _ => self
+                .machine(t, slot)?
+                .state()
+                .leaves(image::Trigger::written),
         };
         if !ok {
             return Err(Status::State);
@@ -454,7 +445,8 @@ impl<S: SlotStore> ImageStore<S> {
         out: &mut impl Sink,
     ) -> Result<(), Status> {
         let i = usize::from(slot);
-        if !allows("pending_set", self.machine(target::APP, slot)?.state()) {
+        let state = self.machine(target::APP, slot)?.state();
+        if !state.leaves(image::Trigger::pending_set) {
             return Err(Status::State);
         }
         self.store
@@ -493,7 +485,11 @@ impl<S: SlotStore> ImageStore<S> {
         version: Version,
         out: &mut impl Sink,
     ) -> Result<(), Status> {
-        if !allows_core("pending_set", self.core(slot)?.state()) {
+        if !self
+            .core(slot)?
+            .state()
+            .leaves(core_image::Trigger::pending_set)
+        {
             return Err(Status::State);
         }
         self.store
@@ -513,7 +509,8 @@ impl<S: SlotStore> ImageStore<S> {
         out: &mut impl Sink,
     ) -> Result<(), Status> {
         let i = usize::from(slot);
-        if !allows("confirmed", self.machine(target::APP, slot)?.state()) {
+        let state = self.machine(target::APP, slot)?.state();
+        if !state.leaves(image::Trigger::confirmed) {
             return Err(Status::State);
         }
         self.store
@@ -536,15 +533,14 @@ impl<S: SlotStore> ImageStore<S> {
 }
 
 /// Delivers `p`, a state the boot stage made, to `chain` as a replay.
-fn replay(chain: &mut impl AppChain, cat: &Catalog, p: &dyn Payload) {
-    let e = p.entry();
+fn replay(chain: &mut impl AppChain, machine: Replay, p: &dyn Payload) {
     let rec = EventRecord {
-        layer: e.layer.code(),
-        kind: e.code,
+        layer: p.layer().code(),
+        kind: p.kind(),
         payload: p.compact(),
         ..EventRecord::default()
     };
-    let replayed = chain.replay(core::slice::from_ref(cat), &rec);
+    let replayed = chain.replay(&[machine], &rec);
     debug_assert!(replayed.is_ok());
 }
 

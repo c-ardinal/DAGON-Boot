@@ -1,15 +1,20 @@
-//! DAGON link v1: frame format (shared by USB CDC, UART and I2C), the command
-//! set, status codes, request/response payloads and the I2C mailbox state.
+//! DAGON link v2: frame format (shared by USB CDC, UART and I2C), the
+//! command table, status codes, the field grammar of every payload with
+//! its one reader and writer, the typed payloads and the I2C mailbox state.
 #![no_std]
 #![forbid(unsafe_code)]
 
+pub mod field;
 pub mod payload;
+pub mod table;
+
+pub use table::Cmd;
 
 use dagon_format::crc32;
 use dagon_format::le::{put_u16, u16_at, u32_at};
 
 pub const SOF: [u8; 2] = [0xDA, 0x6F];
-pub const PROTO_VERSION: u8 = 0x01;
+pub const PROTO_VERSION: u8 = 0x02;
 pub const HEADER_LEN: usize = 8;
 pub const CRC_LEN: usize = 4;
 
@@ -33,67 +38,6 @@ pub const fn frame_len(payload_len: usize) -> usize {
 /// Largest frame on any link (USB CDC).
 pub const MAX_FRAME: usize = frame_len(max_payload::USB);
 
-/// Commands implemented in this protocol version.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[repr(u8)]
-pub enum Cmd {
-    Hello = 0x01,
-    Status = 0x02,
-    /// What the node runs: stage0, boot loader and app versions, wire
-    /// version, MCU id (`payload::VersionResp`). Additive: an agent that
-    /// predates it answers `Status::Unsupported`.
-    Version = 0x03,
-    /// To a node's boot core while its listen window is open: stay in
-    /// update mode instead of starting the app (empty request and reply).
-    /// A boot core already in update mode answers OK; an app answers
-    /// `Status::State`; an agent that predates it, `Status::Unsupported`.
-    Stay = 0x05,
-    XferBegin = 0x10,
-    XferData = 0x11,
-    XferEnd = 0x12,
-    XferHdr = 0x15,
-    SetPending = 0x20,
-    Reboot = 0x21,
-    Confirm = 0x22,
-    /// Node (kind V) replies OK, then enters its ROM loader. Added later as
-    /// an additive change: the other commands are unchanged.
-    EnterRom = 0x24,
-    /// To the hub, for its display. To a node being written, the write's
-    /// one number for the node's own display (additive: an agent that
-    /// predates it answers `Status::Unsupported` and is not told again).
-    Show = 0x41,
-    Relay = 0x50,
-    SubCtl = 0x60,
-    I2cRaw = 0x61,
-    ConfRun = 0x71,
-}
-
-impl Cmd {
-    pub const ALL: [Cmd; 17] = [
-        Cmd::Hello,
-        Cmd::Status,
-        Cmd::Version,
-        Cmd::Stay,
-        Cmd::XferBegin,
-        Cmd::XferData,
-        Cmd::XferEnd,
-        Cmd::XferHdr,
-        Cmd::SetPending,
-        Cmd::Reboot,
-        Cmd::Confirm,
-        Cmd::EnterRom,
-        Cmd::Show,
-        Cmd::Relay,
-        Cmd::SubCtl,
-        Cmd::I2cRaw,
-        Cmd::ConfRun,
-    ];
-
-    pub fn from_u8(v: u8) -> Option<Cmd> {
-        Cmd::ALL.into_iter().find(|c| *c as u8 == v)
-    }
-}
-
 /// First payload byte of every response.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u8)]
@@ -102,6 +46,9 @@ pub enum Status {
     Frame = 0x01,
     Unsupported = 0x02,
     Arg = 0x03,
+    /// A must field the receiver does not know; the body names it
+    /// (`table::error::BAD_FIELD`).
+    Field = 0x04,
     State = 0x05,
     Range = 0x06,
     Flash = 0x07,
@@ -113,11 +60,12 @@ pub enum Status {
 }
 
 impl Status {
-    pub const ALL: [Status; 12] = [
+    pub const ALL: [Status; 13] = [
         Status::Ok,
         Status::Frame,
         Status::Unsupported,
         Status::Arg,
+        Status::Field,
         Status::State,
         Status::Range,
         Status::Flash,
@@ -143,6 +91,9 @@ pub enum FrameError {
     TooLong,
     BadCrc,
     BufferTooSmall,
+    /// A field written out of rising order, numbered 0 or outside the
+    /// lengths its table row gives.
+    Field,
 }
 
 /// A decoded frame borrowing its payload.
@@ -220,6 +171,44 @@ pub fn finish(
     let crc = crc32(&out[2..HEADER_LEN + payload_len]);
     out[HEADER_LEN + payload_len..total].copy_from_slice(&crc.to_le_bytes());
     Ok(total)
+}
+
+/// The answer to a request frame of a wire version this crate does not
+/// read, so that its sender is told instead of left to time out: a frame
+/// of this version echoing bytes 4 and 5 (seq and cmd here), with
+/// `Status::Frame` and the version read here (`table::error::WIRE`).
+///
+/// `None` for anything else: a frame of this version, a response or an
+/// event (so two sides of different versions never answer each other's
+/// answers), or fewer than [`HEADER_LEN`] bytes. The start bytes, the
+/// version at byte 2 and the flags at byte 3 are where every version
+/// keeps them. Stream cutters hand a frame that [`Frame::decode`] refuses
+/// with [`FrameError::BadVersion`] over as its first [`HEADER_LEN`] bytes.
+pub fn version_refusal(request: &[u8], out: &mut [u8]) -> Option<usize> {
+    let head = request.get(..HEADER_LEN)?;
+    let (&[s0, s1, ver, fl, seq, cmd], _) = head.split_first_chunk::<6>()?;
+    if [s0, s1] != SOF || ver == PROTO_VERSION || fl & (flags::RESP | flags::EVENT) != 0 {
+        return None;
+    }
+    let body = out.get_mut(HEADER_LEN..)?;
+    *body.first_mut()? = Status::Frame as u8;
+    let mut w = field::FieldWriter::new(body.get_mut(1..)?);
+    w.field(&table::error::WIRE, &[PROTO_VERSION]).ok()?;
+    let n = 1 + w.len();
+    finish(out, flags::RESP, seq, cmd, n).ok()
+}
+
+/// Length of the refused frame's start a stream cutter hands over.
+pub const REFUSED_LEN: usize = HEADER_LEN;
+
+/// Whether a stream cutter hands the [`REFUSED_LEN`] bytes at the start of
+/// `buf` over, after [`Frame::decode`] refused them with
+/// [`FrameError::BadVersion`]. Not when another frame start lies within
+/// them: that is noise before a frame, and taking it would take the
+/// frame's first bytes with it.
+pub fn is_refused_start(buf: &[u8]) -> bool {
+    buf.get(1..REFUSED_LEN)
+        .is_some_and(|rest| !rest.contains(&SOF[0]))
 }
 
 /// Offset of the next possible frame start (`0xDA`) at or after `from`.
@@ -306,11 +295,11 @@ mod tests {
         assert_eq!(Cmd::ALL.len(), 17);
         assert_eq!(Cmd::from_u8(0x03), Some(Cmd::Version));
         assert_eq!(Cmd::from_u8(0x24), Some(Cmd::EnterRom));
-        assert_eq!(Status::ALL.len(), 12);
+        assert_eq!(Status::ALL.len(), 13);
         assert_eq!(Cmd::from_u8(0x15), Some(Cmd::XferHdr));
         assert_eq!(Cmd::from_u8(0x04), None);
         assert_eq!(Status::from_u8(0x0F), Some(Status::Timeout));
-        assert_eq!(Status::from_u8(0x04), None);
+        assert_eq!(Status::from_u8(0x04), Some(Status::Field));
     }
 
     /// STAY (0x05): an empty request a boot core takes in its listen

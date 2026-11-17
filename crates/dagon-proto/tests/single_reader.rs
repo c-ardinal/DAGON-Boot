@@ -80,10 +80,13 @@ fn nothing_outside_dagon_proto_looks_into_a_payload() {
         .filter(|(name, code)| !name.starts_with(PROTO) && code.contains("dagon_proto"))
         .map(|(name, _)| name)
         .collect();
-    let hits = offenders(|name, l| {
-        framed.iter().any(|f| f == name) && INTO.iter().any(|p| l.contains(p))
-    });
-    assert!(hits.is_empty(), "payload bytes read by hand:\n{}", hits.join("\n"));
+    let hits =
+        offenders(|name, l| framed.iter().any(|f| f == name) && INTO.iter().any(|p| l.contains(p)));
+    assert!(
+        hits.is_empty(),
+        "payload bytes read by hand:\n{}",
+        hits.join("\n")
+    );
 }
 
 #[test]

@@ -53,7 +53,7 @@ const KEY_ID: [u8; 8] = [0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88];
 
 fn hello_resp() -> HelloResp {
     HelloResp {
-        proto_ver: 1,
+        proto_ver: 2,
         role: role::NODE,
         port_kind: 1,
         mcu_id: 2,
@@ -67,7 +67,7 @@ fn hello_resp() -> HelloResp {
 
 fn hello_req_frame() -> Vec<u8> {
     let req = HelloReq {
-        proto_ver: 1,
+        proto_ver: 2,
         max_payload: max_payload::USB as u16,
     };
     frame(0, 0x01, Cmd::Hello, |b| req.encode(b).unwrap())
@@ -84,7 +84,7 @@ fn hello_vectors() {
         &file,
         &[(
             0,
-            &[0xDA, 0x6F, 1, 0, 1, 0x01, 6, 0, 1, 0, 0, 0, 0x40, 0x04],
+            &[0xDA, 0x6F, 2, 0, 1, 0x01, 6, 0, 2, 0, 0, 0, 0x40, 0x04],
         )],
     );
     assert_crc(&file);
@@ -102,15 +102,17 @@ fn hello_vectors() {
     expect_at(
         &file,
         &[
-            (0, &[0xDA, 0x6F, 1, flags::RESP, 1, 0x01, 25, 0]),
-            (8, &[0x00]),                    // status OK
-            (9, &[1, 0, 0, 0]),              // proto_ver
-            (13, &[1, 1, 0x02, 0x00]),       // role node, port_kind S, mcu_id F401
-            (17, &[0]),                      // mode app
-            (18, &[0x00, 0x00, 0x01, 0x01]), // active_version 1.1.0
-            (22, &[1]),                      // trial
-            (23, &KEY_ID),
-            (31, &[0x00, 0x01]), // max_payload 256
+            (0, &[0xDA, 0x6F, 2, flags::RESP, 1, 0x01, 39, 0]),
+            (8, &[0x00]),                             // status OK
+            (9, &[2, 0, 0, 0, 0x00, 0x01]),           // core: proto_ver, max_payload 256
+            (15, &[0x02, 1, 1]),                      // field 1: role node
+            (18, &[0x04, 1, 1]),                      // field 2: port_kind S
+            (21, &[0x06, 2, 0x02, 0x00]),             // field 3: mcu_id F401
+            (25, &[0x08, 1, 0]),                      // field 4: mode app
+            (28, &[0x0A, 4, 0x00, 0x00, 0x01, 0x01]), // field 5: active_version 1.1.0
+            (34, &[0x0C, 1, 1]),                      // field 6: trial
+            (37, &[0x0E, 8]),                         // field 7: key id
+            (39, &KEY_ID),
         ],
     );
     assert_crc(&file);
@@ -157,7 +159,7 @@ fn status_vector() {
     );
     let (_, body) = split_status(decode(&file).payload).unwrap();
     assert_eq!(StatusResp::parse(body).unwrap(), s);
-    assert_eq!(body.len(), StatusResp::LEN);
+    assert_eq!(body.len(), StatusResp::MAX_LEN);
     let mut a = vec![1, 0x00, 0x00, 0x00, 0x01]; // A: written, 1.0.0
     a.extend([0xA0; 16]);
     let mut b = vec![3, 0x00, 0x00, 0x01, 0x01]; // B: trying, 1.1.0
@@ -165,16 +167,20 @@ fn status_vector() {
     expect_at(
         &file,
         &[
-            (6, &[72, 0]), // len = status + 71
+            (6, &[84, 0]), // len = status + 83
             (8, &[0x00]),
-            (9, &a), // slots are 21 bytes: state, version, digest16
-            (30, &b),
-            (51, &[0; 21]),      // factory empty
-            (72, &[1, 0, 1, 0]), // active, confirmed, attempts, last_reason
-            (76, &[1, 0, 0, 0]), // log_generation
+            (9, &[0x02, 63]), // field 1: three packed slots
+            (11, &a),         // a slot is 21 bytes: state, version, digest16
+            (32, &b),
+            (53, &[0; 21]),               // factory empty
+            (74, &[0x04, 1, 1]),          // field 2: active
+            (77, &[0x06, 1, 0]),          // field 3: confirmed
+            (80, &[0x08, 1, 1]),          // field 4: attempts
+            (83, &[0x0A, 1, 0]),          // field 5: last_reason
+            (86, &[0x0C, 4, 1, 0, 0, 0]), // field 6: log_generation
         ],
     );
-    assert_eq!(file.len(), 84);
+    assert_eq!(file.len(), 96);
     assert_crc(&file);
 }
 
@@ -191,14 +197,19 @@ fn xfer_vectors() {
         &frame(0, 0x03, Cmd::XferBegin, |b| begin.encode(b).unwrap()),
     );
     assert_eq!(XferBegin::parse(decode(&file).payload).unwrap(), begin);
-    // target APP, slot B, total_len 1536, hdr_len 512
+    // core: target APP, total_len 1536; must fields: 1 slot B, 2 hdr_len 512
     expect_at(
         &file,
-        &[(5, &[0x10, 8, 0, 0, 1, 0x00, 0x06, 0, 0, 0x00, 0x02])],
+        &[(
+            5,
+            &[
+                0x10, 12, 0, 0, 0x00, 0x06, 0, 0, 0x03, 1, 1, 0x05, 2, 0x00, 0x02,
+            ],
+        )],
     );
     assert_crc(&file);
 
-    let data: Vec<u8> = (0..252u32).map(|i| i as u8).collect();
+    let data: Vec<u8> = (0..251u32).map(|i| i as u8).collect();
     let chunk = XferChunk {
         offset: 252,
         data: &data,
@@ -209,7 +220,8 @@ fn xfer_vectors() {
     );
     assert_eq!(XferChunk::parse(decode(&file).payload).unwrap(), chunk);
     assert_eq!(file.len(), 268, "max I2C frame");
-    expect_at(&file, &[(5, &[0x15, 0x00, 0x01, 252, 0, 0, 0, 0, 1, 2])]); // len 256, offset 252
+    // len 256: offset 252, the delimiter, then the data
+    expect_at(&file, &[(5, &[0x15, 0x00, 0x01, 252, 0, 0, 0, 0, 0, 1, 2])]);
 }
 
 /// The relay link id the built-in RP2040 definition gives its port `port`
@@ -248,7 +260,7 @@ fn relay_vector() {
     let relay = Relay {
         link: rp2040_relay_link("i2c0"),
         addr: 0x42,
-        timeout_ms: 300,
+        timeout_ms: Some(300),
         inner: &inner,
     };
     let file = golden(
@@ -258,10 +270,18 @@ fn relay_vector() {
     let r = Relay::parse(decode(&file).payload).unwrap();
     assert_eq!(r, relay);
     assert_eq!(decode(r.inner).cmd, Cmd::Hello as u8);
-    // len 4 + 18; the link id of the RP2040's i2c0 entry, addr 0x42, timeout 300 ms, then the inner frame verbatim
+    // len 9 + 18; core: the link id of the RP2040's i2c0 entry; must field 1
+    // addr 0x42, field 2 timeout 300 ms, the delimiter, then the inner frame verbatim
     expect_at(
         &file,
-        &[(5, &[0x50, 22, 0, 1, 0x42, 0x2C, 0x01]), (12, &inner)],
+        &[
+            (5, &[0x50, 27, 0, 1, 0x03, 1, 0x42, 0x04, 2, 0x2C, 0x01, 0]),
+            (17, &inner),
+        ],
+    );
+    assert_eq!(
+        decode(&file).payload.len(),
+        Relay::OVERHEAD_MAX + inner.len()
     );
 }
 
@@ -279,13 +299,14 @@ fn hub_command_vectors() {
         &frame(0, 0x11, Cmd::Show, |b| show.encode(b).unwrap()),
     );
     assert_eq!(Show::parse(decode(&file).payload).unwrap(), show);
-    // node, phase, percent, version u32, text
+    // core: phase; fields: 1 node, 2 percent, 3 version u32, 4 text
     expect_at(
         &file,
         &[(
             5,
             &[
-                0x41, 10, 0, 1, 1, 42, 0x00, 0x00, 0x01, 0x01, b's', b'e', b'g',
+                0x41, 18, 0, 1, 0x02, 1, 1, 0x04, 1, 42, 0x06, 4, 0x00, 0x00, 0x01, 0x01, 0x08, 3,
+                b's', b'e', b'g',
             ],
         )],
     );
@@ -299,7 +320,8 @@ fn hub_command_vectors() {
         &frame(0, 0x12, Cmd::SubCtl, |b| sub.encode(b).unwrap()),
     );
     assert_eq!(SubCtl::parse(decode(&file).payload).unwrap(), sub);
-    expect_at(&file, &[(5, &[0x60, 2, 0, 2, 1])]); // nrst pulse, boot0 high
+    // must fields: 1 nrst pulse, 2 boot0 high
+    expect_at(&file, &[(5, &[0x60, 6, 0, 0x03, 1, 2, 0x05, 1, 1])]);
 
     let raw = I2cRaw {
         read_len: 1,
@@ -310,11 +332,10 @@ fn hub_command_vectors() {
         &frame(0, 0x13, Cmd::I2cRaw, |b| raw.encode(b).unwrap()),
     );
     assert_eq!(I2cRaw::parse(decode(&file).payload).unwrap(), raw);
-    // write_len 2, read_len 1, data
-    expect_at(&file, &[(5, &[0x61, 6, 0, 2, 0, 1, 0, 0x00, 0xFF])]);
+    // must field 1 read_len 1, the delimiter, then the bytes to write
+    expect_at(&file, &[(5, &[0x61, 7, 0, 0x03, 2, 1, 0, 0, 0x00, 0xFF])]);
 }
 
-/// ENTER_ROM was added later as an additive change.
 #[test]
 fn enter_rom_vector() {
     let req = EnterRom {
@@ -326,7 +347,7 @@ fn enter_rom_vector() {
     );
     assert_eq!(EnterRom::parse(decode(&file).payload).unwrap(), req);
     // SOF, ver, flags, seq, cmd, len 1; method FORCE_DOWNLOAD_BOOT; CRC
-    expect_at(&file, &[(0, &[0xDA, 0x6F, 1, 0, 0x14, 0x24, 1, 0, 1])]);
+    expect_at(&file, &[(0, &[0xDA, 0x6F, 2, 0, 0x14, 0x24, 1, 0, 1])]);
     assert_eq!(file.len(), 13);
     assert_crc(&file);
 }
@@ -334,7 +355,7 @@ fn enter_rom_vector() {
 fn version_resp() -> VersionResp {
     let sv = |state, version| SlotVersion { state, version };
     VersionResp {
-        wire: Some(1),
+        wire: Some(2),
         mcu_id: Some(2),
         stage0: Some(Version::new(0, 1, 0)),
         boot_core: Some(Version::new(1, 0, 0)),
@@ -356,8 +377,6 @@ fn version_resp() -> VersionResp {
     }
 }
 
-/// VERSION is an additive command of wire 1: the files above are
-/// unchanged.
 #[test]
 fn version_vectors() {
     let file = golden(
@@ -366,7 +385,7 @@ fn version_vectors() {
     );
     let f = decode(&file);
     assert_eq!((f.cmd, f.payload), (0x03, &[][..]));
-    expect_at(&file, &[(0, &[0xDA, 0x6F, 1, 0, 0x15, 0x03, 0, 0])]);
+    expect_at(&file, &[(0, &[0xDA, 0x6F, 2, 0, 0x15, 0x03, 0, 0])]);
     assert_eq!(file.len(), 12);
     assert_crc(&file);
 
@@ -380,25 +399,24 @@ fn version_vectors() {
     assert_eq!(st, Status::Ok);
     assert_eq!(body.len(), VersionResp::MAX_LEN);
     assert_eq!(VersionResp::parse(body), Ok(version_resp()));
-    // count, then TLVs: id, len, value
+    // one field per value, rising by number
     expect_at(
         &file,
         &[
-            (6, &[52, 0]),                            // len = status + 51
-            (9, &[6]),                                // six values
-            (10, &[0x0D, 1, 1]),                      // wire 1
-            (13, &[0x06, 2, 0x02, 0x00]),             // mcu_id F401
-            (17, &[0x0A, 4, 0x00, 0x00, 0x01, 0x00]), // stage0 0.1.0
-            (23, &[0x01, 4, 0x00, 0x00, 0x00, 0x01]), // running boot core 1.0.0
-            (29, &[0x0B, 11, 0]),                     // boot core slots, A running
-            (32, &[4, 0x00, 0x00, 0x00, 0x01]),       // core A confirmed 1.0.0
-            (37, &[0; 5]),                            // core B empty
-            (42, &[0x0C, 16, 1]),                     // app slots, B running
-            (45, &[1, 0x00, 0x00, 0x00, 0x01]),       // A written 1.0.0
-            (50, &[3, 0x00, 0x00, 0x01, 0x01]),       // B trying 1.1.0
-            (55, &[0; 5]),                            // factory empty
+            (6, &[51, 0]),                            // len = status + 50
+            (9, &[0x02, 4, 0x00, 0x00, 0x00, 0x01]),  // 1: running boot core 1.0.0
+            (15, &[0x0C, 2, 0x02, 0x00]),             // 6: mcu_id F401
+            (19, &[0x14, 4, 0x00, 0x00, 0x01, 0x00]), // 10: stage0 0.1.0
+            (25, &[0x16, 11, 0]),                     // 11: boot core slots, A running
+            (28, &[4, 0x00, 0x00, 0x00, 0x01]),       // core A confirmed 1.0.0
+            (33, &[0; 5]),                            // core B empty
+            (38, &[0x18, 16, 1]),                     // 12: app slots, B running
+            (41, &[1, 0x00, 0x00, 0x00, 0x01]),       // A written 1.0.0
+            (46, &[3, 0x00, 0x00, 0x01, 0x01]),       // B trying 1.1.0
+            (51, &[0; 5]),                            // factory empty
+            (56, &[0x1A, 1, 2]),                      // 13: wire 2
         ],
     );
-    assert_eq!(file.len(), 64);
+    assert_eq!(file.len(), 63);
     assert_crc(&file);
 }

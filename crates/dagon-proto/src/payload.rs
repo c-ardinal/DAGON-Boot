@@ -1,8 +1,18 @@
-//! Request and response payloads. Response structs describe the body after
-//! the status byte (see [`crate::split_status`]). `parse` rejects wrong
-//! lengths with [`Status::Arg`]; `encode` returns the byte count written.
+//! Typed request and response payloads over the one reader and writer of
+//! [`crate::field`] and the rows of [`crate::table`]. Response structs
+//! describe the body after the status byte (see [`crate::split_status`]).
+//! `parse` answers what the reader refuses (`Status::Arg`,
+//! `Status::Field`) and `Status::Arg` for a value outside its range;
+//! `encode` returns the byte count written.
 
-use crate::{FrameError, Status};
+use crate::field::{
+    read, shortest, shortest_value, FieldSpec, FieldWriter, MsgSpec, Parsed, Refusal,
+};
+use crate::table::{
+    conf_run, confirm, error, hello, i2c_raw, reboot, relay, set_pending, show, status, subctl,
+    version, xfer_begin, xfer_end, ERROR,
+};
+use crate::{Cmd, FrameError, Status};
 use dagon_format::Version;
 
 /// HELLO / RELAY etc. field values.
@@ -40,18 +50,6 @@ pub mod target {
     /// (`Status::Arg`).
     #[deprecated(note = "target 3 was removed and stays reserved; no node takes it")]
     pub const TOPOLOGY: u8 = 3;
-}
-
-/// STATUS request: empty for the APP slots, or one `target` byte
-/// (`target::BOOTCORE`: the boot loader slots, in the same response shape).
-/// A device that keeps no such slots answers `Status::Unsupported`; one
-/// that predates the byte answers `Status::Arg`.
-pub fn parse_status_req(b: &[u8]) -> Result<u8, Status> {
-    match b {
-        [] => Ok(target::APP),
-        [t] => Ok(*t),
-        _ => Err(Status::Arg),
-    }
 }
 
 /// Image header length announced in XFER_BEGIN for `target::APP`.
@@ -143,76 +141,66 @@ impl SlotState {
     }
 }
 
-struct Rd<'a>(&'a [u8]);
-
-impl<'a> Rd<'a> {
-    fn take(&mut self, n: usize) -> Result<&'a [u8], Status> {
-        if self.0.len() < n {
-            return Err(Status::Arg);
-        }
-        let (a, b) = self.0.split_at(n);
-        self.0 = b;
-        Ok(a)
-    }
-    fn u8(&mut self) -> Result<u8, Status> {
-        Ok(self.take(1)?[0])
-    }
-    fn u16(&mut self) -> Result<u16, Status> {
-        Ok(u16::from_le_bytes(self.arr()?))
-    }
-    fn u32(&mut self) -> Result<u32, Status> {
-        Ok(u32::from_le_bytes(self.arr()?))
-    }
-    fn arr<const N: usize>(&mut self) -> Result<[u8; N], Status> {
-        let mut a = [0u8; N];
-        a.copy_from_slice(self.take(N)?);
-        Ok(a)
-    }
-    fn rest(&mut self, max: usize) -> Result<&'a [u8], Status> {
-        if self.0.len() > max {
-            return Err(Status::Arg);
-        }
-        self.take(self.0.len())
-    }
-    fn end(&self) -> Result<(), Status> {
-        if self.0.is_empty() {
-            Ok(())
-        } else {
-            Err(Status::Arg)
-        }
-    }
+fn rd<'a>(b: &'a [u8], spec: &'a MsgSpec) -> Result<Parsed<'a>, Status> {
+    read(b, spec).map_err(Status::from)
 }
 
-struct Wr<'a> {
-    buf: &'a mut [u8],
-    pos: usize,
+/// `N` bytes of `b` from `off`.
+fn at<const N: usize>(b: &[u8], off: usize) -> Result<[u8; N], Status> {
+    b.get(off..)
+        .and_then(|x| x.get(..N))
+        .and_then(|x| x.try_into().ok())
+        .ok_or(Status::Arg)
 }
 
-impl<'a> Wr<'a> {
-    fn new(buf: &'a mut [u8]) -> Self {
-        Wr { buf, pos: 0 }
+/// A field's value as `N` bytes, when it was sent.
+fn val<const N: usize>(p: &Parsed<'_>, f: &FieldSpec) -> Result<Option<[u8; N]>, Status> {
+    p.field(f).map(|v| at(v, 0)).transpose()
+}
+
+/// A field this reader does not work without.
+fn need<const N: usize>(p: &Parsed<'_>, f: &FieldSpec) -> Result<[u8; N], Status> {
+    val(p, f)?.ok_or(Status::Arg)
+}
+
+fn byte(p: &Parsed<'_>, f: &FieldSpec, absent: u8) -> Result<u8, Status> {
+    Ok(val::<1>(p, f)?.map_or(absent, |[v]| v))
+}
+
+/// A request or response that says nothing: no core and no field this
+/// crate reads (STAY, XFER_END's request, every bare OK).
+pub fn parse_empty(spec: &MsgSpec, b: &[u8]) -> Result<(), Status> {
+    rd(b, spec).map(|_| ())
+}
+
+/// The longest refusal: the status, then the field number's key, length
+/// and four varint bytes.
+pub const REFUSAL_MAX: usize = 1 + 2 + 4;
+
+/// The payload of a refusal: `status`, and for [`Status::Field`] the
+/// number of the must field of `request` (the payload of a `cmd` request)
+/// that was not known. Returns its length.
+pub fn put_refusal(out: &mut [u8], status: Status, cmd: u8, request: &[u8]) -> usize {
+    let Some((first, rest)) = out.split_first_mut() else {
+        return 0;
+    };
+    *first = status as u8;
+    let unknown = match Cmd::from_u8(cmd).map(|c| read(request, &c.spec().req)) {
+        Some(Err(Refusal::Field(n))) if status == Status::Field => shortest(n),
+        _ => None,
+    };
+    let mut w = FieldWriter::new(rest);
+    if let Some((b, n)) = unknown {
+        // Left out when the answer has no room: the status stands alone.
+        let _ = b.get(..n).map(|v| w.field(&error::BAD_FIELD, v));
     }
-    fn put(mut self, b: &[u8]) -> Result<Self, FrameError> {
-        let end = self.pos + b.len();
-        self.buf
-            .get_mut(self.pos..end)
-            .ok_or(FrameError::BufferTooSmall)?
-            .copy_from_slice(b);
-        self.pos = end;
-        Ok(self)
-    }
-    fn u8(self, v: u8) -> Result<Self, FrameError> {
-        self.put(&[v])
-    }
-    fn u16(self, v: u16) -> Result<Self, FrameError> {
-        self.put(&v.to_le_bytes())
-    }
-    fn u32(self, v: u32) -> Result<Self, FrameError> {
-        self.put(&v.to_le_bytes())
-    }
-    fn done(self) -> usize {
-        self.pos
-    }
+    1 + w.len()
+}
+
+/// The field number a [`Status::Field`] response names (`body`: what
+/// follows the status byte).
+pub fn refused_field(body: &[u8]) -> Option<u32> {
+    shortest_value(read(body, &ERROR).ok()?.field(&error::BAD_FIELD)?)
 }
 
 /// HELLO request.
@@ -224,18 +212,17 @@ pub struct HelloReq {
 
 impl HelloReq {
     pub fn parse(b: &[u8]) -> Result<Self, Status> {
-        let mut r = Rd(b);
-        let v = HelloReq {
-            proto_ver: r.u32()?,
-            max_payload: r.u16()?,
-        };
-        r.end().map(|_| v)
+        let p = rd(b, &Cmd::Hello.spec().req)?;
+        Ok(HelloReq {
+            proto_ver: u32::from_le_bytes(at(p.core, 0)?),
+            max_payload: u16::from_le_bytes(at(p.core, 4)?),
+        })
     }
     pub fn encode(&self, out: &mut [u8]) -> Result<usize, FrameError> {
-        Ok(Wr::new(out)
-            .u32(self.proto_ver)?
-            .u16(self.max_payload)?
-            .done())
+        let mut w = FieldWriter::new(out);
+        w.put(&self.proto_ver.to_le_bytes())?
+            .put(&self.max_payload.to_le_bytes())?;
+        Ok(w.len())
     }
 }
 
@@ -256,39 +243,42 @@ pub struct HelloResp {
 }
 
 impl HelloResp {
-    pub const LEN: usize = 24;
+    /// The longest body this crate writes.
+    pub const MAX_LEN: usize = 6 + 4 * 3 + 4 + 6 + 10;
 
     pub fn parse(b: &[u8]) -> Result<Self, Status> {
-        let mut r = Rd(b);
-        let v = HelloResp {
-            proto_ver: r.u32()?,
-            role: r.u8()?,
-            port_kind: r.u8()?,
-            mcu_id: r.u16()?,
-            mode: r.u8()?,
-            active_version: Version::from_raw(r.u32()?),
-            trial: match r.u8()? {
-                0 => false,
-                1 => true,
+        let p = rd(b, &Cmd::Hello.spec().resp)?;
+        let [role] = need(&p, &hello::ROLE)?;
+        let [port_kind] = need(&p, &hello::PORT_KIND)?;
+        let [mode] = need(&p, &hello::MODE)?;
+        Ok(HelloResp {
+            proto_ver: u32::from_le_bytes(at(p.core, 0)?),
+            max_payload: u16::from_le_bytes(at(p.core, 4)?),
+            role,
+            port_kind,
+            mcu_id: u16::from_le_bytes(need(&p, &hello::MCU_ID)?),
+            mode,
+            active_version: Version::from_le_bytes(need(&p, &hello::ACTIVE_VERSION)?),
+            trial: match need(&p, &hello::TRIAL)? {
+                [0] => false,
+                [1] => true,
                 _ => return Err(Status::Arg),
             },
-            key_id: r.arr()?,
-            max_payload: r.u16()?,
-        };
-        r.end().map(|_| v)
+            key_id: need(&p, &hello::KEY_ID)?,
+        })
     }
     pub fn encode(&self, out: &mut [u8]) -> Result<usize, FrameError> {
-        Ok(Wr::new(out)
-            .u32(self.proto_ver)?
-            .u8(self.role)?
-            .u8(self.port_kind)?
-            .u16(self.mcu_id)?
-            .u8(self.mode)?
-            .u32(self.active_version.raw())?
-            .u8(self.trial as u8)?
-            .put(&self.key_id)?
-            .u16(self.max_payload)?
-            .done())
+        let mut w = FieldWriter::new(out);
+        w.put(&self.proto_ver.to_le_bytes())?
+            .put(&self.max_payload.to_le_bytes())?
+            .field(&hello::ROLE, &[self.role])?
+            .field(&hello::PORT_KIND, &[self.port_kind])?
+            .field(&hello::MCU_ID, &self.mcu_id.to_le_bytes())?
+            .field(&hello::MODE, &[self.mode])?
+            .field(&hello::ACTIVE_VERSION, &self.active_version.to_le_bytes())?
+            .field(&hello::TRIAL, &[self.trial as u8])?
+            .field(&hello::KEY_ID, &self.key_id)?;
+        Ok(w.len())
     }
 }
 
@@ -299,6 +289,8 @@ pub struct SlotInfo {
     /// First 16 bytes of the slot's image header SHA-256 (zero if empty).
     pub digest16: [u8; 16],
 }
+
+const SLOT_LEN: usize = status::SLOT_LEN as usize;
 
 /// STATUS response body. Slots are A, B, factory.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
@@ -316,97 +308,122 @@ pub struct StatusResp {
 }
 
 impl StatusResp {
-    pub const LEN: usize = 71;
+    /// The longest body this crate writes.
+    pub const MAX_LEN: usize = 2 + 3 * SLOT_LEN + 4 * 3 + 6;
     /// The image slot entries (A, B) before the factory entry: the most
     /// slots an image kind can have on the wire. A kind with fewer sends the
     /// others as empty.
     pub const IMAGE_SLOTS: usize = 2;
+    /// `active` and `confirmed` of a response that leaves them out.
+    pub const NO_SLOT: u8 = 0xFF;
 
     pub fn parse(b: &[u8]) -> Result<Self, Status> {
-        let mut r = Rd(b);
+        let p = rd(b, &Cmd::Status.spec().resp)?;
         let mut slots = [SlotInfo::default(); 3];
-        for s in &mut slots {
+        let sent = p.field(&status::SLOTS).unwrap_or(&[]);
+        for (s, x) in slots.iter_mut().zip(sent.chunks_exact(SLOT_LEN)) {
+            let [state] = at(x, 0)?;
             *s = SlotInfo {
-                state: SlotState::from_u8(r.u8()?).ok_or(Status::Arg)?,
-                version: Version::from_raw(r.u32()?),
-                digest16: r.arr()?,
+                state: SlotState::from_u8(state).ok_or(Status::Arg)?,
+                version: Version::from_le_bytes(at(x, 1)?),
+                digest16: at(x, 5)?,
             };
         }
-        let v = StatusResp {
+        let generation = val(&p, &status::LOG_GENERATION)?;
+        Ok(StatusResp {
             slots,
-            active: r.u8()?,
-            confirmed: r.u8()?,
-            attempts: r.u8()?,
-            last_reason: r.u8()?,
-            log_generation: r.u32()?,
-        };
-        r.end().map(|_| v)
+            active: byte(&p, &status::ACTIVE, Self::NO_SLOT)?,
+            confirmed: byte(&p, &status::CONFIRMED, Self::NO_SLOT)?,
+            attempts: byte(&p, &status::ATTEMPTS, 0)?,
+            last_reason: byte(&p, &status::LAST_REASON, 0)?,
+            log_generation: generation.map_or(0, u32::from_le_bytes),
+        })
     }
     pub fn encode(&self, out: &mut [u8]) -> Result<usize, FrameError> {
-        let mut w = Wr::new(out);
-        for s in &self.slots {
-            w = w
-                .u8(s.state as u8)?
-                .u32(s.version.raw())?
+        let mut packed = [0u8; 3 * SLOT_LEN];
+        for (x, s) in packed.chunks_exact_mut(SLOT_LEN).zip(&self.slots) {
+            let mut w = FieldWriter::new(x);
+            w.put(&[s.state as u8])?
+                .put(&s.version.to_le_bytes())?
                 .put(&s.digest16)?;
         }
-        Ok(w.u8(self.active)?
-            .u8(self.confirmed)?
-            .u8(self.attempts)?
-            .u8(self.last_reason)?
-            .u32(self.log_generation)?
-            .done())
+        let mut w = FieldWriter::new(out);
+        w.field(&status::SLOTS, &packed)?
+            .field(&status::ACTIVE, &[self.active])?
+            .field(&status::CONFIRMED, &[self.confirmed])?
+            .field(&status::ATTEMPTS, &[self.attempts])?
+            .field(&status::LAST_REASON, &[self.last_reason])?
+            .field(&status::LOG_GENERATION, &self.log_generation.to_le_bytes())?;
+        Ok(w.len())
     }
 }
 
-/// VERSION request: empty for the summary set. A selector (a boot record
-/// page, site/src/content/docs/en/explanation/lifecycle-events.md 5.4) is `Status::Unsupported`
-/// here: this agent keeps no boot record.
+/// STATUS request: the slots of `target` (left out on the wire for
+/// `target::APP`; `target::BOOTCORE`: the boot loader slots, in the same
+/// response shape). A device that keeps no such slots answers
+/// `Status::Unsupported`.
+pub fn parse_status_req(b: &[u8]) -> Result<u8, Status> {
+    byte(
+        &rd(b, &Cmd::Status.spec().req)?,
+        &status::TARGET,
+        target::APP,
+    )
+}
+
+pub fn encode_status_req(t: u8, out: &mut [u8]) -> Result<usize, FrameError> {
+    let mut w = FieldWriter::new(out);
+    w.field_unless(&status::TARGET, &[t], &[target::APP])?;
+    Ok(w.len())
+}
+
+/// VERSION request: no field for the summary set. A selector (a boot
+/// record page, site/src/content/docs/en/explanation/lifecycle-events.md
+/// 5.4) is a must field, so an agent that keeps no boot record answers
+/// `Status::Field` with its number.
 pub fn parse_version_req(b: &[u8]) -> Result<(), Status> {
-    if b.is_empty() {
-        Ok(())
-    } else {
-        Err(Status::Unsupported)
-    }
+    parse_empty(&Cmd::Version.spec().req, b)
 }
 
-/// VERSION response TLV ids (site/src/content/docs/en/explanation/lifecycle-events.md 5.4). A
-/// value the node cannot determine is left out; a reader skips ids it
-/// does not know and values of a length it does not read.
+/// VERSION response field numbers
+/// (site/src/content/docs/en/explanation/lifecycle-events.md 5.4). A
+/// value the node cannot determine is left out; a reader skips the
+/// numbers it does not know.
 pub mod version_id {
-    /// The running boot loader's version (`Version`, u32 LE).
-    pub const BOOTCORE: u8 = 0x01;
-    /// The image header `mcu_id` (u16 LE).
-    pub const MCU: u8 = 0x06;
-    /// The stage0 version mark (`dagon_format::stage0`; `Version`, u32 LE).
-    pub const STAGE0: u8 = 0x0A;
-    /// Boot core slots A, B: [`VersionSlots`].
-    pub const BOOTCORE_SLOTS: u8 = 0x0B;
-    /// App slots A, B, factory: [`VersionSlots`].
-    pub const APP_SLOTS: u8 = 0x0C;
-    /// The wire version the agent speaks (`PROTO_VERSION`, u8).
-    pub const WIRE: u8 = 0x0D;
+    use crate::table::version;
 
-    /// Every id of the summary set and its value, as
+    /// The running boot loader's version (`Version`, u32 LE).
+    pub const BOOTCORE: u8 = version::BOOTCORE.num as u8;
+    /// The image header `mcu_id` (u16 LE).
+    pub const MCU: u8 = version::MCU.num as u8;
+    /// The stage0 version mark (`dagon_format::stage0`; `Version`, u32 LE).
+    pub const STAGE0: u8 = version::STAGE0.num as u8;
+    /// Boot core slots A, B: [`super::VersionSlots`].
+    pub const BOOTCORE_SLOTS: u8 = version::BOOTCORE_SLOTS.num as u8;
+    /// App slots A, B, factory: [`super::VersionSlots`].
+    pub const APP_SLOTS: u8 = version::APP_SLOTS.num as u8;
+    /// The wire version the agent speaks (`PROTO_VERSION`, u8).
+    pub const WIRE: u8 = version::WIRE.num as u8;
+
+    /// Every number of the summary set and its value, as
     /// site/src/content/docs/en/explanation/lifecycle-events.md 5.4 lists them (a test keeps that
-    /// table equal to this one). This agent sends the ids named above.
+    /// table equal to this one). This agent sends the numbers named above.
     pub const TABLE: [(u8, &str); 16] = [
         (0x01, "boot loader version (`Version`, LE u32)"),
         (0x02, "installed boot image identity: first 8 bytes of its SHA-256"),
         (0x03, "agent (`dagon-agent`) version"),
         (0x04, "MCU definition version"),
         (0x05, "board definition version"),
-        (0x06, "MCU identity (5.5): the value the image header and the compiled topology carry; with len 2 the image header's `mcu_id`, u16 LE"),
+        (0x06, "MCU identity (5.5): the image header's `mcu_id`, u16 LE"),
         (0x07, "isolation (4.5): `level u8`, `kind u8`, `boot_extensions u8`, `root_protection` (kind and exact level as the definition enumerates them, e.g. `rdp1`/`rdp2`, the write-protected sectors, and whether the level is reversible), `fuse` (Clear, or Tripped with the disabled extension's identity as the model encodes it, 5.5)"),
-        (0x08, "extensions, for display: per linked extension `id` (up to 32 bytes), `trusted u8`, first 8 bytes of its source hash (4.7); repeated TLVs, one per extension"),
-        (0x09, "extensions, for identity: per trusted extension its full 32-byte source hash (4.7); repeated TLVs"),
+        (0x08, "extensions, for display: a packed array, per linked extension `id` (32 bytes, zero padded), `trusted u8`, first 8 bytes of its source hash (4.7)"),
+        (0x09, "extensions, for identity: a packed array, per trusted extension its full 32-byte source hash (4.7)"),
         (0x0A, "stage0 version: the version mark stage0 carries in its region (`dagon_format::stage0`; `Version`, LE u32); omitted for a stage0 without the mark and on a vendor-stage2 MCU"),
         (0x0B, "boot loader slots A, B: `active u8` (the running slot), then per slot `state u8` (STATUS slot state) and `version` (LE u32)"),
         (0x0C, "app slots A, B, factory, in the shape of 0x0B"),
         (0x0D, "wire version the agent speaks (`PROTO_VERSION`, u8)"),
         (0x10, "formats: pairs `(format id u8, number u8)`: wire, image-header, state-log, event, definitions, boot-program, boot-record, extension-manifest"),
-        (0x20, "boot record summary (5.5): which boots the record holds and the decision and reason of the newest; layout by the model"),
-        (0x21, "one page of the raw boot record region: `offset u16`, then `len` bytes (`len ≤ RECORD_PAGE`, 10); the host reads the region page by page and decodes it with the model's reader"),
+        (0x11, "boot record summary (5.5): which boots the record holds and the decision and reason of the newest; layout by the model"),
+        (0x12, "one page of the raw boot record region: `offset u16`, then `len` bytes (`len ≤ RECORD_PAGE`, 10); the host reads the region page by page and decodes it with the model's reader"),
     ];
 }
 
@@ -458,35 +475,35 @@ impl<const N: usize> VersionSlots<N> {
     }
 
     fn parse(b: &[u8]) -> Result<Self, Status> {
-        let mut r = Rd(b);
-        let active = r.u8()?;
+        let [active] = at(b, 0)?;
         let mut slots = [SlotVersion::default(); N];
-        for s in &mut slots {
+        for (s, x) in slots
+            .iter_mut()
+            .zip(b.get(1..).unwrap_or(&[]).chunks_exact(5))
+        {
+            let [state] = at(x, 0)?;
             *s = SlotVersion {
-                state: SlotState::from_u8(r.u8()?).ok_or(Status::Arg)?,
-                version: Version::from_raw(r.u32()?),
+                state: SlotState::from_u8(state).ok_or(Status::Arg)?,
+                version: Version::from_le_bytes(at(x, 1)?),
             };
         }
-        r.end()?;
         Ok(VersionSlots { active, slots })
     }
 
-    fn encode(&self) -> [u8; 16] {
+    fn encode(&self) -> Result<[u8; 16], FrameError> {
         let mut b = [0u8; 16];
-        let mut w = Wr::new(&mut b).u8(self.active).expect("fits");
+        let mut w = FieldWriter::new(&mut b);
+        w.put(&[self.active])?;
         for s in &self.slots {
-            w = w
-                .u8(s.state as u8)
-                .and_then(|w| w.u32(s.version.raw()))
-                .expect("fits");
+            w.put(&[s.state as u8])?.put(&s.version.to_le_bytes())?;
         }
-        b
+        Ok(b)
     }
 }
 
-/// VERSION response body: `count u8`, then `count` TLVs (`id u8`, `len
-/// u8`, value). Adding a value is a new id; a field left `None` is not
-/// sent.
+/// VERSION response body: one field per value, numbered by
+/// [`version_id`]. Adding a value is a new number; a value left `None` is
+/// not sent.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub struct VersionResp {
     pub wire: Option<u8>,
@@ -504,62 +521,45 @@ const _: () = assert!(VersionResp::MAX_LEN < crate::max_payload::I2C);
 impl VersionResp {
     /// The longest body (every value present).
     pub const MAX_LEN: usize =
-        1 + 6 * 2 + 1 + 2 + 4 + 4 + VersionSlots::<2>::LEN + VersionSlots::<3>::LEN;
+        6 * 2 + 1 + 2 + 4 + 4 + VersionSlots::<2>::LEN + VersionSlots::<3>::LEN;
 
     pub fn parse(b: &[u8]) -> Result<Self, Status> {
-        let mut r = Rd(b);
-        let mut v = VersionResp::default();
-        for _ in 0..r.u8()? {
-            let id = r.u8()?;
-            let len = r.u8()?;
-            let x = r.take(len.into())?;
-            let u32_of = |x: &[u8]| x.try_into().ok().map(Version::from_le_bytes);
-            match id {
-                version_id::WIRE if len == 1 => v.wire = Some(x[0]),
-                version_id::MCU if len == 2 => v.mcu_id = Some(u16::from_le_bytes([x[0], x[1]])),
-                version_id::STAGE0 => v.stage0 = u32_of(x).or(v.stage0),
-                version_id::BOOTCORE => v.boot_core = u32_of(x).or(v.boot_core),
-                version_id::BOOTCORE_SLOTS if x.len() == VersionSlots::<2>::LEN => {
-                    v.core_slots = Some(VersionSlots::parse(x)?)
-                }
-                version_id::APP_SLOTS if x.len() == VersionSlots::<3>::LEN => {
-                    v.app_slots = Some(VersionSlots::parse(x)?)
-                }
-                _ => {}
-            }
-        }
-        r.end().map(|_| v)
+        let p = rd(b, &Cmd::Version.spec().resp)?;
+        let slots2 = p.field(&version::BOOTCORE_SLOTS);
+        let slots3 = p.field(&version::APP_SLOTS);
+        Ok(VersionResp {
+            wire: val::<1>(&p, &version::WIRE)?.map(|[v]| v),
+            mcu_id: val(&p, &version::MCU)?.map(u16::from_le_bytes),
+            stage0: val(&p, &version::STAGE0)?.map(Version::from_le_bytes),
+            boot_core: val(&p, &version::BOOTCORE)?.map(Version::from_le_bytes),
+            core_slots: slots2.map(VersionSlots::parse).transpose()?,
+            app_slots: slots3.map(VersionSlots::parse).transpose()?,
+        })
     }
 
     pub fn encode(&self, out: &mut [u8]) -> Result<usize, FrameError> {
-        let core = self.core_slots.map(|s| s.encode());
-        let app = self.app_slots.map(|s| s.encode());
-        let wire = self.wire.map(|w| [w]);
-        let mcu = self.mcu_id.map(u16::to_le_bytes);
-        let stage0 = self.stage0.map(Version::to_le_bytes);
-        let boot_core = self.boot_core.map(Version::to_le_bytes);
-        let tlvs: [(u8, Option<&[u8]>); 6] = [
-            (version_id::WIRE, wire.as_ref().map(|x| &x[..])),
-            (version_id::MCU, mcu.as_ref().map(|x| &x[..])),
-            (version_id::STAGE0, stage0.as_ref().map(|x| &x[..])),
-            (version_id::BOOTCORE, boot_core.as_ref().map(|x| &x[..])),
-            (
-                version_id::BOOTCORE_SLOTS,
-                core.as_ref().map(|x| &x[..VersionSlots::<2>::LEN]),
-            ),
-            (
-                version_id::APP_SLOTS,
-                app.as_ref().map(|x| &x[..VersionSlots::<3>::LEN]),
-            ),
-        ];
-        let count = tlvs.iter().filter(|t| t.1.is_some()).count() as u8;
-        let mut w = Wr::new(out).u8(count)?;
-        for (id, x) in tlvs {
-            if let Some(x) = x {
-                w = w.u8(id)?.u8(x.len() as u8)?.put(x)?;
-            }
+        let mut w = FieldWriter::new(out);
+        if let Some(v) = self.boot_core {
+            w.field(&version::BOOTCORE, &v.to_le_bytes())?;
         }
-        Ok(w.done())
+        if let Some(v) = self.mcu_id {
+            w.field(&version::MCU, &v.to_le_bytes())?;
+        }
+        if let Some(v) = self.stage0 {
+            w.field(&version::STAGE0, &v.to_le_bytes())?;
+        }
+        if let Some(s) = self.core_slots {
+            let b = s.encode()?;
+            let v = b.get(..VersionSlots::<2>::LEN);
+            w.field(&version::BOOTCORE_SLOTS, v.unwrap_or(&[]))?;
+        }
+        if let Some(s) = self.app_slots {
+            w.field(&version::APP_SLOTS, &s.encode()?)?;
+        }
+        if let Some(v) = self.wire {
+            w.field(&version::WIRE, &[v])?;
+        }
+        Ok(w.len())
     }
 }
 
@@ -570,27 +570,29 @@ pub struct XferBegin {
     pub target: u8,
     pub slot: u8,
     pub total_len: u32,
+    /// 0 (left out on the wire): no header.
     pub hdr_len: u16,
 }
 
 impl XferBegin {
     pub fn parse(b: &[u8]) -> Result<Self, Status> {
-        let mut r = Rd(b);
-        let v = XferBegin {
-            target: r.u8()?,
-            slot: r.u8()?,
-            total_len: r.u32()?,
-            hdr_len: r.u16()?,
-        };
-        r.end().map(|_| v)
+        let p = rd(b, &Cmd::XferBegin.spec().req)?;
+        let [target] = at(p.core, 0)?;
+        let [slot] = need(&p, &xfer_begin::SLOT)?;
+        Ok(XferBegin {
+            target,
+            slot,
+            total_len: u32::from_le_bytes(at(p.core, 1)?),
+            hdr_len: val(&p, &xfer_begin::HDR_LEN)?.map_or(0, u16::from_le_bytes),
+        })
     }
     pub fn encode(&self, out: &mut [u8]) -> Result<usize, FrameError> {
-        Ok(Wr::new(out)
-            .u8(self.target)?
-            .u8(self.slot)?
-            .u32(self.total_len)?
-            .u16(self.hdr_len)?
-            .done())
+        let mut w = FieldWriter::new(out);
+        w.put(&[self.target])?
+            .put(&self.total_len.to_le_bytes())?
+            .field(&xfer_begin::SLOT, &[self.slot])?
+            .field_unless(&xfer_begin::HDR_LEN, &self.hdr_len.to_le_bytes(), &[0, 0])?;
+        Ok(w.len())
     }
     pub fn body_len(&self) -> Option<u32> {
         self.total_len.checked_sub(self.hdr_len as u32)
@@ -605,30 +607,44 @@ pub struct XferChunk<'a> {
 }
 
 impl<'a> XferChunk<'a> {
+    /// Bytes of the request around its data.
+    pub const OVERHEAD: usize = 4 + 1;
+
     pub fn parse(b: &'a [u8]) -> Result<Self, Status> {
-        let mut r = Rd(b);
+        let p = rd(b, &Cmd::XferData.spec().req)?;
         Ok(XferChunk {
-            offset: r.u32()?,
-            data: r.rest(usize::MAX)?,
+            offset: u32::from_le_bytes(at(p.core, 0)?),
+            data: p.bulk,
         })
     }
     pub fn encode(&self, out: &mut [u8]) -> Result<usize, FrameError> {
-        Ok(Wr::new(out).u32(self.offset)?.put(self.data)?.done())
+        let mut w = FieldWriter::new(out);
+        w.put(&self.offset.to_le_bytes())?.bulk(self.data)?;
+        Ok(w.len())
     }
 }
 
 /// `next_offset` body of XFER_HDR / XFER_DATA responses.
 pub fn parse_next_offset(b: &[u8]) -> Result<u32, Status> {
-    let mut r = Rd(b);
-    let v = r.u32()?;
-    r.end().map(|_| v)
+    let p = rd(b, &Cmd::XferData.spec().resp)?;
+    Ok(u32::from_le_bytes(at(p.core, 0)?))
+}
+
+pub fn encode_next_offset(next: u32, out: &mut [u8]) -> Result<usize, FrameError> {
+    let mut w = FieldWriter::new(out);
+    w.put(&next.to_le_bytes())?;
+    Ok(w.len())
 }
 
 /// XFER_END response body: SHA-256 the receiver computed over the body.
 pub fn parse_digest(b: &[u8]) -> Result<[u8; 32], Status> {
-    let mut r = Rd(b);
-    let v = r.arr()?;
-    r.end().map(|_| v)
+    need(&rd(b, &Cmd::XferEnd.spec().resp)?, &xfer_end::SHA256)
+}
+
+pub fn encode_digest(digest: &[u8; 32], out: &mut [u8]) -> Result<usize, FrameError> {
+    let mut w = FieldWriter::new(out);
+    w.field(&xfer_end::SHA256, digest)?;
+    Ok(w.len())
 }
 
 /// SET_PENDING request.
@@ -640,23 +656,42 @@ pub struct SetPending {
 
 impl SetPending {
     pub fn parse(b: &[u8]) -> Result<Self, Status> {
-        let mut r = Rd(b);
-        let v = SetPending {
-            target: r.u8()?,
-            slot: r.u8()?,
-        };
-        r.end().map(|_| v)
+        let p = rd(b, &Cmd::SetPending.spec().req)?;
+        let [target] = at(p.core, 0)?;
+        let [slot] = need(&p, &set_pending::SLOT)?;
+        Ok(SetPending { target, slot })
     }
     pub fn encode(&self, out: &mut [u8]) -> Result<usize, FrameError> {
-        Ok(Wr::new(out).u8(self.target)?.u8(self.slot)?.done())
+        let mut w = FieldWriter::new(out);
+        w.put(&[self.target])?
+            .field(&set_pending::SLOT, &[self.slot])?;
+        Ok(w.len())
     }
 }
 
-/// Single-byte requests: REBOOT `mode`, CONFIRM `target`.
-pub fn parse_u8(b: &[u8]) -> Result<u8, Status> {
-    let mut r = Rd(b);
-    let v = r.u8()?;
-    r.end().map(|_| v)
+/// REBOOT request: its `mode` ([`reboot_mode`]; left out on the wire for
+/// a normal restart).
+pub fn parse_reboot(b: &[u8]) -> Result<u8, Status> {
+    let p = rd(b, &Cmd::Reboot.spec().req)?;
+    byte(&p, &reboot::MODE, reboot_mode::NORMAL)
+}
+
+pub fn encode_reboot(mode: u8, out: &mut [u8]) -> Result<usize, FrameError> {
+    let mut w = FieldWriter::new(out);
+    w.field_unless(&reboot::MODE, &[mode], &[reboot_mode::NORMAL])?;
+    Ok(w.len())
+}
+
+/// CONFIRM request: its `target` (left out on the wire for the app).
+pub fn parse_confirm(b: &[u8]) -> Result<u8, Status> {
+    let p = rd(b, &Cmd::Confirm.spec().req)?;
+    byte(&p, &confirm::TARGET, target::APP)
+}
+
+pub fn encode_confirm(t: u8, out: &mut [u8]) -> Result<usize, FrameError> {
+    let mut w = FieldWriter::new(out);
+    w.field_unless(&confirm::TARGET, &[t], &[target::APP])?;
+    Ok(w.len())
 }
 
 /// SHOW request: the host's progress for the node being written, which
@@ -672,60 +707,92 @@ pub struct Show<'a> {
 }
 
 impl<'a> Show<'a> {
+    /// The longest request.
+    pub const MAX_LEN: usize = 1 + 3 + 3 + 6 + 2 + SHOW_TEXT_MAX;
+
     pub fn parse(b: &'a [u8]) -> Result<Self, Status> {
-        let mut r = Rd(b);
+        let p = rd(b, &Cmd::Show.spec().req)?;
+        let [phase] = at(p.core, 0)?;
         Ok(Show {
-            node: r.u8()?,
-            phase: r.u8()?,
-            percent: r.u8()?,
-            version: Version::from_raw(r.u32()?),
-            text: r.rest(SHOW_TEXT_MAX)?,
+            node: byte(&p, &show::NODE, 0)?,
+            phase,
+            percent: byte(&p, &show::PERCENT, 0)?,
+            version: val(&p, &show::VERSION)?.map_or(Version::default(), Version::from_le_bytes),
+            text: p.field(&show::TEXT).unwrap_or(&[]),
         })
     }
     pub fn encode(&self, out: &mut [u8]) -> Result<usize, FrameError> {
-        if self.text.len() > SHOW_TEXT_MAX {
-            return Err(FrameError::BufferTooSmall);
-        }
-        Ok(Wr::new(out)
-            .u8(self.node)?
-            .u8(self.phase)?
-            .u8(self.percent)?
-            .u32(self.version.raw())?
-            .put(self.text)?
-            .done())
+        let mut w = FieldWriter::new(out);
+        w.put(&[self.phase])?
+            .field(&show::NODE, &[self.node])?
+            .field(&show::PERCENT, &[self.percent])?
+            .field(&show::VERSION, &self.version.to_le_bytes())?
+            .field(&show::TEXT, self.text)?;
+        Ok(w.len())
     }
 }
 
 /// RELAY request: forward `inner` (a complete frame) on `link`/`addr` and
-/// wait up to `timeout_ms`. Response: status, then the node's response frame.
+/// wait up to `timeout_ms`. Response: status, then the node's response
+/// frame as bulk ([`parse_bulk_resp`]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Relay<'a> {
     pub link: u8,
+    /// `link::UART_ADDR` (left out on the wire): a link without addresses.
     pub addr: u8,
-    pub timeout_ms: u16,
+    /// `None`: the relay's own wait for that link.
+    pub timeout_ms: Option<u16>,
     pub inner: &'a [u8],
 }
 
 impl<'a> Relay<'a> {
-    pub const HEAD_LEN: usize = 4;
+    /// The most bytes of a request around its inner frame: the link, both
+    /// fields and the delimiter.
+    pub const OVERHEAD_MAX: usize = 1 + 3 + 4 + 1;
 
     pub fn parse(b: &'a [u8]) -> Result<Self, Status> {
-        let mut r = Rd(b);
+        let p = rd(b, &Cmd::Relay.spec().req)?;
+        let [link] = at(p.core, 0)?;
         Ok(Relay {
-            link: r.u8()?,
-            addr: r.u8()?,
-            timeout_ms: r.u16()?,
-            inner: r.rest(usize::MAX)?,
+            link,
+            addr: byte(&p, &relay::ADDR, link::UART_ADDR)?,
+            timeout_ms: val(&p, &relay::TIMEOUT_MS)?.map(u16::from_le_bytes),
+            inner: p.bulk,
         })
     }
     pub fn encode(&self, out: &mut [u8]) -> Result<usize, FrameError> {
-        Ok(Wr::new(out)
-            .u8(self.link)?
-            .u8(self.addr)?
-            .u16(self.timeout_ms)?
-            .put(self.inner)?
-            .done())
+        let mut w = FieldWriter::new(out);
+        w.put(&[self.link])?
+            .field_unless(&relay::ADDR, &[self.addr], &[link::UART_ADDR])?;
+        if let Some(ms) = self.timeout_ms {
+            w.field(&relay::TIMEOUT_MS, &ms.to_le_bytes())?;
+        }
+        w.bulk(self.inner)?;
+        Ok(w.len())
     }
+}
+
+/// Where the bulk of an OK RELAY or I2C_RAW response starts in its body
+/// (after the delimiter), for a relay that receives it in place.
+pub const BULK_RESP_AT: usize = 1;
+
+/// The body of an OK RELAY or I2C_RAW response whose bulk is already at
+/// `out[BULK_RESP_AT..][..bulk_len]`; returns the body's length.
+pub fn finish_bulk_resp(out: &mut [u8], bulk_len: usize) -> Result<usize, FrameError> {
+    *out.first_mut().ok_or(FrameError::BufferTooSmall)? = 0;
+    Ok(BULK_RESP_AT + bulk_len)
+}
+
+pub fn encode_bulk_resp(bulk: &[u8], out: &mut [u8]) -> Result<usize, FrameError> {
+    let mut w = FieldWriter::new(out);
+    w.bulk(bulk)?;
+    Ok(w.len())
+}
+
+/// The bulk of an OK response of `cmd` (RELAY: the node's response frame;
+/// I2C_RAW: the bytes read).
+pub fn parse_bulk_resp(cmd: Cmd, b: &[u8]) -> Result<&[u8], Status> {
+    Ok(rd(b, &cmd.spec().resp)?.bulk)
 }
 
 /// SUBCTL request.
@@ -737,23 +804,24 @@ pub struct SubCtl {
 
 impl SubCtl {
     pub fn parse(b: &[u8]) -> Result<Self, Status> {
-        let mut r = Rd(b);
-        let v = SubCtl {
-            nrst: r.u8()?,
-            boot0: r.u8()?,
-        };
-        if v.nrst > nrst::PULSE || v.boot0 > boot0::HIGH {
+        let p = rd(b, &Cmd::SubCtl.spec().req)?;
+        let [n] = need(&p, &subctl::NRST)?;
+        let [b0] = need(&p, &subctl::BOOT0)?;
+        if n > nrst::PULSE || b0 > boot0::HIGH {
             return Err(Status::Arg);
         }
-        r.end().map(|_| v)
+        Ok(SubCtl { nrst: n, boot0: b0 })
     }
     pub fn encode(&self, out: &mut [u8]) -> Result<usize, FrameError> {
-        Ok(Wr::new(out).u8(self.nrst)?.u8(self.boot0)?.done())
+        let mut w = FieldWriter::new(out);
+        w.field(&subctl::NRST, &[self.nrst])?
+            .field(&subctl::BOOT0, &[self.boot0])?;
+        Ok(w.len())
     }
 }
 
-/// ENTER_ROM request (an additive change). Response:
-/// status only; the node enters its ROM loader after sending it.
+/// ENTER_ROM request. Response: status only; the node enters its ROM
+/// loader after sending it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct EnterRom {
     pub method: u8,
@@ -761,43 +829,47 @@ pub struct EnterRom {
 
 impl EnterRom {
     pub fn parse(b: &[u8]) -> Result<Self, Status> {
-        let mut r = Rd(b);
-        let v = EnterRom { method: r.u8()? };
-        if !matches!(v.method, rom_method::FORCE_DOWNLOAD_BOOT | rom_method::PMIC) {
+        let p = rd(b, &Cmd::EnterRom.spec().req)?;
+        let [method] = at(p.core, 0)?;
+        if !matches!(method, rom_method::FORCE_DOWNLOAD_BOOT | rom_method::PMIC) {
             return Err(Status::Arg);
         }
-        r.end().map(|_| v)
+        Ok(EnterRom { method })
     }
     pub fn encode(&self, out: &mut [u8]) -> Result<usize, FrameError> {
-        Ok(Wr::new(out).u8(self.method)?.done())
+        let mut w = FieldWriter::new(out);
+        w.put(&[self.method])?;
+        Ok(w.len())
     }
 }
 
 /// I2C_RAW request (to the ROM loader on the recovery lines, at the address
-/// its MCU definition gives). Response body: the bytes read.
+/// its MCU definition gives). Response: the bytes read, as bulk
+/// ([`parse_bulk_resp`]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct I2cRaw<'a> {
+    /// 0 (left out on the wire): nothing is read.
     pub read_len: u16,
-    /// Bytes to write; `write_len` on the wire.
+    /// Bytes to write.
     pub data: &'a [u8],
 }
 
 impl<'a> I2cRaw<'a> {
+    /// The most bytes of a request around its data.
+    pub const OVERHEAD_MAX: usize = 4 + 1;
+
     pub fn parse(b: &'a [u8]) -> Result<Self, Status> {
-        let mut r = Rd(b);
-        let write_len = r.u16()? as usize;
-        let read_len = r.u16()?;
-        let data = r.take(write_len)?;
-        r.end()?;
-        Ok(I2cRaw { read_len, data })
+        let p = rd(b, &Cmd::I2cRaw.spec().req)?;
+        Ok(I2cRaw {
+            read_len: val(&p, &i2c_raw::READ_LEN)?.map_or(0, u16::from_le_bytes),
+            data: p.bulk,
+        })
     }
     pub fn encode(&self, out: &mut [u8]) -> Result<usize, FrameError> {
-        let wl = u16::try_from(self.data.len()).map_err(|_| FrameError::BufferTooSmall)?;
-        Ok(Wr::new(out)
-            .u16(wl)?
-            .u16(self.read_len)?
-            .put(self.data)?
-            .done())
+        let mut w = FieldWriter::new(out);
+        w.field_unless(&i2c_raw::READ_LEN, &self.read_len.to_le_bytes(), &[0, 0])?
+            .bulk(self.data)?;
+        Ok(w.len())
     }
 }
 
@@ -805,20 +877,27 @@ impl<'a> I2cRaw<'a> {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ConfRunReq {
     pub test_id: u8,
+    /// 0 is left out on the wire.
     pub param: u32,
 }
 
 impl ConfRunReq {
     pub fn parse(b: &[u8]) -> Result<Self, Status> {
-        let mut r = Rd(b);
-        let v = ConfRunReq {
-            test_id: r.u8()?,
-            param: r.u32()?,
-        };
-        r.end().map(|_| v)
+        let p = rd(b, &Cmd::ConfRun.spec().req)?;
+        let [test_id] = at(p.core, 0)?;
+        Ok(ConfRunReq {
+            test_id,
+            param: val(&p, &conf_run::PARAM)?.map_or(0, u32::from_le_bytes),
+        })
     }
     pub fn encode(&self, out: &mut [u8]) -> Result<usize, FrameError> {
-        Ok(Wr::new(out).u8(self.test_id)?.u32(self.param)?.done())
+        let mut w = FieldWriter::new(out);
+        w.put(&[self.test_id])?.field_unless(
+            &conf_run::PARAM,
+            &self.param.to_le_bytes(),
+            &[0; 4],
+        )?;
+        Ok(w.len())
     }
 }
 
@@ -831,57 +910,81 @@ pub struct ConfRunResp<'a> {
 }
 
 impl<'a> ConfRunResp<'a> {
+    /// The longest body.
+    pub const MAX_LEN: usize = 1 + 6 + 2 + CONF_DETAIL_MAX;
+
     pub fn parse(b: &'a [u8]) -> Result<Self, Status> {
-        let mut r = Rd(b);
+        let p = rd(b, &Cmd::ConfRun.spec().resp)?;
+        let [verdict] = at(p.core, 0)?;
         Ok(ConfRunResp {
-            verdict: r.u8()?,
-            measured: r.u32()?,
-            detail: r.rest(CONF_DETAIL_MAX)?,
+            verdict,
+            measured: val(&p, &conf_run::MEASURED)?.map_or(0, u32::from_le_bytes),
+            detail: p.field(&conf_run::DETAIL).unwrap_or(&[]),
         })
     }
     pub fn encode(&self, out: &mut [u8]) -> Result<usize, FrameError> {
-        if self.detail.len() > CONF_DETAIL_MAX {
-            return Err(FrameError::BufferTooSmall);
-        }
-        Ok(Wr::new(out)
-            .u8(self.verdict)?
-            .u32(self.measured)?
-            .put(self.detail)?
-            .done())
+        let mut w = FieldWriter::new(out);
+        w.put(&[self.verdict])?
+            .field(&conf_run::MEASURED, &self.measured.to_le_bytes())?
+            .field(&conf_run::DETAIL, self.detail)?;
+        Ok(w.len())
     }
 }
+
+// The table's lengths are the ones the typed payloads name.
+const _: () = assert!(show::TEXT.max as usize == SHOW_TEXT_MAX);
+const _: () = assert!(conf_run::DETAIL.max as usize == CONF_DETAIL_MAX);
+const _: () = assert!(version::BOOTCORE_SLOTS.max as usize == VersionSlots::<2>::LEN);
+const _: () = assert!(version::APP_SLOTS.max as usize == VersionSlots::<3>::LEN);
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[test]
-    fn fixed_lengths() {
-        let mut b = [0u8; 128];
-        let h = HelloResp {
+    fn hello(m: u8) -> HelloResp {
+        HelloResp {
             proto_ver: 1,
             role: role::NODE,
             port_kind: 1,
             mcu_id: 2,
-            mode: mode::APP,
+            mode: m,
             active_version: Version::new(1, 1, 0),
             trial: true,
             key_id: [9; 8],
             max_payload: 256,
-        };
-        assert_eq!(h.encode(&mut b).unwrap(), HelloResp::LEN);
-        assert_eq!(HelloResp::parse(&b[..HelloResp::LEN]), Ok(h));
+        }
+    }
+
+    #[test]
+    fn longest_bodies() {
+        let mut b = [0u8; 128];
+        let h = hello(mode::APP);
+        assert_eq!(h.encode(&mut b).unwrap(), HelloResp::MAX_LEN);
+        assert_eq!(HelloResp::parse(&b[..HelloResp::MAX_LEN]), Ok(h));
         let s = StatusResp {
             active: 0,
             confirmed: 0xFF,
             ..Default::default()
         };
-        assert_eq!(s.encode(&mut b).unwrap(), StatusResp::LEN);
-        assert_eq!(StatusResp::parse(&b[..StatusResp::LEN]), Ok(s));
+        assert_eq!(s.encode(&mut b).unwrap(), StatusResp::MAX_LEN);
+        assert_eq!(StatusResp::parse(&b[..StatusResp::MAX_LEN]), Ok(s));
         assert_eq!(
-            StatusResp::parse(&b[..StatusResp::LEN - 1]),
+            StatusResp::parse(&b[..StatusResp::MAX_LEN - 1]),
             Err(Status::Arg)
         );
+        let show = Show {
+            node: 1,
+            phase: phase::ROM,
+            percent: 0,
+            version: Version::default(),
+            text: &[b'x'; SHOW_TEXT_MAX],
+        };
+        assert_eq!(show.encode(&mut b).unwrap(), Show::MAX_LEN);
+        let long = Show {
+            text: &[b'x'; SHOW_TEXT_MAX + 1],
+            ..show
+        };
+        assert_eq!(long.encode(&mut b), Err(FrameError::Field));
     }
 
     /// HELLO's modes (0 app, 1 update, 2 recovery, 3 agent) each round
@@ -890,71 +993,59 @@ mod tests {
     fn hello_modes_and_reboot_into_update_mode() {
         let modes = [mode::APP, mode::UPDATE, mode::RECOVERY, mode::AGENT];
         assert_eq!(modes, [0, 1, 2, 3]);
-        let mut b = [0u8; HelloResp::LEN];
+        let mut b = [0u8; HelloResp::MAX_LEN];
         for m in modes {
-            let h = HelloResp {
-                proto_ver: 1,
-                role: role::NODE,
-                port_kind: 1,
-                mcu_id: 2,
-                mode: m,
-                active_version: Version::new(1, 0, 0),
-                trial: false,
-                key_id: [7; 8],
-                max_payload: 256,
-            };
-            assert_eq!(h.encode(&mut b).unwrap(), HelloResp::LEN);
-            assert_eq!(HelloResp::parse(&b), Ok(h));
+            assert_eq!(hello(m).encode(&mut b).unwrap(), HelloResp::MAX_LEN);
+            assert_eq!(HelloResp::parse(&b), Ok(hello(m)));
         }
         assert_eq!((reboot_mode::NORMAL, reboot_mode::UPDATE), (0, 1));
-        assert_eq!(parse_u8(&[reboot_mode::UPDATE]), Ok(reboot_mode::UPDATE));
+        let n = encode_reboot(reboot_mode::UPDATE, &mut b).unwrap();
+        assert_eq!(parse_reboot(&b[..n]), Ok(reboot_mode::UPDATE));
+        assert_eq!(encode_reboot(reboot_mode::NORMAL, &mut b), Ok(0));
+        assert_eq!(parse_reboot(&[]), Ok(reboot_mode::NORMAL));
     }
 
     #[test]
-    fn version_reply_skips_what_it_does_not_read() {
-        let mut b = [0u8; 64];
-        let full = VersionResp {
-            wire: Some(1),
-            mcu_id: Some(3),
-            stage0: Some(Version::new(0, 1, 0)),
-            boot_core: Some(Version::new(1, 0, 0)),
-            core_slots: Some(VersionSlots::default()),
-            app_slots: Some(VersionSlots::default()),
-        };
-        assert_eq!(full.encode(&mut b).unwrap(), VersionResp::MAX_LEN);
-        let n = full.encode(&mut b).unwrap();
-        assert_eq!(VersionResp::parse(&b[..n]), Ok(full));
-
-        // Only what the node knows: no stage0, no boot loader.
-        let some = VersionResp {
-            stage0: None,
-            boot_core: None,
-            core_slots: None,
-            ..full
-        };
-        let n = some.encode(&mut b).unwrap();
-        assert_eq!(b[0], 3, "three values sent");
-        assert_eq!(VersionResp::parse(&b[..n]), Ok(some));
-
-        // A later id and a known id at a length this reader does not read
-        // are skipped.
-        let mut later = b[..n].to_vec();
-        later[0] += 2;
-        later.extend([0x7E, 2, 0xAA, 0xBB, version_id::MCU, 8]);
-        later.extend([0; 8]);
-        assert_eq!(VersionResp::parse(&later), Ok(some));
-
+    fn what_is_left_out_reads_as_its_default() {
+        assert_eq!(parse_status_req(&[]), Ok(target::APP));
+        assert_eq!(parse_confirm(&[]), Ok(target::APP));
         assert_eq!(
-            VersionResp::parse(&b[..n - 1]),
-            Err(Status::Arg),
-            "cut short"
+            StatusResp::parse(&[]),
+            Ok(StatusResp {
+                active: StatusResp::NO_SLOT,
+                confirmed: StatusResp::NO_SLOT,
+                ..Default::default()
+            })
         );
-        assert_eq!(VersionResp::parse(&[]), Err(Status::Arg));
+        assert_eq!(VersionResp::parse(&[]), Ok(VersionResp::default()));
+        let begin = XferBegin::parse(&[2, 9, 0, 0, 0, 3, 1, 2]).unwrap();
+        assert_eq!((begin.slot, begin.hdr_len, begin.total_len), (2, 0, 9));
         assert_eq!(
-            VersionResp::parse(&[0, 0]),
+            XferBegin::parse(&[2, 9, 0, 0, 0]),
             Err(Status::Arg),
-            "trailing byte"
+            "no slot"
         );
+        let relay = Relay::parse(&[1, 0, 7]).unwrap();
+        assert_eq!((relay.addr, relay.timeout_ms), (link::UART_ADDR, None));
+        assert_eq!(relay.inner, &[7]);
+        assert_eq!(I2cRaw::parse(&[0]).map(|r| r.read_len), Ok(0));
+        assert_eq!(HelloResp::parse(&[1, 0, 0, 0, 0, 1]), Err(Status::Arg));
+    }
+
+    #[test]
+    fn values_outside_their_range_are_refused() {
+        let mut b = [0u8; 16];
+        let n = SubCtl { nrst: 3, boot0: 0 }.encode(&mut b).unwrap();
+        assert_eq!(SubCtl::parse(&b[..n]), Err(Status::Arg));
+        assert_eq!(
+            EnterRom::parse(&[2]),
+            Ok(EnterRom {
+                method: rom_method::PMIC
+            })
+        );
+        for bad in [&[0][..], &[3], &[]] {
+            assert_eq!(EnterRom::parse(bad), Err(Status::Arg));
+        }
         let mut bad_state = [0u8; 64];
         let n = VersionResp {
             app_slots: Some(VersionSlots::default()),
@@ -962,44 +1053,9 @@ mod tests {
         }
         .encode(&mut bad_state)
         .unwrap();
-        bad_state[4] = 6;
+        bad_state[3] = 6;
         assert_eq!(VersionResp::parse(&bad_state[..n]), Err(Status::Arg));
-        assert_eq!(parse_version_req(&[]), Ok(()));
-        assert_eq!(
-            parse_version_req(&[0x21, 0, 0, 8]),
-            Err(Status::Unsupported)
-        );
-    }
-
-    #[test]
-    fn variable_payloads() {
-        let mut b = [0u8; 64];
-        let raw = I2cRaw {
-            read_len: 1,
-            data: &[0x00, 0xFF],
-        };
-        let n = raw.encode(&mut b).unwrap();
-        assert_eq!(&b[..n], &[2, 0, 1, 0, 0x00, 0xFF]);
-        assert_eq!(I2cRaw::parse(&b[..n]), Ok(raw));
-        assert_eq!(I2cRaw::parse(&b[..n - 1]), Err(Status::Arg));
-        let long = [b'x'; 33];
-        let show = Show {
-            node: 1,
-            phase: phase::ROM,
-            percent: 0,
-            version: Version::default(),
-            text: &long,
-        };
-        assert!(show.encode(&mut b).is_err());
-        assert_eq!(SubCtl::parse(&[3, 0]), Err(Status::Arg));
-        assert_eq!(
-            EnterRom::parse(&[2]),
-            Ok(EnterRom {
-                method: rom_method::PMIC
-            })
-        );
-        for bad in [&[0][..], &[3], &[], &[1, 0]] {
-            assert_eq!(EnterRom::parse(bad), Err(Status::Arg));
-        }
+        // A selector this agent does not know: a must field.
+        assert_eq!(parse_version_req(&[0x25, 2, 0, 8]), Err(Status::Field));
     }
 }

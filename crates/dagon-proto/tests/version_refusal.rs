@@ -34,6 +34,10 @@ fn unknown_version_is_refused_explicitly() {
     assert_eq!(body.field(&table::error::WIRE), Some(&[PROTO_VERSION][..]));
     // The stream cutters hand over the first HEADER_LEN bytes: enough.
     assert_eq!(version_refusal(&req[..HEADER_LEN], &mut out), Some(n));
+    assert!(dagon_proto::is_refused_start(&req));
+    // Noise that looks like a start right before a frame is not handed over.
+    assert!(!dagon_proto::is_refused_start(b"\xDA\x6F junk\xDA\x6F"));
+    assert!(!dagon_proto::is_refused_start(b"\xDA\x6F j"));
 }
 
 #[test]
@@ -47,7 +51,14 @@ fn only_a_request_of_another_version_is_answered() {
     let mut ours = other_version(0);
     ours[2] = PROTO_VERSION;
     assert_eq!(version_refusal(&ours, &mut out), None);
-    assert_eq!(version_refusal(b"\xDA\x6F\x02", &mut out), None, "too short");
-    assert_eq!(version_refusal(b"xx\x02\x00\x00\x00\x00\x00", &mut out), None);
+    assert_eq!(
+        version_refusal(b"\xDA\x6F\x02", &mut out),
+        None,
+        "too short"
+    );
+    assert_eq!(
+        version_refusal(b"xx\x02\x00\x00\x00\x00\x00", &mut out),
+        None
+    );
     assert_eq!(version_refusal(&other_version(0), &mut out[..4]), None);
 }

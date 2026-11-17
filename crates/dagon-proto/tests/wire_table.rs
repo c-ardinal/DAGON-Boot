@@ -57,7 +57,12 @@ fn unknown_optional_field_changes_nothing() {
             assert_eq!(got.core, want.core, "{cmd:?} {resp}");
             assert_eq!(got.bulk, want.bulk, "{cmd:?} {resp}");
             for f in spec.fields {
-                assert_eq!(got.field(f), want.field(f), "{cmd:?} {resp} field {}", f.num);
+                assert_eq!(
+                    got.field(f),
+                    want.field(f),
+                    "{cmd:?} {resp} field {}",
+                    f.num
+                );
             }
         }
     }
@@ -66,7 +71,12 @@ fn unknown_optional_field_changes_nothing() {
 #[test]
 fn unknown_must_field_is_refused_with_its_number() {
     for (cmd, resp, spec) in messages() {
-        for (num, v) in [(UNKNOWN, &[][..]), (UNKNOWN, &[1, 2]), (31, &[7]), (8000, &[])] {
+        for (num, v) in [
+            (UNKNOWN, &[][..]),
+            (UNKNOWN, &[1, 2]),
+            (31, &[7]),
+            (8000, &[]),
+        ] {
             if spec.fields.iter().any(|f| f.num >= num) {
                 continue;
             }
@@ -92,7 +102,10 @@ fn every_malformed_form_is_arg() {
         };
         // 300 * 2 = 0x258: key bytes D8 04 (optional), D9 04 (must).
         arg(&with_tail(spec, &[0xD8, 0x84, 0x00, 0]), "non-minimal key");
-        arg(&with_tail(spec, &[0xD8, 0x04, 0x80, 0x00]), "non-minimal length");
+        arg(
+            &with_tail(spec, &[0xD8, 0x04, 0x80, 0x00]),
+            "non-minimal length",
+        );
         arg(
             &with_tail(spec, &[0x80, 0x80, 0x80, 0x80, 0x01, 0]),
             "fifth varint byte",
@@ -106,11 +119,17 @@ fn every_malformed_form_is_arg() {
             "falling order",
         );
         arg(&with_tail(spec, &[0x01, 0]), "field number 0");
-        arg(&with_tail(spec, &[0xD8, 0x04, 0xFF, 0x7F]), "length past the end");
+        arg(
+            &with_tail(spec, &[0xD8, 0x04, 0xFF, 0x7F]),
+            "length past the end",
+        );
         if !spec.bulk {
             arg(&with_tail(spec, &[0xD8]), "key cut");
             arg(&with_tail(spec, &[0xD8, 0x04]), "length missing");
-            arg(&with_tail(spec, &[0]), "delimiter in a message without bulk");
+            arg(
+                &with_tail(spec, &[0]),
+                "delimiter in a message without bulk",
+            );
         } else {
             let p = sample(spec, &[]);
             arg(&p[..p.len() - 5], "bulk without its delimiter");
@@ -150,10 +169,7 @@ fn every_malformed_form_is_arg() {
                 );
             }
             if f.min > 0 {
-                arg(
-                    &head(free(f.must), &ok[1..]),
-                    "known field too short",
-                );
+                arg(&head(free(f.must), &ok[1..]), "known field too short");
             }
             if f.elem > 1 && f.max > f.min {
                 arg(
@@ -192,16 +208,29 @@ fn writer_refuses_what_the_reader_would() {
     let mut buf = [0u8; 16];
     let mut w = FieldWriter::new(&mut buf);
     w.field(&FieldSpec::opt(2, 0, 4), &[1]).unwrap();
-    assert!(w.field(&FieldSpec::opt(2, 0, 4), &[1]).is_err(), "same number");
+    assert!(
+        w.field(&FieldSpec::opt(2, 0, 4), &[1]).is_err(),
+        "same number"
+    );
     assert!(w.field(&FieldSpec::opt(1, 0, 4), &[1]).is_err(), "falling");
-    assert!(w.field(&FieldSpec::opt(3, 0, 4), &[0; 5]).is_err(), "over max");
-    assert!(w.field(&FieldSpec::opt(3, 2, 4), &[0]).is_err(), "under min");
-    assert!(w.field(&FieldSpec::opt(4, 0, 255), &[0; 14]).is_err(), "overflow");
+    assert!(
+        w.field(&FieldSpec::opt(3, 0, 4), &[0; 5]).is_err(),
+        "over max"
+    );
+    assert!(
+        w.field(&FieldSpec::opt(3, 2, 4), &[0]).is_err(),
+        "under min"
+    );
+    assert!(
+        w.field(&FieldSpec::opt(4, 0, 255), &[0; 14]).is_err(),
+        "overflow"
+    );
     assert_eq!(w.len(), 3);
     let mut w = FieldWriter::new(&mut buf);
     assert!(w.field(&FieldSpec::opt(0, 0, 4), &[]).is_err(), "number 0");
     assert!(
-        w.field(&FieldSpec::opt(4, 0, 6).packed(3), &[0; 4]).is_err(),
+        w.field(&FieldSpec::opt(4, 0, 6).packed(3), &[0; 4])
+            .is_err(),
         "not a multiple of the element"
     );
     assert_eq!(w.len(), 0);
@@ -277,21 +306,33 @@ fn typed(cmd: Cmd, resp: bool) -> Typed {
     let empty = move || -> Typed {
         (
             vec![],
-            Box::new(move |b| dbg(parse_empty(if resp { &cmd.spec().resp } else { &cmd.spec().req }, b))),
+            Box::new(move |b| {
+                dbg(parse_empty(
+                    if resp {
+                        &cmd.spec().resp
+                    } else {
+                        &cmd.spec().req
+                    },
+                    b,
+                ))
+            }),
         )
     };
     let v = Version::new(1, 2, 3);
     match (cmd, resp) {
         (Cmd::Hello, false) => {
             let m = HelloReq {
-                proto_ver: 1,
+                proto_ver: 2,
                 max_payload: 256,
             };
-            (enc(|b| m.encode(b).unwrap()), Box::new(|b| dbg(HelloReq::parse(b))))
+            (
+                enc(|b| m.encode(b).unwrap()),
+                Box::new(|b| dbg(HelloReq::parse(b))),
+            )
         }
         (Cmd::Hello, true) => {
             let m = HelloResp {
-                proto_ver: 1,
+                proto_ver: 2,
                 role: role::NODE,
                 port_kind: 1,
                 mcu_id: 2,
@@ -301,7 +342,10 @@ fn typed(cmd: Cmd, resp: bool) -> Typed {
                 key_id: [7; 8],
                 max_payload: 256,
             };
-            (enc(|b| m.encode(b).unwrap()), Box::new(|b| dbg(HelloResp::parse(b))))
+            (
+                enc(|b| m.encode(b).unwrap()),
+                Box::new(|b| dbg(HelloResp::parse(b))),
+            )
         }
         (Cmd::Status, false) => (
             enc(|b| encode_status_req(target::BOOTCORE, b).unwrap()),
@@ -316,19 +360,25 @@ fn typed(cmd: Cmd, resp: bool) -> Typed {
                 log_generation: 9,
                 ..Default::default()
             };
-            (enc(|b| m.encode(b).unwrap()), Box::new(|b| dbg(StatusResp::parse(b))))
+            (
+                enc(|b| m.encode(b).unwrap()),
+                Box::new(|b| dbg(StatusResp::parse(b))),
+            )
         }
         (Cmd::Version, false) => (vec![], Box::new(|b| dbg(parse_version_req(b)))),
         (Cmd::Version, true) => {
             let m = VersionResp {
-                wire: Some(1),
+                wire: Some(2),
                 mcu_id: Some(3),
                 stage0: Some(v),
                 boot_core: Some(v),
                 core_slots: Some(VersionSlots::default()),
                 app_slots: Some(VersionSlots::default()),
             };
-            (enc(|b| m.encode(b).unwrap()), Box::new(|b| dbg(VersionResp::parse(b))))
+            (
+                enc(|b| m.encode(b).unwrap()),
+                Box::new(|b| dbg(VersionResp::parse(b))),
+            )
         }
         (Cmd::XferBegin, false) => {
             let m = XferBegin {
@@ -337,14 +387,20 @@ fn typed(cmd: Cmd, resp: bool) -> Typed {
                 total_len: 4096,
                 hdr_len: IMAGE_HDR_LEN,
             };
-            (enc(|b| m.encode(b).unwrap()), Box::new(|b| dbg(XferBegin::parse(b))))
+            (
+                enc(|b| m.encode(b).unwrap()),
+                Box::new(|b| dbg(XferBegin::parse(b))),
+            )
         }
         (Cmd::XferData | Cmd::XferHdr, false) => {
             let m = XferChunk {
                 offset: 512,
                 data: &[0, 1, 2],
             };
-            (enc(|b| m.encode(b).unwrap()), Box::new(|b| dbg(XferChunk::parse(b))))
+            (
+                enc(|b| m.encode(b).unwrap()),
+                Box::new(|b| dbg(XferChunk::parse(b))),
+            )
         }
         (Cmd::XferData | Cmd::XferHdr, true) => (
             enc(|b| encode_next_offset(515, b).unwrap()),
@@ -359,7 +415,10 @@ fn typed(cmd: Cmd, resp: bool) -> Typed {
                 target: target::APP,
                 slot: 1,
             };
-            (enc(|b| m.encode(b).unwrap()), Box::new(|b| dbg(SetPending::parse(b))))
+            (
+                enc(|b| m.encode(b).unwrap()),
+                Box::new(|b| dbg(SetPending::parse(b))),
+            )
         }
         (Cmd::Reboot, false) => (
             enc(|b| encode_reboot(reboot_mode::UPDATE, b).unwrap()),
@@ -373,7 +432,10 @@ fn typed(cmd: Cmd, resp: bool) -> Typed {
             let m = EnterRom {
                 method: rom_method::PMIC,
             };
-            (enc(|b| m.encode(b).unwrap()), Box::new(|b| dbg(EnterRom::parse(b))))
+            (
+                enc(|b| m.encode(b).unwrap()),
+                Box::new(|b| dbg(EnterRom::parse(b))),
+            )
         }
         (Cmd::Show, false) => {
             let m = Show {
@@ -383,16 +445,22 @@ fn typed(cmd: Cmd, resp: bool) -> Typed {
                 version: v,
                 text: b"seg",
             };
-            (enc(|b| m.encode(b).unwrap()), Box::new(|b| dbg(Show::parse(b))))
+            (
+                enc(|b| m.encode(b).unwrap()),
+                Box::new(|b| dbg(Show::parse(b))),
+            )
         }
         (Cmd::Relay, false) => {
             let m = Relay {
                 link: 1,
                 addr: 0x42,
-                timeout_ms: 300,
+                timeout_ms: Some(300),
                 inner: &[0xDA, 0x6F, 0, 9],
             };
-            (enc(|b| m.encode(b).unwrap()), Box::new(|b| dbg(Relay::parse(b))))
+            (
+                enc(|b| m.encode(b).unwrap()),
+                Box::new(|b| dbg(Relay::parse(b))),
+            )
         }
         (Cmd::Relay | Cmd::I2cRaw, true) => (
             enc(|b| encode_bulk_resp(&[0, 0xDA, 0x6F], b).unwrap()),
@@ -403,21 +471,30 @@ fn typed(cmd: Cmd, resp: bool) -> Typed {
                 nrst: nrst::PULSE,
                 boot0: boot0::HIGH,
             };
-            (enc(|b| m.encode(b).unwrap()), Box::new(|b| dbg(SubCtl::parse(b))))
+            (
+                enc(|b| m.encode(b).unwrap()),
+                Box::new(|b| dbg(SubCtl::parse(b))),
+            )
         }
         (Cmd::I2cRaw, false) => {
             let m = I2cRaw {
                 read_len: 3,
                 data: &[0, 0xFF],
             };
-            (enc(|b| m.encode(b).unwrap()), Box::new(|b| dbg(I2cRaw::parse(b))))
+            (
+                enc(|b| m.encode(b).unwrap()),
+                Box::new(|b| dbg(I2cRaw::parse(b))),
+            )
         }
         (Cmd::ConfRun, false) => {
             let m = ConfRunReq {
                 test_id: 4,
                 param: 77,
             };
-            (enc(|b| m.encode(b).unwrap()), Box::new(|b| dbg(ConfRunReq::parse(b))))
+            (
+                enc(|b| m.encode(b).unwrap()),
+                Box::new(|b| dbg(ConfRunReq::parse(b))),
+            )
         }
         (Cmd::ConfRun, true) => {
             let m = ConfRunResp {
@@ -425,7 +502,10 @@ fn typed(cmd: Cmd, resp: bool) -> Typed {
                 measured: 12,
                 detail: b"ok",
             };
-            (enc(|b| m.encode(b).unwrap()), Box::new(|b| dbg(ConfRunResp::parse(b))))
+            (
+                enc(|b| m.encode(b).unwrap()),
+                Box::new(|b| dbg(ConfRunResp::parse(b))),
+            )
         }
         (
             Cmd::Stay
@@ -495,8 +575,8 @@ fn typed_readers_follow_the_same_rules() {
 fn golden_cores_and_samples() {
     #[rustfmt::skip]
     let golden: &[(Cmd, bool, u8, &str)] = &[
-        (Cmd::Hello, false, 6, "01000000 0001"),
-        (Cmd::Hello, true, 6, "01000000 0001 020101 040101 06020200 080101 0A0403000201 0C0101 0E080707070707070707"),
+        (Cmd::Hello, false, 6, "02000000 0001"),
+        (Cmd::Hello, true, 6, "02000000 0001 020101 040101 06020200 080101 0A0403000201 0C0101 0E080707070707070707"),
         (Cmd::Status, false, 0, "030101"),
         (Cmd::Status, true, 0, concat!(
             "023F",
@@ -505,7 +585,7 @@ fn golden_cores_and_samples() {
             "000000000000000000000000000000000000000000",
             " 040101 060100 080102 0A0103 0C0409000000")),
         (Cmd::Version, false, 0, ""),
-        (Cmd::Version, true, 0, "020403000201 0C020300 140403000201 160B0000000000000000000000 181000000000000000000000000000000000 1A0101"),
+        (Cmd::Version, true, 0, "020403000201 0C020300 140403000201 160B0000000000000000000000 181000000000000000000000000000000000 1A0102"),
         (Cmd::Stay, false, 0, ""),
         (Cmd::Stay, true, 0, ""),
         (Cmd::XferBegin, false, 5, "00 00100000 030101 05020002"),
@@ -539,9 +619,16 @@ fn golden_cores_and_samples() {
     let all: Vec<(Cmd, bool)> = messages().iter().map(|m| (m.0, m.1)).collect();
     assert_eq!(listed, all, "one golden row per message, in table order");
     for (cmd, resp, core, hex) in golden {
-        let spec = if *resp { &cmd.spec().resp } else { &cmd.spec().req };
+        let spec = if *resp {
+            &cmd.spec().resp
+        } else {
+            &cmd.spec().req
+        };
         assert_eq!(spec.core, *core, "{cmd:?} {resp}: core length");
-        let hex: String = hex.replace("<digest>", &"AB".repeat(32)).split_whitespace().collect();
+        let hex: String = hex
+            .replace("<digest>", &"AB".repeat(32))
+            .split_whitespace()
+            .collect();
         let want: Vec<u8> = (0..hex.len() / 2)
             .map(|i| u8::from_str_radix(&hex[2 * i..2 * i + 2], 16).unwrap())
             .collect();

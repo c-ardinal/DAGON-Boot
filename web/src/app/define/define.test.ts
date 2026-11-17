@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import { RULE_FIX } from '../copy.ts';
 import { canonical, Define } from './define.svelte.ts';
-import { connect, emptyDoc, type Doc, fromYaml, linkView, placeMcu, setLink, setLinkKind, setNode } from './model.ts';
+import { connect, emptyDoc, type Doc, fromYaml, LinkKind, linkView, placeMcu, setLink, setLinkKind, setNode } from './model.ts';
 import { setName } from './model.ts';
 import { SAMPLE_YAML } from '../sample.ts';
 import { problemChip } from './problems.ts';
@@ -142,7 +142,7 @@ describe('define session', () => {
   test('an address clash points at the link and its addr field', () => {
     const d = new Define();
     d.placeSample();
-    d.apply(setLink(setLinkKind(d.doc, 1, 'i2c'), 1, 'addr', 0x42));
+    d.apply(setLink(setLinkKind(d.doc, 1, LinkKind.I2c), 1, 'addr', 0x42));
     const p = d.problems.find((x) => x.rule === 'V-18')!;
     expect([p.severity, p.select, p.field]).toEqual(['error', 'link:watch', 'addr']);
   });

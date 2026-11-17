@@ -4,7 +4,10 @@
 
 use std::sync::atomic::{AtomicU8, Ordering};
 
-use dagon_mcu_rp2040::{RELAY_LINKS, RELAY_LINK_I2C0 as I2C, RELAY_LINK_PIO_UART as UART};
+use dagon_mcu_rp2040::{
+    RELAY_LINKS, RELAY_LINK_BUFFERS, RELAY_LINK_I2C0 as I2C, RELAY_LINK_PIO_UART as UART,
+};
+use dagon_port::timeout::link_limits;
 use dagon_proto::payload::link::UART_ADDR;
 use dagon_proto::payload::{boot0, nrst, I2cRaw, Relay, Show, SubCtl};
 use dagon_proto::{finish, frame_len, max_payload, split_status, Cmd, Frame, Status};
@@ -47,6 +50,22 @@ fn generated_relay_links_match_the_definition() {
     );
     assert_eq!(I2C, dagon_sim::store::relay_link_id("rp2040", "i2c0"));
     assert_eq!(UART, dagon_sim::store::relay_link_id("rp2040", "pio-uart"));
+}
+
+/// Each generated link buffer is one frame of the link's max_payload, and
+/// holds the largest frame of the link's kind wherever the kind has limits
+/// (the frames its driver receives): the size a port of the link takes.
+#[test]
+fn every_link_buffer_holds_its_links_frames() {
+    assert_eq!(RELAY_LINK_BUFFERS.len(), RELAY_LINKS.len());
+    for (link, &n) in RELAY_LINKS.iter().zip(&RELAY_LINK_BUFFERS) {
+        assert_eq!(n, frame_len(link.max_payload.into()), "link {}", link.id);
+        if let Some(l) = link_limits(link.kind) {
+            assert!(n >= frame_len(l.max_payload), "link {}", link.id);
+        }
+        assert!(dagon_relay::fits_link(link, n), "link {}", link.id);
+        assert!(!dagon_relay::fits_link(link, n - 1), "link {}", link.id);
+    }
 }
 
 #[test]
@@ -95,7 +114,10 @@ fn i2c_raw_and_subctl_rules_match_the_sim() {
         p[..n].to_vec()
     };
     let subctl = |n: u8, b: u8| [n, b];
-    let rule = |p: &[u8], high| cmd::i2c_raw(p, high).err();
+    // The ROM loader answers on the I2C link: its buffer is the limit.
+    let i2c = RELAY_LINKS.iter().position(|l| l.id == I2C).unwrap();
+    let (link, limit) = (RELAY_LINKS[i2c], RELAY_LINK_BUFFERS[i2c]);
+    let rule = |p: &[u8], high| cmd::i2c_raw(p, high, &link).err();
 
     // BOOT0 low.
     assert_eq!(
@@ -109,9 +131,21 @@ fn i2c_raw_and_subctl_rules_match_the_sim() {
         ask(&mut h, Cmd::SubCtl, &subctl(nrst::PULSE, boot0::HIGH)),
         Status::Ok
     );
-    let long = raw(cmd::RAW_READ_MAX as u16 + 1);
+    let long = raw(limit as u16 + 1);
     assert_eq!(rule(&long, true), Some(Status::Arg));
     assert_eq!(ask(&mut h, Cmd::I2cRaw, &long), Status::Arg);
+    let mut long_write = vec![0u8; 4 + limit + 1];
+    let n = I2cRaw {
+        read_len: 0,
+        data: &vec![0xFF; limit + 1],
+    }
+    .encode(&mut long_write)
+    .unwrap();
+    assert_eq!(rule(&long_write[..n], true), Some(Status::Arg));
+    assert_eq!(ask(&mut h, Cmd::I2cRaw, &long_write[..n]), Status::Arg);
+    // At the limit: accepted by both.
+    assert_eq!(rule(&raw(limit as u16), true), None);
+    assert_ne!(ask(&mut h, Cmd::I2cRaw, &raw(limit as u16)), Status::Arg);
     assert_eq!(rule(&[1, 0], true), Some(Status::Arg));
     assert_eq!(ask(&mut h, Cmd::I2cRaw, &[1, 0]), Status::Arg);
     // Accepted by the rules: the sim's ROM loader answers.

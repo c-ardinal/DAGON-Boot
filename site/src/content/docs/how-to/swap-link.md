@@ -5,7 +5,9 @@ description: "ノードのつながり方を変えます。"
 
 ## 構成に書く
 
+<!-- generated from dagon_format::with_link_kinds!: python site/scripts/gen.py -->
 構成のリンクには、それぞれ種類があります: `usb-cdc`、`uart`、`i2c`、`ble`、`wifi-tcp`、`ethernet`、`can`。
+<!-- end of generated table -->
 
 親機には、上りのつながり（親機を動かす側へのつながり）と、その先にあるものも書けます。
 
@@ -21,7 +23,7 @@ description: "ノードのつながり方を変えます。"
 
 ## DAGON Consoleで選ぶ
 
-「準備」のインスペクタで、リンクごとの種類と、親機の上りのつながりを選べます。
+「準備」のインスペクタで、リンクごとの種類と、親機の上りのつながり（そのマイコンの定義が上りに持つ種類）を選べます。
 
 ## 使える種類
 

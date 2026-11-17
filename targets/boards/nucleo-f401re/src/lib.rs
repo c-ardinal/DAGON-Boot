@@ -48,8 +48,9 @@ pub mod def {
 #[cfg(feature = "hal")]
 pub use hal::*;
 
-/// The node's 7-bit I2C target address (`[default_link] addr`; the STM32
-/// ROM loader keeps 0x39).
+/// The board's default 7-bit I2C target address (`[default_link] addr`;
+/// the STM32 ROM loader keeps 0x39), for a node whose topology end gives
+/// none.
 pub const I2C_ADDR: u8 = match def::DEFAULT_LINK_ADDR {
     Some(a) => a,
     None => panic!("dagon-board.toml: default_link.addr"),
@@ -106,7 +107,10 @@ mod hal {
     /// Starts DAGON on this board (I2C target link; guard task
     /// `dagon_mcu_stm32f401re::node::DAGON_TASK` serves it) with the app's
     /// self-check, extensions and confirm choice; returns the node's events.
-    /// The board has no bring-up, so no `app.bring_up` is emitted. See
+    /// The board has no bring-up, so no `app.bring_up` is emitted. The
+    /// link answers at `addr`, the node's address from the topology
+    /// (`LINK_ADDR` of its generated wiring), else at
+    /// [`I2C_ADDR`](super::I2C_ADDR). See
     /// `dagon_mcu_stm32f401re::node::start`.
     pub fn start<const N: usize>(
         spawner: embassy_executor::Spawner,
@@ -115,14 +119,18 @@ mod hal {
         tag: &'static str,
         app: App,
         uplink: Kind,
+        addr: Option<u8>,
     ) -> Result<AppEvents, LogError> {
-        dagon_mcu_stm32f401re::node::start::<Board, N>(spawner, parts, guard, tag, app, uplink)
+        let addr = addr.unwrap_or(I2C_ADDR);
+        dagon_mcu_stm32f401re::node::start::<Board, N>(
+            spawner, parts, guard, tag, app, uplink, addr,
+        )
     }
 
-    /// Up `i2c` on this board: I2C3 as a target at
-    /// [`I2C_ADDR`](super::I2C_ADDR) with the DAGON mailbox.
-    pub fn uplink_i2c(link: Link) -> dagon_mcu_stm32f401re::links::I2c {
-        let (target, regs) = Board::open_link(link);
+    /// Up `i2c` on this board: I2C3 as a target at `addr` (`None`:
+    /// [`I2C_ADDR`](super::I2C_ADDR)) with the DAGON mailbox.
+    pub fn uplink_i2c(link: Link, addr: Option<u8>) -> dagon_mcu_stm32f401re::links::I2c {
+        let (target, regs) = Board::open_link(link, addr.unwrap_or(I2C_ADDR));
         dagon_mcu_stm32f401re::links::I2c::new(target, regs)
     }
 
@@ -211,12 +219,12 @@ mod hal {
             (dagon, io)
         }
 
-        fn open_link(l: Link) -> (I2cTarget, pac::i2c::I2c) {
+        fn open_link(l: Link, addr: u8) -> (I2cTarget, pac::i2c::I2c) {
             let mut cfg = i2c::Config::default();
             cfg.sda_pullup = true;
             cfg.scl_pullup = true;
             let target = I2c::new(l.i2c, l.scl, l.sda, l.tx_dma, l.rx_dma, Irqs, cfg)
-                .into_slave_multimaster(SlaveAddrConfig::basic(I2C_ADDR));
+                .into_slave_multimaster(SlaveAddrConfig::basic(addr));
             (target, pac::I2C3)
         }
     }

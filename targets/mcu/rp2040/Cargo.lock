@@ -335,6 +335,7 @@ name = "dagon-mcu-rp2040"
 version = "0.1.0"
 dependencies = [
  "cortex-m",
+ "cortex-m-rt",
  "dagon-agent",
  "dagon-core",
  "dagon-ed25519",
@@ -355,6 +356,7 @@ dependencies = [
  "embassy-usb",
  "embedded-io-async 0.7.0",
  "heapless 0.9.3",
+ "panic-halt",
  "portable-atomic",
  "static_cell",
 ]
@@ -382,7 +384,6 @@ dependencies = [
  "dagon-proto",
  "embassy-futures",
  "embassy-sync",
- "heapless 0.9.3",
 ]
 
 [[package]]
@@ -603,6 +604,8 @@ dependencies = [
  "embassy-hal-internal 0.5.0",
  "embassy-sync",
  "embassy-time",
+ "embassy-time-driver",
+ "embassy-time-queue-utils",
  "embassy-usb-driver",
  "embedded-hal 0.2.7",
  "embedded-hal 1.0.0",
@@ -660,6 +663,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6ee71af1b3a0deaa53eaf2d39252f83504c853646e472400b763060389b9fcc9"
 dependencies = [
  "document-features",
+]
+
+[[package]]
+name = "embassy-time-queue-utils"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "168297bf80aaf114b3c9ad589bf38b01b3009b9af7f97cd18086c5bbf96f5693"
+dependencies = [
+ "embassy-executor-timer-queue",
+ "heapless 0.9.3",
 ]
 
 [[package]]
@@ -1117,6 +1130,12 @@ name = "once_cell"
 version = "1.21.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9f7c3e4beb33f85d45ae3e3a1792185706c8e16d043238c593331cc7cd313b50"
+
+[[package]]
+name = "panic-halt"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a513e167849a384b7f9b746e517604398518590a9142f4846a32e3c2a4de7b11"
 
 [[package]]
 name = "parking_lot"

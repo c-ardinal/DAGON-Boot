@@ -19,7 +19,7 @@ mod timings;
 pub use dagon_romlink::{RomError, Stats as RomStats};
 pub use ops::{
     agent_digest, app_digest, check_release, reason, ConfirmOutcome, Discovery, Event, NodeOutcome,
-    NodeState, Outcome, RecoverAssets, RecoverPath, WritePath, XferTimes,
+    NodeState, Outcome, RecoverAssets, RecoverPath, WritePath, XferTimes, HUB_RECONNECT_MS,
 };
 pub use percent::{transfer_percent, trial_percent};
 #[cfg(feature = "defs")]

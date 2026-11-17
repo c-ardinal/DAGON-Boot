@@ -13,7 +13,6 @@
 //! (`Background`). [`start`] also spawns the watchdog feeder on the app's
 //! executor.
 
-use dagon_port::NodeLink;
 /// The role values a node reports ([`Setup::role`]).
 pub use dagon_proto::payload::role;
 use dagon_relay::{
@@ -30,7 +29,7 @@ use crate::node::{self, App, AppAgent, AppEvents, BoardDef, DagonParts};
 use crate::sub::SubLines;
 use crate::uart::UartLink;
 use crate::watchdog::{feed_forever, now_ms, Guard, Level, Watch};
-use crate::RELAY_LINKS;
+use crate::{RELAY_LINKS, RELAY_LINK_BUFFERS, RELAY_LINK_I2C0, RELAY_LINK_PIO_UART};
 
 const LINKS: usize = RELAY_LINKS.len();
 
@@ -77,8 +76,14 @@ const fn slot(id: u8) -> usize {
     panic!("not a relay link of this package")
 }
 
-/// One request port per entry of [`RELAY_LINKS`].
-static PORTS: [Port; LINKS] = [const { Port::new() }; LINKS];
+/// The places of this package's links in [`RELAY_LINKS`].
+const I2C: usize = slot(RELAY_LINK_I2C0);
+const UART: usize = slot(RELAY_LINK_PIO_UART);
+
+/// Each link's request port, of its generated buffer size
+/// ([`RELAY_LINK_BUFFERS`]); a size that is not the link's stops the build.
+static I2C0_PORT: Port<[u8; RELAY_LINK_BUFFERS[I2C]]> = Port::new(&RELAY_LINKS[I2C]);
+static PIO_UART_PORT: Port<[u8; RELAY_LINK_BUFFERS[UART]]> = Port::new(&RELAY_LINKS[UART]);
 
 /// Embassy time as the relay's clock.
 #[derive(Clone, Copy)]
@@ -178,19 +183,16 @@ pub fn start<B: BoardDef, const N: usize>(
     let watch = RpWatch(guard);
     let uart = links
         .uart
-        .map(|s| UartLink::new(s, now_ms as fn() -> u64, crate::RELAY_LINK_PIO_UART));
-    let wired = [
-        links.i2c.as_ref().map(NodeLink::link_id),
-        uart.as_ref().map(NodeLink::link_id),
-    ];
+        .map(|s| UartLink::new(s, now_ms as fn() -> u64, RELAY_LINK_PIO_UART));
     // One entry per link of this package; a port only where the board
     // wires the link.
+    let mut ports: [Option<&'static Port>; LINKS] = [None; LINKS];
+    ports[I2C] = links.i2c.is_some().then_some(&I2C0_PORT as &Port);
+    ports[UART] = uart.is_some().then_some(&PIO_UART_PORT as &Port);
     static ROUTES: StaticCell<[LinkRoute<'static>; LINKS]> = StaticCell::new();
     let routes = ROUTES.init(core::array::from_fn(|i| LinkRoute {
         link: RELAY_LINKS[i],
-        port: wired
-            .contains(&Some(RELAY_LINKS[i].id))
-            .then_some(&PORTS[i]),
+        port: ports[i],
     }));
     let relay = RpRelay {
         agent: RpAgent(agent),
@@ -198,7 +200,7 @@ pub fn start<B: BoardDef, const N: usize>(
         // The STM32's ROM loader answers on the I2C link.
         recovery: links.lines.map(|lines| Recovery {
             lines,
-            link: crate::RELAY_LINK_I2C0,
+            link: RELAY_LINK_I2C0,
         }),
         watch,
         clock: RpClock,
@@ -233,21 +235,16 @@ async fn pc_task(
     serve(relay, link).await
 }
 
-/// The worker of `link`, with its port and guard task by its place in
-/// [`RELAY_LINKS`].
-async fn work<L: NodeLink>(link: &mut L, watch: RpWatch) -> ! {
-    let i = slot(link.link_id());
-    run_link(link, &PORTS[i], watch, task::link(i)).await
-}
-
+/// The worker of each link, with its port and its guard task by its place
+/// in [`RELAY_LINKS`].
 #[embassy_executor::task]
 async fn i2c_task(mut link: I2cLink<RpI2c<'static, I2C0>>, watch: RpWatch) -> ! {
-    work(&mut link, watch).await
+    run_link(&mut link, &I2C0_PORT, watch, task::link(I2C)).await
 }
 
 #[embassy_executor::task]
 async fn uart_task(mut link: RpUart, watch: RpWatch) -> ! {
-    work(&mut link, watch).await
+    run_link(&mut link, &PIO_UART_PORT, watch, task::link(UART)).await
 }
 
 #[embassy_executor::task]

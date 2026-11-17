@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import { topo_check } from '../../wasm/dagon.ts';
 import { SAMPLE_YAML } from '../sample.ts';
-import { fromYaml, setBus, setLink, toYaml } from './model.ts';
+import { fromYaml, LinkKind, setBus, setLink, toYaml } from './model.ts';
 import { problems } from './problems.ts';
 
 const errors = (yaml: string) => (JSON.parse(topo_check(yaml)) as { errors: number }).errors;
@@ -18,7 +18,7 @@ describe('problem sentences', () => {
 
   test('V-13 names the pairs the ROM loader listens on, and one of them passes', () => {
     const base = fromYaml(SAMPLE_YAML);
-    const i = base.topo.links!.findIndex((l) => l.kind === 'i2c');
+    const i = base.topo.links!.findIndex((l) => l.kind === LinkKind.I2c);
     const doc = setLink(setLink(base, i, 'node_pins.sda', 'PB9'), i, 'node_pins.scl', 'PB8');
     const p = problems(doc).find((x) => x.rule === 'V-13')!;
     expect(p.sentence).toContain('PB4・PA8、PB7・PB6、PB3・PB10');
@@ -28,7 +28,7 @@ describe('problem sentences', () => {
 
   test("V-07 names the pins of the pin's own node, not the 親機's by name, and one of them passes", () => {
     const base = fromYaml(SAMPLE_YAML);
-    const i = base.topo.links!.findIndex((l) => l.kind === 'uart');
+    const i = base.topo.links!.findIndex((l) => l.kind === LinkKind.Uart);
     const doc = setLink(base, i, 'pins.tx', 5);
     const p = problems(doc).find((x) => x.rule === 'V-07')!;
     expect(p.short).not.toContain('親機');

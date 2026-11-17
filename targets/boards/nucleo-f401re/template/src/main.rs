@@ -46,6 +46,7 @@ async fn main(spawner: Spawner) {
     // DAGON_TARGET_TAG in .cargo/config.toml (the boot core uses it too).
     let tag = dagon_mcu_stm32f401re::target_tag!();
     // An unreadable state log: nothing starts and the watchdog resets.
-    board::start(spawner, dagon, &GUARD, tag, app::dagon(), UPLINK).ok();
+    // The node's I2C address from the 構成 (else the board's default).
+    board::start(spawner, dagon, &GUARD, tag, app::dagon(), UPLINK, wiring::LINK_ADDR).ok();
     app::start(spawner, io, &GUARD, node::APP_TASKS);
 }

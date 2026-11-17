@@ -439,6 +439,9 @@ size = 1048576
 at = 536870912
 size = 270336
 
+[relay]
+ram_bytes = 19456
+
 [[relay_link]]
 addressing = "seven-bit"
 id = 1

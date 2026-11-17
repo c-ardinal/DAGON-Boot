@@ -27,6 +27,7 @@ The link kinds are a closed list, in one place in the code, so this does change 
 1. Add one line to `with_link_kinds!` in `crates/dagon-format/src/link.rs`. The name a 構成 uses and the code events carry come from it.
 2. On each MCU that has the link, implement `dagon_port::Link` (`StreamPort` for a byte stream from the hub to a child). `targets/mcu/esp32s3/src/links.rs` is an example.
 3. Add it to the MCU's `LINK_KINDS` (`targets/mcu/rp2040/src/kinds.rs`) and to `[links]` in `dagon-mcu.toml`.
-4. For a new medium on the PC side, implement `Transport` of `crates/dagon-host/src/lib.rs` (`crates/dagon-cli/src/serial.rs` is an example).
+4. Add the words DAGON Console shows for it to `LINK_KIND_WORDS` in `web/src/app/copy.ts` (`label` on the canvas and in the table, `choice` in the inspector's list). DAGON Console's tests fail until it is there.
+5. For a new medium on the PC side, implement `Transport` of `crates/dagon-host/src/lib.rs` (`crates/dagon-cli/src/serial.rs` is an example).
 
 To replace the transport and protocol without changing DAGON's source, provide the `UpdateTransport` and `UpdateProtocol` ports in an extension ([Lifecycle events and extensions](/en/explanation/lifecycle-events/), 8.4).

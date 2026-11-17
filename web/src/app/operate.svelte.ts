@@ -8,6 +8,7 @@ import {
   LOCAL,
   PHASE,
   check_release_for,
+  host_reconnect_ms,
   newHost,
   releaseAgentDigest,
   releaseAppDigest,
@@ -35,6 +36,7 @@ import { ConnectError, wasmReady } from './connect.ts';
 import { ANNOUNCE, FILE, WRITE } from './copy.ts';
 import { HUB_LOCKED, NODE_WRITE, WATCHED, next, type ConnectFailure, type Ctx, type Ev, type L } from './machine.ts';
 import { SAMPLE_CONFIG, type Config, type Node } from './sample.ts';
+import { topoFromNames, type Topo } from './define/model.ts';
 import { imageRows } from './slots.ts';
 
 /** What the page knows about one node from the hub. */
@@ -159,8 +161,6 @@ export interface ReleaseFile {
   verdict: 'checking' | 'pass' | Refusal;
 }
 
-/** dagon-host waits this long for the rebooted hub (HUB_RECONNECT_MS). */
-export const HUB_RECONNECT_MS = 45_000;
 const REFUSALS: readonly string[] = ['source', 'key', 'topology', 'format'];
 
 /** dagon-host's release check (check_release_for, apply, recover) threw this: which refusal it names. */
@@ -233,9 +233,10 @@ export function hubBack(r: ConfirmResult, sent: number | undefined, coreSent: nu
 }
 
 /** The 構成 in a release's topology item (dagon-wasm reads it), or null when it has none or cannot be read. */
-function fileTopologyOf(bytes: Uint8Array, yaml: string): Record<string, unknown> | null {
+function fileTopologyOf(bytes: Uint8Array, yaml: string): Topo | null {
   try {
-    return (release_topology(bytes, yaml) as Record<string, unknown> | null) ?? null;
+    const t = release_topology(bytes, yaml) as Topo | null;
+    return t ? topoFromNames(t) : null;
   } catch {
     return null;
   }
@@ -278,7 +279,7 @@ export class Operate {
    * as differences, and taken in 定義 by "ファイルの構成を取り込む". Null when
    * the file carries none.
    */
-  fileTopology = $state<Record<string, unknown> | null>(null);
+  fileTopology = $state<Topo | null>(null);
   /** "最新のリリースを使う" found no release (M58 in the band until the next step). */
   latestMissing = $state(false);
   /** The version the chosen release gives each node (shown as "↑ 1.0.0 → 1.1.0" before the update). */
@@ -834,11 +835,11 @@ export class Operate {
     return to;
   }
 
-  /** The hub reboots onto `version`: dagon-host reopens it for 45 s (hubRestarting), keeping only that hub. */
+  /** The hub reboots onto `version`: dagon-host reopens it for host_reconnect_ms (hubRestarting), keeping only that hub. */
   private hubAway(version: number | undefined): void {
     if (version !== undefined) this.transport?.expectHub?.(version, this.hubHello);
     this.reconnectNotes = [];
-    this.reconnectUntil = this.now() + HUB_RECONNECT_MS;
+    this.reconnectUntil = this.now() + host_reconnect_ms();
     this.status = ANNOUNCE.A12;
     this.go('hubTurn');
   }

@@ -80,18 +80,19 @@ async fn main(spawner: Spawner) {
         confirm: CONFIRM,
         ..App::new(self_check)
     };
-    let (first, then, events) = match board::start(spawner, dagon, &GUARD, tag, app, Kind::I2c) {
-        Ok(events) if dagon_mcu_stm32f401re::TEST_KEY => {
-            info!("TEST KEY: built with the public test verifying key");
-            (seg::TEST_KEY, seg::version(version), Some(events))
-        }
-        Ok(events) => (seg::version(version), seg::version(version), Some(events)),
-        // DAGON does not serve: the display shows dashes.
-        Err(e) => {
-            error!("state log unreadable: {}", defmt::Debug2Format(&e));
-            (seg::DASHES, seg::DASHES, None)
-        }
-    };
+    let (first, then, events) =
+        match board::start(spawner, dagon, &GUARD, tag, app, Kind::I2c, None) {
+            Ok(events) if dagon_mcu_stm32f401re::TEST_KEY => {
+                info!("TEST KEY: built with the public test verifying key");
+                (seg::TEST_KEY, seg::version(version), Some(events))
+            }
+            Ok(events) => (seg::version(version), seg::version(version), Some(events)),
+            // DAGON does not serve: the display shows dashes.
+            Err(e) => {
+                error!("state log unreadable: {}", defmt::Debug2Format(&e));
+                (seg::DASHES, seg::DASHES, None)
+            }
+        };
     let lease = GUARD.lease(DISPLAY_TASK);
     spawner.spawn(display(io.arduino_i2c, first, then, events, lease).unwrap());
     spawner.spawn(heartbeat(led).unwrap());

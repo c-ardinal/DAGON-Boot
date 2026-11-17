@@ -256,6 +256,11 @@ def type_word(t, lang="en"):
 
 
 def field_table(fields, lang="en"):
+    for n, t, _, d in fields:
+        named = re.findall(r"`([a-z0-9-]+)`", d)
+        if t.split("::")[-1] == "LinkKind" and named and sorted(named) != sorted(link_kinds()):
+            sys.exit(f"the doc comment of `{n}` names the link kinds {named}; "
+                     f"dagon_format::with_link_kinds! has {link_kinds()}")
     rows = [
         f"| `{n}` | {type_word(t, lang)} | {tr(lang, '任意' if opt else '必須', 'no' if opt else 'yes')} | {cell(say(lang, d))} |"
         for n, t, opt, d in fields
@@ -725,6 +730,41 @@ def project_keys(lang):
     return tr(lang, "、", ", ").join(f"`{k}`" for k in keys) + "\n"
 
 
+LINK = ROOT / "crates" / "dagon-format" / "src" / "link.rs"
+
+
+@functools.cache
+def link_kinds():
+    """The link kinds' names in code order, from `dagon_format::with_link_kinds!`."""
+    return re.findall(r'^\s*\w+ = \d+, "([a-z0-9-]+)";', LINK.read_text(encoding="utf-8"), re.M)
+
+
+def kind_list(lang, names, last):
+    """`a`、`b` in Japanese; `a`, `b` {last} `c` in English."""
+    shown = [f"`{n}`" for n in names]
+    return "、".join(shown) if lang == "ja" else ", ".join(shown[:-1]) + f" {last} " + shown[-1] if len(shown) > 1 else "".join(shown)
+
+
+def kinds_sentence(lang):
+    """Every kind a 構成 may name."""
+    return tr(lang, f"構成のリンクには、それぞれ種類があります: {kind_list(lang, link_kinds(), '')}。",
+              f"Every link in a 構成 has a kind: {kind_list(lang, link_kinds(), 'or')}.") + "\n"
+
+
+def firmware_kinds(lang):
+    """The kinds no MCU definition's `[links]` names, as a limitation; none: no line."""
+    named = set()
+    for f in sorted((ROOT / "targets" / "mcu").glob("*/dagon-mcu.toml")):
+        links = tomllib.loads(f.read_text(encoding="utf-8")).get("links", {})
+        named.update(links.get("up", []), links.get("down", []))
+    have = [k for k in link_kinds() if k in named]
+    lack = [k for k in link_kinds() if k not in named]
+    if not lack:
+        return ""
+    return tr(lang, f"- ファームウェアがあるリンクの種類は{kind_list(lang, have, '')}だけです。{kind_list(lang, lack, '')}にはありません。",
+              f"- Firmware exists only for the link kinds {kind_list(lang, have, 'and')}. {kind_list(lang, lack, 'and')} have none.") + "\n"
+
+
 REGION_BEGIN = "<!-- generated from {}: python site/scripts/gen.py -->\n"
 REGION_END = "<!-- end of generated table -->\n"
 # (hand-written page, what the region is generated from, the region's text); a page may hold several.
@@ -737,6 +777,8 @@ REGIONS = [
     ("reference/definitions.md", "dagon-topology's merge ROWS", merge_rows),
     ("reference/topology.md", "dagon-topology's Link", lambda lang: field_table(rust_struct(SCHEMA, "Link"), lang) + "\n"),
     ("reference/topology.md", "dagon-topology's End", lambda lang: field_table(rust_struct(SCHEMA, "End"), lang) + "\n"),
+    ("how-to/swap-link.md", "dagon_format::with_link_kinds!", kinds_sentence),
+    ("explanation/limitations.md", "the MCU definitions' [links]", firmware_kinds),
     ("explanation/index.md", "site/scripts/architecture.py", lambda lang: f"<div>{architecture.node_svg(lang)}</div>\n\n{architecture.component_table(lang)}"),
 ]
 

@@ -33,6 +33,13 @@ const _: () = links::require_downlinks(DOWNLINKS);
 /// `[[app.clock]]` (wiring.rs).
 const CLOCK: Setup = dagon_mcu_stm32f401re::clock_setup!(wiring::clock);
 
+/// The node's 7-bit I2C address on the 親機's bus (from the 構成; a node
+/// without a board has no default).
+const I2C_ADDR: u8 = match wiring::LINK_ADDR {
+    Some(addr) => addr,
+    None => panic!("the 構成 gives this node no I2C address"),
+};
+
 /// Watchdog guard tasks: DAGON's link, then app.rs's.
 const TASKS: usize = node::APP_TASKS + app::TASKS;
 
@@ -47,6 +54,6 @@ async fn main(spawner: Spawner) {
     // DAGON_TARGET_TAG in .cargo/config.toml (the boot core uses it too).
     let tag = dagon_mcu_stm32f401re::target_tag!();
     // An unreadable state log: nothing starts and the watchdog resets.
-    node::start::<Board, TASKS>(spawner, dagon, &GUARD, tag, app::dagon(), UPLINK).ok();
+    node::start::<Board, TASKS>(spawner, dagon, &GUARD, tag, app::dagon(), UPLINK, I2C_ADDR).ok();
     app::start(spawner, io, &GUARD, node::APP_TASKS);
 }

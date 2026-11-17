@@ -9,6 +9,7 @@ mod define;
 mod defs;
 mod frame;
 mod host;
+mod kinds;
 mod release_topo;
 #[cfg(feature = "sim")]
 mod sim;

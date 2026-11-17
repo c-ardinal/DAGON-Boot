@@ -220,7 +220,6 @@ dependencies = [
  "dagon-proto",
  "embassy-futures",
  "embassy-sync",
- "heapless",
 ]
 
 [[package]]

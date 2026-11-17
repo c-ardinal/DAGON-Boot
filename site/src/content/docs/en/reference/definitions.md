@@ -51,7 +51,8 @@ errors; kind fields accept only the values listed below.
 | `[links]` | table | no | Link kinds the MCU package's firmware implements (its `LINK_KINDS`). |
 | `[boot_receive]` | table | no | How the boot stage that writes the app (`[writers] app` names a kind other than `app`) receives when the app does not answer (left out: no link kind takes part in a listen window, and the boot stage receives only in update or recovery mode): `listen_window_ms` (0 to 200, 50 when left out; 0 opens no window), how long after its start it waits for STAY before it boots, and `kinds = { <link kind> = true \| false, ... }`, whether each link kind takes part in the listen window (a kind left out does not). A kind the other end enumerates first (`usb-cdc`) cannot. The boot stage receives on every link of a kind of `[links]`, none above another: on a kind that takes part from its start, on the others in update or recovery mode. A project changes the window with `[mcu_override.<id>.boot_receive]`. |
 | `[[link_port]]` | tables | no | The MCU's link interfaces a topology link end names: `index` (0 to 255), `name` (`a-z`, `0-9`, `-`) and `kind` (a link kind: `i2c`, `uart`, `can`, `ethernet`, `usb-cdc`, `ble`, `wifi-tcp`); `index` and `name` each unique. A link end's `port` is one of these names, of the link's kind (topology check V-27), and the compiled topology carries its `index`. |
-| `[[relay_link]]` | tables | no | The links a node of this MCU relays over, one per `[[link_port]]` at most: `id` (RELAY's link id, 1 to 254, unique), `port` (a `[[link_port]]` name), `addressing` (`"seven-bit"`: the reached end's address from the topology, on a kind with addresses; `{ fixed = N }`, N 0 to 255: the one peer of a kind without addresses) and `max_payload` (1 up to the protocol maximum of the port's kind). An MCU package's build generates them as its `RELAY_LINKS`, and the PC reads the same entries. |
+| `[[relay_link]]` | tables | no | The links a node of this MCU relays over, one per `[[link_port]]` at most: `id` (RELAY's link id, 1 to 254, unique), `port` (a `[[link_port]]` name), `addressing` (`"seven-bit"`: the reached end's address from the topology, on a kind with addresses; `{ fixed = N }`, N 0 to 255: the one peer of a kind without addresses) and `max_payload` (1 up to the protocol maximum of the port's kind). An MCU package's build generates them as its `RELAY_LINKS`, and the PC reads the same entries. The relay keeps, per link, a buffer of one frame of its `max_payload` (`RELAY_LINK_BUFFERS`) and no more; the build stops when that buffer cannot hold the largest frame of the link's kind. Data longer than the buffer (a RELAY's inner frame, the data I2C_RAW writes and the length it reads) is refused with `E_ARG`, never cut. The I2C_RAW limit is the buffer of the link used for recovery. |
+| `[relay]` | table | no | The budget of the relaying app firmware: `ram_bytes` (static RAM, `.bss` plus `.data`, in bytes; 1 up to the MCU's RAM size). Only an MCU with `[[relay_link]]` gives it. CI builds the MCU package's `examples/relay.rs`, measures it and fails above this value (`scripts/relay_ram.py`). |
 | `[connection]` | table | yes | How the user connects it for a write: `label`, `hint`. |
 | `[[doctor]]` | tables | no | Tool check: `what`, `probe` (command), `expect` (`"runs"`, `{ line = "..." }`, `{ prefix = "..." }`), `fix` (command), `hint`, `slow` (`true`: `dagon doctor --fix` says the install takes a while before it starts). |
 | `[ram]` | table | no | `{ at, size }`: all of the MCU's RAM. Images get the RAM below the boot record, the fuse cells and the extension regions. |
@@ -192,6 +193,11 @@ its recovery agent) the speed of that node's UART link as `DAGON_LINK_BAUD`,
 so both ends are built with the same value. A build without it (plain
 `cargo build`) takes `[default_link] baud`, or the `baud` of the board's
 `dagon = true` UART bus.
+
+A node's I2C target address is the `addr` of its end in the topology:
+`dagon gen` writes it as `LINK_ADDR` into the app's `wiring.rs` and the
+boot loader's `boot_wiring.rs`, so both answer at the address the hub
+reaches. Where the topology gives none, both take `[default_link] addr`.
 
 No pin appears twice across `[[pin]]` and the buses, and every name code is
 generated from (pin names, bus ids and their signals, device ids, with `-`

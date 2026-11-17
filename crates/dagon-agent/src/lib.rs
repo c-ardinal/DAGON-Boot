@@ -38,6 +38,7 @@ mod agent;
 pub mod bootcore;
 mod images;
 pub mod snapshot;
+pub mod update_mode;
 
 pub use agent::{reply_status, Agent, AppChain, Reply, IDLE_TIMEOUT_MS};
 pub use images::{ImageView, Transition};

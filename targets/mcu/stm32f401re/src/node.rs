@@ -94,9 +94,10 @@ pub trait BoardDef: BoardCore {
     type UserIo;
     /// Splits the chip's peripherals.
     fn split(p: Peripherals) -> (DagonParts<Self::Link>, Self::UserIo);
-    /// Opens the DAGON link: the I2C target at the node's address, and its
-    /// registers (the address is NACKed while a request runs).
-    fn open_link(link: Self::Link) -> (I2cTarget, pac::i2c::I2c);
+    /// Opens the DAGON link: the I2C target at the node's 7-bit address
+    /// `addr`, and its registers (the address is NACKed while a request
+    /// runs).
+    fn open_link(link: Self::Link, addr: u8) -> (I2cTarget, pac::i2c::I2c);
     /// The flash this board's nodes erase in: the erase regions its build
     /// generated (`ERASE_REGIONS` rows in a board package's def.rs, or in a
     /// node's wiring.rs), which are the board's `[flash] erase_regions`
@@ -222,7 +223,9 @@ fn agent<const N: usize>(
 /// feeder on `spawner` (the app's executor). Before the link serves, the
 /// board's bring-up runs and, with [`Confirm::Own`], the app's trial is
 /// confirmed ([`finish_start`]). `tag` is the node's image target tag;
-/// `app` holds the self-check, the app's extensions and who confirms.
+/// `app` holds the self-check, the app's extensions and who confirms;
+/// `addr` is the node's I2C target address (its end in the topology,
+/// `LINK_ADDR` of the generated wiring, else its board's default).
 /// Returns the app's read access to the node's events. Fails if the state
 /// log is unreadable (nothing is started then; the watchdog resets the
 /// chip).
@@ -233,6 +236,7 @@ pub fn start<B: BoardDef, const N: usize>(
     tag: &str,
     app: App,
     uplink: links::Kind,
+    addr: u8,
 ) -> Result<AppEvents, LogError> {
     // The only uplink this MCU offers (`require_uplink` checks it at
     // compile time): the board's I2C target.
@@ -250,7 +254,7 @@ pub fn start<B: BoardDef, const N: usize>(
     let (mut agent, events) = agent(tag, store, B::extension(), app.exts, app.self_check, guard);
     let board = B::bring_up_port().map(|p| (B::BOARD_ID, p));
     guard.set_trial(finish_start(&mut agent, board, app.confirm));
-    let (target, regs) = B::open_link(parts.link);
+    let (target, regs) = B::open_link(parts.link, addr);
     let link = links::I2c::new(target, regs);
     let high = crate::exec::start();
     high.spawn(serve(agent, flash, link, guard, task).expect("task pool"));

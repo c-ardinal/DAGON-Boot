@@ -1,9 +1,9 @@
 import { RULE_FIX } from '../copy.ts';
 import { describe, expect, test } from 'vitest';
 import { supportedBoards, topo_check, topo_compile } from '../../wasm/dagon.ts';
-import { rom_i2c_addrs, schema_version } from '../../wasm/pkg/dagon_wasm.js';
+import { rom_i2c_addrs, schema_version, topo_parse } from '../../wasm/pkg/dagon_wasm.js';
 import { SAMPLE_CONFIG, SAMPLE_YAML } from '../sample.ts';
-import { canPlace, mcus, ownFlash, maxNodes, connect, emptyDoc, freeAddrs, fromYaml, hopAvailable, linkKinds, linkView, SCHEMA_VERSION, place, placeMcu, removeNode, setLink, setLinkKind, setNode, setUplink, toConfig, toYaml } from './model.ts';
+import { canPlace, LinkKind, mcus, ownFlash, maxNodes, connect, emptyDoc, freeAddrs, fromYaml, hopAvailable, linkKinds, linkView, SCHEMA_VERSION, place, placeMcu, removeNode, setLink, setLinkKind, setNode, setUplink, toConfig, topoWithNames, toYaml, withDefaults, type Topo } from './model.ts';
 import { problemChip } from './problems.ts';
 import { problems } from './problems.ts';
 
@@ -70,7 +70,7 @@ describe('define document', () => {
     doc = connect(connect(doc, 'nucleo'), 'm5stopwatch');
     // The values the page held before it read them from the definition.
     expect(doc.topo.buses).toEqual([{ id: 'i2c-main', kind: 'i2c', controller: 'i2c0', sda: 16, scl: 17, speed_hz: 100_000, pullups: 'external' }]);
-    expect(linkView(doc.topo, doc.topo.links!.find((l) => l.kind === 'uart')!).pins).toEqual({ tx: 26, rx: 27 });
+    expect(linkView(doc.topo, doc.topo.links!.find((l) => l.kind === LinkKind.Uart)!).pins).toEqual({ tx: 26, rx: 27 });
     const yaml = toYaml(doc.topo);
     expect(yaml.indexOf('controller')).toBeLessThan(yaml.indexOf('sda: 16'));
   });
@@ -87,7 +87,7 @@ describe('define document', () => {
 
   test('a duplicate address is reported by the check, and free addresses skip the ROM loader', () => {
     let doc = fromYaml(SAMPLE_YAML);
-    doc = setLinkKind(doc, 1, 'i2c');
+    doc = setLinkKind(doc, 1, LinkKind.I2c);
     doc = setLink(doc, 1, 'addr', 0x42);
     expect(check(toYaml(doc.topo)).issues.map((i) => i.rule)).toContain('V-18');
     // The F401's ROM loader (its definition's [rom_i2c]) is the only one defined.
@@ -128,7 +128,7 @@ describe('define document', () => {
     doc = setNode(doc, hub2, 'role', 'coordinator');
     doc = connect(doc, hub2, 'hub');
     // Two RP2040s: no CAN port on either, so the first kind both define a port for.
-    expect(linkView(doc.topo, doc.topo.links![doc.topo.links!.length - 1])).toMatchObject({ from: 'hub', to: hub2, kind: 'usb-cdc' });
+    expect(linkView(doc.topo, doc.topo.links![doc.topo.links!.length - 1])).toMatchObject({ from: 'hub', to: hub2, kind: LinkKind.UsbCdc });
     const v23 = problems(doc).filter((p) => p.rule === 'V-23');
     expect(v23.length).toBeGreaterThan(0);
     // Information, never an error: nothing tells the 構成 is wrong.
@@ -165,30 +165,30 @@ describe('define document', () => {
   });
 
   test('the 親機 uplink: set, written to the YAML (same compiled topology), and drawn as its L0', () => {
-    const doc = setUplink(fromYaml(SAMPLE_YAML), 'hub', { kind: 'wifi-tcp', host: 'browser' });
+    const doc = setUplink(fromYaml(SAMPLE_YAML), 'hub', { kind: LinkKind.WifiTcp, host: 'browser' });
     const yaml = toYaml(doc.topo);
     expect(yaml).toContain('uplink');
-    expect(fromYaml(yaml).topo.nodes.find((n) => n.id === 'hub')?.uplink).toEqual({ kind: 'wifi-tcp', host: 'browser' });
+    expect(fromYaml(yaml).topo.nodes.find((n) => n.id === 'hub')?.uplink).toEqual({ kind: LinkKind.WifiTcp, host: 'browser' });
     expect(topo_compile(yaml)).toEqual(topo_compile(SAMPLE_YAML));
     const hubOf = (c: ReturnType<typeof toConfig>) => c.nodes.find((n) => n.id === 'hub')!;
-    expect(hubOf(toConfig(doc, supportedBoards())).uplink).toEqual({ kind: 'wifi-tcp', host: 'browser' });
+    expect(hubOf(toConfig(doc, supportedBoards())).uplink).toEqual({ kind: LinkKind.WifiTcp, host: 'browser' });
     expect(hubOf(toConfig(fromYaml(SAMPLE_YAML), supportedBoards())).uplink).toBeUndefined();
     expect(setUplink(doc, 'hub', null).topo.nodes.find((n) => n.id === 'hub')?.uplink).toBeUndefined();
   });
 
   test('hops the firmware cannot do yet are known, and reported as まだ使えないつながり (◇)', () => {
-    expect(linkKinds('rp2040')).toEqual({ up: ['usb-cdc'], down: ['i2c', 'uart'] });
+    expect(linkKinds('rp2040')).toEqual({ up: [LinkKind.UsbCdc], down: [LinkKind.I2c, LinkKind.Uart] });
     const doc = fromYaml(SAMPLE_YAML);
     const [hub, seg] = ['hub', 'seg'].map((id) => doc.topo.nodes.find((n) => n.id === id));
-    expect(hopAvailable('i2c', hub, seg)).toBe(true);
-    expect(hopAvailable('ble', hub, seg)).toBe(false);
-    expect(hopAvailable('usb-cdc', undefined, hub)).toBe(true);
-    expect(hopAvailable('wifi-tcp', undefined, hub)).toBe(false);
-    const yaml = toYaml(setUplink(doc, 'hub', { kind: 'ble', host: 'browser' }).topo);
+    expect(hopAvailable(LinkKind.I2c, hub, seg)).toBe(true);
+    expect(hopAvailable(LinkKind.Ble, hub, seg)).toBe(false);
+    expect(hopAvailable(LinkKind.UsbCdc, undefined, hub)).toBe(true);
+    expect(hopAvailable(LinkKind.WifiTcp, undefined, hub)).toBe(false);
+    const yaml = toYaml(setUplink(doc, 'hub', { kind: LinkKind.Ble, host: 'browser' }).topo);
     const r = check(yaml);
     expect(r.issues.map((i) => i.rule)).toEqual(['V-24']);
     expect(problemChip({ rule: 'V-24', severity: 'warning' })).toEqual({ mark: '◇', kind: 'unsupported' });
-    const ps = problems(setUplink(doc, 'hub', { kind: 'ble', host: 'browser' }));
+    const ps = problems(setUplink(doc, 'hub', { kind: LinkKind.Ble, host: 'browser' }));
     expect(ps.some((p) => p.rule === 'V-24')).toBe(true);
   });
 
@@ -225,5 +225,22 @@ describe('define document', () => {
       compiled++;
     }
     expect(compiled).toBeGreaterThan(10);
+  });
+});
+
+describe('kinds by code, files by name', () => {
+  const files = import.meta.glob<string>('../../../../topology/*.yaml', { query: '?raw', import: 'default', eager: true });
+  const withUplink = SAMPLE_YAML.replace('  - id: hub\n', '  - id: hub\n    uplink: { kind: wifi-tcp, host: browser }\n');
+  const unknownKind = SAMPLE_YAML.replace('  - kind: uart', '  - kind: spi');
+  test('the page keeps codes and writes each file back with its kinds by name, every key in its place', () => {
+    expect(Object.keys(files).length).toBeGreaterThan(1);
+    for (const y of [...Object.values(files), withUplink, unknownKind]) {
+      const doc = fromYaml(y);
+      expect(doc.topo.links!.every((l) => typeof l.kind === 'number' || l.kind === 'spi')).toBe(true);
+      // The writer is given the file as read, so the YAML it writes is the one it wrote when kinds were names.
+      expect(JSON.stringify(topoWithNames(doc.topo))).toBe(JSON.stringify(withDefaults(topo_parse(y) as Topo)));
+    }
+    expect(fromYaml(withUplink).topo.nodes.find((n) => n.id === 'hub')?.uplink?.kind).toBe(LinkKind.WifiTcp);
+    expect(toYaml(fromYaml(unknownKind).topo)).toContain('- kind: spi');
   });
 });

@@ -54,5 +54,9 @@ fn main() {
     };
     let (start, size) = def.slot(image, feature("SLOT_B"));
     let header = HEADER_SIZE as u32;
+    // The examples are apps linked here (a generated app's
+    // .cargo/config.toml gives the same arguments).
+    println!("cargo:rustc-link-arg-examples=--nmagic");
+    println!("cargo:rustc-link-arg-examples=-Tlink.x");
     dagon_mcu_build::memory_x(start + header, size - header, ram, ram_len);
 }

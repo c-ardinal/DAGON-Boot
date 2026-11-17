@@ -2,7 +2,7 @@
 // page — nodes only on one side, a different MCU, board or role, and links of
 // another kind, address or pins. Rows for the file check's table and the graph chips.
 import { DIFF, INSPECT } from '../copy.ts';
-import { KIND_LABEL, linkIndexOf, sides, type TLink, type TNode, type Topo } from './model.ts';
+import { kindLabel, LinkKind, linkIndexOf, sides, type TLink, type TNode, type Topo } from './model.ts';
 
 export interface DiffRow {
   /** The node (呼び名) or link ("メイン → 7セグ") the row is about. */
@@ -25,11 +25,11 @@ function linkText(t: Topo, l: TLink | undefined): string {
   const { up, down } = sides(t, l);
   const pins = (a?: number, b?: number) => (a === undefined && b === undefined ? '' : `${a ?? '—'}/${b ?? '—'}`);
   const parts =
-    l.kind === 'i2c'
-      ? ['I2C', hex(down.addr)]
-      : l.kind === 'uart'
-        ? ['UART', String(l.baud ?? ''), pins(up.pins?.tx, up.pins?.rx)]
-        : [KIND_LABEL[l.kind]];
+    l.kind === LinkKind.I2c
+      ? [kindLabel(l.kind), hex(down.addr)]
+      : l.kind === LinkKind.Uart
+        ? [kindLabel(l.kind), String(l.baud ?? ''), pins(up.pins?.tx, up.pins?.rx)]
+        : [kindLabel(l.kind)];
   const control = pins(up.nrst, up.boot);
   return [...parts, control && `${INSPECT.reset}/${INSPECT.boot} ${control}`].filter(Boolean).join(' · ');
 }

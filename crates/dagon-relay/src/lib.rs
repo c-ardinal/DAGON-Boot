@@ -7,7 +7,9 @@
 //!   ([`Recovery`]), everything else to this node's own agent (SHOW
 //!   included).
 //! - [`run_link`]: one worker per link ([`dagon_port::NodeLink`]): it
-//!   carries the requests [`serve`] hands it through a [`Port`].
+//!   carries the requests [`serve`] hands it through a [`Port`]. A port and
+//!   its worker each hold one frame of their link's largest payload, sized
+//!   at build time ([`fits_link`]); longer data is refused with E_ARG.
 //! - [`cmd`]: the argument rules of the relay commands (RELAY, I2C_RAW).
 //!
 //! The MCU package states the links its relay reaches nodes over, as its
@@ -27,7 +29,7 @@ mod port;
 use dagon_port::RelayLinkDef;
 
 pub use pc::{serve, Recovery, Relay};
-pub use port::{run_link, LinkRoute, Port};
+pub use port::{fits_link, run_link, LinkRoute, Port};
 
 /// The relay's settings. The defaults are the relay's own values; an MCU
 /// package or app changes only what its wiring needs.

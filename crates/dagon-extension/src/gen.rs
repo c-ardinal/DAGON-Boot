@@ -408,11 +408,24 @@ fn maps(out: &mut String, maps: &[(Binding, Map)]) {
     out.push_str("];\n");
 }
 
-/// `boot_wiring.rs` for a node whose MCU has a DAGON boot stage.
+/// `LINK_ADDR` of a node's app and boot wiring: the I2C target address of
+/// the node's end in the topology (`None`: the topology gives none).
+pub fn link_addr_rs(addr: Option<u8>) -> String {
+    format!(
+        "/// This node's I2C target address from its end in the topology (`None`:\n\
+         /// the topology gives none; the board's `[default_link] addr` applies).\n\
+         pub const LINK_ADDR: Option<u8> = {};\n",
+        addr.map_or("None".into(), |a| format!("Some({a:#04x})"))
+    )
+}
+
+/// `boot_wiring.rs` for a node whose MCU has a DAGON boot stage;
+/// `link_addr`: its I2C target address from the topology.
 pub fn boot_wiring(
     node: &str,
     def: &McuDef,
     board: Option<&BoardDef>,
+    link_addr: Option<u8>,
     plan: &ImagePlan<'_>,
     known: &Known,
 ) -> Result<String, String> {
@@ -429,6 +442,7 @@ pub fn boot_wiring(
         board.map_or(String::new(), |b| format!(", board {}", b.id))
     );
     board_values(&mut out, boot, board);
+    out.push_str(&link_addr_rs(link_addr));
     if let Some(w) = def.watchdog {
         let _ = writeln!(
             out,

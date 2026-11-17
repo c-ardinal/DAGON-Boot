@@ -930,7 +930,6 @@ export const INSPECT = {
   unset: '未設定',
   advanced: '詳しい設定',
   kind: '種類',
-  kinds: { i2c: 'I2C（共有の 2 本線）', uart: 'UART（1 対 1 の配線）' } as Record<string, string>,
   addr: 'アドレス（16 進）',
   freeAddr: '空いている番号',
   nodePins: '相手側のピン',
@@ -964,13 +963,6 @@ export const INSPECT = {
   /** The flash size the MCU definition's default flash map lays out (not a claim about the flash the chip owns). */
   flashSize: 'フラッシュ（定義の配置）',
   flashValue: (b: number) => (b >= 1 << 20 ? `${b / (1 << 20)} MiB` : `${b / (1 << 10)} KiB`),
-  kindsMore: {
-    can: 'CAN（親機どうし）',
-    ethernet: 'Ethernet（親機どうし）',
-    'usb-cdc': 'USB',
-    ble: 'BLE',
-    'wifi-tcp': 'Wi-Fi（TCP）',
-  } as Record<string, string>,
   /** The 親機's hop towards the PC. */
   uplink: '接続元',
   uplinkHost: '接続元の機器',
@@ -979,6 +971,21 @@ export const INSPECT = {
   notYet: '未対応',
   notYetOption: (label: string) => `${label}（未対応）`,
 } as const;
+
+/**
+ * Each link kind's words, keyed by the name a 構成 writes (dagon-wasm's link_kind_table; a
+ * test keeps the keys equal to it): `label` on the canvas, the table and the file check,
+ * `choice` in the inspector's list of kinds.
+ */
+export const LINK_KIND_WORDS: Record<string, { label: string; choice: string }> = {
+  'usb-cdc': { label: 'USB', choice: 'USB' },
+  uart: { label: 'UART', choice: 'UART（1 対 1 の配線）' },
+  i2c: { label: 'I2C', choice: 'I2C（共有の 2 本線）' },
+  ble: { label: 'BLE', choice: 'BLE' },
+  'wifi-tcp': { label: 'Wi-Fi', choice: 'Wi-Fi（TCP）' },
+  ethernet: { label: 'Ethernet', choice: 'Ethernet（親機どうし）' },
+  can: { label: 'CAN', choice: 'CAN（親機どうし）' },
+};
 
 /** The confirmation before anything is deleted (Delete key, trash button, the table's 消す). */
 export const CONFIRM = {

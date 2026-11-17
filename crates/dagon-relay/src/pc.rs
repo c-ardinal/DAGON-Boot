@@ -11,12 +11,15 @@ use dagon_proto::{flags, Cmd, Frame, Status, HEADER_LEN, MAX_FRAME};
 use crate::port::{Op, Port, Req};
 use crate::{cmd, task, Config, LinkRoute, Liveness, OwnAgent, RelayClock};
 
-/// The reset and boot-mode lines of a node, and the link its ROM boot
-/// loader answers I2C_RAW on.
+/// The reset and boot-mode lines of a node, and the link and address its
+/// ROM boot loader answers I2C_RAW on.
 pub struct Recovery<C> {
     pub lines: C,
     /// Id of that link (one of the node's [`RelayLinkDef`](dagon_port::RelayLinkDef)s).
     pub link: u8,
+    /// The loader's 7-bit I2C address: the `[rom_i2c] addr` of that node's
+    /// MCU definition, which the MCU package's build generates.
+    pub rom_addr: u8,
 }
 
 /// What [`serve`] runs on: this node's agent, its links and the parts it
@@ -217,11 +220,11 @@ where
     /// Raw transactions to the ROM loader, only while BOOT0 is high, each
     /// within the recovery link's buffer.
     async fn i2c_raw(&mut self, p: &[u8], max: usize) -> (Status, usize) {
-        let route = self
-            .r
-            .recovery
-            .as_ref()
-            .and_then(|rec| self.route(rec.link));
+        let Some(rec) = self.r.recovery.as_ref() else {
+            return (Status::Unsupported, 0);
+        };
+        let addr = rec.rom_addr;
+        let route = self.route(rec.link);
         let Some((link, port)) = route.and_then(|k| Some((k.link, k.port?))) else {
             return (Status::Unsupported, 0);
         };
@@ -229,7 +232,7 @@ where
             Ok(r) => r,
             Err(e) => return (e, 0),
         };
-        let (addr, timeout) = (self.r.config.rom_addr, self.r.config.raw_timeout_ms);
+        let timeout = self.r.config.raw_timeout_ms;
         let req = self.req(Op::Raw, addr, timeout, raw.read_len);
         self.via(port, req, raw.data, max).await
     }

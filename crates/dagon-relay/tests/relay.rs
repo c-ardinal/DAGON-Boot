@@ -492,6 +492,8 @@ fn the_relay_serves_the_pc_over_its_links() {
         recovery: Some(Recovery {
             lines: SimLines(&bus),
             link: BUS,
+            // The wired node's MCU definition gives its loader's address.
+            rom_addr: bus.borrow_mut().sub_mut().and_then(|n| n.rom_addr).unwrap(),
         }),
         watch: NoWatchdog,
         clock: clock.clone(),
@@ -615,9 +617,6 @@ fn the_relay_serves_the_pc_over_its_links() {
 #[test]
 fn the_defaults_are_the_relays_values() {
     let c = Config::default();
-    assert_eq!(
-        (c.rom_addr, c.raw_timeout_ms, c.port_margin_ms),
-        (0x39, 1_000, 1_000)
-    );
+    assert_eq!((c.raw_timeout_ms, c.port_margin_ms), (1_000, 1_000));
     assert_eq!((task::PC, task::link(0), task::count(2)), (0, 1, 3));
 }

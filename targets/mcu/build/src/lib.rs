@@ -116,8 +116,42 @@ pub const NODE_DEFINITION: &str = "mcu.toml";
 pub fn definition() -> Definition {
     let dir = manifest_dir();
     let def = Definition::parse(&node_definition_text(), |rel| read(&dir.join(rel)));
-    fs::write(out_dir().join("definition.rs"), def.rs()).unwrap();
+    let recovery = env::var_os(BOOT_FOLDER_ENV).and_then(|f| recovery_text(Path::new(&f)));
+    let rs = def.rs() + &recovery_rom_rs(recovery.as_deref());
+    fs::write(out_dir().join("definition.rs"), rs).unwrap();
     def
+}
+
+/// The MCU definition of the node on this node's recovery lines (the node
+/// its relay resets and reaches through its ROM loader), with the
+/// project's overrides applied, as `dagon gen` writes it beside
+/// [`NODE_DEFINITION`]; absent when no node is there.
+pub const RECOVERY_DEFINITION: &str = "recovery-mcu.toml";
+
+/// The text of the boot folder's [`RECOVERY_DEFINITION`], if it holds one
+/// ([`definition`] has checked the folder's hashes first).
+fn recovery_text(folder: &Path) -> Option<String> {
+    let path = folder.join(RECOVERY_DEFINITION);
+    println!("cargo:rerun-if-changed={}", path.display());
+    path.is_file().then(|| read(&path))
+}
+
+/// `RECOVERY_ROM_ADDR`, the I2C address of the ROM loader the relay's
+/// recovery reaches: `[rom_i2c] addr` of the recovery node's definition
+/// (`recovery`); `None` without one or for an MCU with no ROM loader.
+fn recovery_rom_rs(recovery: Option<&str>) -> String {
+    let addr = recovery.and_then(|text| {
+        let t: toml::Table = text.parse().expect("the recovery node's MCU definition");
+        let a = t.get("rom_i2c")?.get("addr")?;
+        Some(u8::try_from(int(a, "[rom_i2c] addr")).expect("[rom_i2c] addr fits a u8"))
+    });
+    format!(
+        "/// The I2C address of the ROM loader on this node's recovery lines: the\n\
+         /// `[rom_i2c] addr` of that node's MCU definition (`None`: no node there,\n\
+         /// or its MCU has no ROM loader).\n\
+         pub const RECOVERY_ROM_ADDR: Option<u8> = {};\n",
+        addr.map_or("None".into(), |a| format!("Some({a:#04x})"))
+    )
 }
 
 fn manifest_dir() -> PathBuf {
@@ -233,7 +267,7 @@ pub fn check_defs(folder: &Path, read: &mut dyn FnMut(&Path)) -> Result<(), Stri
         }
         listed.push(name);
     }
-    for f in [NODE_DEFINITION, NODE_BOARD] {
+    for f in [NODE_DEFINITION, NODE_BOARD, RECOVERY_DEFINITION] {
         if folder.join(f).is_file() && !listed.contains(&f) {
             return Err(format!(
                 "{}: no line in {DEFS_FILE} for it; {gen}",
@@ -1220,7 +1254,10 @@ mod tests {
         fs::write(d.join(RECOVERY_DEFINITION), linked).unwrap();
         fs::write(d.join(DEFS_FILE), defs_text(&[(NODE_DEFINITION, mcu)])).unwrap();
         let e = check_defs(&d, &mut |_| {}).unwrap_err();
-        assert!(e.contains(RECOVERY_DEFINITION) && e.contains("no line"), "{e}");
+        assert!(
+            e.contains(RECOVERY_DEFINITION) && e.contains("no line"),
+            "{e}"
+        );
         let listed = defs_text(&[(NODE_DEFINITION, mcu), (RECOVERY_DEFINITION, linked)]);
         fs::write(d.join(DEFS_FILE), listed).unwrap();
         check_defs(&d, &mut |_| {}).unwrap();

@@ -8,6 +8,9 @@ use dagon_proto::field::{read, FieldSpec, FieldWriter, MsgSpec, Refusal, MAX_FIE
 use dagon_proto::payload::*;
 use dagon_proto::{table, Cmd, Status};
 
+/// The link of the RELAY sample: the grammar is checked, nothing is relayed.
+const ANY_LINK: u8 = 1;
+
 /// A field number no command has (a two-byte key).
 const UNKNOWN: u16 = 300;
 
@@ -452,7 +455,7 @@ fn typed(cmd: Cmd, resp: bool) -> Typed {
         }
         (Cmd::Relay, false) => {
             let m = Relay {
-                link: 1,
+                link: ANY_LINK,
                 addr: 0x42,
                 timeout_ms: Some(300),
                 inner: &[0xDA, 0x6F, 0, 9],

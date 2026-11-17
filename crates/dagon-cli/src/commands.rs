@@ -40,7 +40,7 @@ fn slot_arg(s: &str) -> Result<u8, String> {
     let mut c = s.chars();
     match (c.next(), c.next()) {
         (Some(l), None) if slot_letters().any(|x| x == l.to_ascii_lowercase()) => Ok(binding_of(l)),
-        _ => Err("--slot must be a or b".into()),
+        _ => Err(format!("--slot must be {}", crate::cli::slot_choices())),
     }
 }
 
@@ -130,7 +130,8 @@ fn describe(path: &Path, img: &[u8]) {
 pub fn image_sign(a: &ImageSignArgs) -> Res {
     let cfg = Config::load(a.config.as_deref())?;
     let t = read_topology(&cfg, &cfg.topology_path(a.topology.as_deref())?)?;
-    let kind = image::image_kind_of(&a.kind).ok_or("--kind must be app, bootcore or agent")?;
+    let kind = image::image_kind_of(&a.kind)
+        .ok_or_else(|| format!("--kind must be {}", crate::cli::kind_choices()))?;
     let slot = slot_arg(&a.slot)?;
     let bits = match (a.flags.as_deref(), a.caps.as_deref()) {
         (None, None) => None,

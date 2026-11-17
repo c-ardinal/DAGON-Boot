@@ -1405,8 +1405,10 @@ The one authentication rule, applied by every verifier in the chain
   clocks the same way, from the MCU definition's `[[bootcore.clock]]` and
   `[[app.clock]]` setups for the board's `[clock] source`, and their HAL
   sets the chosen one up; no stage assumes a crystal the board does not
-  state. On the RP2040 only a crystal gives the app its USB clock, so a
-  node whose uplink is USB does not build on a board without one, and the
+  state. On the RP2040 only a crystal gives the app and the boot loader
+  their USB clock, so a node whose uplink is USB does not build on a board
+  without one, and there the boot loader receives only on the board's
+  DAGON I2C and UART buses; the
   topology check (V-26) works out each node's UART speeds from the clock
   its app runs on, refusing a UART link on an internal oscillator whose
   tolerance the definition does not state.

@@ -934,7 +934,7 @@ async fn display_task(mut lcd: Lcd, events: AppEvents) {
 }
 // main: static EXTS: StaticCell<MyApp> = StaticCell::new();
 //       let app = App { exts: Some(EXTS.init(MyApp)), ..App::new(self_check) };
-//       // I2C_ADDR: ノードのI2Cのアドレス（wiringのLINK_ADDR）
+//       // I2C_ADDR: the node's I2C address from its wiring (LINK_ADDR)
 //       let events = node::start::<Board, N>(spawner, dagon, &GUARD, tag, app, UPLINK, I2C_ADDR)?;
 //       spawner.spawn(display_task(lcd, events))
 ```

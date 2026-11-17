@@ -44,7 +44,11 @@ dagon-events = { path = "../../../../crates/dagon-events" }
 dagon-format = { path = "../../../../crates/dagon-format" }
 dagon-port = { path = "../../../../crates/dagon-port" }
 embassy-rp = { version = "0.10.0", features = ["rp2040", "critical-section-impl", "boot2-none", "unstable-pac", "time-driver"] }
-embassy-time = "0.5"
+# No executor polls the boot core's futures (boot_receive's port uses its
+# own waker): the generic timer queue takes any waker, the integrated one
+# panics on it (image_check.py). That port's wakers are all equal, so they
+# share one entry; 8 is the smallest size.
+embassy-time = { version = "0.5", features = ["generic-queue-8"] }
 # Update and recovery mode: the links' futures polled together between
 # sleeps (join).
 embassy-futures = "0.1"

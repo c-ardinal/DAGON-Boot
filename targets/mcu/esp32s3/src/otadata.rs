@@ -56,8 +56,9 @@ pub fn selected_view(running: u8, selected: u8, state: Option<u32>) -> Option<Se
 
 /// One otadata entry: `ota_seq` u32, `seq_label` [20], `ota_state` u32, `crc` u32.
 pub const ENTRY_LEN: usize = 32;
-/// Entry `i` lives at the start of otadata sector `i`.
-pub const SECTOR_LEN: u32 = 0x1000;
+/// Entry `i` lives at the start of otadata sector `i`: one erase unit
+/// (`[execution] erase_regions`).
+pub const SECTOR_LEN: u32 = crate::ERASE_REGIONS[0].unit;
 const OTA_SLOT_COUNT: u32 = 2;
 
 /// CRC of an entry: the 2nd stage's `esp_rom_crc32_le(UINT32_MAX, &ota_seq, 4)`

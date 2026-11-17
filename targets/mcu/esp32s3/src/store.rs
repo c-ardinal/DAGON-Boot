@@ -265,7 +265,7 @@ impl<F: Flash, O: Otadata, W: Watchdog> SlotStore for EspStore<F, O, W> {
             slot,
             len,
             flushed: 0,
-            tail: [0xFF; WORD],
+            tail: [crate::ERASED_VALUE; WORD],
             tail_len: 0,
         });
         Ok(())
@@ -311,7 +311,7 @@ impl<F: Flash, O: Otadata, W: Watchdog> SlotStore for EspStore<F, O, W> {
         rx.tail[rx.tail_len..rx.tail_len + rest.len()].copy_from_slice(rest);
         rx.tail_len += rest.len();
         if end == rx.len as u64 && rx.tail_len > 0 {
-            rx.tail[rx.tail_len..].fill(0xFF);
+            rx.tail[rx.tail_len..].fill(crate::ERASED_VALUE);
             self.program(p.start + rx.flushed, &rx.tail)?;
             rx.flushed += WRITE_UNIT;
             rx.tail_len = 0;

@@ -164,7 +164,7 @@ impl<'a, 'd> EspBootSelect<'a, 'd> {
                 .map_err(|_| BootSelectError::Write)?;
             let mut back = [0u8; otadata::ENTRY_LEN];
             fs.read(at, &mut back).map_err(|_| BootSelectError::Write)?;
-            if back != [0xFF; otadata::ENTRY_LEN] {
+            if back != [crate::ERASED_VALUE; otadata::ENTRY_LEN] {
                 return Err(BootSelectError::Write);
             }
         }

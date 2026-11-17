@@ -777,6 +777,38 @@ fn slots_must_fit_and_not_overlap() {
 /// `[stage0]` goes with a stage0 region of its size and names a key place
 /// stage0 can read; the key place defaults to stage0's flash.
 #[test]
+fn the_flash_write_facts_are_required_keys() {
+    let mut seen = 0;
+    for dir in std::fs::read_dir(source_root().join("targets/mcu"))
+        .unwrap()
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.join(super::load::MCU_FILE).is_file())
+    {
+        let text = std::fs::read_to_string(dir.join(super::load::MCU_FILE)).unwrap();
+        let csv = std::fs::read_to_string(dir.join("partitions.csv")).unwrap_or_default();
+        let files = [("partitions.csv", csv.as_str())];
+        let m = parse_mcu_text(&text, &files).unwrap();
+        let mut keys = vec!["write_unit", "erased_value"];
+        if m.stage0.is_some() {
+            keys.push("head_bytes");
+        }
+        for key in keys {
+            let line = text
+                .lines()
+                .find(|l| l.starts_with(&format!("{key} = ")))
+                .unwrap_or_else(|| panic!("{}: no {key}", dir.display()));
+            let e = parse_mcu_text(&text.replace(&format!("{line}\n"), ""), &files)
+                .unwrap_err()
+                .to_string();
+            assert!(e.contains(&format!("missing field `{key}`")), "{e}");
+            seen += 1;
+        }
+    }
+    assert!(seen >= 3, "{seen}");
+}
+
+#[test]
 fn stage0_states_its_region_and_a_key_place_it_can_read() {
     let with = |stage0: &str| {
         FAKE_MCU.replace(

@@ -185,8 +185,8 @@ fn capability_vectors() {
             (8, &[0x00]),           // status OK
             (9, &[0x02, 1, 0x06]),  // field 1: request fields 1 and 2
             (12, &[0x06, 6]),       // field 3: tunnel entries
-            (14, &[1, 0x0C, 0x01]), // link 1: 268
-            (17, &[2, 0x07, 0x04]), // link 2: 1031
+            (14, &[1, 0x0C, 0x01]), // first entry: its link, 268
+            (17, &[2, 0x07, 0x04]), // second entry: its link, 1031
         ],
     );
     assert_crc(&file);

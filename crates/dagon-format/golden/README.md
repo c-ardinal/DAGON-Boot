@@ -33,6 +33,6 @@ data; images carry the `TEST_KEY` build flag). Public key:
 | `frame_enter_rom.bin` | ENTER_ROM (0x24) method = 1 FORCE_DOWNLOAD_BOOT, seq 0x14. Added later as an additive change: the files above are unchanged |
 | `frame_hello_resp_cmds.bin` | HELLO response of a node that says what it serves: `frame_hello_resp.bin` with field 8 `cmds` (HELLO, STATUS, VERSION, CAPS, RELAY). Additive: `frame_hello_resp.bin`, from a node that leaves the field out, is unchanged |
 | `frame_caps_req.bin` | CAPS (0x04) request about RELAY (0x50), seq 0x16. Additive: the files above are unchanged |
-| `frame_caps_resp.bin` | CAPS response: OK, request fields 1 and 2, no response fields, tunnel entries link 1: 268 and link 2: 1031 |
+| `frame_caps_resp.bin` | CAPS response: OK, request fields 1 and 2, no response fields, two tunnel entries, 268 bytes over the first link and 1031 over the second |
 | `frame_version_req.bin` | VERSION (0x03) request, empty (the summary set), seq 0x15. Additive: the files above are unchanged |
 | `frame_version_resp.bin` | VERSION response: OK, 6 TLVs: wire 1, mcu_id F401, stage0 0.1.0, running boot core 1.0.0, boot core slots (A confirmed 1.0.0 running, B empty), app slots (A written 1.0.0, B trying 1.1.0 running, factory empty) |

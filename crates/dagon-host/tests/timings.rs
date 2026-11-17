@@ -10,7 +10,7 @@ use dagon_topology::defs::{Registry, Source};
 
 /// An MCU no code names: unequal erase units, its own watchdog.
 const NOVA: &str = r#"
-format = 2
+format = 3
 id = "nova-m4"
 name = "NOVA-M4"
 wire_id = 0x7E11
@@ -118,7 +118,7 @@ fn topology(mcu: &str) -> dagon_topology::Topology {
 /// A board of the synthetic MCU carrying a flash part with `regions`.
 fn board(id: &str, regions: &str) -> String {
     format!(
-        "[board.{id}]\nformat = 2\nproduct = \"P\"\nmcu = \"nova-m4\"\nflash_bytes = 0x10_0000\n\
+        "[board.{id}]\nformat = 3\nproduct = \"P\"\nmcu = \"nova-m4\"\nflash_bytes = 0x10_0000\n\
          drawing = \"nucleo-64\"\n[board.{id}.flash]\npart = \"X\"\nerase_regions = [{regions}]\n"
     )
 }

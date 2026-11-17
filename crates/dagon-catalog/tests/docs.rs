@@ -178,7 +178,10 @@ fn the_display_name_of_every_kind_is_its_catalog_name() {
     for c in machines() {
         for e in c.entries {
             let want = format!("{}.{}", c.layer.name(), e.kind);
-            assert_eq!(dagon_catalog::name(c.layer, e.code).as_deref(), Some(&*want));
+            assert_eq!(
+                dagon_catalog::name(c.layer, e.code).as_deref(),
+                Some(&*want)
+            );
         }
     }
     assert_eq!(dagon_catalog::name(Layer::App, 0xEE), None);
@@ -300,6 +303,8 @@ fn hidden_items_are_used_only_by_dagon_events() {
     const HIDDEN: &[&str] = &[
         concat!("_", "_machine"),
         concat!("_", "_sm_from"),
+        concat!("_", "_sm_id"),
+        concat!("_", "_transits"),
         concat!("_", "_dagon_events_state_machine_once_per_crate"),
         concat!("_", "_private"),
         concat!("_", "_new"),

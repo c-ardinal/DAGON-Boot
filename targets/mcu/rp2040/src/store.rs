@@ -211,6 +211,12 @@ impl SlotStore for AppStore {
         Ok(())
     }
 
+    /// The hand-over to the boot core's update mode
+    /// ([`crate::bl::request_update_mode`]).
+    fn request_update_mode(&mut self) -> Result<(), StoreError> {
+        crate::bl::request_update_mode(&mut self.flash).map_err(|_| StoreError::Flash)
+    }
+
     /// Stage0's version mark in its region (`dagon_format::stage0`).
     fn stage0_version(&mut self) -> Option<Version> {
         stage0::find(STAGE0, STAGE0_SIZE, |a, b| self.flash.read(a, b).is_ok())

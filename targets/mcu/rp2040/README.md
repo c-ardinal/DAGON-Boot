@@ -240,6 +240,14 @@ body); that app writes the boot core again. With one boot core slot the
 app's agent refuses a boot core transfer while the app is on trial.
 Stage0 halts only when there is no such app.
 
+The boot core receives on USB, as the same USB device the app presents.
+When the app handed over (REBOOT mode 1 writes UPDATE_STAY) it serves
+the update session in update mode before it decides anything, and leaves
+on REBOOT or after 60 s without a request; when nothing can be started it
+serves the session in recovery mode. It opens no listen window (USB is
+enumerated first) and needs the 48 MHz USB clock, so it receives only on
+a board with a crystal; on the ring oscillator it receives nothing.
+
 ## Boot images
 
 `stage0/` and `bootcore/` are DAGON's boot images for this MCU (their

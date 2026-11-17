@@ -6,6 +6,7 @@
 
 use dagon_core::bootcore::{self, Apps, Boot, CoreFail, Diag, NoCore, Stage0, Start};
 pub use dagon_core::bootcore::{MustReset, Settled};
+use dagon_core::log::{trial_room, Log, LogError};
 use dagon_format::SigVerifier;
 use dagon_port::Flash;
 
@@ -73,6 +74,20 @@ pub fn settle_core<F: Flash>(
         holds,
     };
     bootcore::settle_log(flash, &BL_LOG_LAYOUT, running, cell, healthy)
+}
+
+/// The app's hand-over to the boot core's update mode (REBOOT mode 1):
+/// UPDATE_STAY in the app log, after room for the boot core's UPDATE_DONE
+/// and the trials (`dagon_core::log::Log::request_stay`).
+pub fn request_update_mode<F: Flash>(flash: &mut F) -> Result<(), LogError> {
+    Log::load(flash, &APP_LOG_LAYOUT)?.request_stay(flash, trial_room(TRIAL_ATTEMPTS))
+}
+
+/// The boot core's start: whether the app handed over, consuming its
+/// UPDATE_STAY with UPDATE_DONE in the room the app made (no erase). An
+/// unreadable log is no hand-over.
+pub fn handed_over<F: Flash>(flash: &mut F) -> bool {
+    Log::load(flash, &APP_LOG_LAYOUT).is_ok_and(|mut l| l.take_stay(flash) == Ok(true))
 }
 
 #[cfg(test)]

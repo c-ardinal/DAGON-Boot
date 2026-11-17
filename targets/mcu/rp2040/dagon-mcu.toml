@@ -48,7 +48,10 @@ out_hz = 125_000_000
 pll = { refdiv = 1, fbdiv = 125, postdiv1 = 6, postdiv2 = 2 }
 
 # The boot loader runs on stage0's setups: the ring oscillator as it runs,
-# or a 12 MHz crystal through the system PLL to 125 MHz.
+# or a 12 MHz crystal through the system PLL to 125 MHz. From a crystal it
+# also runs the USB PLL (48 MHz, as the app's setup below), so it receives
+# on USB in update and recovery mode; on the ring oscillator it has no USB
+# clock and receives on nothing.
 [[bootcore.clock]]
 source = "internal"
 out_hz = 6_500_000
@@ -57,7 +60,7 @@ out_hz = 6_500_000
 source = "crystal"
 in_hz = 12_000_000
 out_hz = 125_000_000
-pll = { refdiv = 1, fbdiv = 125, postdiv1 = 6, postdiv2 = 2 }
+pll = { refdiv = 1, fbdiv = 125, postdiv1 = 6, postdiv2 = 2, usb_refdiv = 1, usb_fbdiv = 120, usb_postdiv1 = 6, usb_postdiv2 = 5 }
 
 # The app runs on the same setups; from a crystal it also runs the USB PLL
 # for the 48 MHz its USB link needs (RP2040 datasheet section 4.1): 12 MHz /

@@ -21,11 +21,15 @@ use dagon_format::statelog::FaceHeader;
 use dagon_format::SigVerifier;
 use dagon_mcu_common::serve::{serve, Exit, ServeHost};
 use dagon_mcu_rp2040::bl;
-use dagon_mcu_rp2040::layout::APP_LOG_LAYOUT;
-use dagon_port::{Flash, Link, LinkError, LinkKind, Reconnect};
-use dagon_proto::payload::{mode, reboot_mode, target, HelloResp, SetPending, XferBegin, XferChunk};
+use dagon_mcu_rp2040::layout::{APP_LOG_LAYOUT, MIN_FLASH_SIZE, SECTOR, XIP_BASE};
+use dagon_port::{Flash, FlashRegion, Link, LinkError, LinkKind, Reconnect};
+use dagon_proto::payload::{
+    mode, reboot_mode, target, HelloReq, HelloResp, SetPending, SlotState, XferBegin, XferChunk,
+};
 use dagon_proto::{max_payload, split_status, Cmd, Frame, Status};
-use dagon_sim::{hub_config, listen as sim_listen, sample, Layout, Run, SimFlash, SimNode, SimStore};
+use dagon_sim::{
+    hub_config, listen as sim_listen, sample, Layout, Run, SimFlash, SimNode, SimStore,
+};
 use dagon_topology::defs::{McuDef, Registry};
 
 /// How often the test link's read gives up with nothing complete: the
@@ -139,6 +143,17 @@ fn request(seq: u8, cmd: Cmd, payload: &[u8]) -> Vec<u8> {
     b
 }
 
+fn hello(seq: u8) -> Vec<u8> {
+    let mut p = [0u8; 8];
+    let n = HelloReq {
+        proto_ver: dagon_proto::PROTO_VERSION as u32,
+        max_payload: max_payload::I2C as u16,
+    }
+    .encode(&mut p)
+    .unwrap();
+    request(seq, Cmd::Hello, &p[..n])
+}
+
 /// The status and body of a reply frame.
 fn reply(f: &[u8]) -> (u8, Status, Vec<u8>) {
     let (f, _) = Frame::decode(f, max_payload::USB).unwrap();
@@ -175,7 +190,12 @@ fn session(store: SimStore, entry: Entry) -> CoreAgent {
         mode: entry.mode(),
         ..hub_config()
     };
-    Agent::for_writer(cfg, Ed25519Small::with_tick(sample::PUBKEY, tick as fn()), store, chain)
+    Agent::for_writer(
+        cfg,
+        Ed25519Small::with_tick(sample::PUBKEY, tick as fn()),
+        store,
+        chain,
+    )
 }
 
 fn hub() -> SimNode {
@@ -241,7 +261,7 @@ fn the_listen_window_on_each_rp2040_link_kind() {
     for (kind, window, first) in kinds() {
         let clock = Rc::new(Cell::new(0));
         let mut link = TestLink::new(kind, &clock);
-        link.incoming.push_back((0, request(1, Cmd::Hello, &[])));
+        link.incoming.push_back((0, hello(1)));
         link.incoming
             .push_back((first.ceil() as u64, request(2, Cmd::Stay, &[])));
         let now = || clock.get();
@@ -255,7 +275,10 @@ fn the_listen_window_on_each_rp2040_link_kind() {
         }
         assert_eq!(window, rp2040().boot_receive.unwrap().listen_window_ms);
         assert!(stayed, "{kind:?}: STAY in the window");
-        assert_eq!(link.unanswered, 1, "{kind:?}: HELLO in the window is not answered");
+        assert_eq!(
+            link.unanswered, 1,
+            "{kind:?}: HELLO in the window is not answered"
+        );
         let w = link.written.borrow();
         assert_eq!(w.len(), 1, "{kind:?}");
         assert_eq!(reply(&w[0]).0, Cmd::Stay as u8);
@@ -267,7 +290,10 @@ fn the_listen_window_on_each_rp2040_link_kind() {
         late.incoming
             .push_back((u64::from(window) + 1, request(3, Cmd::Stay, &[])));
         let now = || clock.get();
-        assert!(!dagon_sim::block_on(listen(&mut late, window, now)), "{kind:?}: late");
+        assert!(
+            !dagon_sim::block_on(listen(&mut late, window, now)),
+            "{kind:?}: late"
+        );
         assert!(late.written.borrow().is_empty());
         assert!(
             clock.get() <= u64::from(window) + TICK_MS,
@@ -289,7 +315,7 @@ fn update_mode_and_its_60_s_exit_on_each_rp2040_link_kind() {
             let clock = Rc::new(Cell::new(0));
             let mut link = TestLink::new(kind, &clock);
             link.incoming.extend([
-                (5, request(1, Cmd::Hello, &[])),
+                (5, hello(1)),
                 (10, request(2, Cmd::Stay, &[])),
                 (30_000, request(3, Cmd::Reboot, &[reboot_mode::UPDATE])),
             ]);
@@ -319,19 +345,23 @@ fn recovery_mode_never_leaves_by_itself_on_each_rp2040_link_kind() {
         let mut agent = session(hub().store().clone(), Entry::Recovery);
         let clock = Rc::new(Cell::new(0));
         let mut link = TestLink::new(kind, &clock);
-        link.incoming.push_back((5, request(1, Cmd::Hello, &[])));
+        link.incoming.push_back((5, hello(1)));
         link.closes_at = 5 * UPDATE_IDLE_MS;
         let written = link.written.clone();
         let (exit, expired, at) = receive(link, &mut agent, Entry::Recovery);
         assert_eq!((exit, expired), (Exit::Closed, false), "{kind:?}");
-        assert!(at >= 5 * UPDATE_IDLE_MS, "{kind:?}: served until the link closed");
+        assert!(
+            at >= 5 * UPDATE_IDLE_MS,
+            "{kind:?}: served until the link closed"
+        );
         let (_, st, body) = reply(&written.borrow()[0]);
         assert_eq!(st, Status::Ok);
         assert_eq!(HelloResp::parse(&body).unwrap().mode, mode::RECOVERY);
     }
 }
 
-/// The requests that write the hub's app into slot B and set it pending.
+/// The requests that write the hub's app into slot A (the boot core may
+/// write the slot the app runs from) and set it pending.
 fn write_requests() -> Vec<Vec<u8>> {
     let img = sample::HUB_1_0_0;
     let mut out = Vec::new();
@@ -343,7 +373,7 @@ fn write_requests() -> Vec<Vec<u8>> {
     let mut p = [0u8; 300];
     let n = XferBegin {
         target: target::APP,
-        slot: 1,
+        slot: 0,
         total_len: img.len() as u32,
         hdr_len: 512,
     }
@@ -365,7 +395,7 @@ fn write_requests() -> Vec<Vec<u8>> {
     push(Cmd::XferEnd, &[]);
     let n = SetPending {
         target: target::APP,
-        slot: 1,
+        slot: 0,
     }
     .encode(&mut p)
     .unwrap();
@@ -401,7 +431,9 @@ fn a_write_through_update_and_recovery_mode_on_each_rp2040_link_kind() {
                 "the update-mode verifier feeds the watchdog while it checks"
             );
             node.reset(1);
-            assert_eq!(node.run(), Run::App(1), "{kind:?} {entry:?}");
+            assert_eq!(node.run(), Run::App(0), "{kind:?} {entry:?}");
+            let st = node.status();
+            assert_eq!(st.slots[0].state, SlotState::Trying, "{kind:?} {entry:?}");
         }
     }
 }
@@ -411,7 +443,18 @@ fn a_write_through_update_and_recovery_mode_on_each_rp2040_link_kind() {
 /// consumes it with UPDATE_DONE, and the start after that does not stay.
 #[test]
 fn the_hand_over_is_taken_once() {
-    let mut flash = SimFlash::rp2040_2m(3);
+    // The RP2040's flash as its definition gives it: 4 KiB erase, any
+    // number of bytes per write.
+    let mut flash = SimFlash::new(
+        &[FlashRegion {
+            start: XIP_BASE,
+            len: MIN_FLASH_SIZE as u32,
+            erase_size: SECTOR,
+            write_size: 1,
+            erased_value: 0xFF,
+        }],
+        3,
+    );
     flash
         .write(
             APP_LOG_LAYOUT.faces[0],

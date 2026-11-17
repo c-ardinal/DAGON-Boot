@@ -10,7 +10,9 @@ use dagon_proto::payload::{
     self, mode, phase, reboot_mode, target, HelloReq, HelloResp, SetPending, Show, SlotState,
     StatusResp, VersionResp, VersionSlots, XferBegin, XferChunk, IMAGE_HDR_LEN,
 };
-use dagon_proto::{flags, frame_len, max_payload, split_status, Cmd, Frame, Status, HEADER_LEN};
+use dagon_proto::{
+    flags, frame_len, max_payload, split_status, Cmd, Frame, FrameError, Status, HEADER_LEN,
+};
 
 use crate::images::{ImageStore, ImageView};
 use crate::{
@@ -22,9 +24,12 @@ use core::marker::PhantomData;
 /// A transfer with no request for this long returns to idle.
 pub const IDLE_TIMEOUT_MS: u32 = 10_000;
 
-const RESP_BUF: usize = frame_len(1 + StatusResp::LEN);
-// The largest reply body is STATUS's; VERSION's fits the same buffer.
-const _: () = assert!(VersionResp::MAX_LEN <= StatusResp::LEN);
+const RESP_BUF: usize = frame_len(1 + StatusResp::MAX_LEN);
+// The largest reply body is STATUS's; VERSION's and HELLO's fit the same buffer.
+const _: () = assert!(VersionResp::MAX_LEN <= StatusResp::MAX_LEN);
+const _: () = assert!(HelloResp::MAX_LEN <= StatusResp::MAX_LEN);
+/// The answer to a frame of another wire version: a status and one field.
+const REFUSAL_BUF: usize = frame_len(4);
 const BODY_AT: usize = HEADER_LEN + 1;
 const READ_CHUNK: usize = 256;
 const SLOT_A: u8 = 0;
@@ -85,6 +90,8 @@ pub struct Agent<S, X, V, W = writer::App> {
     resp: [u8; RESP_BUF],
     resp_len: usize,
     resp_reboot: Option<u32>,
+    /// Kept apart from `resp`, which a repeated request is answered from.
+    refusal: [u8; REFUSAL_BUF],
 }
 
 type Handled = Result<(usize, Option<u32>), Status>;
@@ -125,6 +132,7 @@ impl<S: SlotStore, X: AppChain, V: SigVerifier, W: Writer> Agent<S, X, V, W> {
             resp: [0; RESP_BUF],
             resp_len: 0,
             resp_reboot: None,
+            refusal: [0; REFUSAL_BUF],
         };
         agent.opened();
         agent
@@ -242,21 +250,38 @@ impl<S: SlotStore, X: AppChain, V: SigVerifier, W: Writer> Agent<S, X, V, W> {
     }
 
     /// Handles one request frame. `None`: not a valid request (dropped
-    /// silently). A repeat of the previous seq and cmd returns the previous
-    /// reply without executing again.
+    /// silently). A request frame of another wire version is refused with
+    /// an answer (`dagon_proto::version_refusal`). A repeat of the previous
+    /// seq and cmd returns the previous reply without executing again.
     pub fn handle(&mut self, request: &[u8]) -> Option<Reply<'_>> {
-        let (frame, _) = Frame::decode(request, self.cfg.max_payload as usize).ok()?;
+        let frame = match Frame::decode(request, self.cfg.max_payload as usize) {
+            Ok((frame, _)) => frame,
+            Err(FrameError::BadVersion) => {
+                let n = dagon_proto::version_refusal(request, &mut self.refusal)?;
+                return Some(Reply {
+                    frame: self.refusal.get(..n)?,
+                    reboot: false,
+                    reboot_delay_ms: 0,
+                });
+            }
+            Err(_) => return None,
+        };
         if frame.flags & (flags::RESP | flags::EVENT) != 0 {
             return None;
         }
         if self.last != Some((frame.seq, frame.cmd)) {
-            let (status, body, reboot) = match self.dispatch(frame.cmd, frame.payload) {
-                Ok((body, reboot)) => (Status::Ok, body, reboot),
-                Err(s) => (s, 0, None),
+            let (len, reboot) = match self.dispatch(frame.cmd, frame.payload) {
+                Ok((body, reboot)) => {
+                    self.resp[HEADER_LEN] = Status::Ok as u8;
+                    (1 + body, reboot)
+                }
+                Err(s) => {
+                    let out = &mut self.resp[HEADER_LEN..];
+                    (payload::put_refusal(out, s, frame.cmd, frame.payload), None)
+                }
             };
-            self.resp[HEADER_LEN] = status as u8;
             self.resp_len =
-                dagon_proto::finish(&mut self.resp, flags::RESP, frame.seq, frame.cmd, 1 + body)
+                dagon_proto::finish(&mut self.resp, flags::RESP, frame.seq, frame.cmd, len)
                     .expect("response fits RESP_BUF");
             self.resp_reboot = reboot;
             self.last = Some((frame.seq, frame.cmd));
@@ -279,8 +304,8 @@ impl<S: SlotStore, X: AppChain, V: SigVerifier, W: Writer> Agent<S, X, V, W> {
             Some(Cmd::XferEnd) => self.xfer_end(p),
             Some(Cmd::SetPending) => self.set_pending(SetPending::parse(p)?),
             Some(Cmd::Stay) => self.stay(p),
-            Some(Cmd::Reboot) => self.reboot(payload::parse_u8(p)?),
-            Some(Cmd::Confirm) => self.confirm(payload::parse_u8(p)?),
+            Some(Cmd::Reboot) => self.reboot(payload::parse_reboot(p)?),
+            Some(Cmd::Confirm) => self.confirm(payload::parse_confirm(p)?),
             Some(Cmd::Show) if W::APP => self.show(Show::parse(p)?),
             _ => Err(Status::Unsupported),
         }
@@ -547,7 +572,8 @@ impl<S: SlotStore, X: AppChain, V: SigVerifier, W: Writer> Agent<S, X, V, W> {
             );
             self.open_body(target, slot, body_len)?;
         }
-        Ok((put_u32(self.body(), end as u32), None))
+        let n = payload::encode_next_offset(end as u32, self.body());
+        Ok((n.expect("fits"), None))
     }
 
     /// Signature, key and compatibility of the header in `self.hdr` for a
@@ -576,13 +602,12 @@ impl<S: SlotStore, X: AppChain, V: SigVerifier, W: Writer> Agent<S, X, V, W> {
         }
         let end = end as u32;
         noted(self.session.data_written(&mut self.chain, end));
-        Ok((put_u32(self.body(), end), None))
+        let n = payload::encode_next_offset(end, self.body());
+        Ok((n.expect("fits"), None))
     }
 
     fn xfer_end(&mut self, p: &[u8]) -> Handled {
-        if !p.is_empty() {
-            return Err(Status::Arg);
-        }
+        payload::parse_empty(&Cmd::XferEnd.spec().req, p)?;
         let session::State::Body {
             target,
             slot,
@@ -598,8 +623,8 @@ impl<S: SlotStore, X: AppChain, V: SigVerifier, W: Writer> Agent<S, X, V, W> {
         noted(self.session.verify_started(&mut self.chain));
         match self.verify_and_commit(target, slot, len) {
             Ok(digest) => {
-                self.body()[..32].copy_from_slice(&digest);
-                Ok((32, None))
+                let n = payload::encode_digest(&digest, self.body());
+                Ok((n.expect("fits"), None))
             }
             Err(s) => {
                 noted(self.requests.verify_failed(&mut self.chain, s as u8));
@@ -688,9 +713,7 @@ impl<S: SlotStore, X: AppChain, V: SigVerifier, W: Writer> Agent<S, X, V, W> {
     /// that takes the first STAY is the boot core's own loop); a running
     /// app refuses it.
     fn stay(&mut self, p: &[u8]) -> Handled {
-        if !p.is_empty() {
-            return Err(Status::Arg);
-        }
+        payload::parse_empty(&Cmd::Stay.spec().req, p)?;
         if W::APP {
             return Err(Status::State);
         }
@@ -805,11 +828,6 @@ fn check_header<V: SigVerifier>(
         return Err(Status::Compat);
     }
     Ok(h)
-}
-
-fn put_u32(out: &mut [u8], v: u32) -> usize {
-    out[..4].copy_from_slice(&v.to_le_bytes());
-    4
 }
 
 fn format_status(e: FormatError) -> Status {

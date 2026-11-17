@@ -10,7 +10,7 @@
 
 use dagon_events::Clock;
 use dagon_format::SigVerifier;
-use dagon_proto::payload::mode;
+use dagon_proto::payload::{self, mode};
 use dagon_proto::{flags, frame_len, Cmd, Frame};
 
 use crate::{Agent, AppChain, SlotStore, Writer, IDLE_TIMEOUT_MS};
@@ -88,8 +88,12 @@ pub enum Exit {
 
 fn stay(request: &[u8]) -> Option<Stay> {
     let (f, _) = Frame::decode(request, request.len()).ok()?;
-    let is_stay = f.cmd == Cmd::Stay as u8 && f.flags & flags::RESP == 0 && f.payload.is_empty();
-    let frame = request.get(..STAY_LEN)?.try_into().ok()?;
+    let is_stay = f.cmd == Cmd::Stay as u8
+        && f.flags & flags::RESP == 0
+        && payload::parse_empty(&Cmd::Stay.spec().req, f.payload).is_ok();
+    // Kept as the STAY it means: its seq, and none of the fields skipped.
+    let mut frame = [0u8; STAY_LEN];
+    dagon_proto::finish(&mut frame, f.flags, f.seq, f.cmd, 0).ok()?;
     is_stay.then_some(Stay { frame })
 }
 

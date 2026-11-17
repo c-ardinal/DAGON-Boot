@@ -16,7 +16,6 @@
 
 use dagon_port::{BusError, I2cBus, SubControl};
 
-pub const ROM_ADDR: u8 = 0x39;
 pub const ACK: u8 = 0x79;
 pub const NACK: u8 = 0x1F;
 pub const BUSY: u8 = 0x76;
@@ -60,7 +59,7 @@ pub trait HostClock {
 }
 
 /// The hub as seen by the ROM procedure: its I2C bus (all transactions go
-/// to [`ROM_ADDR`]), the node's NRST/BOOT0 lines and a clock.
+/// to [`Plan::addr`]), the node's NRST/BOOT0 lines and a clock.
 #[allow(async_fn_in_trait)]
 pub trait RomLink: I2cBus + SubControl + HostClock {
     /// Timeout for the following I2C transactions (a stretching command
@@ -77,9 +76,13 @@ pub struct Region<'a> {
     pub data: &'a [u8],
 }
 
-/// What to write: sectors to erase, then regions in this order.
+/// Where to write and what: the loader's I2C address, sectors to erase,
+/// then regions in this order.
 #[derive(Clone, Copy, Debug)]
 pub struct Plan<'a> {
+    /// The loader's 7-bit I2C address: the node's MCU definition's
+    /// `[rom_i2c] addr`.
+    pub addr: u8,
     pub erase: &'a [u16],
     pub regions: &'a [Region<'a>],
 }
@@ -128,7 +131,7 @@ pub async fn flash<L: RomLink>(l: &mut L, plan: &Plan<'_>) -> Result<Stats, RomE
     let mut stats = Stats::default();
     let r = loop {
         stats.attempts += 1;
-        let mut s = Session::new(l);
+        let mut s = Session::new(l, plan.addr);
         match s.run(plan).await {
             Ok(()) => {
                 stats.frames = s.frames;
@@ -150,6 +153,7 @@ pub async fn flash<L: RomLink>(l: &mut L, plan: &Plan<'_>) -> Result<Stats, RomE
 
 struct Session<'l, L: RomLink> {
     l: &'l mut L,
+    addr: u8,
     last: u64,
     frames: u32,
     max_rtt: u32,
@@ -161,9 +165,10 @@ fn xor(b: &[u8]) -> u8 {
 }
 
 impl<'l, L: RomLink> Session<'l, L> {
-    fn new(l: &'l mut L) -> Self {
+    fn new(l: &'l mut L, addr: u8) -> Self {
         Session {
             l,
+            addr,
             last: 0,
             frames: 0,
             max_rtt: 0,
@@ -204,9 +209,9 @@ impl<'l, L: RomLink> Session<'l, L> {
             return Err(RomError::Late);
         }
         let r = match (data.is_empty(), buf.is_empty()) {
-            (false, false) => self.l.write_read(ROM_ADDR, data, buf).await,
-            (false, true) => I2cBus::write(self.l, ROM_ADDR, data).await,
-            _ => I2cBus::read(self.l, ROM_ADDR, buf).await,
+            (false, false) => self.l.write_read(self.addr, data, buf).await,
+            (false, true) => I2cBus::write(self.l, self.addr, data).await,
+            _ => I2cBus::read(self.l, self.addr, buf).await,
         };
         self.last = self.l.now_ms();
         self.frames += 1;

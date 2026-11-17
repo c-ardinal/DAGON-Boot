@@ -61,6 +61,11 @@
 /// - `State`, the states, and `Machine`, which holds one in a private
 ///   field. `Machine::new()` (initial state) is visible only in the crate
 ///   that declares the machine; `Machine` has no `Default` and no `Clone`.
+/// - `StateId` (the states without fields, numbered as the catalog lists
+///   them), `Trigger` (one variant per transition method) and the
+///   transition table generated from the declaration,
+///   `State::leaves(Trigger)`: code that must know whether a transition
+///   will follow asks it, never the catalog's names.
 /// - One transition method per transition. It takes the layer's composed
 ///   chain ([`crate::Sink`]); from a state it leaves from it builds the
 ///   event and the next state, delivers the event to the chain, then sets
@@ -73,9 +78,11 @@
 ///   forms in order.
 /// - `CATALOG`, the machine's [`crate::Catalog`], and `ENTRY` on each
 ///   payload type.
-/// - Decoding of the machine's [`crate::EventRecord`]s back into its
-///   payloads, which the layer's replay ([`crate::Composed::replay`])
-///   uses.
+/// - `REPLAY`, the decoding of the machine's [`crate::EventRecord`]s back
+///   into its payloads, which the layer's replay
+///   ([`crate::Composed::replay`]) takes.
+/// - Each payload's [`crate::Payload`] gives its layer and code only: an
+///   image that delivers events links no catalog name.
 /// - A test, `every_transition`, that calls every transition from every
 ///   state (fields and arguments at their `Default`) and checks it moves
 ///   exactly from its `from` states to its `to` state and delivers exactly
@@ -321,11 +328,66 @@ macro_rules! __machine {
             }
 
             impl State {
+                /// The state's name, for a person reading it (tests,
+                /// tools); code decides on [`State::id`] and
+                /// [`State::leaves`].
                 pub fn name(&self) -> &'static str {
                     match self {
                         $( State::$S { .. } => stringify!($S), )+
                     }
                 }
+
+                /// The state without its fields: its index in the
+                /// catalog's `states`.
+                pub const fn id(&self) -> StateId {
+                    match self {
+                        $( State::$S { .. } => StateId::$S, )+
+                    }
+                }
+
+                /// Whether transition `t` leaves from this state.
+                pub const fn leaves(&self, t: Trigger) -> bool {
+                    self.id().leaves(t)
+                }
+            }
+
+            /// The states without their fields, numbered in declaration
+            /// order (the catalog's `states`).
+            #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+            #[repr(u8)]
+            pub enum StateId {
+                $( $S ),+
+            }
+
+            /// The machine's transitions, one per transition method.
+            #[allow(non_camel_case_types)]
+            #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+            pub enum Trigger {
+                $( $trig ),+
+            }
+
+            impl StateId {
+                /// The transition table generated from the declaration:
+                /// whether `t` leaves from this state.
+                #[allow(unreachable_patterns)]
+                pub const fn leaves(self, t: Trigger) -> bool {
+                    match t {
+                        $( Trigger::$trig => matches!(self, $( $crate::__sm_id!($from) )|+), )+
+                    }
+                }
+            }
+
+            /// [`crate::Catalog::leaves`]: the table by state index and
+            /// event code.
+            fn __transits(state: u8, kind: u8) -> ::core::option::Option<bool> {
+                const ALL: &[StateId] = &[$( StateId::$S ),+];
+                let s = *ALL.get(usize::from(state))?;
+                $(
+                    if kind == $code {
+                        return ::core::option::Option::Some(s.leaves(Trigger::$trig));
+                    }
+                )+
+                ::core::option::Option::None
             }
 
             /// The machine. Its state changes only through the transition
@@ -362,9 +424,9 @@ macro_rules! __machine {
                             #[allow(unreachable_patterns)]
                             _ => {
                                 return ::core::result::Result::Err($crate::Refused {
-                                    machine: stringify!($name),
-                                    trigger: stringify!($trig),
-                                    state: self.state.name(),
+                                    layer: $crate::Layer::$layer,
+                                    kind: $code,
+                                    state: self.state.id() as u8,
                                 })
                             }
                         };
@@ -384,7 +446,11 @@ macro_rules! __machine {
                 states: &[$(stringify!($S)),+],
                 entries: &[$($ev::ENTRY),+],
                 __replay,
+                __transits,
             };
+
+            /// Decodes the machine's records for [`crate::Composed::replay`].
+            pub const REPLAY: $crate::Replay = __replay;
 
             fn __replay(
                 rec: &$crate::EventRecord,
@@ -395,8 +461,10 @@ macro_rules! __machine {
                 }
                 $(
                     if rec.kind == $code {
-                        let entry = &$ev::ENTRY;
-                        if !entry.observe.replay || entry.flags.retired {
+                        // A constant, so the entry is not linked.
+                        const READS: bool =
+                            $ev::ENTRY.observe.replay && !$ev::ENTRY.flags.retired;
+                        if !READS {
                             return false;
                         }
                         return match $ev::__decode(&rec.payload) {
@@ -465,8 +533,12 @@ macro_rules! __machine {
                 }
 
                 impl $crate::Payload for $ev {
-                    fn entry(&self) -> &'static $crate::Entry {
-                        &Self::ENTRY
+                    fn layer(&self) -> $crate::Layer {
+                        $crate::Layer::$layer
+                    }
+
+                    fn kind(&self) -> u8 {
+                        $code
                     }
 
                     #[allow(unused_mut, unused_variables, unused_assignments)]
@@ -538,6 +610,8 @@ macro_rules! __machine {
                         let mut m = Machine { state: *s };
                         let from: &[&str] = &[$(stringify!($from)),+];
                         let leaves = from.contains(&"*") || from.contains(&s.name());
+                        assert_eq!(s.leaves(Trigger::$trig), leaves, "{} table", stringify!($trig));
+                        assert_eq!(CATALOG.leaves(s.id() as u8, $code), Some(leaves));
                         let r = {
                             let mut out = $crate::compose_unpublished(
                                 $crate::Layer::$layer, $crate::Nop, &mut seen,
@@ -554,7 +628,7 @@ macro_rules! __machine {
                                 let mut out = $crate::compose_unpublished(
                                     $crate::Layer::$layer, $crate::Nop, &mut seen,
                                 );
-                                out.replay(&[CATALOG], &rec)
+                                out.replay(&[REPLAY], &rec)
                             };
                             let entry = &$ev::ENTRY;
                             if entry.observe.replay && !entry.flags.retired {
@@ -574,6 +648,18 @@ macro_rules! __machine {
                 )+
             }
         }
+    };
+}
+
+/// A `from` state of [`state_machine!`] as a pattern on `StateId`.
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __sm_id {
+    (*) => {
+        _
+    };
+    ($s:ident) => {
+        StateId::$s
     };
 }
 

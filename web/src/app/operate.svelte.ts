@@ -8,6 +8,7 @@ import {
   LOCAL,
   PHASE,
   check_release_for,
+  host_reconnect_ms,
   newHost,
   releaseAgentDigest,
   releaseAppDigest,
@@ -160,8 +161,6 @@ export interface ReleaseFile {
   verdict: 'checking' | 'pass' | Refusal;
 }
 
-/** dagon-host waits this long for the rebooted hub (HUB_RECONNECT_MS). */
-export const HUB_RECONNECT_MS = 45_000;
 const REFUSALS: readonly string[] = ['source', 'key', 'topology', 'format'];
 
 /** dagon-host's release check (check_release_for, apply, recover) threw this: which refusal it names. */
@@ -836,11 +835,11 @@ export class Operate {
     return to;
   }
 
-  /** The hub reboots onto `version`: dagon-host reopens it for 45 s (hubRestarting), keeping only that hub. */
+  /** The hub reboots onto `version`: dagon-host reopens it for host_reconnect_ms (hubRestarting), keeping only that hub. */
   private hubAway(version: number | undefined): void {
     if (version !== undefined) this.transport?.expectHub?.(version, this.hubHello);
     this.reconnectNotes = [];
-    this.reconnectUntil = this.now() + HUB_RECONNECT_MS;
+    this.reconnectUntil = this.now() + host_reconnect_ms();
     this.status = ANNOUNCE.A12;
     this.go('hubTurn');
   }

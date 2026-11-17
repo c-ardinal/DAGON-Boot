@@ -2070,3 +2070,32 @@ fn gen_skips_a_node_folder_reached_through_a_junction() {
     let lines = vec![format!("skipped    nodes/watch: {}", r.skipped[0].1)];
     assert!(super::outcome(&lines).unwrap_err().contains("is a link"));
 }
+
+/// A node's I2C target address is its end's `addr` in the topology, not its
+/// board's `[default_link] addr` (0x42 on the NUCLEO-F401RE): `dagon gen`
+/// writes it into the app's wiring and the boot core's wiring, and the
+/// app's start-up hands it to the board; a node the topology gives no
+/// address keeps `None` (its board's default).
+#[test]
+fn a_non_default_topology_address_reaches_the_app_and_the_boot_core() {
+    let d = tmp("addr");
+    let dir = d.join("proj");
+    let seg = "{ node: seg, port: i2c3, addr: 0x42,";
+    assert!(SAMPLE.contains(seg));
+    let topology = SAMPLE.replace(seg, "{ node: seg, port: i2c3, addr: 0x45,");
+    new_project(&dir, "proj", &topology, &d.join("keys"), &dev()).unwrap();
+    let config = dir.join(crate::config::CONFIG_FILE);
+    let lines = gen_project(&config, &["seg".into(), "watch".into()], false)
+        .unwrap_or_else(|e| panic!("{e}"));
+    assert!(!lines.iter().any(|l| l.starts_with("skipped")), "{lines:?}");
+    let want = "pub const LINK_ADDR: Option<u8> = Some(0x45);\n";
+    for rel in ["nodes/seg/src/wiring.rs", "nodes/seg/dagon/boot_wiring.rs"] {
+        let text = read(&dir, rel);
+        assert!(text.contains(want), "{rel}: {text}");
+    }
+    let main = read(&dir, "nodes/seg/src/main.rs");
+    assert!(main.contains("wiring::LINK_ADDR"), "{main}");
+    let none = "pub const LINK_ADDR: Option<u8> = None;\n";
+    let watch = read(&dir, "nodes/watch/src/wiring.rs");
+    assert!(watch.contains(none), "{watch}");
+}

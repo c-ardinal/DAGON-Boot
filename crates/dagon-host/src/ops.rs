@@ -21,9 +21,11 @@ use dagon_proto::{Cmd, Status};
 use crate::rom::RomMap;
 use crate::{Error, Host, HostClock, Result, RouteError, Target, Transport};
 
-/// REBOOT until the hub's new HELLO, reopening the port meanwhile. Stays
-/// well inside the 60 s the hub keeps its trial watchdog fed, so CONFIRM
-/// always lands in time.
+/// REBOOT until the hub's new HELLO, reopening the port meanwhile. A host
+/// margin, not an MCU or link property: it stays well inside the 60 s the
+/// hub keeps its trial watchdog fed, so CONFIRM always lands in time. Public
+/// at the crate root; the Console reads it through dagon-wasm's
+/// `host_reconnect_ms`.
 pub const HUB_RECONNECT_MS: u32 = 45_000;
 /// Pause between reopen attempts while the hub is away.
 pub const REOPEN_MS: u32 = 1_000;

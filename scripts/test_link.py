@@ -88,6 +88,15 @@ def ts_kind_literals(path, text, names):
     return out
 
 
+RECONNECT_NUMBER = re.compile(r"\w*reconnect\w*\s*(?::\s*[\w<>]+\s*)?=\s*\d[\d_]{2,}|\w*reconnect\w*\s*(?::\s*[\w<>]+\s*)?=\s*\d+\s*\*\s*\d+", re.I)
+
+
+def reconnect_numbers(path, text):
+    """`path:line` of every line of `text` setting a reconnect-named value to a
+    number of three or more digits (the wait is dagon-host's HUB_RECONNECT_MS)."""
+    return [f"{path}:{i}: {l.strip()}" for i, l in enumerate(text.splitlines(), 1) if RECONNECT_NUMBER.search(l)]
+
+
 ENUM = re.compile(r"\benum\s+(\w+)[^{;]*\{(.*?)^\s*\}", re.M | re.S)
 VARIANT = re.compile(r"^\s*([A-Z]\w*)\s*([,(={]?)", re.M)
 
@@ -208,6 +217,16 @@ class OneLinkContract(unittest.TestCase):
         planted = "const UPLINK = ['usb-cdc', \"ble\"];\nif (k === `can`) go();\nconst id = 'i2c-main';\n"
         self.assertEqual(len(ts_kind_literals("web/src/x.ts", planted, names)), 2)
         self.assertEqual(ts_kind_literals("web/src/app/define/model.ts", "const BUS_KIND = 'i2c';\n", names), [])
+
+    def test_console_has_no_reconnect_wait_number(self):
+        found = []
+        for p in web_files():
+            found += reconnect_numbers(rel(p), p.read_text(encoding="utf-8"))
+        self.assertEqual(found, [], "a reconnect wait written in the Console; read dagon-wasm's host_reconnect_ms")
+
+    def test_the_reconnect_check_catches_a_planted_number(self):
+        planted = "export const HUB_RECONNECT_MS = 45_000;\nconst reconnectMs: number = 45000;\nconst RECONNECT_STEP_S = 5;\nlet reconnectUntil = null;\nconst reconnectWait = 45 * 1000;\n"
+        self.assertEqual(len(reconnect_numbers("web/src/x.ts", planted)), 3)
 
     def test_no_agent_run(self):
         agent = "\n".join(p.read_text(encoding="utf-8") for p in (ROOT / "crates/dagon-agent/src").rglob("*.rs"))

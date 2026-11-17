@@ -760,7 +760,7 @@ fn golden_wiring() -> String {
     let (def, board) = parts(&reg);
     let m = ext_manifest("display", &["serial"]);
     let plan = node::plan(def, Some(board), Image::Bootcore, vec![ext(&m)], &known()).unwrap();
-    gen::boot_wiring("hub", def, Some(board), &plan, &known()).unwrap()
+    gen::boot_wiring("hub", def, Some(board), Some(0x45), &plan, &known()).unwrap()
 }
 
 /// The generated file is Rust that compiles (this module includes the
@@ -787,6 +787,8 @@ fn boot_wiring_is_the_golden_copy_and_compiles() {
     let regions = golden::MAPS[0].maps[0].1;
     assert!(regions.iter().all(|r| r.device == (r.number >= 3)));
     assert!(!golden::LED.unwrap().active_high);
+    // The node's I2C target address from its end in the topology.
+    assert_eq!(golden::LINK_ADDR, Some(0x45));
     let _chain: golden::BootChain = golden::BOOT_CHAIN;
     // One limit per chained extension, from the same list.
     assert_eq!(golden::BOOT_EXTENSIONS.len(), golden::EXTENSIONS.len());
@@ -802,7 +804,7 @@ fn programs_run_only_on_action_capable_boot_events() {
     let reg = registry(RP2040, &[], &board);
     let (def, board) = parts(&reg);
     let plan = node::plan(def, Some(board), Image::Bootcore, vec![], &known()).unwrap();
-    let e = gen::boot_wiring("hub", def, Some(board), &plan, &known()).unwrap_err();
+    let e = gen::boot_wiring("hub", def, Some(board), None, &plan, &known()).unwrap_err();
     assert!(e.contains("no action-capable boot event"), "{e}");
 }
 

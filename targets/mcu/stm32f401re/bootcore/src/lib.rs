@@ -71,16 +71,29 @@ use static_cell::StaticCell;
 pub use cortex_m_rt::entry as __entry;
 
 /// The boot core's `main` for the node whose generated `boot_wiring.rs`
-/// is the module `$wiring`: its extension chain and their time limits.
+/// is the module `$wiring`: its extension chain and their time limits,
+/// and the node's I2C target address from the topology (`LINK_ADDR`).
 #[macro_export]
 macro_rules! boot {
     ($wiring:ident) => {
         #[$crate::__entry]
         fn main() -> ! {
-            $crate::run($wiring::BOOT_CHAIN, $wiring::BOOT_EXTENSIONS)
+            $crate::run(
+                $wiring::BOOT_CHAIN,
+                $wiring::BOOT_EXTENSIONS,
+                $wiring::LINK_ADDR,
+            )
         }
     };
 }
+
+/// Wakes the core from the link's wait (`boot_link`); nothing to do.
+#[cortex_m_rt::exception]
+fn SysTick() {}
+
+/// The longest the listen window and update mode sleep before they feed
+/// the watchdog again: a quarter of the period it runs with.
+const FEED_EVERY_MS: u32 = board::TRIAL_WDT_MS / 4;
 
 /// The board's `[boot]` values (build.rs, from the node's boot folder).
 #[allow(dead_code)]
@@ -157,8 +170,9 @@ impl Clock for Cycles {
 }
 
 /// One boot with `chain` (the node's boot extensions, in order; their
-/// time limits and observed events in `limits`).
-pub fn run<E: Extension>(chain: E, limits: &'static [BootExtension]) -> ! {
+/// time limits and observed events in `limits`); the link answers at
+/// `link_addr` (`None`: the board's default address).
+pub fn run<E: Extension>(chain: E, limits: &'static [BootExtension], link_addr: Option<u8>) -> ! {
     let p = embassy_stm32::init(CLOCK.hal_config());
     // Before the log is read and before any extension runs.
     iwdg::start(board::TRIAL_WDT_MS);
@@ -174,7 +188,7 @@ pub fn run<E: Extension>(chain: E, limits: &'static [BootExtension]) -> ! {
     };
     let mut flash = F401Flash::new(p.FLASH);
     // The link first: the listen window counts from the start.
-    if let Some(mut port) = open_link!(p) {
+    if let Some(mut port) = open_link!(p, link_addr, CYCLES_PER_US) {
         let handed_over = Log::load(&mut flash, &board::LOG)
             .and_then(|mut l| l.take_stay(&mut flash))
             == Ok(true);
@@ -182,7 +196,8 @@ pub fn run<E: Extension>(chain: E, limits: &'static [BootExtension]) -> ! {
             update_mode(port, flash, &mut clock, None)
         }
         let window = link::LISTEN_WINDOW_MS;
-        if let Some(stay) = listen(&mut port, &mut clock, window, &mut iwdg::feed) {
+        let feed = &mut iwdg::feed;
+        if let Some(stay) = listen(&mut port, &mut clock, window, FEED_EVERY_MS, feed) {
             update_mode(port, flash, &mut clock, Some(stay))
         }
         #[cfg(feature = "listen-time")]
@@ -294,7 +309,14 @@ fn update_mode(
         };
         let mut agent: Agent<_, _, _, BootCore> = Agent::for_writer(cfg, VERIFIER, store, chain);
         let first = stay.as_ref().map(Stay::frame);
-        serve(&mut port, &mut agent, clock, &mut iwdg::feed, first);
+        serve(
+            &mut port,
+            &mut agent,
+            clock,
+            FEED_EVERY_MS,
+            &mut iwdg::feed,
+            first,
+        );
     }
     SCB::sys_reset()
 }

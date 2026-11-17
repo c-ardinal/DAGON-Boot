@@ -213,6 +213,8 @@ fn agent<const N: usize>(
     let on_trial = on_trial(&store);
     let verifier = Ed25519Compact::new(crate::PUBKEY);
     let mut agent = Agent::new(config(tag), verifier, store, chain);
+    #[cfg(feature = "conform")]
+    agent.also_serves(dagon_conform::node::CMDS);
     agent.watchdog_taken(watchdog_period_ms(on_trial), guard.trial_policy());
     (agent, reader)
 }

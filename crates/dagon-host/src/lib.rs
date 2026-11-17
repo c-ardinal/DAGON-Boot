@@ -285,13 +285,14 @@ impl<T: Transport, C: HostClock> Host<T, C> {
     }
 
     /// Largest payload a request to `to` may carry: the uplink's, and for a
-    /// linked node also its link's and what fits inside a RELAY on the uplink.
+    /// linked node what the relay's tunnel over its link carries
+    /// ([`Relay::tunnel_mtu`]).
     pub(crate) fn link_max(&self, to: Target) -> usize {
         let up = self.transport.max_payload();
         match to {
             Target::Local => up,
-            Target::Linked { max_payload, .. } => usize::from(max_payload)
-                .min(up.saturating_sub(Relay::OVERHEAD_MAX + dagon_proto::frame_len(0))),
+            Target::Linked { max_payload, .. } => Relay::tunnel_mtu(up, usize::from(max_payload))
+                .saturating_sub(dagon_proto::frame_len(0)),
         }
     }
 
@@ -658,5 +659,32 @@ mod tests {
         ] {
             assert!(repeatable(c), "{c:?}");
         }
+    }
+
+    /// A non-OK RELAY status is the relay's own refusal; an OK one carries
+    /// the node's answer, whose status is the node's result.
+    #[test]
+    fn the_relays_refusal_and_the_nodes_answer_are_told_apart() {
+        let (seq, cmd) = (3, Cmd::Status);
+        let relay_refused = [Status::Arg as u8];
+        assert!(matches!(
+            relayed::<()>(&relay_refused, max_payload::I2C, seq, cmd),
+            Err(Error::Relay(Status::Arg))
+        ));
+
+        let mut node = [0u8; dagon_proto::frame_len(1)];
+        node[dagon_proto::HEADER_LEN] = Status::Arg as u8;
+        let n = dagon_proto::finish(&mut node, flags::RESP, seq, cmd as u8, 1).unwrap();
+        let mut outer = vec![0u8; 1 + Relay::RESP_OVERHEAD + n];
+        outer[0] = Status::Ok as u8;
+        let m = payload::encode_bulk_resp(&node[..n], &mut outer[1..]).unwrap();
+        let answer = relayed::<()>(&outer[..1 + m], max_payload::I2C, seq, cmd).unwrap();
+        assert!(matches!(
+            ok_body::<()>(cmd, &answer),
+            Err(Error::Rejected {
+                cmd: Cmd::Status,
+                status: Status::Arg
+            })
+        ));
     }
 }

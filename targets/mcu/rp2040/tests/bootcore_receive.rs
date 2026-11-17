@@ -214,7 +214,7 @@ fn request(seq: u8, cmd: Cmd, payload: &[u8]) -> Vec<u8> {
 }
 
 fn hello(seq: u8) -> Vec<u8> {
-    let mut p = [0u8; 8];
+    let mut p = [0u8; 32];
     let n = HelloReq {
         proto_ver: dagon_proto::PROTO_VERSION as u32,
         max_payload: max_payload::I2C as u16,
@@ -228,6 +228,7 @@ fn hello(seq: u8) -> Vec<u8> {
 fn reply(f: &[u8]) -> (u8, Status, Vec<u8>) {
     let (f, _) = Frame::decode(f, max_payload::USB).unwrap();
     let (st, body) = split_status(f.payload).unwrap();
+    let body = bulk_of(f.cmd, st, body);
     (f.cmd, st, body.to_vec())
 }
 
@@ -389,7 +390,14 @@ fn the_listen_window_and_stay_on_each_rp2040_link_kind() {
             (0, hello(1)),
             (at, request(2, Cmd::Stay, &[])),
             (at + 1, hello(3)),
-            (at + 2, request(4, Cmd::Reboot, &[reboot_mode::NORMAL])),
+            (
+                at + 2,
+                request(
+                    4,
+                    Cmd::Reboot,
+                    &wire(|b| dagon_proto::payload::encode_reboot(reboot_mode::NORMAL, b)),
+                ),
+            ),
         ]);
         let o = boot(link, &mut rp_flash(), hub().store().clone(), false);
         if !takes_part {
@@ -444,8 +452,14 @@ fn the_hand_over_is_taken_once_and_refused_without_a_link() {
         bl::request_update_mode(&mut flash, true).unwrap();
         let clock = Rc::new(Cell::new(0));
         let mut link = TestLink::new(kind, &clock);
-        link.incoming
-            .push_back((1, request(1, Cmd::Reboot, &[reboot_mode::NORMAL])));
+        link.incoming.push_back((
+            1,
+            request(
+                1,
+                Cmd::Reboot,
+                &wire(|b| dagon_proto::payload::encode_reboot(reboot_mode::NORMAL, b)),
+            ),
+        ));
         let o = boot(link, &mut flash, hub().store().clone(), false);
         assert_eq!((o.entry, o.step_ms), (Some(Entry::HandOver), 0), "{kind:?}");
         assert_eq!(o.exit, Some(Exit::Reboot), "{kind:?}");
@@ -491,7 +505,14 @@ fn update_mode_and_its_60_s_exit_on_each_rp2040_link_kind() {
         link.incoming.extend([
             (5, hello(1)),
             (10, request(2, Cmd::Stay, &[])),
-            (30_000, request(3, Cmd::Reboot, &[reboot_mode::UPDATE])),
+            (
+                30_000,
+                request(
+                    3,
+                    Cmd::Reboot,
+                    &wire(|b| dagon_proto::payload::encode_reboot(reboot_mode::UPDATE, b)),
+                ),
+            ),
         ]);
         let o = boot(link, &mut flash, hub().store().clone(), false);
         assert_eq!(o.exit, Some(Exit::Idle), "{kind:?}");
@@ -526,7 +547,14 @@ fn recovery_mode_never_leaves_by_itself_on_each_rp2040_link_kind() {
         // After the listen window, which takes no request but STAY.
         link.incoming.extend([
             (100, hello(1)),
-            (late, request(2, Cmd::Reboot, &[reboot_mode::NORMAL])),
+            (
+                late,
+                request(
+                    2,
+                    Cmd::Reboot,
+                    &wire(|b| dagon_proto::payload::encode_reboot(reboot_mode::NORMAL, b)),
+                ),
+            ),
         ]);
         let o = boot(link, &mut rp_flash(), hub().store().clone(), true);
         assert_eq!(
@@ -589,7 +617,10 @@ fn write_requests() -> Vec<Vec<u8>> {
     .encode(&mut p)
     .unwrap();
     push(Cmd::SetPending, &p[..n]);
-    push(Cmd::Reboot, &[reboot_mode::NORMAL]);
+    push(
+        Cmd::Reboot,
+        &wire(|b| dagon_proto::payload::encode_reboot(reboot_mode::NORMAL, b)),
+    );
     out
 }
 
@@ -629,5 +660,27 @@ fn a_write_through_update_and_recovery_mode_on_each_rp2040_link_kind() {
             let st = node.status();
             assert_eq!(st.slots[0].state, SlotState::Trying, "{kind:?} {recovery}");
         }
+    }
+}
+
+/// The request payload `enc` writes.
+#[allow(dead_code)]
+fn wire(enc: impl FnOnce(&mut [u8]) -> Result<usize, dagon_proto::FrameError>) -> Vec<u8> {
+    let mut b = vec![0u8; 1100];
+    let n = enc(&mut b).unwrap();
+    b.truncate(n);
+    b
+}
+
+/// The bulk of an OK RELAY or I2C_RAW response; any other body as it is.
+#[allow(dead_code)]
+fn bulk_of(cmd: u8, status: dagon_proto::Status, body: &[u8]) -> &[u8] {
+    match dagon_proto::Cmd::from_u8(cmd) {
+        Some(c @ (dagon_proto::Cmd::Relay | dagon_proto::Cmd::I2cRaw))
+            if status == dagon_proto::Status::Ok =>
+        {
+            dagon_proto::payload::parse_bulk_resp(c, body).unwrap()
+        }
+        _ => body,
     }
 }

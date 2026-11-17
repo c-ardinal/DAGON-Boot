@@ -32,10 +32,10 @@ fn relay(h: &mut SimRelay, l: u8, addr: u8, inner_len: usize) -> Status {
     let r = Relay {
         link: l,
         addr,
-        timeout_ms: 20,
+        timeout_ms: Some(20),
         inner: &inner,
     };
-    let mut p = vec![0u8; 4 + inner_len];
+    let mut p = vec![0u8; 16 + inner_len];
     let n = r.encode(&mut p).unwrap();
     ask(h, Cmd::Relay, &p[..n])
 }
@@ -109,11 +109,11 @@ fn i2c_raw_and_subctl_rules_match_the_sim() {
             read_len,
             data: &[0x00, 0xFF],
         };
-        let mut p = [0u8; 8];
+        let mut p = [0u8; 32];
         let n = r.encode(&mut p).unwrap();
         p[..n].to_vec()
     };
-    let subctl = |n: u8, b: u8| [n, b];
+    let subctl = |nrst: u8, boot0: u8| wire(|b| SubCtl { nrst, boot0 }.encode(b));
     // The ROM loader answers on the I2C link: its buffer is the limit.
     let i2c = RELAY_LINKS.iter().position(|l| l.id == I2C).unwrap();
     let (link, limit) = (RELAY_LINKS[i2c], RELAY_LINK_BUFFERS[i2c]);
@@ -134,7 +134,7 @@ fn i2c_raw_and_subctl_rules_match_the_sim() {
     let long = raw(limit as u16 + 1);
     assert_eq!(rule(&long, true), Some(Status::Arg));
     assert_eq!(ask(&mut h, Cmd::I2cRaw, &long), Status::Arg);
-    let mut long_write = vec![0u8; 4 + limit + 1];
+    let mut long_write = vec![0u8; 16 + limit + 1];
     let n = I2cRaw {
         read_len: 0,
         data: &vec![0xFF; limit + 1],
@@ -152,12 +152,29 @@ fn i2c_raw_and_subctl_rules_match_the_sim() {
     assert_eq!(rule(&raw(1), true), None);
     // Out-of-range SUBCTL values are refused by the shared parser.
     assert_eq!(SubCtl::parse(&[3, 0]), Err(Status::Arg));
-    assert_eq!(ask(&mut h, Cmd::SubCtl, &[3, 0]), Status::Arg);
+    assert_eq!(
+        ask(
+            &mut h,
+            Cmd::SubCtl,
+            &wire(|b| dagon_proto::payload::SubCtl { nrst: 3, boot0: 0 }.encode(b))
+        ),
+        Status::Arg
+    );
     // SHOW, which the relaying node's own agent answers: a text over 32
     // bytes is E_ARG in both.
-    let mut show = [0u8; 7 + 33];
-    show[1] = 1;
+    // Core: the phase; field 4 (key 0x08): a text of 33 bytes.
+    let mut show = vec![1, 0x08, 33];
+    show.extend([b'x'; 33]);
     assert_eq!(Show::parse(&show).err(), Some(Status::Arg));
     assert_eq!(ask(&mut h, Cmd::Show, &show), Status::Arg);
-    assert_eq!(ask(&mut h, Cmd::Show, &show[..7]), Status::Ok);
+    assert_eq!(ask(&mut h, Cmd::Show, &show[..1]), Status::Ok);
+}
+
+/// The request payload `enc` writes.
+#[allow(dead_code)]
+fn wire(enc: impl FnOnce(&mut [u8]) -> Result<usize, dagon_proto::FrameError>) -> Vec<u8> {
+    let mut b = vec![0u8; 1100];
+    let n = enc(&mut b).unwrap();
+    b.truncate(n);
+    b
 }

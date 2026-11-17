@@ -41,21 +41,28 @@ pub enum FormatError {
 }
 
 /// CRC-32 (IEEE 802.3: reflected polynomial 0xEDB88320, init and final XOR 0xFFFFFFFF).
+///
+/// Four bits per table step: a 64-byte table instead of 1 KiB in every
+/// image. On a node it checks state log records and frames, a few hundred
+/// bytes at most, where the byte-wide table's speed is not needed.
 pub fn crc32(data: &[u8]) -> u32 {
     let mut crc = 0xFFFF_FFFFu32;
     for &b in data {
-        crc = CRC_TABLE[((crc ^ b as u32) & 0xFF) as usize] ^ (crc >> 8);
+        crc ^= u32::from(b);
+        crc = CRC_TABLE[(crc & 0xF) as usize] ^ (crc >> 4);
+        crc = CRC_TABLE[(crc & 0xF) as usize] ^ (crc >> 4);
     }
     crc ^ 0xFFFF_FFFF
 }
 
-const CRC_TABLE: [u32; 256] = {
-    let mut table = [0u32; 256];
+/// The CRC of each 4-bit value, shifted through 4 bits.
+const CRC_TABLE: [u32; 16] = {
+    let mut table = [0u32; 16];
     let mut i = 0;
-    while i < 256 {
+    while i < 16 {
         let mut c = i as u32;
         let mut k = 0;
-        while k < 8 {
+        while k < 4 {
             c = if c & 1 != 0 {
                 0xEDB8_8320 ^ (c >> 1)
             } else {

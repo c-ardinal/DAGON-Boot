@@ -1,5 +1,6 @@
 //! SimRom: the STM32 system-memory boot loader on I2C (ST AN4221), as seen by
-//! an I2C controller at 7-bit address [`ROM_ADDR`].
+//! an I2C controller at the 7-bit address its MCU definition gives
+//! (`[rom_i2c] addr`, [`SimNode::rom_addr`](crate::SimNode::rom_addr)).
 //!
 //! Every frame is one I2C transaction in either direction. A write is a
 //! "send command" or "send data" frame. Each read returns the next reply
@@ -26,7 +27,6 @@ use crate::flash::SimFlash;
 use dagon_port::{BusError, Flash};
 use std::collections::VecDeque;
 
-pub const ROM_ADDR: u8 = 0x39;
 pub const ACK: u8 = 0x79;
 pub const NACK: u8 = 0x1F;
 pub const BUSY: u8 = 0x76;

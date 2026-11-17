@@ -213,11 +213,18 @@ fn i2c_raw_reaches_the_rom_loader_at_its_definitions_address() {
     node.rom_addr = at;
     let mut r = SimRelay::new(relaying_node());
     r.add_i2c(NODE_I2C_PORT, node, true);
-    assert_eq!(r.rom_addr, at, "the relay's recovery takes the wired node's");
+    assert_eq!(
+        r.rom_addr, at,
+        "the relay's recovery takes the wired node's"
+    );
     let (s, _) = ask(&mut r, &frame(Cmd::SubCtl, &[nrst::PULSE, boot0::HIGH]));
     assert_eq!(s, Status::Ok);
     let port = r.port(NODE_I2C_PORT, dagon_port::LinkKind::I2c);
-    assert_eq!(r.bus.scan(port), vec![0x3B], "the loader answers there only");
+    assert_eq!(
+        r.bus.scan(port),
+        vec![0x3B],
+        "the loader answers there only"
+    );
     let mut p = [0u8; 8];
     let n = I2cRaw {
         read_len: 1,

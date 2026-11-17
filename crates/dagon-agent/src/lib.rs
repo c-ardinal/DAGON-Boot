@@ -35,7 +35,6 @@
 #![forbid(unsafe_code)]
 
 mod agent;
-pub mod bootcore;
 mod images;
 pub mod snapshot;
 pub mod update_mode;

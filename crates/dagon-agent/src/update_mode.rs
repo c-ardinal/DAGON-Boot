@@ -1,7 +1,8 @@
 //! A boot core's receiving (DES-RB-030): the listen window right after its
 //! start, and update mode, where the boot core's session ([`Agent`] with
 //! [`crate::writer::BootCore`]) answers every request until REBOOT or
-//! [`EXIT_IDLE_MS`] without one. Between events both sleep in the link's
+//! [`EXIT_IDLE_MS`] without one, or recovery mode, which only REBOOT ends
+//! ([`Entry`] says which, and why). Between events both sleep in the link's
 //! wait ([`Port::wait`]: the MCU package wakes it on the link's interrupt
 //! or event and on a timer), never longer than the next deadline or the
 //! feed interval, and feed the watchdog at every wake; the MCU package
@@ -9,6 +10,7 @@
 
 use dagon_events::Clock;
 use dagon_format::SigVerifier;
+use dagon_proto::payload::mode;
 use dagon_proto::{flags, frame_len, Cmd, Frame};
 
 use crate::{Agent, AppChain, SlotStore, Writer, IDLE_TIMEOUT_MS};
@@ -18,6 +20,35 @@ pub const EXIT_IDLE_MS: u32 = 60_000;
 
 const US_PER_MS: u64 = 1_000;
 const STAY_LEN: usize = frame_len(0);
+
+/// Why the boot core serves its session.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Entry {
+    /// A STAY came in the listen window.
+    Stay,
+    /// The app handed over (REBOOT mode 1, an UPDATE_STAY the boot core
+    /// consumed with UPDATE_DONE).
+    HandOver,
+    /// Nothing can be started (the state log is unreadable or no slot
+    /// passes its check).
+    Recovery,
+}
+
+impl Entry {
+    /// HELLO's mode in this entry (`payload::mode`).
+    pub const fn mode(self) -> u8 {
+        match self {
+            Entry::Stay | Entry::HandOver => mode::UPDATE,
+            Entry::Recovery => mode::RECOVERY,
+        }
+    }
+
+    /// Whether the boot core leaves after [`EXIT_IDLE_MS`] without a
+    /// request. Recovery mode has nothing to start, so it stays.
+    pub const fn leaves_when_idle(self) -> bool {
+        !matches!(self, Entry::Recovery)
+    }
+}
 
 /// A link a boot core serves between sleeps.
 pub trait Port {
@@ -113,7 +144,29 @@ pub fn serve<P, S, X, V, W, C>(
     clock: &mut C,
     feed_every_ms: u32,
     feed: &mut impl FnMut(),
+    first: Option<&[u8]>,
+) -> Exit
+where
+    P: Port,
+    S: SlotStore,
+    X: AppChain,
+    V: SigVerifier,
+    W: Writer,
+    C: Clock,
+{
+    serve_in(port, agent, clock, feed_every_ms, feed, first, Entry::Stay)
+}
+
+/// [`serve`] in `entry`'s mode: recovery mode does not leave after
+/// [`EXIT_IDLE_MS`], only on REBOOT.
+pub fn serve_in<P, S, X, V, W, C>(
+    port: &mut P,
+    agent: &mut Agent<S, X, V, W>,
+    clock: &mut C,
+    feed_every_ms: u32,
+    feed: &mut impl FnMut(),
     mut first: Option<&[u8]>,
+    entry: Entry,
 ) -> Exit
 where
     P: Port,
@@ -151,10 +204,15 @@ where
             agent.abort();
             transfer = false;
         }
-        if quiet >= exit_us {
+        if entry.leaves_when_idle() && quiet >= exit_us {
             return Exit::Idle;
         }
-        let next = if transfer { abort_us } else { exit_us };
+        let next = match (transfer, entry.leaves_when_idle()) {
+            (true, _) => abort_us,
+            (false, true) => exit_us,
+            // Nothing to wait for but the next request.
+            (false, false) => quiet + u64::from(feed_every_ms) * US_PER_MS,
+        };
         sleep(port, next - quiet, feed_every_ms);
     }
 }

@@ -1,4 +1,4 @@
-import { decodeHelloResp, encodeHelloReq } from '../wasm/dagon.ts';
+import { decodeHelloResp, encodeHelloReq, wireVersion } from '../wasm/dagon.ts';
 import { CMD, MAX_PAYLOAD_USB, STATUS_OK, encodeFrame, newFrameStream, parseFrame } from './frame.ts';
 import { ROLE_HUB, type HelloResp } from './hello.ts';
 
@@ -85,7 +85,7 @@ export async function probeHello(port: SerialPort, waitMs = PROBE_MS): Promise<H
     return null;
   }
   try {
-    const req = encodeHelloReq({ protoVer: 1, maxPayload: MAX_PAYLOAD_USB });
+    const req = encodeHelloReq({ protoVer: wireVersion(), maxPayload: MAX_PAYLOAD_USB });
     await t.write(encodeFrame({ flags: 0, seq: 0, cmd: CMD.HELLO, payload: req }));
     const raw = await t.read(waitMs);
     const f = raw && parseFrame(raw);

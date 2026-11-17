@@ -1,4 +1,4 @@
-// DAGON link v1 frame: SOF DA 6F | ver 01 | flags | seq | cmd | len u16 LE |
+// DAGON link v2 frame: SOF DA 6F | ver 02 | flags | seq | cmd | len u16 LE |
 // payload | crc32 LE. Encoding, CRC and the stream cutter come from
 // dagon-wasm (crates/dagon-proto); this file only names fields and splits a
 // frame that has already been checked.

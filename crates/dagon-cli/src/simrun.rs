@@ -821,7 +821,7 @@ mod tests {
             lines[0].starts_with(&format!("hub: versions: stage0 {s0}; boot core A:")),
             "{lines:?}"
         );
-        assert!(lines[0].ends_with("; wire 1; mcu 0x0001"), "{lines:?}");
+        assert!(lines[0].ends_with("; wire 2; mcu 0x0001"), "{lines:?}");
         assert!(
             lines[1].contains(&format!("app A:Confirmed {OLD} (running)")),
             "{lines:?}"

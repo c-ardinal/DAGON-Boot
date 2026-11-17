@@ -3,6 +3,8 @@
 // file has to free WASM memory.
 import init, {
   FrameCutter,
+  PayloadWriter,
+  payload_read,
   WasmHost,
   frame_encode,
   hello_decode,
@@ -20,6 +22,7 @@ import init, {
   supported_boards as boards,
   version_older,
   version_text,
+  wire_version,
 } from './pkg/dagon_wasm.js';
 import type { HostLink, Target } from './pkg/dagon_wasm.js';
 import type { HelloReq, HelloResp } from '../serial/hello.ts';
@@ -206,6 +209,46 @@ export function encodeFrameBytes(flags: number, seq: number, cmd: number, payloa
   return frame_encode(flags, seq, cmd, payload);
 }
 
+/** A payload taken apart by dagon-proto's reader (a response's after its status byte). */
+export interface PayloadParts {
+  core: Uint8Array;
+  /** Field values by number; a field that was not sent is absent. */
+  fields: Map<number, Uint8Array>;
+  bulk: Uint8Array;
+}
+
+/** Reads the payload of a `cmd` request or response; throws on a malformed one. `numbers`: the fields to take. */
+export function readPayload(cmd: number, response: boolean, payload: Uint8Array, numbers: number[] = []): PayloadParts {
+  const p = payload_read(cmd, response, payload);
+  try {
+    const fields = new Map<number, Uint8Array>();
+    for (const n of numbers) {
+      const v = p.field(n);
+      if (v) fields.set(n, v);
+    }
+    return { core: p.core, fields, bulk: p.bulk };
+  } finally {
+    p.free();
+  }
+}
+
+/** Writes the payload of a `cmd` request or response with dagon-proto's writer; fields in rising number order. */
+export function writePayload(
+  cmd: number,
+  response: boolean,
+  parts: { core?: Uint8Array; fields?: [number, Uint8Array][]; bulk?: Uint8Array },
+): Uint8Array {
+  const w = new PayloadWriter(cmd, response);
+  try {
+    if (parts.core) w.core(parts.core);
+    for (const [n, v] of parts.fields ?? []) w.field(n, v);
+    if (parts.bulk) w.bulk(parts.bulk);
+    return w.finish();
+  } finally {
+    w.free();
+  }
+}
+
 /** Stream cutter: SOF search, length and CRC checks are dagon-proto's. */
 export interface FrameStream {
   /** Each complete, CRC-checked frame in `chunk` (and earlier partial bytes). */
@@ -316,6 +359,11 @@ export function supportedBoards(): Board[] {
 /** The board a node naming only `mcu` stands for; undefined when the MCU has none (several boards, none marked). */
 export function defaultBoard(mcu: string): string | undefined {
   return supportedBoards().find((b) => b.mcu === mcu && b.isDefault)?.id;
+}
+
+/** The wire version this page speaks (dagon_proto::PROTO_VERSION). */
+export function wireVersion(): number {
+  return wire_version();
 }
 
 export function encodeHelloReq(r: HelloReq): Uint8Array {

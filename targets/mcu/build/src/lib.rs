@@ -136,6 +136,12 @@ fn recovery_text(folder: &Path) -> Option<String> {
     path.is_file().then(|| read(&path))
 }
 
+/// `RECOVERY_ROM_ADDR` of the node whose boot folder is `folder`, as
+/// [`definition`] generates it.
+pub fn recovery_rom_addr_rs(folder: &Path) -> String {
+    recovery_rom_rs(recovery_text(folder).as_deref())
+}
+
 /// `RECOVERY_ROM_ADDR`, the I2C address of the ROM loader the relay's
 /// recovery reaches: `[rom_i2c] addr` of the recovery node's definition
 /// (`recovery`); `None` without one or for an MCU with no ROM loader.

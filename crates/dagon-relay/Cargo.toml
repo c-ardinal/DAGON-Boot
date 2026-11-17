@@ -10,7 +10,6 @@ dagon-proto = { path = "../dagon-proto" }
 embassy-futures = "0.1"
 # The link ports' channels.
 embassy-sync = "0.8"
-heapless = "0.9"
 
 [dev-dependencies]
 # The relay names no agent type: the agent crate reaches dagon-events, whose

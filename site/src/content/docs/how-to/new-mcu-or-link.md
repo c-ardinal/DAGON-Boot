@@ -27,6 +27,7 @@ description: "DAGONに新しいマイコンやリンクを足すときに、書�
 1. `crates/dagon-format/src/link.rs`の`with_link_kinds!`に1行足します。構成の名前とイベントのコードはここから来ます。
 2. そのリンクを持つマイコンで、`dagon_port::Link`（親機から子機へのバイト列なら`StreamPort`）を実装します。`targets/mcu/esp32s3/src/links.rs`が例です。
 3. マイコンの`LINK_KINDS`（`targets/mcu/rp2040/src/kinds.rs`）と、`dagon-mcu.toml`の`[links]`に足します。
-4. PC側で新しい媒体を使うときは、`crates/dagon-host/src/lib.rs`の`Transport`を実装します（`crates/dagon-cli/src/serial.rs`が例です）。
+4. DAGON Consoleでの表示の言葉を、`web/src/app/copy.ts`の`LINK_KIND_WORDS`に足します（`label`はキャンバスと表、`choice`はインスペクタの一覧）。足すまでDAGON Consoleのテストが失敗します。
+5. PC側で新しい媒体を使うときは、`crates/dagon-host/src/lib.rs`の`Transport`を実装します（`crates/dagon-cli/src/serial.rs`が例です）。
 
 DAGONのソースを変えずに転送とプロトコルを置き換えるには、拡張で`UpdateTransport`と`UpdateProtocol`のポートを提供します（[ライフサイクルイベントと拡張](/explanation/lifecycle-events/)の8.4）。

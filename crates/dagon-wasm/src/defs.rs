@@ -152,18 +152,18 @@ pub fn i2c_hzs(mcus: Vec<String>) -> Vec<u32> {
     })
 }
 
-/// The `[[link_port]]` name a new end of a `kind` link (`i2c`, `uart`, ...) on a node of `mcu`
+/// The `[[link_port]]` name a new end of a link of kind code `kind` on a node of `mcu`
 /// (and `board`, or none) starts at, `iface` the UART link's (`hw-uart0`, `pio-uart`); null when
 /// the MCU has no port of that kind (dagon_topology::default_port).
 #[wasm_bindgen]
 pub fn default_port(
     mcu: &str,
     board: Option<String>,
-    kind: &str,
+    kind: u8,
     iface: Option<String>,
 ) -> Option<String> {
-    use dagon_topology::schema::{LinkKind, UartIface};
-    let kind = *LinkKind::ALL.iter().find(|k| k.name() == kind)?;
+    use dagon_topology::schema::UartIface;
+    let kind = crate::kinds::of_code(kind)?;
     let iface = match iface.as_deref() {
         Some("hw-uart0") => Some(UartIface::HwUart0),
         Some("pio-uart") => Some(UartIface::PioUart),

@@ -248,6 +248,12 @@ pub const MCU: &[Requirement<McuCheck>] = &[
         check: relay_links,
     },
     Requirement {
+        engine: "relay firmware RAM check (scripts/relay_ram.py, CI)",
+        fields: &["relay.ram_bytes"],
+        rule: "[relay] only with [[relay_link]]; ram_bytes 1 up to the MCU's RAM (ram.size, when given)",
+        check: relay_firmware,
+    },
+    Requirement {
         engine: "topology check V-27, compiled topology (a link end's port index)",
         fields: &["link_port[].index"],
         rule: "index and name each used once; name a-z, 0-9 and '-'",
@@ -913,6 +919,19 @@ fn relay_links(m: &McuDef) -> Result<(), String> {
         )?;
     }
     Ok(())
+}
+
+fn relay_firmware(m: &McuDef) -> Result<(), String> {
+    let Some(r) = m.relay else {
+        return Ok(());
+    };
+    fail(m.relay_links.is_empty(), || {
+        "[relay] is for an MCU that relays: it has no [[relay_link]]".into()
+    })?;
+    let ram = m.ram.map_or(u32::MAX, |r| r.size);
+    fail(r.ram_bytes == 0 || r.ram_bytes > ram, || {
+        format!("relay.ram_bytes {} is outside 1-{ram}", r.ram_bytes)
+    })
 }
 
 fn hub_pins(b: &BoardDef, m: &McuDef) -> Result<(), String> {

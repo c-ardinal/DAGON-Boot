@@ -171,11 +171,13 @@ fn a_listed_link_of_a_kind_with_no_simulated_medium_is_unsupported() {
     );
 }
 
+/// I2C_RAW goes over the relay link of the wired node's port (its buffer is
+/// the limit), not the first I2C port.
 #[test]
 fn i2c_raw_reaches_the_wired_node_on_its_own_port() {
-    let mut r = SimRelay::new(relaying_node());
+    let mut r = SimRelay::with_definition(relaying_node(), &overridden());
     r.add_i2c("i2c0", f401(2, 200), false);
-    r.add_i2c("i2c1", f401(3, 100), true);
+    r.add_i2c("i2c2", f401(3, 100), true);
     let (s, _) = ask(&mut r, &frame(Cmd::SubCtl, &[nrst::PULSE, boot0::HIGH]));
     assert_eq!(s, Status::Ok);
     let mut p = [0u8; 8];
@@ -188,7 +190,28 @@ fn i2c_raw_reaches_the_wired_node_on_its_own_port() {
     assert_eq!(
         ask(&mut r, &frame(Cmd::I2cRaw, &p[..n])),
         (Status::Ok, vec![ACK]),
-        "the ROM loader of the node on i2c1 answers"
+        "the ROM loader of the node on i2c2 answers"
+    );
+}
+
+/// A wired node on a port the node does not relay over has no recovery
+/// link: I2C_RAW is unsupported there, as on the relay.
+#[test]
+fn i2c_raw_without_a_recovery_link_is_unsupported() {
+    let mut r = SimRelay::new(relaying_node());
+    r.add_i2c("i2c1", f401(3, 100), true);
+    let (s, _) = ask(&mut r, &frame(Cmd::SubCtl, &[nrst::PULSE, boot0::HIGH]));
+    assert_eq!(s, Status::Ok);
+    let mut p = [0u8; 8];
+    let n = I2cRaw {
+        read_len: 1,
+        data: &[cmd::GET, 0xFF],
+    }
+    .encode(&mut p)
+    .unwrap();
+    assert_eq!(
+        ask(&mut r, &frame(Cmd::I2cRaw, &p[..n])).0,
+        Status::Unsupported
     );
 }
 

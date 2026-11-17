@@ -45,6 +45,7 @@ include!(concat!(env!("OUT_DIR"), "/definition.rs"));
 pub use dagon_port::timeout::EraseRegion;
 
 pub mod bl;
+pub mod boot_receive;
 pub mod clock;
 pub mod image;
 pub mod kinds;
@@ -54,6 +55,8 @@ pub mod regions;
 #[cfg(target_os = "none")]
 pub mod arm;
 
+#[cfg(feature = "hal")]
+pub mod boot_links;
 #[cfg(feature = "usb")]
 pub mod exec;
 #[cfg(feature = "hal")]

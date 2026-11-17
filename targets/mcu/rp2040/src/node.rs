@@ -175,8 +175,8 @@ pub(crate) fn open<B: BoardDef, const N: usize>(
 static SERIAL: StaticCell<[u8; 16]> = StaticCell::new();
 
 /// The flash chip's 64-bit unique ID in hex: a per-board USB serial
-/// number. Call once.
-fn serial(flash: &mut RpFlash) -> &'static str {
+/// number, the same from the app and from the boot core. Call once.
+pub fn serial(flash: &mut RpFlash) -> &'static str {
     let s = SERIAL.init(hex(&flash.unique_id()));
     core::str::from_utf8(s).unwrap_or("0")
 }

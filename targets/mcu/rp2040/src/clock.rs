@@ -171,6 +171,16 @@ impl Setup {
     }
 }
 
+/// Whether this node's boot core receives on some link, as far as the
+/// running app can tell: the app runs the USB clock, so the board has the
+/// crystal the boot core's USB clock comes from too (an RP2040 app is
+/// reached over USB, which needs it). Without it the app tells of none and
+/// refuses the hand-over.
+#[cfg(feature = "hal")]
+pub fn boot_core_receives() -> bool {
+    embassy_rp::pac::CLOCKS.clk_usb_ctrl().read().enable()
+}
+
 #[cfg(feature = "hal")]
 impl From<Pll> for PllConfig {
     fn from(p: Pll) -> Self {

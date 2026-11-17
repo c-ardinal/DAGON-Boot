@@ -366,19 +366,19 @@ fn every_builtin_mcu_and_board_chooses_a_boot_loader_and_app_clock() {
         assert!(seen.contains(&w), "{w:?} in {seen:?}");
     }
     assert_eq!(seen.len(), want.len(), "{seen:?}");
-    // The RP2040 app on a crystal has the USB clock; the boot loader does not.
+    // On a crystal the RP2040 app and boot loader have the USB clock (the
+    // boot loader receives on USB in update and recovery mode); stage0 does
+    // not.
     let rp = reg.mcu("rp2040").unwrap();
     let b = reg.board("waveshare-rp2040-touch-lcd-1.28").unwrap();
-    assert!(rp
-        .clock_for(ClockStage::App, Some(b))
-        .unwrap()
-        .pll
-        .contains_key("usb_fbdiv"));
-    assert!(!rp
-        .clock_for(ClockStage::Bootcore, Some(b))
-        .unwrap()
-        .pll
-        .contains_key("usb_fbdiv"));
+    for (stage, usb) in [
+        (ClockStage::App, true),
+        (ClockStage::Bootcore, true),
+        (ClockStage::Stage0, false),
+    ] {
+        let pll = &rp.clock_for(stage, Some(b)).unwrap().pll;
+        assert_eq!(pll.contains_key("usb_fbdiv"), usb, "{stage:?}");
+    }
 }
 
 /// A stage0 still takes only its own table: its setups never change with

@@ -614,6 +614,53 @@ fn the_relay_serves_the_pc_over_its_links() {
     run(&clock, &bus, workers, scenario.as_mut());
 }
 
+/// A relay whose package has no recovery loader address (no node on its
+/// recovery lines, `RECOVERY_ROM_ADDR` None) is built without a recovery:
+/// SUBCTL and I2C_RAW answer E_UNSUPPORTED, and the bus is never touched.
+#[test]
+fn a_relay_without_a_recovery_answers_i2c_raw_unsupported() {
+    let (bus, _) = sample_bus();
+    let clock = VirtualClock::default();
+    let links = [LinkRoute {
+        link: LINKS[0],
+        port: None,
+    }];
+    let (requests, replies) = (Frames::new(), Frames::new());
+    let (own, _app) = agent();
+    let relay: Relay<'_, _, SimLines<'_>, _, _> = Relay {
+        agent: own,
+        links: &links,
+        recovery: None,
+        watch: NoWatchdog,
+        clock: clock.clone(),
+        config: Config::default(),
+    };
+    let up = ScriptedPc {
+        requests: &requests,
+        replies: &replies,
+        frame: Vec::new(),
+    };
+    let pc = Pc {
+        requests: &requests,
+        replies: &replies,
+        seq: Cell::new(0),
+    };
+    let scenario = async {
+        assert_eq!(pc.lines(true, nrst::PULSE).await, Status::Unsupported);
+        assert_eq!(pc.rom_get().await.0, Status::Unsupported);
+        assert!(
+            !bus.borrow_mut().sub_mut().unwrap().boot0(),
+            "lines untouched"
+        );
+    };
+    let serving = async move {
+        serve(relay, up).await;
+    };
+    let (mut serving, mut scenario) = (std::pin::pin!(serving), std::pin::pin!(scenario));
+    let workers: Vec<Pin<&mut dyn Future<Output = ()>>> = vec![serving.as_mut()];
+    run(&clock, &bus, workers, scenario.as_mut());
+}
+
 #[test]
 fn the_defaults_are_the_relays_values() {
     let c = Config::default();

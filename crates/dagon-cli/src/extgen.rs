@@ -779,6 +779,53 @@ mod tests {
         std::fs::remove_dir_all(&base).unwrap();
     }
 
+    /// A relay's boot folder holds the MCU definition, as the project
+    /// resolves it, of the node on its recovery link, listed in
+    /// `defs.sha256`; the relay's build generates its ROM loader's address
+    /// from it. A relay with no recovery link has none and gets `None`.
+    #[test]
+    fn a_relays_boot_folder_holds_its_recovery_nodes_definition() {
+        use dagon_topology::defs::boot_folder::{check_defs, recovery_rom_addr_rs, RECOVERY_FILE};
+        use dagon_topology::defs::Source;
+        let base = scratch("recovery");
+        let over = base.join("over.toml");
+        let moved = "format = 1\n\n[mcu_override.stm32f401re.rom_i2c]\naddr = 0x3B\n";
+        std::fs::create_dir_all(&base).unwrap();
+        std::fs::write(&over, moved).unwrap();
+        let reg = Registry::load(&[Source::Project(&over)]).unwrap();
+        let src = dagon_src();
+        let gen = |yaml: &str| {
+            let t = dagon_topology::parse_str(yaml).unwrap();
+            let p = ProjectRef {
+                base: &base,
+                config: "dagon.toml",
+                src: &src,
+                check_boot_graph: false,
+                link_addr: &|_| None,
+                recovery_mcu: &|id| crate::scaffold::recovery_mcu(&t, id).map(str::to_string),
+            };
+            write_nodes(&reg, &p, &t.nodes, &[], &[], &Extensions::default()).unwrap()
+        };
+        let hub = base.join("boot/hub");
+        let some = "pub const RECOVERY_ROM_ADDR: Option<u8> = Some(0x3b);\n";
+        let none = "pub const RECOVERY_ROM_ADDR: Option<u8> = None;\n";
+
+        let lines = gen(crate::scaffold::SAMPLE);
+        check_defs(&hub).unwrap();
+        let text = std::fs::read_to_string(hub.join(RECOVERY_FILE)).unwrap();
+        assert!(text.contains("addr = 0x3b") || text.contains("addr = 59"), "{text}");
+        assert!(recovery_rom_addr_rs(&hub).contains(some), "{lines:?}");
+        assert!(!base.join("boot/seg").join(RECOVERY_FILE).exists());
+        assert!(recovery_rom_addr_rs(&base.join("boot/seg")).contains(none));
+
+        // The hub no longer drives the F401's reset and boot lines.
+        gen(&crate::scaffold::SAMPLE.replace(", nrst: 18, boot: 28", ""));
+        check_defs(&hub).unwrap();
+        assert!(!hub.join(RECOVERY_FILE).exists());
+        assert!(recovery_rom_addr_rs(&hub).contains(none));
+        std::fs::remove_dir_all(&base).unwrap();
+    }
+
     #[test]
     fn gen_writes_the_boot_crate_wiring_fragments_and_the_map_per_node() {
         let base = scratch("ok");

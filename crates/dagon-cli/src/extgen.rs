@@ -333,6 +333,8 @@ pub struct ProjectRef<'a> {
     /// stamp ([`boot_graph_stamp`]); off only in tests that do not run
     /// cargo.
     pub check_boot_graph: bool,
+    /// A node's I2C target address from the topology, for its boot wiring.
+    pub link_addr: &'a dyn Fn(&str) -> Option<u8>,
 }
 
 /// The host check of node `id`'s boot crate (`boot/<id>/`): cargo
@@ -432,12 +434,13 @@ fn plan_files(
         known,
     )?);
     let dir = format!("nodes/{}/{GENERATED}", n.id);
+    let link_addr = (p.link_addr)(&n.id);
     let mut notes = Vec::new();
     for p in &plans {
         if p.image == Image::Bootcore {
             files.push((
                 format!("{dir}/boot_wiring.rs"),
-                gen::boot_wiring(&n.id, def, board, p, known)?,
+                gen::boot_wiring(&n.id, def, board, link_addr, p, known)?,
             ));
         }
         for (slot, space) in &p.memory {
@@ -696,6 +699,7 @@ mod tests {
             config: "dagon.toml",
             src: &src,
             check_boot_graph: false,
+            link_addr: &|_| None,
         };
         write_nodes(Registry::builtin(), &p, nodes, only, failed, cfg)
     }
@@ -946,6 +950,7 @@ mod tests {
             config: "dagon.toml",
             src: &src,
             check_boot_graph: true,
+            link_addr: &|_| None,
         };
         let lines = write_nodes(Registry::builtin(), &p, &hub, &[], &[], &cfg).unwrap();
         assert!(
@@ -1068,6 +1073,7 @@ mod tests {
             config: "dagon.toml",
             src: &src,
             check_boot_graph: true,
+            link_addr: &|_| None,
         };
         let none = Extensions::default();
         write_nodes(Registry::builtin(), &p, &hub, &[], &[], &none).unwrap();

@@ -75,6 +75,16 @@ fn reached(t: &Topology, id: &str) -> String {
         .collect()
 }
 
+/// The I2C target address node `id` answers at: its end's `addr` on the
+/// link it is reached over (`None`: the topology gives none, or the link
+/// is not I2C; the board's `[default_link] addr` applies then).
+pub(crate) fn link_addr(t: &Topology, id: &str) -> Option<u8> {
+    t.reached_over(id)
+        .filter(|l| l.kind == LinkKind::I2c)?
+        .end(id)?
+        .addr
+}
+
 /// wiring.rs for the node at `index` in `t.nodes`: constants only, from
 /// the topology, `flash_bytes` for a node whose crate comes from its MCU
 /// package, the node's erase regions (`regions`: its board's `[flash]`
@@ -145,6 +155,7 @@ pub fn wiring_rs(
          pub flash_bytes: Option<u32>,\n}}\n\n\
          pub const NODE: Node = Node {{\n    id: {id:?},\n    index: {index},\n    tag: {tag:?},\n    hub: {hub},\n    \
          max_attempts: {att},\n    link: {link},\n    flash_bytes: {flash},\n}};\n\n\
+         {addr}\n\
          /// The nodes this node's links reach, in the topology's link order.\n\
          pub const REACHED: &[Reached] = &[\n{reached}];\n\n{regions}{clock}",
         topo = t.name,
@@ -152,6 +163,7 @@ pub fn wiring_rs(
         tag = n.tag,
         att = n.max_attempts.unwrap_or(3),
         reached = reached(t, &n.id),
+        addr = dagon_extension::gen::link_addr_rs(link_addr(t, &n.id)),
         regions = dagon_topology::defs::codegen::erase_regions_rs(regions),
     )
 }
@@ -1031,6 +1043,7 @@ pub fn gen_project(config: &Path, only: &[String], force: bool) -> Result<Vec<St
         config: &config_name,
         src: &tables.dagon,
         check_boot_graph: true,
+        link_addr: &|id| link_addr(&t, id),
     };
     out.extend(crate::extgen::write_nodes(
         &reg,

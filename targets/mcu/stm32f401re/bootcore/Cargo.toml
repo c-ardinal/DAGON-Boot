@@ -26,11 +26,20 @@ lint = { features = ["", "slot-b"], env = { DAGON_TARGET_TAG = "lint", DAGON_BOO
 no-confirm = []
 # Linked for boot core slot B (a release carries a core for each slot).
 slot-b = ["dagon-mcu-stm32f401re/slot-b"]
+# Measuring build: once the listen window has ended without a STAY, keeps
+# the microseconds since the boot core's start in DAGON_LISTEN_US and
+# stays there (watchdog fed) instead of booting, for a probe to read.
+listen-time = []
 
 [dependencies]
 dagon-mcu-stm32f401re = { path = "..", default-features = false, features = ["hal", "image-bootcore"] }
 # Byte-loop memory copy and fill keep the image small.
 dagon-boot = { path = "../../../../crates/dagon-boot", features = ["small-mem"] }
+# Update mode: the shared session as the boot core's writer.
+dagon-agent = { path = "../../../../crates/dagon-agent" }
+dagon-proto = { path = "../../../../crates/dagon-proto" }
+# The session's published events, taken once without masking interrupts.
+static_cell = "2"
 dagon-core = { path = "../../../../crates/dagon-core" }
 dagon-ed25519 = { path = "../../../../crates/dagon-ed25519" }
 dagon-events = { path = "../../../../crates/dagon-events" }
@@ -40,14 +49,11 @@ embassy-stm32 = { version = "0.6.0", features = ["stm32f401re"] }
 cortex-m = { version = "0.7", features = ["critical-section-single-core"] }
 cortex-m-rt = "0.7"
 
-[dev-dependencies]
-# examples/size.rs: the update session the boot core serves, measured with it.
-dagon-agent = { path = "../../../../crates/dagon-agent" }
-dagon-proto = { path = "../../../../crates/dagon-proto" }
-
 [build-dependencies]
 # The board facts and the linked extensions' check from the node's boot folder.
 dagon-topology = { path = "../../../../crates/dagon-topology" }
+# The node's MCU definition in its boot folder (its listen window).
+toml = { version = "0.8", default-features = false, features = ["parse"] }
 
 [profile.release]
 opt-level = "z"

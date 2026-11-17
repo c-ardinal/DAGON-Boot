@@ -22,6 +22,10 @@ its boot LED, halt pattern and clock into the boot core. The image is what
 the signer takes from the ELF (`dagon_sign::image::payload_from_file`):
 from the lowest to the highest address its loadable segments fill.
 
+A boot core package may check its own images further: its
+`image_check.py`, run with the built ELF and the boot folder, prints what
+fails (an MCU's vector table, say).
+
 An image also fails when it links a name of the event catalogs (read from
 the Events page they generate): firmware decides on event codes and a
 generated transition table, and names are looked up only where a person
@@ -43,6 +47,8 @@ EXAMPLE = "size"
 # The page the event catalogs generate (dagon-catalog's docs test).
 EVENTS_PAGE = stage0_size.ROOT / "site" / "src" / "content" / "docs" / "en" / "reference" / "events.md"
 NAME_MIN = 6
+# A boot core package's own check of its built image (package_check).
+PACKAGE_CHECK = "image_check.py"
 
 
 def budget(mcu_id: str) -> int | None:
@@ -127,6 +133,22 @@ def check(elf_path: pathlib.Path, mcu_id: str, label: str = "") -> list[str]:
     return out
 
 
+def package_check(pkg: pathlib.Path, elf: pathlib.Path, folder: pathlib.Path,
+                  name: str) -> list[str]:
+    """The boot core package's own check of one built image, when it has
+    one (`<package>/image_check.py <elf> <boot folder>`: what only that
+    MCU's image can be checked for); each line it prints is a finding."""
+    hook = pkg / PACKAGE_CHECK
+    if not hook.is_file():
+        return []
+    r = subprocess.run([sys.executable, "-I", str(hook), str(elf), str(folder)],
+                       capture_output=True, text=True)
+    if r.returncode == 0:
+        return []
+    lines = (r.stdout + r.stderr).strip().splitlines() or ["failed"]
+    return [f"{name}: {line}" for line in lines]
+
+
 def mcus() -> list[str]:
     return [d.parent.name for d in sorted(MCU.glob("*/dagon-mcu.toml"))]
 
@@ -179,6 +201,7 @@ def build_all() -> None:
                 continue
             elf = out / target_of(mcu) / "release" / "examples" / EXAMPLE
             failed += check(elf, mcu, label)
+            failed += package_check(pkg, elf, folder, f"{mcu} boot core{label}")
     if failed:
         sys.exit("\n".join(failed))
 

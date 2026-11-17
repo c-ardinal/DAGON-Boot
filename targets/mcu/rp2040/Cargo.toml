@@ -72,7 +72,6 @@ dagon-format = { path = "../../../crates/dagon-format" }
 # tests/bootcore_receive.rs: the boot core's session over the simulator's
 # store, on the link kinds the definition lets the boot core receive on.
 dagon-events = { path = "../../../crates/dagon-events" }
-dagon-topology = { path = "../../../crates/dagon-topology" }
 dagon-ed25519 = { path = "../../../crates/dagon-ed25519", features = ["compact"] }
 ed25519-compact = { version = "2.6", default-features = false }
 
@@ -85,9 +84,12 @@ cortex-m = "0.7"
 name = "relay"
 required-features = ["relay"]
 
-# The host tests' simulator (std), kept out of the firmware examples.
+# The host tests' simulator and the MCU definitions they read (both std),
+# kept out of the firmware examples (an example builds with the
+# dev-dependencies: dagon-topology's serde_json pulls std into thumbv6m).
 [target.'cfg(not(target_os = "none"))'.dev-dependencies]
 dagon-sim = { path = "../../../crates/dagon-sim" }
+dagon-topology = { path = "../../../crates/dagon-topology" }
 
 [target.'cfg(target_os = "none")'.dev-dependencies]
 embassy-rp = { version = "0.10.0", features = ["rp2040", "time-driver", "critical-section-impl"] }

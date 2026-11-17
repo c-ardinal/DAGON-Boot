@@ -4,7 +4,8 @@ import { MockTransport, type MockOptions } from '../serial/mock.ts';
 import { LOCAL, type Target } from '../wasm/dagon.ts';
 import { ConnectError } from './connect.ts';
 import { ANNOUNCE, BAND } from './copy.ts';
-import { Operate } from './operate.svelte.ts';
+import { host_reconnect_ms } from '../wasm/pkg/dagon_wasm.js';
+import { HUB_RECONNECT_MS, Operate } from './operate.svelte.ts';
 import { SAMPLE_CONFIG } from './sample.ts';
 
 function session(opts: MockOptions = {}) {
@@ -19,6 +20,13 @@ function session(opts: MockOptions = {}) {
 }
 
 const settle = () => new Promise((r) => setTimeout(r, 0));
+
+describe('the reconnect wait', () => {
+  test("is dagon-host's one value, read through dagon-wasm", () => {
+    expect(HUB_RECONNECT_MS).toBe(host_reconnect_ms());
+    expect(host_reconnect_ms()).toBe(45_000);
+  });
+});
 
 // dagon-host (through dagon-wasm) against the in-memory hub.
 describe('operating mode against the in-memory hub', () => {

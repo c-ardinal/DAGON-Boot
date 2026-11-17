@@ -4,7 +4,7 @@
 # component of compat.toml with that version, and the version is at least what
 # the commits since the component's last tag require. Only a CLI tag
 # (cli-v<version>, with or without -rc.N) then builds the dagon
-# executables and, once every build has passed, publishes the GitHub release
+# executables, each with the Console page built from the tagged sources, and, once every build has passed, publishes the GitHub release
 # setup.sh and setup.ps1 read. A manual run builds and publishes nothing.
 name: release build
 
@@ -68,6 +68,13 @@ jobs:
           rustup default "$(sed -n 's/^channel = "\([^"]*\)".*/\1/p' rust-toolchain.toml)"
       - name: Rust target
         run: rustup target add ${{ matrix.target }}
+      # release.py builds the Console page from web/ before dagon, and the
+      # build stops if dagon would embed no page.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: wasm-pack (the page's WebAssembly)
+        run: npm install --global wasm-pack@0.15.1
       - name: Build the archive
         shell: bash
         # Through the environment, not pasted into the script: a tag name is

@@ -1,10 +1,10 @@
-"""Checks of scripts/page.py: the page's source hash covers what its
-WebAssembly embeds, the definitions under targets/ included.
+"""Checks of scripts/page.py and of the page it builds: the built page stays
+out of git, and the page takes its release key the way firmware does.
 
     python -m unittest discover -s scripts -p "test_*.py"
 """
+import subprocess
 import unittest
-from unittest import mock
 
 import page
 
@@ -16,7 +16,6 @@ class BuiltPage(unittest.TestCase):
     meet on it; releases and CI build it from web/."""
 
     def git(self, *args):
-        import subprocess
         return subprocess.run(["git", "-C", str(ROOT), *args], capture_output=True, text=True)
 
     def test_the_built_page_is_not_tracked(self):
@@ -33,52 +32,10 @@ class BuiltPage(unittest.TestCase):
         self.assertFalse(hasattr(page, "SOURCE"))
 
 
-class PageSources(unittest.TestCase):
-    def test_every_embedded_definition_file_is_a_source(self):
-        sources = set(page.source_files())
-        embedded = page.embedded_files()
-        self.assertIn(ROOT / "targets" / "mcu" / "esp32s3" / "partitions.csv", embedded)
-        for f in embedded:
-            self.assertTrue(f.is_file(), f)
-            self.assertIn(f, sources)
-
-    def test_a_definition_change_makes_the_page_stale(self):
-        target = ROOT / "targets" / "boards" / "nucleo-f401re" / "dagon-board.toml"
-        before = page.source_hash()
-        real = type(target).read_bytes
-
-        def read_bytes(p):
-            data = real(p)
-            return data + b"\n# changed\n" if p == target else data
-
-        with mock.patch.object(type(target), "read_bytes", read_bytes):
-            self.assertNotEqual(page.source_hash(), before)
-
-    def test_a_build_dependency_change_makes_the_page_stale(self):
-        target = ROOT / "targets" / "mcu" / "build" / "src" / "lib.rs"
-        self.assertIn(target, page.source_files())
-        before = page.source_hash()
-        real = type(target).read_bytes
-
-        def read_bytes(p):
-            data = real(p)
-            return data + b"\n// changed\n" if p == target else data
-
-        with mock.patch.object(type(target), "read_bytes", read_bytes):
-            self.assertNotEqual(page.source_hash(), before)
-
+class PageKey(unittest.TestCase):
     def test_the_page_embeds_its_key_through_the_shared_helper(self):
         build = (ROOT / "crates" / "dagon-wasm" / "build.rs").read_text(encoding="utf-8")
         self.assertIn("dagon_mcu_build::embed_pubkey()", build)
-
-    def test_paths_sort_with_regard_to_case_on_every_system(self):
-        names = ["web/a.ts", "web/README.md", "web/Z.ts", "web/e2e/b.ts"]
-        order = page.in_order(ROOT / n for n in names)
-        self.assertEqual([p.relative_to(ROOT).as_posix() for p in order], ["web/README.md", "web/Z.ts", "web/a.ts", "web/e2e/b.ts"])
-
-    def test_the_sources_are_listed_in_that_order(self):
-        web = [p for p in page.source_files() if p.relative_to(ROOT).parts[0] == "web"]
-        self.assertEqual(web, page.in_order(web))
 
 
 if __name__ == "__main__":

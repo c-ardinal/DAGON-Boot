@@ -1,13 +1,13 @@
 """Checks what the two built Console pages carry.
 
-    python site/scripts/pages.py                 # the page dagon serve hands out (crates/dagon-cli/page)
-    python site/scripts/pages.py --demo <dir>    # also the public demo page built into <dir>
+    python site/scripts/pages.py                 # the page dagon serve hands out (crates/dagon-cli/page, from scripts/page.py build)
+    python site/scripts/pages.py --demo <dir>    # only the public demo page built into <dir>
 
 The served page carries none of the demo: no repository fixture (the test-key
 release, the boot core) and no stand-in hub. Neither page carries the
 development stand-in for the agent routes, so neither names an agent product
 (the pages show DAGON; the served page learns the agents from serve). Exit 1
-names what was found.
+names what was found; a page folder without index.html is itself a finding.
 
 The public test key itself is not looked for: dagon-sign holds it to mark
 images signed with it, so its bytes are in every build of the WebAssembly.
@@ -24,6 +24,8 @@ STAND_IN = re.compile(rb'URLSearchParams\(["`]sim')
 
 
 def served_problems(page=SERVED):
+    if not (page / "index.html").is_file():
+        return [f"{page}: no built page (python scripts/page.py build)"]
     out = []
     for p in sorted(page.rglob("*")):
         if not p.is_file():
@@ -44,8 +46,9 @@ def demo_problems(page):
 
 
 if __name__ == "__main__":
-    found = served_problems()
     if "--demo" in sys.argv:
-        found += demo_problems(pathlib.Path(sys.argv[sys.argv.index("--demo") + 1]))
+        found = demo_problems(pathlib.Path(sys.argv[sys.argv.index("--demo") + 1]))
+    else:
+        found = served_problems()
     print("\n".join(found) or "the pages carry only what they should")
     sys.exit(1 if found else 0)

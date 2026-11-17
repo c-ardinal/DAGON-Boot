@@ -1,7 +1,8 @@
 """Builds the dagon executable for one target into a release archive.
 
 The archive holds `dagon` (`dagon.exe` on Windows) with the browser page
-built in (crates/dagon-cli/page, checked to be up to date first). It is
+built in: the page is built from this tree first (scripts/page.py), and the
+build stops if dagon would embed no page (DAGON_REQUIRE_PAGE=1). It is
 named with the component and version as cargo-binstall expects it
 (crates/dagon-cli/Cargo.toml): `dagon-cli-<version>-<target>.tar.gz`, or
 `.zip` for Windows, next to a `.sha256` file. The version is the cli entry
@@ -17,6 +18,7 @@ does not name the cli at the compat.toml version stops it before any build.
 import argparse
 import hashlib
 import importlib.util
+import os
 import pathlib
 import subprocess
 import sys
@@ -29,9 +31,17 @@ bc = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(bc)
 
 
-def run(cmd):
+def run(cmd, env=None):
     print("+", " ".join(str(c) for c in cmd), flush=True)
-    subprocess.run([str(c) for c in cmd], check=True, cwd=ROOT)
+    subprocess.run([str(c) for c in cmd], check=True, cwd=ROOT, env=env)
+
+
+def build(target):
+    """Builds the page, then dagon for `target` with that page embedded."""
+    run([sys.executable, "-I", ROOT / "scripts" / "page.py", "build"])
+    env = {k: v for k, v in os.environ.items() if k != "DAGON_WEB_DIST"}
+    env["DAGON_REQUIRE_PAGE"] = "1"
+    run(["cargo", "build", "--release", "--locked", "-p", "dagon-cli", "--target", target], env)
 
 
 def host_target():
@@ -63,8 +73,7 @@ def main():
     target = a.target or host_target()
     windows = "windows" in target
 
-    run([sys.executable, "-I", ROOT / "scripts" / "page.py", "check"])
-    run(["cargo", "build", "--release", "--locked", "-p", "dagon-cli", "--target", target])
+    build(target)
 
     exe = ROOT / "target" / target / "release" / ("dagon.exe" if windows else "dagon")
     a.out.mkdir(parents=True, exist_ok=True)

@@ -29,7 +29,8 @@ slot-b = ["dagon-mcu-stm32f401re/slot-b"]
 
 [dependencies]
 dagon-mcu-stm32f401re = { path = "..", default-features = false, features = ["hal", "image-bootcore"] }
-dagon-boot = { path = "../../../../crates/dagon-boot" }
+# Byte-loop memory copy and fill keep the image small.
+dagon-boot = { path = "../../../../crates/dagon-boot", features = ["small-mem"] }
 dagon-core = { path = "../../../../crates/dagon-core" }
 dagon-ed25519 = { path = "../../../../crates/dagon-ed25519" }
 dagon-events = { path = "../../../../crates/dagon-events" }

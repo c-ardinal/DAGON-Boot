@@ -284,9 +284,9 @@ impl Extension for Probe {
     }
     fn on_event(&mut self, e: &Event<'_>, _: &Ctx<'_>) {
         let k = if e.is_replayed() {
-            format!("replay:{}", e.kind())
+            format!("replay:{}", kind_name(e))
         } else {
-            e.kind().to_string()
+            kind_name(e).to_string()
         };
         self.0.borrow_mut().push(k);
     }
@@ -698,4 +698,12 @@ fn version_leaves_out_what_the_node_cannot_read() {
     let v = version(&mut n);
     assert_eq!((v.stage0, v.boot_core, v.core_slots), (None, None, None));
     assert!(v.app_slots.is_some() && v.mcu_id.is_some());
+}
+
+/// The kind's name as a log display shows it, looked up from its code.
+fn kind_name(e: &dagon_events::Event<'_>) -> &'static str {
+    [&dagon_agent::MACHINES, &dagon_events::MACHINES]
+        .iter()
+        .find_map(|m| m.entry(e.layer(), e.kind()))
+        .map_or("?", |x| x.kind)
 }

@@ -1,8 +1,8 @@
 //! The DAGON wire protocol mapped onto the agent's machines.
 
 use dagon_events::{
-    Accept, Catalog, Clock, Composed, Delay, EventRecord, Extension, Health, Published,
-    RebootRequest, Refused, Sink, Snapshot, TrialInfo, Unreadable, UpdateOffer,
+    Accept, Clock, Composed, Delay, EventRecord, Extension, Health, Published, RebootRequest,
+    Refused, Replay, Sink, Snapshot, TrialInfo, Unreadable, UpdateOffer,
 };
 use dagon_format::header::{self, image_kind, slot_binding, ImageHeader, HEADER_SIZE};
 use dagon_format::{FormatError, Sha256, SigVerifier};
@@ -40,7 +40,7 @@ pub trait AppChain: Sink {
     fn accept_update(&mut self, o: &UpdateOffer) -> Accept;
     fn allow_reboot_now(&mut self, r: &RebootRequest) -> Delay;
     fn self_check(&mut self, t: &TrialInfo) -> Health;
-    fn replay(&mut self, machines: &[Catalog], rec: &EventRecord) -> Result<(), Unreadable>;
+    fn replay(&mut self, machines: &[Replay], rec: &EventRecord) -> Result<(), Unreadable>;
 }
 
 impl<P: Snapshot, const N: usize, B: Extension, U: Extension, C: Clock> AppChain
@@ -55,7 +55,7 @@ impl<P: Snapshot, const N: usize, B: Extension, U: Extension, C: Clock> AppChain
     fn self_check(&mut self, t: &TrialInfo) -> Health {
         Composed::self_check(self, t)
     }
-    fn replay(&mut self, machines: &[Catalog], rec: &EventRecord) -> Result<(), Unreadable> {
+    fn replay(&mut self, machines: &[Replay], rec: &EventRecord) -> Result<(), Unreadable> {
         Composed::replay(self, machines, rec)
     }
 }

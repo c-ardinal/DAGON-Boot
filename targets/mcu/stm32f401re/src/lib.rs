@@ -39,10 +39,10 @@ pub mod trial;
 /// APP slot, or the boot core's boot core slot.
 pub const LINKED_SLOT: u8 = if cfg!(feature = "slot-b") { 1 } else { 0 };
 
-#[cfg(feature = "node")]
-pub mod exec;
 #[cfg(feature = "hal")]
 pub mod boot_link;
+#[cfg(feature = "node")]
+pub mod exec;
 #[cfg(feature = "hal")]
 pub mod flash;
 #[cfg(feature = "node")]

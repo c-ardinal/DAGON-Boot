@@ -52,6 +52,7 @@ is what `dagon new` generates, see `../../boards/nucleo-f401re/template`):
 #![no_main]
 
 mod app;
+mod wiring;
 
 use dagon_board_nucleo_f401re::{self as board, Board, BoardDef};
 use dagon_mcu_stm32f401re::clock::Setup;
@@ -82,7 +83,9 @@ static GUARD: Guard<TASKS> = Guard::new(node::levels::<TASKS>(), Trial::NeverFee
 async fn main(spawner: Spawner) {
     let (dagon, io) = Board::split(embassy_stm32::init(CLOCK.hal_config()));
     let tag = dagon_mcu_stm32f401re::target_tag!();
-    board::start(spawner, dagon, &GUARD, tag, app::dagon(), UPLINK).ok();
+    // The node's I2C address from the 構成 (dagon gen writes it into
+    // wiring.rs), else the board's [default_link] addr.
+    board::start(spawner, dagon, &GUARD, tag, app::dagon(), UPLINK, wiring::LINK_ADDR).ok();
     app::start(spawner, io, &GUARD, node::APP_TASKS);
 }
 ```

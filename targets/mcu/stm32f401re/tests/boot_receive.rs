@@ -255,7 +255,9 @@ fn a_stay_within_the_listen_window_keeps_the_boot_core() {
     let now = Rc::new(Cell::new(0));
     let mut hub = Hub::new(now.clone(), vec![(ms(2), stay(7))]);
     let mut feeds = 0;
-    let kept = listen(&mut hub, &mut clock(&now), 50, FEED_EVERY_MS, &mut || feeds += 1);
+    let kept = listen(&mut hub, &mut clock(&now), 50, FEED_EVERY_MS, &mut || {
+        feeds += 1
+    });
     assert_eq!(kept.as_ref().map(|s| s.frame().to_vec()), Some(stay(7)));
     assert_eq!(now.get(), ms(2), "the window ended at the STAY");
     assert!(feeds > 0, "the watchdog is fed while the window is open");
@@ -342,7 +344,14 @@ fn update_mode_ends_60_s_after_the_last_request() {
         last_feed = now.get();
         fed.set(fed.get() + 1);
     };
-    let exit = serve(&mut hub, &mut agent, &mut clock(&now), FEED_EVERY_MS, &mut feed, None);
+    let exit = serve(
+        &mut hub,
+        &mut agent,
+        &mut clock(&now),
+        FEED_EVERY_MS,
+        &mut feed,
+        None,
+    );
     assert_eq!(exit, Exit::Idle);
     let ended = now.get();
     assert_eq!(ended, ms(90_000));
@@ -352,7 +361,12 @@ fn update_mode_ends_60_s_after_the_last_request() {
         "longest gap between feeds {longest_gap} us"
     );
     let most = 2 * (90_000 / FEED_EVERY_MS as usize) + 10;
-    assert!(hub.polls <= most && hub.waits <= most, "{} polls, {} waits", hub.polls, hub.waits);
+    assert!(
+        hub.polls <= most && hub.waits <= most,
+        "{} polls, {} waits",
+        hub.polls,
+        hub.waits
+    );
 }
 
 /// REBOOT ends update mode once the hub has read its reply whole.
@@ -363,7 +377,14 @@ fn reboot_ends_update_mode_once_its_reply_is_read() {
     let reboot = frame(2, Cmd::Reboot, &[reboot_mode::NORMAL]);
     let mut hub = Hub::new(now.clone(), vec![(ms(5), reboot)]);
     let mut agent = session(&f);
-    let exit = serve(&mut hub, &mut agent, &mut clock(&now), FEED_EVERY_MS, &mut || {}, None);
+    let exit = serve(
+        &mut hub,
+        &mut agent,
+        &mut clock(&now),
+        FEED_EVERY_MS,
+        &mut || {},
+        None,
+    );
     assert_eq!(exit, Exit::Reboot);
     assert_eq!(answer(hub.replies[0].as_ref().unwrap()).0, Status::Ok);
     assert!(now.get() < ms(1_000));

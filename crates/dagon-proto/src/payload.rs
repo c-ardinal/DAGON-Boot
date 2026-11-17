@@ -11,8 +11,17 @@ pub mod role {
     pub const NODE: u8 = 1;
 }
 
+/// HELLO `mode`: what answers.
 pub mod mode {
+    /// The app's agent.
     pub const APP: u8 = 0;
+    /// The boot core in update mode: it entered by STAY in its listen
+    /// window or by the app's REBOOT mode 1, and takes a normal write.
+    pub const UPDATE: u8 = 1;
+    /// The boot core in recovery mode: its state log is unreadable or no
+    /// app may start; it takes a normal write and starts no app by itself.
+    pub const RECOVERY: u8 = 2;
+    /// The recovery agent of a vendor-stage2 MCU.
     pub const AGENT: u8 = 3;
 }
 
@@ -48,8 +57,14 @@ pub fn parse_status_req(b: &[u8]) -> Result<u8, Status> {
 /// Image header length announced in XFER_BEGIN for `target::APP`.
 pub const IMAGE_HDR_LEN: u16 = 512;
 
+/// REBOOT `mode`.
 pub mod reboot_mode {
     pub const NORMAL: u8 = 0;
+    /// Restart into the boot core's update mode: the app writes
+    /// UPDATE_STAY to the state log, then resets; a boot core in update
+    /// mode stays there. A node whose boot core has no update mode answers
+    /// `Status::Unsupported`; one that predates the mode, `Status::Arg`.
+    pub const UPDATE: u8 = 1;
 }
 
 /// ENTER_ROM `method`.
@@ -866,6 +881,32 @@ mod tests {
             StatusResp::parse(&b[..StatusResp::LEN - 1]),
             Err(Status::Arg)
         );
+    }
+
+    /// HELLO's modes (0 app, 1 update, 2 recovery, 3 agent) each round
+    /// trip; REBOOT mode 1 asks for update mode.
+    #[test]
+    fn hello_modes_and_reboot_into_update_mode() {
+        let modes = [mode::APP, mode::UPDATE, mode::RECOVERY, mode::AGENT];
+        assert_eq!(modes, [0, 1, 2, 3]);
+        let mut b = [0u8; HelloResp::LEN];
+        for m in modes {
+            let h = HelloResp {
+                proto_ver: 1,
+                role: role::NODE,
+                port_kind: 1,
+                mcu_id: 2,
+                mode: m,
+                active_version: Version::new(1, 0, 0),
+                trial: false,
+                key_id: [7; 8],
+                max_payload: 256,
+            };
+            assert_eq!(h.encode(&mut b).unwrap(), HelloResp::LEN);
+            assert_eq!(HelloResp::parse(&b), Ok(h));
+        }
+        assert_eq!((reboot_mode::NORMAL, reboot_mode::UPDATE), (0, 1));
+        assert_eq!(parse_u8(&[reboot_mode::UPDATE]), Ok(reboot_mode::UPDATE));
     }
 
     #[test]

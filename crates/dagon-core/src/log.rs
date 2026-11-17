@@ -10,7 +10,9 @@
 //! SNAPSHOT carrying the confirmed slot and the attempts) and writes that
 //! face's header with `generation + 1` last, for each target. Until that header is written the
 //! old face stays the valid one, so a cut compaction is simply redone. The
-//! rolled-back marker of STATUS is not carried over.
+//! rolled-back marker of STATUS is not carried over. An unconsumed
+//! UPDATE_STAY is carried over too, so a hand-over to the boot core's
+//! update mode survives a compaction.
 
 use dagon_format::statelog::{
     kind, reason, slot, target, FaceHeader, Record, FACE_HEADER_SIZE, RECORD_SIZE,
@@ -182,6 +184,11 @@ pub const fn trial_room(max: u8) -> u32 {
     2 * (max as u32 + 3)
 }
 
+/// Records the app reserves beyond its own room when it writes an
+/// UPDATE_STAY ([`Log::request_stay`]): the stay and the boot core's
+/// UPDATE_DONE.
+pub const STAY_ROOM: u32 = 2;
+
 /// Where the two log faces live.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct LogLayout {
@@ -211,6 +218,9 @@ pub struct Log {
     pub state: LogState,
     /// The boot core slots (empty in a log that holds no boot core records).
     pub core: LogState,
+    /// An UPDATE_STAY no UPDATE_DONE has consumed: the boot core enters
+    /// update mode at its start.
+    pub update_stay: bool,
     pub generation: u32,
     layout: LogLayout,
     /// Index of the active face in `layout.faces`.
@@ -240,6 +250,7 @@ impl Log {
         let mut log = Log {
             state: LogState::default(),
             core: LogState::default(),
+            update_stay: false,
             generation,
             layout: *layout,
             face,
@@ -328,6 +339,41 @@ impl Log {
         }
     }
 
+    /// The app's hand-over to its boot core's update mode (REBOOT mode
+    /// 1): makes room for `keep` records (the room the store keeps for
+    /// trials) and [`STAY_ROOM`], compacting now when the face lacks it
+    /// (the app runs, no trial is waiting), then appends UPDATE_STAY. A
+    /// stay already unconsumed is left as it is.
+    pub fn request_stay<F: Flash>(&mut self, flash: &mut F, keep: u32) -> Result<(), LogError> {
+        if self.update_stay {
+            return Ok(());
+        }
+        self.reserve(flash, keep + STAY_ROOM)?;
+        self.append_marker(flash, kind::UPDATE_STAY)
+    }
+
+    /// The boot core's start: `Ok(true)` when an UPDATE_STAY was waiting,
+    /// now consumed by an UPDATE_DONE written into the room the app made
+    /// for it. Never compacts or erases: a face without room is
+    /// `LogError::Full` and the stay stays unconsumed.
+    pub fn take_stay<F: Flash>(&mut self, flash: &mut F) -> Result<bool, LogError> {
+        if !self.update_stay {
+            return Ok(false);
+        }
+        self.append_marker(flash, kind::UPDATE_DONE)?;
+        Ok(true)
+    }
+
+    /// Appends a node-wide record (UPDATE_STAY, UPDATE_DONE) in place.
+    fn append_marker<F: Flash>(&mut self, flash: &mut F, k: u8) -> Result<(), LogError> {
+        let none = SlotRef {
+            slot: slot::NONE,
+            version: Version::default(),
+            digest16: [0; 16],
+        };
+        self.append_in_place(flash, target::APP, k, none, reason::NONE)
+    }
+
     fn append_for<F: Flash>(
         &mut self,
         flash: &mut F,
@@ -350,6 +396,11 @@ impl Log {
     fn fold(&mut self, r: &Record) {
         self.state = self.state.apply(r);
         self.core = self.core.apply_core(r);
+        match r.kind {
+            kind::UPDATE_STAY => self.update_stay = true,
+            kind::UPDATE_DONE => self.update_stay = false,
+            _ => {}
+        }
     }
 
     fn face_end(&self) -> u32 {
@@ -389,6 +440,7 @@ impl Log {
 
     fn copy_to_other_face<F: Flash>(&mut self, flash: &mut F) -> Result<(), LogError> {
         let carried = [(target::BOOTCORE, self.core), (target::APP, self.state)];
+        let stay = self.update_stay;
         let generation = self.generation.wrapping_add(1);
         self.face ^= 1;
         let face = self.layout.faces[self.face];
@@ -396,6 +448,7 @@ impl Log {
         self.next = Some(face + FACE_HEADER_SIZE as u32);
         self.state = LogState::default();
         self.core = LogState::default();
+        self.update_stay = false;
         for (t, s) in carried {
             let carry = [
                 s.confirmed
@@ -411,6 +464,9 @@ impl Log {
                 self.fold(&r);
                 self.advance(addr);
             }
+        }
+        if stay {
+            self.append_marker(flash, kind::UPDATE_STAY)?;
         }
         flash.write(face, &FaceHeader { generation }.to_bytes())?;
         self.generation = generation;
@@ -548,6 +604,7 @@ mod tests {
         // for two: the copy runs out of space.
         let mut log = Log {
             core: LogState::default(),
+            update_stay: false,
             state: LogState {
                 confirmed: Some(a),
                 pending: Some(b),

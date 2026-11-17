@@ -71,7 +71,8 @@ fn session() -> ! {
         port_kind: port_kind::SELF_BOOT,
         target_tag: checked_tag(TARGET_TAG),
         role: role::NODE,
-        mode: mode::APP,
+        // Update or recovery, chosen at run time: both writing paths link.
+        mode: core::hint::black_box(mode::UPDATE),
         max_payload: max_payload::USB as u16,
         trial_attempts: TRIAL_ATTEMPTS,
     };

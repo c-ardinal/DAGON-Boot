@@ -1,0 +1,151 @@
+//! The boot core's side of update mode in the simulator: on each link kind
+//! of each MCU the boot core listens for the window its definition gives,
+//! and the RP2040's boot core writes the app through the same session the
+//! app's agent runs.
+
+use dagon_agent::writer::BootCore;
+use dagon_agent::Agent;
+use dagon_ed25519::Ed25519Compact;
+use dagon_events::{compose, Bounds, Composed, Layer, Nop, Published, Watchdog};
+use dagon_proto::payload::{mode, target, SetPending, XferBegin, XferChunk};
+use dagon_proto::{split_status, Cmd, Frame, Status};
+use dagon_sim::{hub_config, listen, sample, Layout, Run, SimFlash, SimNode};
+use dagon_topology::defs::Registry;
+
+/// The listen window on every link kind of the three MCUs: the first STAY
+/// the hub sends after it releases the node's reset (design: 2 ms after,
+/// then every 5 ms) arrives within the window on a kind that takes part,
+/// and keeps the boot core in update mode; on a kind that does not (USB,
+/// which enumerates first) the boot core opens no window, and a STAY
+/// after the window is not taken. A project's window of 0 opens none.
+#[test]
+fn the_listen_window_on_each_link_kind_of_the_three_mcus() {
+    let mut seen = Vec::new();
+    for m in Registry::builtin().mcus() {
+        let r = m.boot_receive.as_ref().expect("the boot stage receives");
+        for (&kind, &takes_part) in &r.kinds {
+            let at = listen::first_stay_ms(kind).expect("the simulator has the kind");
+            let window = m.listen_window_ms(kind);
+            assert_eq!(listen::stays(m, kind, at), takes_part, "{} {kind:?}", m.id);
+            if takes_part {
+                assert_eq!(window, r.listen_window_ms, "{} {kind:?}", m.id);
+                let late = f64::from(window) + 1.0;
+                assert!(!listen::stays(m, kind, late), "{} {kind:?}: late", m.id);
+            } else {
+                assert_eq!(window, 0, "{} {kind:?}", m.id);
+            }
+            let mut none = m.clone();
+            none.boot_receive.as_mut().unwrap().listen_window_ms = 0;
+            assert!(!listen::stays(&none, kind, 0.0), "{} {kind:?}: 0 ms", m.id);
+            seen.push(format!("{}/{}", m.id, kind.name()));
+        }
+    }
+    seen.sort();
+    assert_eq!(
+        seen,
+        [
+            "esp32s3/uart",
+            "esp32s3/usb-cdc",
+            "rp2040/i2c",
+            "rp2040/uart",
+            "rp2040/usb-cdc",
+            "stm32f401re/i2c"
+        ]
+    );
+}
+
+type Chain = Composed<&'static Published<(), 4>, Nop, Nop, fn() -> u64>;
+
+fn chain() -> Chain {
+    let events: &'static mut Published<(), 4> = Box::leak(Box::new(Published::new()));
+    let now: fn() -> u64 = || 0;
+    compose(
+        Layer::App,
+        events,
+        Nop,
+        Nop,
+        Bounds::new(now, Watchdog::new(4000, 8000)),
+    )
+}
+
+fn call(
+    a: &mut Agent<dagon_sim::SimStore, Chain, Ed25519Compact, BootCore>,
+    seq: u8,
+    cmd: Cmd,
+    p: &[u8],
+) -> Status {
+    let mut buf = [0u8; 1200];
+    let n = Frame {
+        flags: 0,
+        seq,
+        cmd: cmd as u8,
+        payload: p,
+    }
+    .encode(&mut buf)
+    .unwrap();
+    let reply = a.handle(&buf[..n]).expect("reply");
+    let (f, _) = Frame::decode(reply.frame, 1200).unwrap();
+    split_status(f.payload).unwrap().0
+}
+
+/// The RP2040's boot core, in update mode, writes the app into its
+/// confirmed slot through the shared session and sets it pending; the
+/// node's next start tries it.
+#[test]
+fn the_rp2040_boot_core_writes_the_app() {
+    let mut node = SimNode::new(
+        hub_config(),
+        sample::PUBKEY,
+        SimFlash::rp2040_2m(7),
+        Layout::RP2040_HUB,
+    );
+    node.provision(sample::HUB_1_0_0, 0).unwrap();
+    assert_eq!(node.run(), Run::App(0));
+    let cfg = dagon_agent::Config {
+        mode: mode::UPDATE,
+        ..hub_config()
+    };
+    let store = node.store().clone();
+    let mut core: Agent<_, _, _, BootCore> =
+        Agent::for_writer(cfg, Ed25519Compact::new(sample::PUBKEY), store, chain());
+    let img = sample::HUB_1_0_0;
+    let mut p = [0u8; 1100];
+    let n = XferBegin {
+        target: target::APP,
+        slot: 0,
+        total_len: img.len() as u32,
+        hdr_len: 512,
+    }
+    .encode(&mut p)
+    .unwrap();
+    let mut seq = 0u8;
+    let mut ok = |core: &mut Agent<_, _, _, BootCore>, cmd, p: &[u8]| {
+        seq += 1;
+        assert_eq!(call(core, seq, cmd, p), Status::Ok, "{cmd:?}");
+    };
+    ok(&mut core, Cmd::XferBegin, &p[..n]);
+    let (hdr, body) = img.split_at(512);
+    for (cmd, part) in [(Cmd::XferHdr, hdr), (Cmd::XferData, body)] {
+        for (i, c) in part.chunks(1000).enumerate() {
+            let n = XferChunk {
+                offset: (i * 1000) as u32,
+                data: c,
+            }
+            .encode(&mut p)
+            .unwrap();
+            ok(&mut core, cmd, &p[..n]);
+        }
+    }
+    ok(&mut core, Cmd::XferEnd, &[]);
+    let n = SetPending {
+        target: target::APP,
+        slot: 0,
+    }
+    .encode(&mut p)
+    .unwrap();
+    ok(&mut core, Cmd::SetPending, &p[..n]);
+    node.reset(1);
+    assert_eq!(node.run(), Run::App(0));
+    let st = node.status();
+    assert_eq!(st.slots[0].state, dagon_proto::payload::SlotState::Trying);
+}

@@ -151,6 +151,18 @@ impl<S: SlotStore> ImageStore<S> {
         images
     }
 
+    /// The store's log room for a write about to start
+    /// ([`SlotStore::keep_room`]); no image state changes.
+    pub(crate) fn keep_room(&mut self) -> Result<(), Status> {
+        self.store.keep_room().map_err(store_status)
+    }
+
+    /// The hand-over to the boot core's update mode
+    /// ([`SlotStore::request_update_mode`]); no image state changes.
+    pub(crate) fn request_update_mode(&mut self) -> Result<(), Status> {
+        self.store.request_update_mode().map_err(store_status)
+    }
+
     /// Fresh machines in the states the store reports, as at start.
     pub(crate) fn reopen(&mut self) {
         // A store that cannot make room refuses SET_PENDING later (its

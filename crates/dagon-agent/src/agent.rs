@@ -7,8 +7,8 @@ use dagon_events::{
 use dagon_format::header::{self, image_kind, slot_binding, ImageHeader, HEADER_SIZE};
 use dagon_format::{FormatError, Sha256, SigVerifier};
 use dagon_proto::payload::{
-    self, phase, reboot_mode, target, HelloReq, HelloResp, SetPending, Show, SlotState, StatusResp,
-    VersionResp, VersionSlots, XferBegin, XferChunk, IMAGE_HDR_LEN,
+    self, mode, phase, reboot_mode, target, HelloReq, HelloResp, SetPending, Show, SlotState,
+    StatusResp, VersionResp, VersionSlots, XferBegin, XferChunk, IMAGE_HDR_LEN,
 };
 use dagon_proto::{flags, frame_len, max_payload, split_status, Cmd, Frame, Status, HEADER_LEN};
 
@@ -278,6 +278,7 @@ impl<S: SlotStore, X: AppChain, V: SigVerifier, W: Writer> Agent<S, X, V, W> {
             Some(Cmd::XferData) => self.xfer_data(XferChunk::parse(p)?),
             Some(Cmd::XferEnd) => self.xfer_end(p),
             Some(Cmd::SetPending) => self.set_pending(SetPending::parse(p)?),
+            Some(Cmd::Stay) => self.stay(p),
             Some(Cmd::Reboot) => self.reboot(payload::parse_u8(p)?),
             Some(Cmd::Confirm) => self.confirm(payload::parse_u8(p)?),
             Some(Cmd::Show) if W::APP => self.show(Show::parse(p)?),
@@ -365,7 +366,10 @@ impl<S: SlotStore, X: AppChain, V: SigVerifier, W: Writer> Agent<S, X, V, W> {
 
     fn xfer_begin(&mut self, req: XferBegin) -> Handled {
         self.end_session(AbortCause::NewRequest);
-        let body_len = match self.offer_guards(&req) {
+        let body_len = match self
+            .offer_guards(&req)
+            .and_then(|n| self.room_for_write().map(|()| n))
+        {
             Ok(n) => n,
             Err(s) => {
                 noted(
@@ -391,8 +395,31 @@ impl<S: SlotStore, X: AppChain, V: SigVerifier, W: Writer> Agent<S, X, V, W> {
         Ok((0, None))
     }
 
+    /// The boot core makes the log's room for what a write records when
+    /// the write starts, before anything is erased: the store's shared
+    /// reservation, which compacts into the other face and never erases
+    /// the only valid one. Its session makes none when it is made, and the
+    /// boot stages make none outside update mode. The app's room was made
+    /// at its start.
+    fn room_for_write(&mut self) -> Result<(), Status> {
+        if W::APP {
+            return Ok(());
+        }
+        self.images.keep_room()
+    }
+
+    /// Whether this session writes: the app's always, the boot core's only
+    /// in update or recovery mode. Outside them the boot core erases and
+    /// writes nothing, its log included, and refuses with E_STATE.
+    fn writes(&self) -> bool {
+        W::APP || matches!(self.cfg.mode, mode::UPDATE | mode::RECOVERY)
+    }
+
     /// DAGON's guards on an update offer; the body length when it passes.
     fn offer_guards(&mut self, req: &XferBegin) -> Result<u32, Status> {
+        if !self.writes() {
+            return Err(Status::State);
+        }
         let body_len = req.body_len().ok_or(Status::Arg)?;
         let ab = matches!(req.slot, SLOT_A | SLOT_B);
         let factory = req.slot == FACTORY;
@@ -438,9 +465,11 @@ impl<S: SlotStore, X: AppChain, V: SigVerifier, W: Writer> Agent<S, X, V, W> {
     /// that is on trial: the slot is not written or set pending then.
     /// Stage0 starts no app while an APP trial is open, so a write of the
     /// only core cut by a power loss would leave nothing to start; the app
-    /// is confirmed or rolled back first.
+    /// is confirmed or rolled back first. The boot core's writes of the
+    /// app are not held back by the app's trial: it writes the app in
+    /// update mode because that app does not answer.
     fn only_core_on_trial(&mut self, t: u8) -> bool {
-        if self.keeps(t) {
+        if t != target::BOOTCORE || self.keeps(t) {
             return false;
         }
         let st = self.images.status();
@@ -613,6 +642,9 @@ impl<S: SlotStore, X: AppChain, V: SigVerifier, W: Writer> Agent<S, X, V, W> {
     }
 
     fn switch(&mut self, req: SetPending) -> Handled {
+        if !self.writes() {
+            return Err(Status::State);
+        }
         let t = req.target;
         if !matches!(t, target::APP | target::BOOTCORE) || !matches!(req.slot, SLOT_A | SLOT_B) {
             return Err(Status::Arg);
@@ -640,9 +672,31 @@ impl<S: SlotStore, X: AppChain, V: SigVerifier, W: Writer> Agent<S, X, V, W> {
         Ok((0, None))
     }
 
-    fn reboot(&mut self, mode: u8) -> Handled {
-        if mode != reboot_mode::NORMAL {
+    /// STAY: the boot core in update mode stays there (the listen window
+    /// that takes the first STAY is the boot core's own loop); a running
+    /// app refuses it.
+    fn stay(&mut self, p: &[u8]) -> Handled {
+        if !p.is_empty() {
             return Err(Status::Arg);
+        }
+        if W::APP {
+            return Err(Status::State);
+        }
+        Ok((0, None))
+    }
+
+    fn reboot(&mut self, mode: u8) -> Handled {
+        match mode {
+            reboot_mode::NORMAL => {}
+            // The app records the hand-over, then resets like mode 0.
+            reboot_mode::UPDATE if W::APP => {
+                self.end_session(AbortCause::NewRequest);
+                self.images.request_update_mode()?;
+            }
+            // The boot core is in update mode: it stays.
+            reboot_mode::UPDATE if self.writes() => return Ok((0, None)),
+            reboot_mode::UPDATE => return Err(Status::State),
+            _ => return Err(Status::Arg),
         }
         self.end_session(AbortCause::NewRequest);
         let delay = match self.chain.allow_reboot_now(&RebootRequest::new(mode)) {

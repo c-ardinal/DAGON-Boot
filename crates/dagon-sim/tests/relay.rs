@@ -6,7 +6,7 @@ use dagon_format::statelog::reason;
 use dagon_format::{key_id, sha256, Version};
 use dagon_port::I2cBus;
 use dagon_proto::payload::{self, *};
-use dagon_proto::{flags, max_payload, split_status, Cmd, Frame, Status};
+use dagon_proto::{flags, max_payload, plant, split_status, Cmd, Frame, Status};
 use dagon_sim::rom::{cmd, ACK, BUSY, NACK};
 use dagon_sim::*;
 use ed25519_compact::{KeyPair, Seed};
@@ -97,6 +97,18 @@ impl Pc {
         let req = self.frame(cmd, payload);
         let resp = relay.request(&req).expect("the relaying node answers");
         Pc::parse(&resp, self.seq, cmd)
+    }
+
+    /// The status a request of any command number is answered with.
+    fn status(&mut self, relay: &mut SimRelay, cmd: u8, payload: &[u8]) -> Status {
+        self.seq = self.seq.wrapping_add(1);
+        let mut req = vec![0u8; 8 + payload.len() + 4];
+        req[8..8 + payload.len()].copy_from_slice(payload);
+        dagon_proto::finish(&mut req, 0, self.seq, cmd, payload.len()).unwrap();
+        let resp = relay.request(&req).expect("the relaying node answers");
+        let (f, _) = Frame::decode(&resp, max_payload::USB).unwrap();
+        assert_eq!((f.flags, f.seq, f.cmd), (flags::RESP, self.seq, cmd));
+        split_status(f.payload).unwrap().0
     }
 
     /// RELAY to the I2C node; returns the relay status and the node's answer.
@@ -190,6 +202,83 @@ fn hello_and_status_through_the_relaying_node() {
     assert_eq!(st.slots[0].state, SlotState::Confirmed);
     assert_eq!(st.slots[1].state, SlotState::Empty);
     assert_eq!(st.log_generation, 1);
+}
+
+fn set_of(cmds: &[Cmd]) -> CmdSet {
+    cmds.iter().fold(CmdSet::EMPTY, |s, c| s.with(*c as u8))
+}
+
+/// The commands an app's agent serves, in the command table's order.
+const APP: [Cmd; 13] = [
+    Cmd::Hello,
+    Cmd::Status,
+    Cmd::Version,
+    Cmd::Caps,
+    Cmd::Stay,
+    Cmd::XferBegin,
+    Cmd::XferData,
+    Cmd::XferEnd,
+    Cmd::XferHdr,
+    Cmd::SetPending,
+    Cmd::Reboot,
+    Cmd::Confirm,
+    Cmd::Show,
+];
+
+/// The simulated relaying node says it serves its agent's commands and
+/// the relay's, a node behind it says its agent's, and a request with an
+/// unknown must field, a field sent twice or a bad length is refused in
+/// every command of the relaying node with no port and no recovery line
+/// used and its slots as they were.
+#[test]
+fn the_relaying_node_says_what_it_serves_and_reads_before_it_acts() {
+    let mut relay = relay_with_f401();
+    let mut pc = Pc { seq: 0 };
+    let (st, body) = pc.ask(&mut relay, Cmd::Hello, &hello());
+    assert_eq!(st, Status::Ok);
+    let cmds = HelloResp::parse(&body).unwrap().cmds;
+    let own = [Cmd::Relay, Cmd::SubCtl, Cmd::I2cRaw];
+    assert_eq!(cmds, set_of(&APP).union(set_of(&own)));
+    let behind = pc.ok(&mut relay, Cmd::Hello, &hello());
+    assert_eq!(HelloResp::parse(&behind).unwrap().cmds, set_of(&APP));
+
+    let (ops, slots) = (relay.bus.ops, relay.node.status());
+    let mut served = CmdSet::EMPTY;
+    plant::each_probe(|n, p| {
+        if pc.status(&mut relay, n, p) == Status::Field {
+            served = served.with(n);
+        }
+    });
+    assert_eq!(served, cmds, "what answers is what HELLO says");
+    let commands = plant::each(&cmds, |n, plant, p| {
+        assert_eq!(
+            pc.status(&mut relay, n, p),
+            plant.status(),
+            "{n:#x} {plant:?}"
+        );
+        assert_eq!(relay.bus.ops, ops, "{n:#x} {plant:?}: a port was used");
+    });
+    assert_eq!(commands, APP.len() + own.len(), "every command it serves");
+    assert_eq!(relay.node.status(), slots);
+
+    // A relaying node with no node on its recovery lines serves RELAY alone
+    // of the relay's commands.
+    let mut bare = SimRelay::new(SimNode::new(
+        hub_config(),
+        *kp().pk,
+        SimFlash::rp2040_2m(1),
+        Layout::RP2040_HUB,
+    ));
+    let (_, body) = pc.ask(&mut bare, Cmd::Hello, &hello());
+    let cmds = HelloResp::parse(&body).unwrap().cmds;
+    assert_eq!(cmds, set_of(&APP).union(set_of(&[Cmd::Relay])));
+    let mut served = CmdSet::EMPTY;
+    plant::each_probe(|n, p| {
+        if pc.status(&mut bare, n, p) == Status::Field {
+            served = served.with(n);
+        }
+    });
+    assert_eq!(served, cmds);
 }
 
 #[test]

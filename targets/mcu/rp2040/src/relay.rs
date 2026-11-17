@@ -29,7 +29,9 @@ use crate::node::{self, App, AppAgent, AppEvents, BoardDef, DagonParts};
 use crate::sub::SubLines;
 use crate::uart::UartLink;
 use crate::watchdog::{feed_forever, now_ms, Guard, Level, Watch};
-use crate::{RELAY_LINKS, RELAY_LINK_BUFFERS, RELAY_LINK_I2C0, RELAY_LINK_PIO_UART};
+use crate::{
+    RECOVERY_ROM_ADDR, RELAY_LINKS, RELAY_LINK_BUFFERS, RELAY_LINK_I2C0, RELAY_LINK_PIO_UART,
+};
 
 const LINKS: usize = RELAY_LINKS.len();
 
@@ -197,11 +199,17 @@ pub fn start<B: BoardDef, const N: usize>(
     let relay = RpRelay {
         agent: RpAgent(agent),
         links: routes,
-        // The STM32's ROM loader answers on the I2C link.
-        recovery: links.lines.map(|lines| Recovery {
-            lines,
-            link: RELAY_LINK_I2C0,
-        }),
+        // The ROM loader of the node on the recovery lines answers on the
+        // I2C link, at the address its MCU definition gives (generated);
+        // without one there is no recovery.
+        recovery: links
+            .lines
+            .zip(RECOVERY_ROM_ADDR)
+            .map(|(lines, rom_addr)| Recovery {
+                lines,
+                link: RELAY_LINK_I2C0,
+                rom_addr,
+            }),
         watch,
         clock: RpClock,
         config: setup.relay,

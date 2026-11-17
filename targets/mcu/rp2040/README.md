@@ -210,13 +210,18 @@ the rest for the app.
 
 | Address | Size | Content |
 |---|---|---|
-| 0x10000000 | 16 KiB | boot2 (256 B) + stage0 (`stage0/`, never updated) |
-| 0x10004000 | 2 x 4 KiB | boot core state log faces (read by stage0) |
-| 0x10006000 | 2 x 4 KiB | APP state log faces A/B |
-| 0x10008000 | 128 KiB | boot core slot A (`bootcore/`), body at +0x200 |
-| 0x10028000 | 128 KiB | boot core slot B, as slot A |
-| 0x10048000 | 1 MiB | APP-A: 512-byte header, body at 0x10048200 |
-| 0x10148000 | 1 MiB | APP-B: same, body at 0x10148200 |
+| 0x10000000 | 16 KiB | 256 B head the boot ROM reads, then stage0 |
+| 0x10004000 | 2 x 4 KiB | boot core state log faces A/B |
+| 0x10006000 | 2 x 4 KiB | app state log faces A/B |
+| 0x10008000 | 128 KiB | boot core slot A: 512-byte header, body at 0x10008200 |
+| 0x10028000 | 128 KiB | boot core slot B: 512-byte header, body at 0x10028200 |
+| 0x10048000 | 1 MiB | app slot A: 512-byte header, body at 0x10048200 |
+| 0x10148000 | 1 MiB | app slot B: 512-byte header, body at 0x10148200 |
+
+The table is the definition's (a test in `targets/mcu/build` writes it).
+The first bytes of the stage0 region are boot2, which the boot ROM loads
+and checks; stage0 (`stage0/`) follows and is never updated, and it reads
+the boot core state log. The boot core is built from `bootcore/`.
 
 The boot core starts the watchdog for 8 s before every jump. Stage0 starts
 the pending boot core (written by the running app's agent from a release)

@@ -1,7 +1,7 @@
 # DAGON MCU definition (format: targets/README.md). The firmware's layout
 # is generated from it; these addresses never move (a project moves its
 # slots by overriding them).
-format = 2
+format = 3
 id = "rp2040"
 name = "RP2040"
 wire_id = 0x0001
@@ -29,6 +29,9 @@ app_log = { faces = [0x1000_6000, 0x1000_7000], face_size = 0x1000 }
 [stage0]
 key = "flash"
 region_bytes = 0x4000
+# The boot ROM reads the 256-byte boot2 from the start of the region before
+# stage0 (RP2040 datasheet section 2.8.1.3).
+head_bytes = 0x100
 
 # The ring oscillator stage0 starts on: nominal 6.5 MHz at reset, anywhere
 # from 1.8 to 12 MHz (RP2040 datasheet section 2.17.1).
@@ -280,6 +283,11 @@ flag = { unverified = "package" }
 [execution]
 masked_max_us = "unmeasured"
 flash_op = "xip-off-masked"
+# The QSPI NOR page program writes any number of bytes from 1 to 256
+# (W25Q080 datasheet, Page Program 02h; embassy-rp 0.10 flash::WRITE_SIZE
+# 1), and erased flash reads 0xFF.
+write_unit = 1
+erased_value = 0xFF
 erase_regions = [
     { start = 0x1000_0000, len = 0x40_0000, unit = 0x1000, unit_max_ms = { unverified = 500 } },
 ]

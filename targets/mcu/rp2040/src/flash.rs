@@ -2,11 +2,22 @@
 //! by XIP address.
 
 use dagon_port::{Flash, FlashError, FlashRegion};
-use embassy_rp::flash::{Blocking, Flash as RpDriver, ERASE_SIZE};
+use embassy_rp::flash::{Blocking, Flash as RpDriver, ERASE_SIZE, WRITE_SIZE};
 use embassy_rp::peripherals::FLASH;
 use embassy_rp::Peri;
 
-use crate::layout::{MIN_FLASH_SIZE, XIP_BASE};
+use crate::layout::{MIN_FLASH_SIZE, SECTOR, XIP_BASE};
+
+// The driver erases whole `ERASE_SIZE` sectors and writes whole
+// `WRITE_SIZE` units.
+const _: () = assert!(
+    (SECTOR as usize).is_multiple_of(ERASE_SIZE)
+        && (crate::WRITE_UNIT as usize).is_multiple_of(WRITE_SIZE),
+    "[execution] erase or write unit is not a multiple of the flash driver's"
+);
+
+/// Bytes of the flash chip's unique ID (64 bits).
+const UNIQUE_ID_LEN: usize = (u64::BITS / u8::BITS) as usize;
 
 /// The part of the flash the DAGON layout spans (the first
 /// [`MIN_FLASH_SIZE`] bytes; a larger chip's rest stays the app's own).
@@ -15,9 +26,9 @@ pub struct RpFlash(RpDriver<'static, FLASH, Blocking, MIN_FLASH_SIZE>);
 pub const REGIONS: [FlashRegion; 1] = [FlashRegion {
     start: XIP_BASE,
     len: MIN_FLASH_SIZE as u32,
-    erase_size: ERASE_SIZE as u32,
-    write_size: 1,
-    erased_value: 0xFF,
+    erase_size: SECTOR,
+    write_size: crate::WRITE_UNIT,
+    erased_value: crate::ERASED_VALUE,
 }];
 
 impl RpFlash {
@@ -26,8 +37,8 @@ impl RpFlash {
     }
 
     /// 64-bit unique ID of the flash chip (per-board serial number).
-    pub fn unique_id(&mut self) -> [u8; 8] {
-        let mut id = [0u8; 8];
+    pub fn unique_id(&mut self) -> [u8; UNIQUE_ID_LEN] {
+        let mut id = [0u8; UNIQUE_ID_LEN];
         let _ = self.0.blocking_unique_id(&mut id);
         id
     }

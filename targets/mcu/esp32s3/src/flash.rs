@@ -7,8 +7,9 @@ use esp_bootloader_esp_idf::partitions::FlashStorage;
 
 use crate::layout::{region_for, ERASE_UNIT, REGIONS, WRITE_UNIT};
 
-/// Chunk used to check erased state and read back writes.
-const CHECK_CHUNK: usize = 256;
+/// Chunk used to check erased state and read back writes (256 bytes of
+/// stack).
+const CHECK_CHUNK: usize = 1 << 8;
 
 /// Shares the one `FlashStorage` with [`crate::boot::EspBootSelect`].
 pub struct EspFlash<'a, 'd> {
@@ -80,7 +81,9 @@ impl Flash for EspFlash<'_, '_> {
         if !addr.is_multiple_of(WRITE_UNIT) || !data.len().is_multiple_of(WRITE_UNIT as usize) {
             return Err(FlashError::Align);
         }
-        self.for_each_chunk(addr, data.len(), |_, c| c.iter().all(|&b| b == 0xFF))?;
+        self.for_each_chunk(addr, data.len(), |_, c| {
+            c.iter().all(|&b| b == crate::ERASED_VALUE)
+        })?;
         self.storage
             .borrow_mut()
             .write_nor(addr, data)

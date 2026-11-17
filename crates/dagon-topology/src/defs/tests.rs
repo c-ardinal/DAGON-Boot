@@ -291,7 +291,7 @@ fn source_tree_loads_and_equals_builtin() {
 }
 
 pub(super) const FAKE_MCU: &str = r#"
-format = 2
+format = 3
 id = "fake-m0"
 name = "FAKE-M0"
 wire_id = 0x7F01
@@ -355,7 +355,7 @@ out_hz = 1_000_000
 
 pub(super) const FAKE_BOARD: &str = r#"
 product = "Fake Board"
-format = 2
+format = 3
 mcu = "fake-m0"
 flash_bytes = 0x20_0000
 i2c_target = true
@@ -676,25 +676,35 @@ fn definitions_state_their_format_and_unknown_formats_are_refused() {
     }
     // Absent means format 1, which this reader refuses by number, as it
     // refuses a newer one even when it carries fields it does not know.
-    let want = "definition format 1; this dagon reads definition format 2 ";
-    let mcu = FAKE_MCU.replace("format = 2\n", "");
+    let want = "definition format 1; this dagon reads definition format 3 ";
+    let mcu = FAKE_MCU.replace("format = 3\n", "");
     let e = project_registry("format-absent", &mcu, FAKE_BOARD).unwrap_err();
     assert!(e.msg.contains(want), "{e}");
-    let board = FAKE_BOARD.replace("format = 2\n", "");
+    let board = FAKE_BOARD.replace("format = 3\n", "");
     let e = project_registry("format-absent-board", FAKE_MCU, &board).unwrap_err();
     assert!(e.msg.contains(want), "{e}");
-    let mcu = FAKE_MCU.replace("format = 2", "format = 3\nnew_key = 1");
+    let mcu = FAKE_MCU.replace("format = 3", "format = 4\nnew_key = 1");
     let e = project_registry("format-mcu", &mcu, FAKE_BOARD).unwrap_err();
-    assert!(e.msg.contains("definition format 3"), "{e}");
-    let board = FAKE_BOARD.replace("format = 2", "format = 9");
-    let e = project_registry("format-board", FAKE_MCU, &board).unwrap_err();
-    assert!(e.msg.contains("definition format 9"), "{e}");
-    // Format 1 (an MCU's `erase_unit`) is refused by number.
-    let mcu = FAKE_MCU.replace("format = 2", "format = 1");
-    let e = project_registry("format-mcu-1", &mcu, FAKE_BOARD).unwrap_err();
-    let want = "definition format 1; this dagon reads definition format 2 ";
+    let want = "definition format 4; this dagon reads definition format 3 ";
     assert!(e.msg.contains(want), "{e}");
-    let board = FAKE_BOARD.replace("format = 2", "format = 1");
+    let board = FAKE_BOARD.replace("format = 3", "format = 9");
+    let e = project_registry("format-board", FAKE_MCU, &board).unwrap_err();
+    let want = "definition format 9; this dagon reads definition format 3 ";
+    assert!(e.msg.contains(want), "{e}");
+    // Format 2 (without the flash write facts) is refused by number.
+    let want = "definition format 2; this dagon reads definition format 3 ";
+    let mcu = FAKE_MCU.replace("format = 3", "format = 2");
+    let e = project_registry("format-mcu-2", &mcu, FAKE_BOARD).unwrap_err();
+    assert!(e.msg.contains(want), "{e}");
+    let board = FAKE_BOARD.replace("format = 3", "format = 2");
+    let e = project_registry("format-board-2", FAKE_MCU, &board).unwrap_err();
+    assert!(e.msg.contains(want), "{e}");
+    // Format 1 (an MCU's `erase_unit`) is refused by number.
+    let mcu = FAKE_MCU.replace("format = 3", "format = 1");
+    let e = project_registry("format-mcu-1", &mcu, FAKE_BOARD).unwrap_err();
+    let want = "definition format 1; this dagon reads definition format 3 ";
+    assert!(e.msg.contains(want), "{e}");
+    let board = FAKE_BOARD.replace("format = 3", "format = 1");
     let e = project_registry("format-board-1", FAKE_MCU, &board).unwrap_err();
     assert!(e.msg.contains(want), "{e}");
 }
@@ -705,7 +715,7 @@ fn a_board_table_is_a_whole_board_definition() {
     // A node's values alone are no board: refused, naming what is missing.
     write(
         &dir.join("dagon.toml"),
-        "[board.seg]\nformat = 2\nflash_bytes = 524288\n",
+        "[board.seg]\nformat = 3\nflash_bytes = 524288\n",
     );
     let e = Registry::load(&[Source::Project(&dir.join("dagon.toml"))]).unwrap_err();
     assert!(e.msg.contains("missing field `product`"), "{e}");
@@ -713,7 +723,7 @@ fn a_board_table_is_a_whole_board_definition() {
 
     write(
         &dir.join("dagon.toml"),
-        "[board.my-f401]\nformat = 2\nproduct = \"My F401\"\nmcu = \"stm32f401re\"\n\
+        "[board.my-f401]\nformat = 3\nproduct = \"My F401\"\nmcu = \"stm32f401re\"\n\
          flash_bytes = 524288\ndrawing = \"nucleo-64\"\n",
     );
     let r = Registry::load(&[Source::Project(&dir.join("dagon.toml"))]).unwrap();
@@ -777,6 +787,60 @@ fn slots_must_fit_and_not_overlap() {
 /// `[stage0]` goes with a stage0 region of its size and names a key place
 /// stage0 can read; the key place defaults to stage0's flash.
 #[test]
+fn the_flash_write_facts_are_required_keys() {
+    let mut seen = 0;
+    for dir in std::fs::read_dir(source_root().join("targets/mcu"))
+        .unwrap()
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.join(super::load::MCU_FILE).is_file())
+    {
+        let text = std::fs::read_to_string(dir.join(super::load::MCU_FILE)).unwrap();
+        let csv = std::fs::read_to_string(dir.join("partitions.csv")).unwrap_or_default();
+        let files = [("partitions.csv", csv.as_str())];
+        let m = parse_mcu_text(&text, &files).unwrap();
+        let mut keys = vec!["write_unit", "erased_value"];
+        if m.stage0.is_some() {
+            keys.push("head_bytes");
+        }
+        for key in keys {
+            let line = text
+                .lines()
+                .find(|l| l.starts_with(&format!("{key} = ")))
+                .unwrap_or_else(|| panic!("{}: no {key}", dir.display()));
+            let e = parse_mcu_text(&text.replace(&format!("{line}\n"), ""), &files)
+                .unwrap_err()
+                .to_string();
+            assert!(e.contains(&format!("missing field `{key}`")), "{e}");
+            seen += 1;
+        }
+    }
+    assert!(seen >= 3, "{seen}");
+    let rp =
+        std::fs::read_to_string(source_root().join("targets/mcu/rp2040/dagon-mcu.toml")).unwrap();
+    for (from, to, want) in [
+        (
+            "write_unit = 1\n",
+            "write_unit = 3\n",
+            "write_unit 3 must be a power of two",
+        ),
+        (
+            "write_unit = 1\n",
+            "write_unit = 0x2000\n",
+            "write_unit 8192 does not divide execution.erase_regions[0].unit 4096",
+        ),
+        (
+            "head_bytes = 0x100\n",
+            "head_bytes = 0x4000\n",
+            "head_bytes 0x4000 leaves stage0 no room",
+        ),
+    ] {
+        let e = mcu_err(&rp.replace(from, to));
+        assert!(e.contains(want), "{e}");
+    }
+}
+
+#[test]
 fn stage0_states_its_region_and_a_key_place_it_can_read() {
     let with = |stage0: &str| {
         FAKE_MCU.replace(
@@ -786,7 +850,7 @@ fn stage0_states_its_region_and_a_key_place_it_can_read() {
     };
     let m = parse_mcu_text(
         &with(
-            "\n[stage0]\nregion_bytes = 0x4000\n\
+            "\n[stage0]\nregion_bytes = 0x4000\nhead_bytes = 0\n\
              [[stage0.clock]]\nsource = \"internal\"\nout_hz = 1_000_000\n",
         ),
         &[],
@@ -794,22 +858,25 @@ fn stage0_states_its_region_and_a_key_place_it_can_read() {
     .unwrap();
     let s = m.stage0.unwrap();
     assert_eq!((s.key.as_str(), s.region_bytes), ("flash", 0x4000));
-    let e = mcu_err(&with("\n[stage0]\nkey = \"otp\"\nregion_bytes = 0x4000\n"));
+    let e = mcu_err(&with(
+        "\n[stage0]\nkey = \"otp\"\nregion_bytes = 0x4000\nhead_bytes = 0\n",
+    ));
     assert!(
         e.contains("stage0.key \"otp\": this MCU's stage0 cannot read a key from that place"),
         "{e}"
     );
-    let e = mcu_err(&with("\n[stage0]\nregion_bytes = 0x2000\n"));
+    let e = mcu_err(&with("\n[stage0]\nregion_bytes = 0x2000\nhead_bytes = 0\n"));
     assert!(
         e.contains("is not the 0x4000 bytes of layout.stage0"),
         "{e}"
     );
     let e = mcu_err(&with(""));
     assert!(e.contains("layout.stage0 needs a [stage0] table"), "{e}");
-    let e = mcu_err(&(FAKE_MCU.to_string() + "\n[stage0]\nregion_bytes = 0x4000\n"));
+    let e =
+        mcu_err(&(FAKE_MCU.to_string() + "\n[stage0]\nregion_bytes = 0x4000\nhead_bytes = 0\n"));
     assert!(e.contains("[stage0] needs layout.stage0"), "{e}");
     let e = mcu_err(&with(
-        "\n[stage0]\nregion_bytes = 0x4000\nverifies = true\n",
+        "\n[stage0]\nregion_bytes = 0x4000\nhead_bytes = 0\nverifies = true\n",
     ));
     assert!(e.contains("unknown field `verifies`"), "{e}");
 }
@@ -1051,7 +1118,7 @@ fn the_json_form_round_trips_and_is_validated_again() {
     assert_eq!(back.mcus(), without_doctor(&project));
     assert_eq!(back.boards(), project.boards());
     // A project's entry is made safe again on receipt, whatever was sent.
-    let board = "format = 2\nid = 'x'\nproduct = '<b>C:/Users/me</b>'\nmcu = 'rp2040'\n\
+    let board = "format = 3\nid = 'x'\nproduct = '<b>C:/Users/me</b>'\nmcu = 'rp2040'\n\
                  flash_bytes = 0x400000\ndrawing = 'pico'\n";
     let sent = serde_json::json!({
         "mcus": [{
@@ -1113,11 +1180,11 @@ fn project_text_that_is_not_a_plain_name_leaves_as_a_generic_label() {
     write(
         &dir.join("dagon.toml"),
         &format!(
-            "[board.my-pico]\nformat = 2\nproduct = \"C:/Users/me/{secret}\"\nmcu = \"rp2040\"\n\
+            "[board.my-pico]\nformat = 3\nproduct = \"C:/Users/me/{secret}\"\nmcu = \"rp2040\"\n\
              flash_bytes = 0x40_0000\ndrawing = \"pico\"\n\
              header = [{{ pin = \"GPIO4\", label = \"{secret}\" }}, {{ pin = \"GPIO5\", label = \"D5\" }}]\n\
              default_link = {{ kind = \"i2c\", addr = 0x44, control = \"full\" }}\n\
-             [board.my-two]\nformat = 2\nproduct = \"My Two\"\nmcu = \"rp2040\"\n\
+             [board.my-two]\nformat = 3\nproduct = \"My Two\"\nmcu = \"rp2040\"\n\
              flash_bytes = 0x40_0000\ndrawing = \"pico\"\n\
              default_link = {{ kind = \"i2c\", addr = 0x45, control = \"full\" }}\n"
         ),

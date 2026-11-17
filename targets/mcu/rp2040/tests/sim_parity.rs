@@ -27,17 +27,31 @@ fn ask(h: &mut SimRelay, c: Cmd, payload: &[u8]) -> Status {
     split_status(f.payload).unwrap().0
 }
 
-fn relay(h: &mut SimRelay, l: u8, addr: u8, inner_len: usize) -> Status {
-    let inner = vec![0u8; inner_len];
+/// A whole request frame of `len` bytes (command 0x7F, opaque payload).
+fn frame(len: usize) -> Vec<u8> {
+    let mut f = vec![0u8; len];
+    finish(&mut f, 0, 1, 0x7F, len - frame_len(0)).unwrap();
+    f
+}
+
+/// RELAY of `inner` as the sim answers it, and as the relay's rules
+/// predict it from the sim's USB uplink: E_ARG when they refuse it, else
+/// E_TIMEOUT (no node answers).
+fn relay(h: &mut SimRelay, l: u8, addr: u8, inner: &[u8]) -> (Status, Status) {
     let r = Relay {
         link: l,
         addr,
         timeout_ms: Some(20),
-        inner: &inner,
+        inner,
     };
-    let mut p = vec![0u8; 16 + inner_len];
+    let want = if cmd::relay_fits(&RELAY_LINKS, max_payload::USB, &r) {
+        Status::Timeout
+    } else {
+        Status::Arg
+    };
+    let mut p = vec![0u8; 16 + inner.len()];
     let n = r.encode(&mut p).unwrap();
-    ask(h, Cmd::Relay, &p[..n])
+    (ask(h, Cmd::Relay, &p[..n]), want)
 }
 
 /// The generated `RELAY_LINKS` are the entries the definitions loader reads
@@ -84,20 +98,20 @@ fn relay_rules_match_the_sim() {
         (9, 0x42, 12),
     ];
     for (l, a, len) in cases {
-        let want = if cmd::relay_fits(&RELAY_LINKS, l, a, len) {
-            Status::Timeout
-        } else {
-            Status::Arg
-        };
-        assert_eq!(
-            relay(&mut h, l, a, len),
-            want,
-            "link {l} addr {a:#x} len {len}"
-        );
+        let (got, want) = relay(&mut h, l, a, &frame(len));
+        assert_eq!(got, want, "link {l} addr {a:#x} len {len}");
+    }
+    // An inner frame that is not one whole frame: refused by both.
+    let mut bad_crc = frame(16);
+    bad_crc[12] ^= 1;
+    let mut trailing = frame(16);
+    trailing.push(0);
+    for inner in [bad_crc, trailing, vec![0; 16]] {
+        assert_eq!(relay(&mut h, I2C, 0x42, &inner), (Status::Arg, Status::Arg));
     }
     // Short timeout: an absent I2C node answers within about the timeout.
     let t0 = h.now_ms();
-    assert_eq!(relay(&mut h, I2C, 0x55, 12), Status::Timeout);
+    assert_eq!(relay(&mut h, I2C, 0x55, &frame(12)).0, Status::Timeout);
     assert!(h.now_ms() - t0 <= 20 + 2 + 2, "{} ms", h.now_ms() - t0);
 }
 

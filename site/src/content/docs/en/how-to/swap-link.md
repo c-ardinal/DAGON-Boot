@@ -5,7 +5,9 @@ description: "Change how a node is linked."
 
 ## In the 構成
 
+<!-- generated from dagon_format::with_link_kinds!: python site/scripts/gen.py -->
 Every link in a 構成 has a kind: `usb-cdc`, `uart`, `i2c`, `ble`, `wifi-tcp`, `ethernet` or `can`.
+<!-- end of generated table -->
 
 A 親機 can also declare its uplink, the link towards whatever drives it, and what is at the other end:
 
@@ -21,7 +23,7 @@ The uplink is not part of the compiled topology, so existing 構成 and their pa
 
 ## In DAGON Console
 
-In 準備 (define), the inspector offers each kind for a link and, on the 親機, for its uplink.
+In 準備 (define), the inspector offers each kind for a link and, on the 親機, the kinds its MCU definition offers up for its uplink.
 
 ## Which kinds work
 

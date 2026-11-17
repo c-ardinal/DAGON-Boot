@@ -56,9 +56,21 @@ pub fn link_kind_table() -> JsValue {
         .into()
 }
 
+/// How long dagon-host waits for a rebooted hub's new HELLO: the Console's
+/// reconnect countdown reads it here instead of keeping a copy.
+#[wasm_bindgen]
+pub fn host_reconnect_ms() -> u32 {
+    dagon_host::HUB_RECONNECT_MS
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_reconnect_wait_is_the_hosts() {
+        assert_eq!(host_reconnect_ms(), dagon_host::HUB_RECONNECT_MS);
+    }
 
     #[test]
     fn the_table_is_every_kind_in_code_order() {

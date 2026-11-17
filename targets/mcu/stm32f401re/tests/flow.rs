@@ -241,7 +241,10 @@ impl Node {
     }
 
     fn reboot(mut self) -> (Node, Decision) {
-        let (st, _, reboot) = self.call(Cmd::Reboot, &[reboot_mode::NORMAL]);
+        let (st, _, reboot) = self.call(
+            Cmd::Reboot,
+            &wire(|b| dagon_proto::payload::encode_reboot(reboot_mode::NORMAL, b)),
+        );
         assert_eq!((st, reboot), (Status::Ok, true));
         Node::boot_shared(self.flash)
     }
@@ -260,6 +263,7 @@ impl Node {
         let reply = self.agent.handle(&buf[..n]).expect("reply");
         let (f, _) = Frame::decode(reply.frame, 300).unwrap();
         let (st, body) = split_status(f.payload).unwrap();
+        let body = bulk_of(f.cmd, st, body);
         (st, body.to_vec(), reply.reboot)
     }
 
@@ -299,7 +303,7 @@ impl Node {
             target: target::APP,
             slot,
         };
-        let mut p = [0u8; 8];
+        let mut p = [0u8; 32];
         let n = req.encode(&mut p).unwrap();
         self.call(Cmd::SetPending, &p[..n]).0
     }
@@ -319,7 +323,7 @@ impl Node {
             proto_ver: dagon_proto::PROTO_VERSION as u32,
             max_payload: max_payload::I2C as u16,
         };
-        let mut p = [0u8; 8];
+        let mut p = [0u8; 32];
         let n = req.encode(&mut p).unwrap();
         let (st, body, _) = self.call(Cmd::Hello, &p[..n]);
         assert_eq!(st, Status::Ok);
@@ -355,7 +359,14 @@ fn update_confirm_then_back_to_previous_version() {
     let h = n.hello();
     assert_eq!((h.active_version, h.trial), (Version::new(1, 1, 0), true));
     assert_eq!((n.status().active, n.status().confirmed), (B, A));
-    assert_eq!(n.call(Cmd::Confirm, &[target::APP]).0, Status::Ok);
+    assert_eq!(
+        n.call(
+            Cmd::Confirm,
+            &wire(|b| dagon_proto::payload::encode_confirm(target::APP, b))
+        )
+        .0,
+        Status::Ok
+    );
     let st = n.status();
     assert_eq!(st.slots[B as usize].state, SlotState::Confirmed);
     assert_eq!(st.slots[A as usize].state, SlotState::Written);
@@ -369,7 +380,14 @@ fn update_confirm_then_back_to_previous_version() {
     let (mut n, d) = n.reboot();
     assert_eq!(booted(d), (A, true));
     assert_eq!(n.hello().active_version, Version::new(1, 0, 0));
-    assert_eq!(n.call(Cmd::Confirm, &[target::APP]).0, Status::Ok);
+    assert_eq!(
+        n.call(
+            Cmd::Confirm,
+            &wire(|b| dagon_proto::payload::encode_confirm(target::APP, b))
+        )
+        .0,
+        Status::Ok
+    );
     let (mut n, d) = n.reboot();
     assert_eq!(booted(d), (A, false));
     assert_eq!(n.status().confirmed, A);
@@ -461,4 +479,26 @@ fn unaligned_chunks_are_buffered_and_flushed_padded() {
     // Offsets must continue where the last write ended.
     s.erase(target::APP, B, 10, &t).unwrap();
     assert!(s.write(target::APP, B, 4, &data[..4], &t).is_err());
+}
+
+/// The request payload `enc` writes.
+#[allow(dead_code)]
+fn wire(enc: impl FnOnce(&mut [u8]) -> Result<usize, dagon_proto::FrameError>) -> Vec<u8> {
+    let mut b = vec![0u8; 1100];
+    let n = enc(&mut b).unwrap();
+    b.truncate(n);
+    b
+}
+
+/// The bulk of an OK RELAY or I2C_RAW response; any other body as it is.
+#[allow(dead_code)]
+fn bulk_of(cmd: u8, status: dagon_proto::Status, body: &[u8]) -> &[u8] {
+    match dagon_proto::Cmd::from_u8(cmd) {
+        Some(c @ (dagon_proto::Cmd::Relay | dagon_proto::Cmd::I2cRaw))
+            if status == dagon_proto::Status::Ok =>
+        {
+            dagon_proto::payload::parse_bulk_resp(c, body).unwrap()
+        }
+        _ => body,
+    }
 }

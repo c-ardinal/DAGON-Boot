@@ -88,7 +88,7 @@ def ts_kind_literals(path, text, names):
     return out
 
 
-RECONNECT_NUMBER = re.compile(r"\w*reconnect\w*\s*(?::\s*[\w<>]+\s*)?=\s*\d[\d_]{2,}", re.I)
+RECONNECT_NUMBER = re.compile(r"\w*reconnect\w*\s*(?::\s*[\w<>]+\s*)?=\s*\d[\d_]{2,}|\w*reconnect\w*\s*(?::\s*[\w<>]+\s*)?=\s*\d+\s*\*\s*\d+", re.I)
 
 
 def reconnect_numbers(path, text):
@@ -225,8 +225,8 @@ class OneLinkContract(unittest.TestCase):
         self.assertEqual(found, [], "a reconnect wait written in the Console; read dagon-wasm's host_reconnect_ms")
 
     def test_the_reconnect_check_catches_a_planted_number(self):
-        planted = "export const HUB_RECONNECT_MS = 45_000;\nconst reconnectMs: number = 45000;\nconst RECONNECT_STEP_S = 5;\nlet reconnectUntil = null;\n"
-        self.assertEqual(len(reconnect_numbers("web/src/x.ts", planted)), 2)
+        planted = "export const HUB_RECONNECT_MS = 45_000;\nconst reconnectMs: number = 45000;\nconst RECONNECT_STEP_S = 5;\nlet reconnectUntil = null;\nconst reconnectWait = 45 * 1000;\n"
+        self.assertEqual(len(reconnect_numbers("web/src/x.ts", planted)), 3)
 
     def test_no_agent_run(self):
         agent = "\n".join(p.read_text(encoding="utf-8") for p in (ROOT / "crates/dagon-agent/src").rglob("*.rs"))

@@ -21,7 +21,7 @@
   import { modal } from '../app/motion.ts';
 
   interface Props {
-    /** Why the page could not reconnect by itself (dagon-host's 45 s are over: this dialog opens only then). */
+    /** Why the page could not reconnect by itself (dagon-host's reconnect wait is over: this dialog opens only then). */
     notes: ReconnectNote[];
     onreconnect: () => void;
     /** Closed with Escape: the band offers the same button. */

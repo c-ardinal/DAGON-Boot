@@ -240,11 +240,23 @@ fn update(store: &mut SimStore, log: &Log, confirm: Confirm, health: Option<Heal
     let mut w = Wire { seq: 0 };
     w.transfer(&mut a, 1, &image(1, Version::new(1, 1, 0), &body));
     assert_eq!(
-        w.call(&mut a, Cmd::SetPending, &[target::APP, 1]),
+        w.call(
+            &mut a,
+            Cmd::SetPending,
+            &wire(|b| dagon_proto::payload::SetPending {
+                target: target::APP,
+                slot: 1
+            }
+            .encode(b))
+        ),
         Status::Ok
     );
     assert_eq!(
-        w.call(&mut a, Cmd::Reboot, &[reboot_mode::NORMAL]),
+        w.call(
+            &mut a,
+            Cmd::Reboot,
+            &wire(|b| dagon_proto::payload::encode_reboot(reboot_mode::NORMAL, b))
+        ),
         Status::Ok
     );
     assert_eq!(store.boot(), Boot::Run(1));
@@ -403,26 +415,17 @@ fn the_published_snapshot_follows_an_update_and_its_trial() {
     let img = image(1, Version::new(1, 1, 0), &body);
     let mut w = Wire { seq: 0 };
     // The host tells the number before the erase, so it is there all through.
-    assert_eq!(
-        w.call(&mut a, Cmd::Show, &[1, 1, 7, 0, 0, 0, 0]),
-        Status::Ok
-    );
+    assert_eq!(w.call(&mut a, Cmd::Show, &[1, 0x04, 1, 7]), Status::Ok);
     w.begin(&mut a, 1, &img);
     let s = snapshot(&events);
     assert_eq!(s.phase, Phase::Transferring);
     assert_eq!(s.progress, Some((200, 900)), "the first body chunk");
     assert_eq!(s.percent, Some(7));
     // Between chunks: the transfer goes on. A number past 100 is not shown.
-    assert_eq!(
-        w.call(&mut a, Cmd::Show, &[1, 1, 200, 0, 0, 0, 0]),
-        Status::Ok
-    );
+    assert_eq!(w.call(&mut a, Cmd::Show, &[1, 0x04, 1, 200]), Status::Ok);
     assert_eq!(snapshot(&events).percent, Some(100));
     // Only a transfer's number is for the display.
-    assert_eq!(
-        w.call(&mut a, Cmd::Show, &[1, 2, 9, 0, 0, 0, 0]),
-        Status::Ok
-    );
+    assert_eq!(w.call(&mut a, Cmd::Show, &[2, 0x04, 1, 9]), Status::Ok);
     assert_eq!(snapshot(&events).percent, Some(100));
     w.rest(&mut a, &img);
     let s = snapshot(&events);
@@ -431,12 +434,24 @@ fn the_published_snapshot_follows_an_update_and_its_trial() {
         (Phase::Written, None, None)
     );
     assert_eq!(
-        w.call(&mut a, Cmd::SetPending, &[target::APP, 1]),
+        w.call(
+            &mut a,
+            Cmd::SetPending,
+            &wire(|b| dagon_proto::payload::SetPending {
+                target: target::APP,
+                slot: 1
+            }
+            .encode(b))
+        ),
         Status::Ok
     );
     assert_eq!(snapshot(&events).phase, Phase::Pending);
     assert_eq!(
-        w.call(&mut a, Cmd::Reboot, &[reboot_mode::NORMAL]),
+        w.call(
+            &mut a,
+            Cmd::Reboot,
+            &wire(|b| dagon_proto::payload::encode_reboot(reboot_mode::NORMAL, b))
+        ),
         Status::Ok
     );
     assert_eq!(snapshot(&events).phase, Phase::RebootPending);
@@ -477,4 +492,13 @@ fn kind_name(e: &dagon_events::Event<'_>) -> &'static str {
         .iter()
         .find_map(|m| m.entry(e.layer(), e.kind()))
         .map_or("?", |x| x.kind)
+}
+
+/// The request payload `enc` writes.
+#[allow(dead_code)]
+fn wire(enc: impl FnOnce(&mut [u8]) -> Result<usize, dagon_proto::FrameError>) -> Vec<u8> {
+    let mut b = vec![0u8; 1100];
+    let n = enc(&mut b).unwrap();
+    b.truncate(n);
+    b
 }

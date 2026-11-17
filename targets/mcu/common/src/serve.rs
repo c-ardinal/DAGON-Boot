@@ -174,7 +174,7 @@ mod tests {
         compose, Bounds, Composed, Ctx, Delay, Event, Extension, Layer, Nop, Published,
         RebootRequest, Watchdog,
     };
-    use dagon_proto::payload::{reboot_mode, HelloResp};
+    use dagon_proto::payload::HelloResp;
     use dagon_proto::{max_payload, split_status, Cmd, Frame, Status};
     use dagon_sim::store::SimStore;
 
@@ -383,7 +383,7 @@ mod tests {
     #[test]
     fn reboot_reply_is_flushed_before_the_exit() {
         let mut link = Mock::default();
-        let reboot = request(3, Cmd::Reboot as u8, &[reboot_mode::NORMAL]);
+        let reboot = request(3, Cmd::Reboot as u8, &[]);
         link.incoming.extend([Some(reboot), Some(hello(4))]);
         let (mut a, mut h) = (agent(), Host::default());
         let exit = dagon_sim::block_on(serve(&mut link, &mut a, &mut h));
@@ -404,7 +404,7 @@ mod tests {
         };
         let mut a = probed(probe.clone());
         let mut link = Mock::default();
-        let reboot = request(3, Cmd::Reboot as u8, &[reboot_mode::NORMAL]);
+        let reboot = request(3, Cmd::Reboot as u8, &[]);
         link.incoming.extend([Some(reboot), Some(hello(4))]);
         let mut h = Host::default();
         let exit = dagon_sim::block_on(serve(&mut link, &mut a, &mut h));
@@ -463,7 +463,7 @@ mod tests {
             fail_write: true,
             ..Mock::default()
         };
-        let reboot = request(3, Cmd::Reboot as u8, &[reboot_mode::NORMAL]);
+        let reboot = request(3, Cmd::Reboot as u8, &[]);
         link.incoming.extend([Some(reboot)]);
         let mut h = Host::default();
         let exit = dagon_sim::block_on(serve(&mut link, &mut a, &mut h));
@@ -479,7 +479,7 @@ mod tests {
         // The peer's retry (same seq) on a working link gets the reply.
         link.fail_write = false;
         link.incoming
-            .extend([Some(request(3, Cmd::Reboot as u8, &[reboot_mode::NORMAL]))]);
+            .extend([Some(request(3, Cmd::Reboot as u8, &[]))]);
         let exit = dagon_sim::block_on(serve(&mut link, &mut a, &mut h));
         assert_eq!((exit, link.written.len()), (Exit::Reboot, 1));
     }
@@ -493,7 +493,7 @@ mod tests {
             fail_flush: true,
             ..Mock::default()
         };
-        let reboot = request(3, Cmd::Reboot as u8, &[reboot_mode::NORMAL]);
+        let reboot = request(3, Cmd::Reboot as u8, &[]);
         link.incoming.extend([Some(reboot), Some(hello(4))]);
         let mut h = Host::default();
         let exit = dagon_sim::block_on(serve(&mut link, &mut a, &mut h));

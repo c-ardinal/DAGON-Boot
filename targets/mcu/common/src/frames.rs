@@ -3,7 +3,7 @@
 //! [`FrameReader::push_at`]) a partial frame dropped after [`GAP_MS`]
 //! without a byte.
 
-use dagon_proto::{Frame, FrameError, SOF};
+use dagon_proto::{is_refused_start, Frame, FrameError, REFUSED_LEN, SOF};
 
 /// Longest pause between two bytes of one frame on a UART link.
 pub const GAP_MS: u64 = 20;
@@ -70,6 +70,11 @@ impl<const N: usize> FrameReader<N> {
             match Frame::decode(&self.buf[..self.len], self.max_payload) {
                 Ok((_, n)) => return Some(n),
                 Err(FrameError::Incomplete) => return None,
+                // A frame of another wire version: its start goes on, for
+                // the answer that refuses it (`dagon_proto::version_refusal`).
+                Err(FrameError::BadVersion) if is_refused_start(&self.buf[..self.len]) => {
+                    return Some(REFUSED_LEN)
+                }
                 Err(_) => self.consume(1),
             }
         }

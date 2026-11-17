@@ -81,6 +81,14 @@ impl FrameCutter {
                     return Some(&self.buf[..n]);
                 }
                 Err(FrameError::Incomplete) => return None,
+                // A frame of another wire version: its start goes on, for
+                // the answer that refuses it (`dagon_proto::version_refusal`).
+                Err(FrameError::BadVersion)
+                    if dagon_proto::is_refused_start(&self.buf[..self.len]) =>
+                {
+                    self.done = dagon_proto::REFUSED_LEN;
+                    return Some(&self.buf[..self.done]);
+                }
                 Err(_) => {
                     let next = find_sof(&self.buf[..self.len], 1).unwrap_or(self.len);
                     self.drop_front(next);

@@ -1132,10 +1132,23 @@ mod tests {
             "{rs}"
         );
         assert!(rs.contains("pub const RELAY_LINK_I2C0: u8 = 4;\n"), "{rs}");
+        // Each link's buffer, next to the table and in its order: one frame
+        // of the link's max_payload.
+        assert!(
+            rs.contains(
+                "pub const RELAY_LINK_BUFFERS: [usize; 2] = [\
+                 dagon_proto::frame_len(1024), dagon_proto::frame_len(256)];\n"
+            ),
+            "{rs}"
+        );
         // An MCU that relays over nothing has an empty table.
         let rs = definition_rs(DEF);
         assert!(
             rs.contains("pub const RELAY_LINKS: [dagon_port::RelayLinkDef; 0] = [\n];\n"),
+            "{rs}"
+        );
+        assert!(
+            rs.contains("pub const RELAY_LINK_BUFFERS: [usize; 0] = [];\n"),
             "{rs}"
         );
     }

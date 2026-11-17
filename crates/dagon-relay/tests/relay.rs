@@ -407,13 +407,22 @@ impl Pc<'_> {
 
     /// ROM loader GET: its first reply byte.
     async fn rom_get(&self) -> (Status, Vec<u8>) {
-        let raw = I2cRaw {
-            read_len: 1,
-            data: &[0x00, 0xFF],
-        };
-        let mut p = [0u8; 16];
+        self.raw(1, &[0x00, 0xFF]).await
+    }
+
+    async fn raw(&self, read_len: u16, data: &[u8]) -> (Status, Vec<u8>) {
+        let raw = I2cRaw { read_len, data };
+        let mut p = vec![0u8; 4 + data.len()];
         let n = raw.encode(&mut p).unwrap();
         self.ask(Cmd::I2cRaw, &p[..n]).await
+    }
+
+    /// RELAY of a request frame carrying the link's whole `max` payload (a
+    /// command the node does not know): the node's reply comes back whole.
+    async fn full_frame(&self, link: u8, addr: u8, max: usize) -> (Status, Vec<u8>) {
+        let mut inner = vec![0u8; frame_len(max)];
+        finish(&mut inner, 0, 0x5A, 0x7F, max).unwrap();
+        self.relay(link, addr, 300, &inner).await
     }
 
     async fn show(&self) -> Status {
@@ -504,6 +513,18 @@ fn the_relay_serves_the_pc_over_its_links() {
         let (s, body) = pc.hello(STREAM, STREAM_ADDR).await;
         assert!(hello_answered(s, &body, max_payload::UART), "{s:?}");
 
+        // A frame of each link's whole payload goes through, and so does
+        // its node's reply.
+        for (link, addr, max) in [
+            (BUS, NODE_I2C_ADDR, max_payload::I2C),
+            (STREAM, STREAM_ADDR, max_payload::UART),
+        ] {
+            let (s, body) = pc.full_frame(link, addr, max).await;
+            assert_eq!(s, Status::Ok, "link {link}");
+            let (f, n) = Frame::decode(&body, max).expect("the node's reply");
+            assert_eq!((f.seq, f.cmd, n), (0x5A, 0x7F, body.len()), "link {link}");
+        }
+
         // A link the node has but the board does not wire: E_UNSUPPORTED.
         assert_eq!(pc.hello(SPARE, STREAM_ADDR).await.0, Status::Unsupported);
 
@@ -535,6 +556,14 @@ fn the_relay_serves_the_pc_over_its_links() {
         assert!(bus.borrow_mut().sub_mut().unwrap().boot0());
         clock.wait_until(clock.now_ms() + 100).await;
         assert_eq!(pc.rom_get().await, (Status::Ok, vec![dagon_sim::rom::ACK]));
+        // The recovery link's buffer bounds both directions: E_ARG above
+        // it, never a shortened transfer.
+        let limit = frame_len(max_payload::I2C);
+        assert_eq!(pc.raw(limit as u16 + 1, &[]).await.0, Status::Arg);
+        assert_eq!(pc.raw(0, &vec![0; limit + 1]).await.0, Status::Arg);
+        let (s, read) = pc.raw(limit as u16, &[]).await;
+        assert!(s != Status::Ok || read.len() == limit, "{s:?} {}", read.len());
+        assert_ne!(s, Status::Arg);
         bus.borrow_mut().sub = None;
         assert_eq!(pc.lines(false, nrst::PULSE).await, Status::Timeout);
         bus.borrow_mut().sub = wired;

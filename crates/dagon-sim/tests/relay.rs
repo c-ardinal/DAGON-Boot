@@ -300,6 +300,27 @@ fn rom_get_and_get_id() {
     );
 }
 
+/// I2C_RAW reads and writes up to the recovery link's buffer (one frame of
+/// its max_payload); one byte more is E_ARG, never a shortened transfer.
+#[test]
+fn i2c_raw_above_the_recovery_links_buffer_is_refused() {
+    let mut relay = relay_with_f401();
+    let mut pc = Pc { seq: 0 };
+    pc.subctl(&mut relay, nrst::PULSE, boot0::HIGH);
+    let limit = dagon_proto::frame_len(max_payload::I2C);
+    let raw = |read_len: u16, data: &[u8]| {
+        let mut p = vec![0u8; 4 + data.len()];
+        let n = I2cRaw { read_len, data }.encode(&mut p).unwrap();
+        p.truncate(n);
+        p
+    };
+    let over_read = raw(limit as u16 + 1, &[]);
+    assert_eq!(pc.ask(&mut relay, Cmd::I2cRaw, &over_read).0, Status::Arg);
+    let over_write = raw(0, &vec![0xFF; limit + 1]);
+    assert_eq!(pc.ask(&mut relay, Cmd::I2cRaw, &over_write).0, Status::Arg);
+    assert_eq!(pc.rom(&mut relay, &[], limit as u16).len(), limit);
+}
+
 #[test]
 fn rom_erase_write_read_with_busy_and_frame_timeout() {
     let mut relay = relay_with_f401();

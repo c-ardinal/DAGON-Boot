@@ -2,6 +2,7 @@
 // GET /v1/agent, POST/DELETE /v1/agent/link (consent asked once, when
 // linking), POST /v1/agent/ask (no confirmation per question). The key never
 // comes here; the provider's name is shown only in the linking step.
+import type { Route } from '../request.ts';
 import { AGENT, BUILD } from './copy.ts';
 
 /** One way to reach an agent: its own login through a program, or an HTTP API with a key. */
@@ -89,7 +90,7 @@ export interface AgentProblem {
 }
 
 /** One HTTP call to serve: the Cli in the product, a stand-in in tests and the dev mock. */
-export type AgentApi = (method: string, path: string, body?: unknown) => Promise<Response>;
+export type AgentApi = (route: Route, o?: { params?: Record<string, string>; body?: unknown }) => Promise<Response>;
 
 /** Questions sent with the conversation's last turns, at most this many. */
 const HISTORY = 10;
@@ -138,7 +139,7 @@ export class Agent {
 
   async refresh(): Promise<void> {
     try {
-      const r = await this.api('GET', 'agent');
+      const r = await this.api('GET /v1/agent');
       this.status = r.ok ? ((await r.json()) as AgentStatus) : null;
     } catch {
       this.status = null;
@@ -149,7 +150,7 @@ export class Agent {
   async setLink(choice: AgentChoice | null): Promise<AgentProblem | null> {
     if (this.guard('link')) return { text: '', failed: false };
     try {
-      const r = choice ? await this.api('POST', 'agent/link', { ...choice, consent: true }) : await this.api('DELETE', 'agent/link');
+      const r = choice ? await this.api('POST /v1/agent/link', { body: { ...choice, consent: true } }) : await this.api('DELETE /v1/agent/link');
       if (!r.ok) return problemOf(r.status, await codeOf(r));
       this.status = (await r.json()) as AgentStatus;
       if (!choice) this.messages = [];
@@ -164,9 +165,9 @@ export class Agent {
    * it in the OS credential store; nothing of it stays here. null when it went through, else why not.
    */
   async setKey(choice: AgentChoice, key: string | null): Promise<AgentProblem | null> {
-    const path = `agent/key/${encodeURIComponent(choice.agent)}/${encodeURIComponent(choice.way)}`;
+    const params = { agent: choice.agent, way: choice.way };
     try {
-      const r = key === null ? await this.api('DELETE', path) : await this.api('PUT', path, { key });
+      const r = key === null ? await this.api('DELETE /v1/agent/key/:agent/:way', { params }) : await this.api('PUT /v1/agent/key/:agent/:way', { params, body: { key } });
       if (!r.ok) {
         const body = (await r.json().catch(() => ({}))) as { error?: unknown; code?: unknown };
         if (body.code === 'AGENT_KEY_STORE' && typeof body.error === 'string') return { ...AGENT.errors.AGENT_KEY_STORE, text: body.error };
@@ -189,7 +190,7 @@ export class Agent {
     this.thinking = true;
     try {
       const rollback = await this.record();
-      const r = await this.api('POST', 'agent/ask', { question, kind, ...(selection ? { selection } : {}), ...(rollback ? { rollback } : {}), history });
+      const r = await this.api('POST /v1/agent/ask', { body: { question, kind, ...(selection ? { selection } : {}), ...(rollback ? { rollback } : {}), history } });
       if (!r.ok) return this.say(problemOf(r.status, await codeOf(r)));
       const a = (await r.json()) as { answer: string; proposal?: Proposal | null };
       this.messages = [...this.messages, { role: 'dagon', ...splitAnswer(a.answer), proposal: a.proposal ?? null }];

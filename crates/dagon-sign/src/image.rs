@@ -66,13 +66,19 @@ pub fn slot_of(reg: &Registry, mcu: &str, h: &ImageHeader) -> Option<Slot> {
     slot_with(reg, mcu, h.image_kind, s)
 }
 
+/// The image kinds a name selects, each with its header code: what
+/// [`image_kind_of`] takes and what help and errors list.
+pub const IMAGE_KIND_NAMES: &[(&str, u8)] = &[
+    ("app", image_kind::APP),
+    ("bootcore", image_kind::BOOTCORE),
+    ("agent", image_kind::AGENT),
+];
+
 pub fn image_kind_of(name: &str) -> Option<u8> {
-    match name {
-        "app" => Some(image_kind::APP),
-        "bootcore" => Some(image_kind::BOOTCORE),
-        "agent" => Some(image_kind::AGENT),
-        _ => None,
-    }
+    IMAGE_KIND_NAMES
+        .iter()
+        .find(|(n, _)| *n == name)
+        .map(|(_, kind)| *kind)
 }
 
 /// Comma-separated flag names into a bit set.
@@ -312,6 +318,24 @@ fn elf_load_segments(b: &[u8]) -> Result<Vec<(u32, &[u8])>, ImageError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_name_parses_to_a_kind_exactly_when_the_table_has_it() {
+        for (name, kind) in IMAGE_KIND_NAMES {
+            assert_eq!(image_kind_of(name), Some(*kind), "{name}");
+        }
+        let outside = ["", "stage0", "APP", "app ", "kind"];
+        for name in IMAGE_KIND_NAMES.iter().map(|(n, _)| *n).chain(outside) {
+            let listed = IMAGE_KIND_NAMES.iter().find(|(n, _)| *n == name);
+            assert_eq!(image_kind_of(name), listed.map(|(_, k)| *k), "{name:?}");
+        }
+        for (i, (name, kind)) in IMAGE_KIND_NAMES.iter().enumerate() {
+            for (other, other_kind) in &IMAGE_KIND_NAMES[i + 1..] {
+                assert_ne!(name, other, "a name listed twice");
+                assert_ne!(kind, other_kind, "{name} and {other} share a code");
+            }
+        }
+    }
 
     /// Minimal ELF32 LE with the given (paddr, data) PT_LOAD segments.
     pub(crate) fn elf(segs: &[(u32, &[u8])]) -> Vec<u8> {

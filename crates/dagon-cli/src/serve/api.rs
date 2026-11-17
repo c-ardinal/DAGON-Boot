@@ -44,7 +44,7 @@ fn gen_nodes(
 ) -> Result<Vec<String>, String> {
     let ids = if only.is_empty() {
         let cfg = Config::load(Some(&config.to_string_lossy()))?;
-        let t = read_topology(&cfg, &inside(&cfg, &cfg.topology_path(None)?)?)?;
+        let t = read_topology(&cfg, &inside(&cfg, &cfg.configured_topology()?)?)?;
         t.nodes.iter().map(|n| n.id.clone()).collect()
     } else {
         only.to_vec()
@@ -738,7 +738,7 @@ fn sha_hex(b: &[u8]) -> String {
 /// Signs the built applications of `nodes` with the CLI's key.
 fn job_sign(job: &mut Job, cfg: Config, v: Value) -> Result<Value, String> {
     let nodes = nodes_of(&v).map_err(|_| "nodes must be node ids".to_string())?;
-    let t = read_topology(&cfg, &inside(&cfg, &cfg.topology_path(None)?)?)?;
+    let t = read_topology(&cfg, &inside(&cfg, &cfg.configured_topology()?)?)?;
     let key = serve_key(&cfg)?;
     let cancel = job.cancel_flag();
     sign_nodes(&cfg, &t, &nodes, &key, &mut |l| job.log(l), &cancel)
@@ -1032,7 +1032,7 @@ fn job_release(job: &mut Job, cfg: Config, v: Value) -> Result<Value, String> {
     };
     let name = name.filter(|n| plain(n) && n.len() <= 16);
     let name = name.ok_or("name must be up to 16 plain characters")?;
-    let t = read_topology(&cfg, &inside(&cfg, &cfg.topology_path(None)?)?)?;
+    let t = read_topology(&cfg, &inside(&cfg, &cfg.configured_topology()?)?)?;
     let key = serve_key(&cfg)?;
     let cancel = job.cancel_flag();
     release_from(&cfg, &t, want, name, &key, &mut |l| job.log(l), &cancel)
@@ -1184,7 +1184,7 @@ fn kept_ctx(server: &Server) -> Result<(Config, dagon_topology::Topology, [u8; 3
         .ok_or_else(|| Response::error(409, "the open project has no public key to verify with"))?;
     let path = inside(
         &cfg,
-        &cfg.topology_path(None)
+        &cfg.configured_topology()
             .map_err(|e| Response::error(500, &e))?,
     )
     .map_err(|e| Response::error(403, &e))?;
@@ -1381,7 +1381,7 @@ fn job_conform(job: &mut Job, cfg: Config, v: Value) -> Result<Value, String> {
         .as_str()
         .filter(|n| plain(n))
         .ok_or("node is required")?;
-    let t = read_topology(&cfg, &inside(&cfg, &cfg.topology_path(None)?)?)?;
+    let t = read_topology(&cfg, &inside(&cfg, &cfg.configured_topology()?)?)?;
     let reg = crate::defs::registry(&cfg)?;
     let to = crate::conform::node_target(&reg, &t, node)?;
     let timings = crate::conform::node_timings(&reg, &t, node)?;

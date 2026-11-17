@@ -41,16 +41,17 @@ export function agentMock(q: URLSearchParams, yaml: () => string, wait = (ms: nu
     never_sends: NEVER,
   });
   const json = (body: unknown, code = 200) => new Response(JSON.stringify(body), { status: code, headers: { 'Content-Type': 'application/json' } });
-  return async (method, path, body) => {
-    if (path === 'agent') return json(status());
-    if (path === 'agent/link') {
+  return async (route, { body } = {}) => {
+    if (route === 'GET /v1/agent') return json(status());
+    if (route === 'POST /v1/agent/link' || route === 'DELETE /v1/agent/link') {
+      const linking = route === 'POST /v1/agent/link';
       if (q.has('agentdemo')) return json({ error: 'demo', code: 'DEMO' }, 403);
       const b = (body ?? {}) as { agent?: string; way?: string; consent?: unknown };
-      if (method === 'POST' && (b.consent !== true || !b.agent || !b.way)) return json({ error: 'agent and way must name a defined agent and way' }, 400);
-      consent = method === 'POST' ? { agent: b.agent!, way: b.way!, at: now() } : null;
+      if (linking && (b.consent !== true || !b.agent || !b.way)) return json({ error: 'agent and way must name a defined agent and way' }, 400);
+      consent = linking ? { agent: b.agent!, way: b.way!, at: now() } : null;
       return json(status());
     }
-    if (path === 'agent/ask') {
+    if (route === 'POST /v1/agent/ask') {
       if (!consent) return json({ error: 'not linked', code: 'AGENT_NOT_LINKED' }, 409);
       await wait(1200);
       const kind = String((body as { kind?: string }).kind ?? 'free');

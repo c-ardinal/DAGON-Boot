@@ -120,7 +120,7 @@
   /** DAGON's link to its agent through serve (development: `?agent` stands in for serve's routes). */
   // Development builds only, written so every other build (the served page, the demo page) leaves agentMock out.
   const agentStandIn = import.meta.env.DEV && dev && params.has('agent');
-  const agent = new Agent(import.meta.env.DEV && agentStandIn ? agentMock(params, () => d.config.yaml) : (m, p, b) => cli.api(m, p, b));
+  const agent = new Agent(import.meta.env.DEV && agentStandIn ? agentMock(params, () => d.config.yaml) : (route, o) => cli.api(route, o));
   if (agentStandIn) void agent.refresh();
   /** One condition closes every path to linking, talking, keys and the CLI sheet: linked is never true in a demo. */
   const agentLinked = $derived(!simulated && agent.linked);

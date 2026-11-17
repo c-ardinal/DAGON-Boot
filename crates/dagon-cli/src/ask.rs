@@ -504,7 +504,7 @@ pub fn command(words: &[String]) -> Result<(), String> {
     crate::agents::ready(&home, &keys)?;
     let cfg = crate::config::Config::load(None)?;
     let reg = crate::defs::registry(&cfg)?;
-    let yaml = match cfg.topology_path(None) {
+    let yaml = match cfg.configured_topology() {
         Ok(p) => read_topology(&p)?,
         Err(_) => None,
     };

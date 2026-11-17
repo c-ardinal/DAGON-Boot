@@ -85,6 +85,22 @@ pub(crate) fn link_addr(t: &Topology, id: &str) -> Option<u8> {
         .addr
 }
 
+/// The MCU of the node on node `id`'s recovery lines: the other end of an
+/// I2C link with a ROM entry on which `id`'s end drives the reset and boot
+/// lines (`None`: `id` drives none).
+pub(crate) fn recovery_mcu<'t>(t: &'t Topology, id: &str) -> Option<&'t str> {
+    let far = t
+        .links
+        .iter()
+        .find(|l| {
+            l.kind == LinkKind::I2c
+                && l.control.rom_entry.is_some()
+                && l.end(id).is_some_and(|e| e.drives_reset())
+        })?
+        .other(id)?;
+    Some(t.node(&far.node)?.mcu.as_str())
+}
+
 /// wiring.rs for the node at `index` in `t.nodes`: constants only, from
 /// the topology, `flash_bytes` for a node whose crate comes from its MCU
 /// package, the node's erase regions (`regions`: its board's `[flash]`
@@ -1044,6 +1060,7 @@ pub fn gen_project(config: &Path, only: &[String], force: bool) -> Result<Vec<St
         src: &tables.dagon,
         check_boot_graph: true,
         link_addr: &|id| link_addr(&t, id),
+        recovery_mcu: &|id| recovery_mcu(&t, id).map(str::to_string),
     };
     out.extend(crate::extgen::write_nodes(
         &reg,

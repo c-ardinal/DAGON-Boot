@@ -25,7 +25,8 @@ use std::path::{Path, PathBuf};
 use dagon_extension::node::{self, Ext, Image, ImagePlan};
 use dagon_extension::{gen, Known, Manifest, MANIFEST_FILE};
 use dagon_topology::defs::boot_folder::{
-    board_file_text, defs_text, mcu_file_text, source_sha256, BOARD_FILE, DEFS_FILE, MCU_FILE,
+    board_file_text, defs_text, mcu_file_text, recovery_file_text, source_sha256, BOARD_FILE,
+    DEFS_FILE, MCU_FILE, RECOVERY_FILE,
 };
 use dagon_topology::defs::{ImageKind, McuDef, PortKind, Registry};
 use dagon_topology::schema::{Node, Role};
@@ -335,6 +336,8 @@ pub struct ProjectRef<'a> {
     pub check_boot_graph: bool,
     /// A node's I2C target address from the topology, for its boot wiring.
     pub link_addr: &'a dyn Fn(&str) -> Option<u8>,
+    /// The MCU of the node on a node's recovery lines, from the topology.
+    pub recovery_mcu: &'a dyn Fn(&str) -> Option<String>,
 }
 
 /// The host check of node `id`'s boot crate (`boot/<id>/`): cargo
@@ -464,6 +467,12 @@ fn plan_files(
     if let Some(b) = n.board.as_deref() {
         let text = board_file_text(reg, b).ok_or_else(|| format!("unknown board {b}"))?;
         defs.push((BOARD_FILE, text));
+    }
+    // The recovery node's, for a node that drives one: its relay's build
+    // takes the ROM loader's address from it.
+    if let Some(m) = (p.recovery_mcu)(&n.id) {
+        let text = recovery_file_text(reg, &m).ok_or_else(|| format!("unknown MCU {m}"))?;
+        defs.push((RECOVERY_FILE, text));
     }
     let named: Vec<(&str, &str)> = defs.iter().map(|(f, t)| (*f, t.as_str())).collect();
     let hashes = defs_text(&named);
@@ -700,6 +709,7 @@ mod tests {
             src: &src,
             check_boot_graph: false,
             link_addr: &|_| None,
+            recovery_mcu: &|_| None,
         };
         write_nodes(Registry::builtin(), &p, nodes, only, failed, cfg)
     }
@@ -813,7 +823,10 @@ mod tests {
         let lines = gen(crate::scaffold::SAMPLE);
         check_defs(&hub).unwrap();
         let text = std::fs::read_to_string(hub.join(RECOVERY_FILE)).unwrap();
-        assert!(text.contains("addr = 0x3b") || text.contains("addr = 59"), "{text}");
+        assert!(
+            text.contains("addr = 0x3b") || text.contains("addr = 59"),
+            "{text}"
+        );
         assert!(recovery_rom_addr_rs(&hub).contains(some), "{lines:?}");
         assert!(!base.join("boot/seg").join(RECOVERY_FILE).exists());
         assert!(recovery_rom_addr_rs(&base.join("boot/seg")).contains(none));
@@ -998,6 +1011,7 @@ mod tests {
             src: &src,
             check_boot_graph: true,
             link_addr: &|_| None,
+            recovery_mcu: &|_| None,
         };
         let lines = write_nodes(Registry::builtin(), &p, &hub, &[], &[], &cfg).unwrap();
         assert!(
@@ -1121,6 +1135,7 @@ mod tests {
             src: &src,
             check_boot_graph: true,
             link_addr: &|_| None,
+            recovery_mcu: &|_| None,
         };
         let none = Extensions::default();
         write_nodes(Registry::builtin(), &p, &hub, &[], &[], &none).unwrap();

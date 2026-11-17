@@ -22,6 +22,8 @@ export interface HelloResp {
   trial: boolean;
   keyId: Uint8Array;
   maxPayload: number;
+  /** The commands the node serves, as dagon-proto packs them; left out by a node that does not say. */
+  cmds?: Uint8Array;
 }
 
 /** The body of an OK HELLO response, written by dagon-proto. */

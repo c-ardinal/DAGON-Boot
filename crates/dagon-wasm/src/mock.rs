@@ -5,10 +5,11 @@
 //! writer.
 
 use dagon_format::Version;
+use dagon_proto::handler::{self, Handler};
 use dagon_proto::payload::{
-    encode_bulk_resp, encode_digest, encode_next_offset, parse_confirm, parse_empty, parse_reboot,
-    parse_status_req, put_refusal, HelloReq, HelloResp, Relay, SetPending, Show, SlotInfo,
-    SlotState, StatusResp, XferBegin, XferChunk, REFUSAL_MAX,
+    confirm_of, encode_bulk_resp, encode_digest, encode_next_offset, put_refusal, reboot_of,
+    status_req_of, CmdSet, HelloReq, HelloResp, Relay, SetPending, Show, SlotInfo, SlotState,
+    StatusResp, XferBegin, XferChunk, REFUSAL_MAX,
 };
 use dagon_proto::{flags, max_payload, Cmd, FrameError, Status, CRC_LEN, HEADER_LEN};
 use wasm_bindgen::prelude::*;
@@ -89,48 +90,77 @@ pub struct Request {
     pub bulk: Vec<u8>,
 }
 
-fn read_request(cmd: u8, p: &[u8]) -> Result<Request, Status> {
-    let mut r = Request::default();
-    match Cmd::from_u8(cmd).ok_or(Status::Unsupported)? {
-        Cmd::Hello => {
-            HelloReq::parse(p)?;
-        }
-        Cmd::Status => r.target = parse_status_req(p)?,
-        Cmd::XferBegin => {
-            let b = XferBegin::parse(p)?;
-            (r.target, r.slot) = (b.target, b.slot);
-        }
-        Cmd::XferHdr | Cmd::XferData => {
-            let c = XferChunk::parse(p)?;
-            (r.offset, r.bulk) = (c.offset, c.data.to_vec());
-        }
-        Cmd::XferEnd => parse_empty(&Cmd::XferEnd.spec().req, p)?,
-        Cmd::SetPending => {
-            let s = SetPending::parse(p)?;
-            (r.target, r.slot) = (s.target, s.slot);
-        }
-        Cmd::Reboot => {
-            parse_reboot(p)?;
-        }
-        Cmd::Confirm => r.target = parse_confirm(p)?,
-        Cmd::Show => {
-            Show::parse(p)?;
-        }
-        Cmd::Relay => {
-            let x = Relay::parse(p)?;
-            (r.link, r.addr, r.bulk) = (x.link, x.addr, x.inner.to_vec());
-        }
-        _ => return Err(Status::Unsupported),
+/// A chunk of a transfer, as XFER_HDR and XFER_DATA carry it.
+fn chunk(r: &mut Request, c: XferChunk<'_>) {
+    (r.offset, r.bulk) = (c.offset, c.data.to_vec());
+}
+
+/// The commands the page's nodes serve: each row puts what its request
+/// says into the [`Request`] the page acts on. RELAY is the last row, for
+/// the node that relays.
+const TABLE: [Handler<Request, ()>; 11] = [
+    Handler::new(Cmd::Hello, |_, p| HelloReq::of(p).map(|_| ())),
+    Handler::new(Cmd::Status, |r, p| {
+        r.target = status_req_of(p)?;
+        Ok(())
+    }),
+    Handler::new(Cmd::XferBegin, |r, p| {
+        let b = XferBegin::of(p)?;
+        (r.target, r.slot) = (b.target, b.slot);
+        Ok(())
+    }),
+    Handler::new(Cmd::XferData, |r, p| XferChunk::of(p).map(|c| chunk(r, c))),
+    Handler::new(Cmd::XferEnd, |_, _| Ok(())),
+    Handler::new(Cmd::XferHdr, |r, p| XferChunk::of(p).map(|c| chunk(r, c))),
+    Handler::new(Cmd::SetPending, |r, p| {
+        let s = SetPending::of(p)?;
+        (r.target, r.slot) = (s.target, s.slot);
+        Ok(())
+    }),
+    Handler::new(Cmd::Reboot, |_, p| reboot_of(p).map(|_| ())),
+    Handler::new(Cmd::Confirm, |r, p| {
+        r.target = confirm_of(p)?;
+        Ok(())
+    }),
+    Handler::new(Cmd::Show, |_, p| Show::of(p).map(|_| ())),
+    Handler::new(Cmd::Relay, |r, p| {
+        let x = Relay::of(p)?;
+        (r.link, r.addr, r.bulk) = (x.link, x.addr, x.inner.to_vec());
+        Ok(())
+    }),
+];
+
+/// The rows a node serves: all of them when it relays, all but RELAY's
+/// when it does not.
+fn table(relays: bool) -> &'static [Handler<Request, ()>] {
+    const ROWS: &[Handler<Request, ()>] = &TABLE;
+    match ROWS.split_last() {
+        Some((relay, others)) if !relays && relay.cmd == Cmd::Relay => others,
+        _ => ROWS,
     }
+}
+
+fn read_request(cmd: u8, p: &[u8], relays: bool) -> Result<Request, Status> {
+    let mut r = Request::default();
+    let row = handler::find(table(relays), cmd).ok_or(Status::Unsupported)?;
+    row.call(&mut r, p)?;
     Ok(r)
 }
 
-/// Reads the payload of a `cmd` request. A command the hub does not serve
-/// is refused as unsupported; a malformed payload and an unknown must
-/// field are refused as a node refuses them.
+/// The commands a node of the page serves (`relays`: the one that
+/// relays), as HELLO carries them.
 #[wasm_bindgen]
-pub fn request_read(cmd: u8, payload: &[u8]) -> Request {
-    read_request(cmd, payload).unwrap_or_else(|status| {
+pub fn node_cmds(relays: bool) -> Vec<u8> {
+    handler::cmds(table(relays)).as_bytes().to_vec()
+}
+
+/// Reads the payload of a `cmd` request to a node of the page (`relays`:
+/// the one that relays). A command the node does not serve is refused as
+/// unsupported; a malformed payload and an unknown must field are refused
+/// as a node refuses them.
+#[wasm_bindgen]
+pub fn request_read(cmd: u8, payload: &[u8], relays: bool) -> Request {
+    read_request(cmd, payload, relays).unwrap_or_else(|status| {
         let mut out = [0u8; REFUSAL_MAX];
         let n = put_refusal(&mut out, status, cmd, payload);
         Request {
@@ -155,7 +185,9 @@ pub fn response_status(status: u8) -> Vec<u8> {
     vec![status]
 }
 
-/// The body of an OK HELLO response (after the status byte).
+/// The body of an OK HELLO response (after the status byte). `cmds`: the
+/// commands the node serves ([`node_cmds`]); empty for a node that does
+/// not say.
 #[wasm_bindgen]
 #[allow(clippy::too_many_arguments)]
 pub fn hello_response_body(
@@ -168,7 +200,12 @@ pub fn hello_response_body(
     trial: bool,
     key_id: &[u8],
     max_payload: u16,
+    cmds: &[u8],
 ) -> Result<Vec<u8>, JsError> {
+    let cmds = match cmds {
+        [] => CmdSet::EMPTY,
+        said => CmdSet::from_bytes(said).map_err(|_| JsError::new("not a command set"))?,
+    };
     let h = HelloResp {
         proto_ver,
         role,
@@ -181,6 +218,7 @@ pub fn hello_response_body(
             .try_into()
             .map_err(|_| JsError::new("a key id is 8 bytes"))?,
         max_payload,
+        cmds,
     };
     Ok(ok(HelloResp::MAX_LEN, |b| h.encode(b)).split_off(1))
 }
@@ -259,18 +297,55 @@ mod tests {
         };
         let mut b = [0u8; 16];
         let n = begin.encode(&mut b).unwrap();
-        let r = request_read(Cmd::XferBegin as u8, &b[..n]);
+        let r = request_read(Cmd::XferBegin as u8, &b[..n], false);
         assert!(r.refusal.is_empty());
         assert_eq!((r.target, r.slot), (0, 1));
         // Cut short: E_ARG. An unknown must field (300): E_FIELD naming it.
-        let r = request_read(Cmd::XferBegin as u8, &b[..3]);
+        let r = request_read(Cmd::XferBegin as u8, &b[..3], false);
         assert_eq!(r.refusal, [Status::Arg as u8]);
-        let r = request_read(Cmd::XferEnd as u8, &[0xD9, 0x04, 0]);
+        let r = request_read(Cmd::XferEnd as u8, &[0xD9, 0x04, 0], false);
         let (status, body) = split_status(&r.refusal).unwrap();
         assert_eq!((status, refused_field(body)), (Status::Field, Some(300)));
-        let r = request_read(Cmd::SubCtl as u8, &[]);
+        let r = request_read(Cmd::SubCtl as u8, &[], true);
         assert_eq!(r.refusal, [Status::Unsupported as u8]);
-        assert_eq!(request_read(0xEE, &[]).refusal, [Status::Unsupported as u8]);
+        assert_eq!(
+            request_read(0xEE, &[], true).refusal,
+            [Status::Unsupported as u8]
+        );
+    }
+
+    /// A node of the page says in HELLO what it serves (RELAY only the one
+    /// that relays), and a request with an unknown must field, a field
+    /// sent twice or a bad length comes back from every one of those
+    /// commands as a refusal and nothing else, so the page acts on none.
+    #[test]
+    fn a_node_says_what_it_serves_and_a_planted_request_is_only_a_refusal() {
+        use dagon_proto::plant;
+        for (relays, count) in [(true, 11), (false, 10)] {
+            let said = node_cmds(relays);
+            let body = hello_response_body(2, 0, 1, 1, 0, 0, false, &[0; 8], 1088, &said)
+                .ok()
+                .unwrap();
+            let cmds = HelloResp::parse(&body).unwrap().cmds;
+            assert_eq!(cmds.has(Cmd::Relay as u8), relays);
+            let mut served = CmdSet::EMPTY;
+            plant::each_probe(|n, p| {
+                let refusal = request_read(n, p, relays).refusal;
+                match split_status(&refusal).map(|s| s.0) {
+                    Some(Status::Field) => served = served.with(n),
+                    other => assert_eq!(other, Some(Status::Unsupported), "{n:#x}"),
+                }
+            });
+            assert_eq!(served, cmds, "what answers is what HELLO says");
+            let commands = plant::each(&cmds, |n, plant, p| {
+                let r = request_read(n, p, relays);
+                let status = split_status(&r.refusal).map(|s| s.0);
+                assert_eq!(status, Some(plant.status()), "{n:#x} {plant:?}");
+                let read = (r.target, r.slot, r.offset, r.link, r.addr, r.bulk.len());
+                assert_eq!(read, (0, 0, 0, 0, 0, 0), "{n:#x} {plant:?}");
+            });
+            assert_eq!(commands, count, "every command it serves");
+        }
     }
 
     #[test]

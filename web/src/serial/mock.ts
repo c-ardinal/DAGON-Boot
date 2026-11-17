@@ -11,7 +11,7 @@ import { CMD, encodeFrame, parseFrame, STATUS, WIRE } from './frame.ts';
 import { ROLE_HUB, ROLE_NODE, encodeHelloResp, versionRaw, type HelloResp } from './hello.ts';
 import { FrameQueue, type Transport } from './transport.ts';
 import sampleYaml from '../../../topology/sample.yaml?raw';
-import { readRequest, respond, topo_targets, wireVersion, type Target, type WireRequest } from '../wasm/dagon.ts';
+import { readRequest, respond, servedCmds, topo_targets, wireVersion, type Target, type WireRequest } from '../wasm/dagon.ts';
 
 const HDR_VERSION_AT = 0x018;
 const SLOT_EMPTY = 0;
@@ -40,6 +40,9 @@ export const SAMPLE_HUB_HELLO: HelloResp = {
   get maxPayload() {
     return WIRE.MAX_PAYLOAD_USB;
   },
+  get cmds() {
+    return servedCmds(true);
+  },
 };
 
 const node = (portKind: number, mcuId: number, maxPayload: number): HelloResp => ({
@@ -48,6 +51,7 @@ const node = (portKind: number, mcuId: number, maxPayload: number): HelloResp =>
   portKind,
   mcuId,
   maxPayload,
+  cmds: servedCmds(false),
 });
 
 interface Slot {
@@ -199,7 +203,7 @@ export class MockTransport implements Transport {
     if (!this.isOpen) throw new Error('port not open');
     if (this.opts.silent) return;
     const frame = parseFrame(raw);
-    const req = readRequest(frame.cmd, frame.payload);
+    const req = readRequest(frame.cmd, frame.payload, true);
     const hub = this.devices.get('hub')!;
     const body = req.refusal ?? (frame.cmd === CMD.RELAY ? await this.relay(req) : await answer(hub, frame.cmd, req, this.fellBack('hub'), this.refuse.hub));
     const resp = encodeFrame({ flags: WIRE.FLAG_RESP, seq: frame.seq, cmd: frame.cmd, payload: body });
@@ -224,7 +228,7 @@ export class MockTransport implements Transport {
     const dev = key && !this.quiet.has(key) ? this.devices.get(key) : undefined;
     if (!key || !dev) return respond.status(STATUS.TIMEOUT);
     const inner = parseFrame(req.bulk);
-    const innerReq = readRequest(inner.cmd, inner.payload);
+    const innerReq = readRequest(inner.cmd, inner.payload, false);
     const body = innerReq.refusal ?? (await answer(dev, inner.cmd, innerReq, this.fellBack(key), this.refuse[key]));
     if (inner.cmd === CMD.REBOOT && body[0] === STATUS.OK) this.reboots.push(key);
     const resp = encodeFrame({ flags: WIRE.FLAG_RESP, seq: inner.seq, cmd: inner.cmd, payload: body });

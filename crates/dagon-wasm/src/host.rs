@@ -697,6 +697,10 @@ fn hello_js(h: &HelloResp) -> JsValue {
     set(&o, "trial", h.trial.into());
     set(&o, "keyId", Uint8Array::from(&h.key_id[..]).into());
     set(&o, "maxPayload", h.max_payload.into());
+    // Left out for a node that does not say what it serves.
+    if !h.cmds.is_empty() {
+        set(&o, "cmds", Uint8Array::from(h.cmds.as_bytes()).into());
+    }
     o.into()
 }
 

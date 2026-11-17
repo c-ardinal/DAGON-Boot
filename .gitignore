@@ -34,6 +34,10 @@ keys/
 # CLI outputs (images, bundles, provisioning files)
 /out/
 
+# The built DAGON Console page (python scripts/page.py build): releases and
+# CI build it from web/
+/crates/dagon-cli/page/
+
 # Source files of the product symbol: never committed
 assets/product-symbol/no_commit/
 

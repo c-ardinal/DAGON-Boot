@@ -685,10 +685,20 @@ fn definitions_state_their_format_and_unknown_formats_are_refused() {
     assert!(e.msg.contains(want), "{e}");
     let mcu = FAKE_MCU.replace("format = 3", "format = 4\nnew_key = 1");
     let e = project_registry("format-mcu", &mcu, FAKE_BOARD).unwrap_err();
-    assert!(e.msg.contains("definition format 3"), "{e}");
+    let want = "definition format 4; this dagon reads definition format 3 ";
+    assert!(e.msg.contains(want), "{e}");
     let board = FAKE_BOARD.replace("format = 3", "format = 9");
     let e = project_registry("format-board", FAKE_MCU, &board).unwrap_err();
-    assert!(e.msg.contains("definition format 9"), "{e}");
+    let want = "definition format 9; this dagon reads definition format 3 ";
+    assert!(e.msg.contains(want), "{e}");
+    // Format 2 (without the flash write facts) is refused by number.
+    let want = "definition format 2; this dagon reads definition format 3 ";
+    let mcu = FAKE_MCU.replace("format = 3", "format = 2");
+    let e = project_registry("format-mcu-2", &mcu, FAKE_BOARD).unwrap_err();
+    assert!(e.msg.contains(want), "{e}");
+    let board = FAKE_BOARD.replace("format = 3", "format = 2");
+    let e = project_registry("format-board-2", FAKE_MCU, &board).unwrap_err();
+    assert!(e.msg.contains(want), "{e}");
     // Format 1 (an MCU's `erase_unit`) is refused by number.
     let mcu = FAKE_MCU.replace("format = 3", "format = 1");
     let e = project_registry("format-mcu-1", &mcu, FAKE_BOARD).unwrap_err();

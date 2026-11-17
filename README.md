@@ -166,16 +166,22 @@ DAGONがしないことと、スロットが1つのイメージにできない�
 
 ### DAGONを自分でビルドする
 
-必要なものは次の2つです。
+`dagon`コマンドは、上の「インストール」のスクリプトか[リリース](https://github.com/c-ardinal/DAGON-Boot/releases)のアーカイブで入れます。どちらもDAGON Consoleを組み込んであります。
+
+このリポジトリのクローンからビルドするときに必要なものは次のとおりです。
 
 - Rust 1.95.0以降
 - Cコンパイラ（WindowsはVisual Studio 2022のC++ビルドツール、Linuxはgcc 13以降、macOSはXcode Command Line Tools 16.4以降）
+- DAGON Consoleのページ用に、Python 3、Node.jsとnpm、`wasm-pack` 0.15.1
+
+ページを先にビルドします。ビルドしないと、`dagon serve`はページのビルドのしかたを表示するだけです。
 
 ```sh
-cargo install --git https://github.com/c-ardinal/DAGON-Boot --tag cli-v<version> dagon-cli
+python scripts/page.py build
+cargo install --path crates/dagon-cli
 ```
 
-クローンからビルドするときは`cargo install --path crates/dagon-cli`です。外すときは`cargo uninstall dagon-cli`です。
+外すときは`cargo uninstall dagon-cli`です。
 
 ## 依存しているものと外部のデータ
 

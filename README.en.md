@@ -166,16 +166,22 @@ What DAGON does not do, and what an image with one slot cannot do, are in [Limit
 
 ### Building DAGON yourself
 
-It needs two things:
+Install the `dagon` command with the scripts under "Install" above or from an archive of a [release](https://github.com/c-ardinal/DAGON-Boot/releases). Both have DAGON Console built in.
+
+To build it from a clone of this repository, you need:
 
 - Rust 1.95.0 or later
 - A C compiler (the Visual Studio 2022 C++ build tools on Windows, gcc 13 or later on Linux, Xcode Command Line Tools 16.4 or later on macOS)
+- For the DAGON Console page: Python 3, Node.js and npm, and `wasm-pack` 0.15.1
+
+Build the page first. Without it, `dagon serve` only tells you how to build the page.
 
 ```sh
-cargo install --git https://github.com/c-ardinal/DAGON-Boot --tag cli-v<version> dagon-cli
+python scripts/page.py build
+cargo install --path crates/dagon-cli
 ```
 
-From a clone, it is `cargo install --path crates/dagon-cli`. To remove it, run `cargo uninstall dagon-cli`.
+To remove it, run `cargo uninstall dagon-cli`.
 
 ## Dependencies and external data
 

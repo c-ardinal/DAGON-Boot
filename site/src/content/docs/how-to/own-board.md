@@ -11,7 +11,7 @@ description: "一覧に無いボードを、そのボードの定義を書いて
 
 ```toml
 [board.my-f401]
-format = 2
+format = 3
 product = "My F401 board"
 mcu = "stm32f401re"
 flash_bytes = 524288

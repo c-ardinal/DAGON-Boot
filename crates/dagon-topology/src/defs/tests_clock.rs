@@ -14,7 +14,7 @@ fn with_clock(id: &str, clock: &str) -> String {
             "[layout]\n",
             "[layout]\nstage0 = { at = 0x0010_A000, size = 0x4000 }\n",
         )
-        + "\n[stage0]\nregion_bytes = 0x4000\n"
+        + "\n[stage0]\nregion_bytes = 0x4000\nhead_bytes = 0\n"
         + clock
 }
 

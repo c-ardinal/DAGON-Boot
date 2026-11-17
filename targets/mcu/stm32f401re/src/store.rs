@@ -16,8 +16,8 @@ use dagon_port::{Flash, FlashError};
 use dagon_proto::payload::{target, SlotInfo, StatusResp};
 
 const HDR: u32 = HEADER_SIZE as u32;
-/// Flash write unit this store pads to (STM32F4: 32-bit programming).
-const UNIT: usize = 4;
+/// Flash write unit this store pads to (`[execution] write_unit`).
+const UNIT: usize = crate::WRITE_UNIT as usize;
 
 /// Body bytes waiting for a full write unit.
 #[derive(Clone, Copy, Debug, Default)]
@@ -248,7 +248,7 @@ impl<F: Flash> SlotStore for KindSStore<F> {
         tail.bytes[tail.len..tail.len + left.len()].copy_from_slice(left);
         tail.len += left.len();
         if tail.len > 0 && offset + data.len() as u32 == tail.end {
-            tail.bytes[tail.len..].fill(0xFF);
+            tail.bytes[tail.len..].fill(crate::ERASED_VALUE);
             self.flash
                 .write(body + tail.at, &tail.bytes)
                 .map_err(flash_err)?;

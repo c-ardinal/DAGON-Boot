@@ -995,7 +995,7 @@ mod tests {
             std::fs::write(
                 board.join(BOARD_FILE),
                 format!(
-                    "id = {id:?}\nformat = 2\nproduct = \"P\"\nmcu = \"rp2040\"\nflash_bytes = 0x40_0000\n\
+                    "id = {id:?}\nformat = 3\nproduct = \"P\"\nmcu = \"rp2040\"\nflash_bytes = 0x40_0000\n\
                      drawing = \"x\"\n{extra}[boot]\nled = \"GPIO25\"\nhalt = {{ pattern = \"blink\", period_ms = 200 }}\n\
                      [[pin]]\npin = \"GPIO25\"\nname = \"led\"\n"
                 ),
@@ -1108,7 +1108,7 @@ mod tests {
             format!(
                 "format = 1\n[[board_override.pico-like.pin]]\npin = \"{pin}\"\nname = \"button\"\n\n\
                  [mcu_override.rp2040.watchdog]\ntrial_ms = {trial}\n\n\
-                 [board.mine]\nformat = 2\nproduct = \"Mine\"\nmcu = \"rp2040\"\nflash_bytes = 0x40_0000\n\
+                 [board.mine]\nformat = 3\nproduct = \"Mine\"\nmcu = \"rp2040\"\nflash_bytes = 0x40_0000\n\
                  drawing = \"x\"\n[board.mine.boot]\nled = \"{pin}\"\n[[board.mine.pin]]\npin = \"{pin}\"\n"
             )
         };
@@ -1258,7 +1258,7 @@ mod tests {
         let project = dir.join("dagon.toml");
         std::fs::write(
             &project,
-            "format = 1\n[board.mine]\nformat = 2\nproduct = \"Mine\"\nmcu = \"rp2040\"\nflash_bytes = 0x40_0000\n\
+            "format = 1\n[board.mine]\nformat = 3\nproduct = \"Mine\"\nmcu = \"rp2040\"\nflash_bytes = 0x40_0000\n\
              drawing = \"x\"\n[board.mine.boot]\nled = \"GPIO2\"\n[[board.mine.pin]]\npin = \"GPIO2\"\n",
         )
         .unwrap();

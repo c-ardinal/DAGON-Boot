@@ -1,6 +1,6 @@
 # DAGON MCU definition (format: targets/README.md). Slots come from
 # partitions.csv; addresses are flash offsets (images are MMU-mapped).
-format = 2
+format = 3
 id = "esp32s3"
 name = "ESP32-S3"
 wire_id = 0x0003
@@ -182,6 +182,10 @@ flag = "unmeasured"
 [execution]
 masked_max_us = "unmeasured"
 flash_op = "cache-off-masked"
+# The ROM SPI flash write takes 4-byte aligned words (esp-storage 0.10,
+# FlashStorage::WORD_SIZE), and erased NOR flash reads 0xFF.
+write_unit = 4
+erased_value = 0xFF
 erase_regions = [
     { start = 0x0, len = 0x100_0000, unit = 0x1000, unit_max_ms = { unverified = 500 } },
 ]

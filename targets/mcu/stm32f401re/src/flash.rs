@@ -2,11 +2,17 @@
 //! (erase and write only inside [`FLASH_REGIONS`]).
 
 use dagon_port::{Flash, FlashError, FlashRegion};
-use embassy_stm32::flash::{Blocking, Flash as Hal, FLASH_BASE, FLASH_SIZE};
+use embassy_stm32::flash::{Blocking, Flash as Hal, FLASH_BASE, FLASH_SIZE, WRITE_SIZE};
 use embassy_stm32::peripherals::FLASH;
 use embassy_stm32::Peri;
 
 use crate::layout::FLASH_REGIONS;
+
+// The driver writes whole `WRITE_SIZE` words.
+const _: () = assert!(
+    (crate::WRITE_UNIT as usize).is_multiple_of(WRITE_SIZE),
+    "[execution] write_unit is not a multiple of the flash driver's write size"
+);
 
 pub struct F401Flash<'d>(Hal<'d, Blocking>);
 

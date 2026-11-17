@@ -85,7 +85,7 @@ fn flash_with(
         .ok_or("node is required")?;
     // Only ever compared with the candidates, never passed on as given.
     let device = v["device"].as_str();
-    let t = read_topology(cfg, &inside(cfg, &cfg.topology_path(None)?)?)?;
+    let t = read_topology(cfg, &inside(cfg, &cfg.configured_topology()?)?)?;
     let out = provision_out(cfg, node)?;
     // The page gets paths relative to the project or the DAGON source.
     let steps = crate::flash::plan(cfg, &t, node, &out, crate::flash::Paths::Relative)?;
@@ -132,7 +132,7 @@ fn flash_with(
 pub fn job_doctor(job: &mut Job, cfg: Config, _v: Value) -> Result<Value, String> {
     let reg = super::api::project_registry(&cfg)?;
     let mcus: Vec<String> = cfg
-        .topology_path(None)
+        .configured_topology()
         .and_then(|p| inside(&cfg, &p))
         .and_then(|p| read_topology(&cfg, &p))
         .map(|t| t.nodes.iter().map(|n| n.mcu.clone()).collect())

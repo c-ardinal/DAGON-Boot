@@ -1004,7 +1004,7 @@ pub(crate) fn outcome(lines: &[String]) -> Result<(), String> {
 /// reports (written, skipped, added, notes).
 pub fn gen_project(config: &Path, only: &[String], force: bool) -> Result<Vec<String>, String> {
     let cfg = Config::load(Some(&config.to_string_lossy()))?;
-    let t = read_topology(&cfg, &contained(&cfg.base, &cfg.topology_path(None)?)?)?;
+    let t = read_topology(&cfg, &contained(&cfg.base, &cfg.configured_topology()?)?)?;
     let tables = project_tables(config)?;
     if let Some(bad) = only.iter().find(|id| t.node(id).is_none()) {
         return Err(format!("no updatable node '{bad}' in the topology"));

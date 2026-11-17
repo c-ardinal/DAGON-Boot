@@ -1574,7 +1574,7 @@ fn a_project_override_reaches_the_esp32s3_factory_agent() {
 }
 
 fn cfg_topology(cfg: &Config) -> Topology {
-    read_topology(cfg, &cfg.topology_path(None).unwrap()).unwrap()
+    read_topology(cfg, &cfg.configured_topology().unwrap()).unwrap()
 }
 
 #[test]

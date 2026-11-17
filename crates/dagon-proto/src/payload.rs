@@ -773,7 +773,8 @@ impl EnterRom {
     }
 }
 
-/// I2C_RAW request (to the ROM loader at 0x39). Response body: the bytes read.
+/// I2C_RAW request (to the ROM loader on the recovery lines, at the address
+/// its MCU definition gives). Response body: the bytes read.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct I2cRaw<'a> {
     pub read_len: u16,

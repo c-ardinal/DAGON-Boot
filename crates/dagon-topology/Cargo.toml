@@ -30,7 +30,6 @@ toml = { version = "0.8", default-features = false, features = ["parse"] }
 # Parity tests: the definitions match the built-in tables (these crates depend
 # on this one; the cycle is through dev-dependencies only).
 dagon-host = { path = "../dagon-host", features = ["defs"] }
-dagon-romlink = { path = "../dagon-romlink" }
 dagon-sign = { path = "../dagon-sign" }
 # tests/defs_layout.rs compiles the MCU packages' build helper
 # (targets/mcu/build), which hashes the node's definitions; already in the

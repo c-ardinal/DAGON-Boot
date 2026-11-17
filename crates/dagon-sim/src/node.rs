@@ -3,7 +3,7 @@
 //! a configurable behaviour for images running on trial.
 
 use crate::flash::SimFlash;
-use crate::rom::{SimRom, ROM_ADDR};
+use crate::rom::SimRom;
 use crate::store::{Boot, Layout, SimStore};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, MutexGuard};
@@ -120,6 +120,9 @@ pub struct SimNode {
     /// `Unsupported`, as such an agent does.
     pub predates: Vec<u8>,
     pub rom: SimRom,
+    /// Where its ROM loader answers on I2C: its MCU definition's
+    /// `[rom_i2c] addr` (`None`: its MCU has none).
+    pub rom_addr: Option<u8>,
     run: Run,
     on_trial: bool,
     nrst_low: bool,
@@ -152,6 +155,10 @@ impl SimNode {
             busy_reads: 1,
             predates: Vec::new(),
             rom: SimRom::default(),
+            rom_addr: crate::store::simulated_mcu(layout.mcu)
+                .rom_i2c
+                .as_ref()
+                .map(|r| r.addr),
             run: Run::Dead,
             on_trial: false,
             nrst_low: false,
@@ -366,7 +373,7 @@ impl SimNode {
     /// Whether `addr` ACKs on the I2C bus.
     pub fn i2c_present(&self, addr: u8) -> bool {
         match self.run {
-            Run::Rom => addr == ROM_ADDR,
+            Run::Rom => self.rom_addr == Some(addr),
             _ => self.responsive() && self.i2c_addr == Some(addr),
         }
     }

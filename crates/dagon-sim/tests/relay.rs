@@ -7,7 +7,7 @@ use dagon_format::{key_id, sha256, Version};
 use dagon_port::I2cBus;
 use dagon_proto::payload::{self, *};
 use dagon_proto::{flags, max_payload, split_status, Cmd, Frame, Status};
-use dagon_sim::rom::{cmd, ACK, BUSY, NACK, ROM_ADDR};
+use dagon_sim::rom::{cmd, ACK, BUSY, NACK};
 use dagon_sim::*;
 use ed25519_compact::{KeyPair, Seed};
 use payload::link;
@@ -230,6 +230,12 @@ fn own_store_on_page_programmed_flash() {
 #[test]
 fn i2c_scan_finds_only_present_targets() {
     let mut relay = relay_with_f401();
+    // Where the F401's ROM loader answers: its MCU definition's address.
+    let rom = relay
+        .i2c_node(NODE_I2C_PORT, NODE_I2C_ADDR)
+        .unwrap()
+        .rom_addr
+        .unwrap();
     let mut pc = Pc { seq: 0 };
     let port = relay.port(NODE_I2C_PORT, dagon_port::LinkKind::I2c);
     assert_eq!(relay.bus.scan(port), vec![NODE_I2C_ADDR]);
@@ -246,7 +252,7 @@ fn i2c_scan_finds_only_present_targets() {
     pc.subctl(&mut relay, nrst::PULSE, boot0::HIGH);
     assert_eq!(
         relay.bus.scan(port),
-        vec![ROM_ADDR],
+        vec![rom],
         "ROM loader replaces the app"
     );
     pc.subctl(&mut relay, nrst::PULSE, boot0::LOW);
@@ -254,7 +260,7 @@ fn i2c_scan_finds_only_present_targets() {
 
     // Same lines through the port trait, as relay logic would drive them.
     block_on(dagon_port::SubControl::pulse_reset(&mut relay.bus, true)).unwrap();
-    assert_eq!(relay.bus.scan(port), vec![ROM_ADDR]);
+    assert_eq!(relay.bus.scan(port), vec![rom]);
     block_on(dagon_port::SubControl::pulse_reset(&mut relay.bus, false)).unwrap();
     assert_eq!(relay.bus.scan(port), vec![NODE_I2C_ADDR]);
 

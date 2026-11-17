@@ -49,7 +49,7 @@ pub mod def {
 pub use hal::*;
 
 /// The board's default 7-bit I2C target address (`[default_link] addr`;
-/// the STM32 ROM loader keeps 0x39), for a node whose topology end gives
+/// the MCU's ROM loader keeps its own, `[rom_i2c] addr`), for a node whose topology end gives
 /// none.
 pub const I2C_ADDR: u8 = match def::DEFAULT_LINK_ADDR {
     Some(a) => a,

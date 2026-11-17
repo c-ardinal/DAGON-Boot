@@ -334,6 +334,32 @@ fn gen_with(name: &str, id: &str, entry: &str, extra: &str) -> (PathBuf, Vec<Str
     (dir, lines)
 }
 
+/// `dagon gen` gives the hub the definition, as the project resolves it,
+/// of the node its I2C ROM link reaches, whether or not the hub's end names
+/// the reset and boot lines (its board wires them): the relay's build takes
+/// that loader's address. The host takes the ROM path to the same node.
+#[test]
+fn gen_gives_the_relay_its_rom_link_peer_with_or_without_named_lines() {
+    use dagon_topology::defs::boot_folder::recovery_rom_addr_rs;
+    let moved = "\n[mcu_override.stm32f401re.rom_i2c]\naddr = 0x3B\n";
+    let without = SAMPLE.replace(", nrst: 18, boot: 28", "");
+    for (name, yaml) in [("rec-lines", SAMPLE), ("rec-nolines", without.as_str())] {
+        let d = tmp(name);
+        let dir = d.join("proj");
+        new_project(&dir, "proj", yaml, &d.join("keys"), &dev()).unwrap();
+        let config = dir.join(crate::config::CONFIG_FILE);
+        let toml = read(&dir, crate::config::CONFIG_FILE) + moved;
+        std::fs::write(&config, toml).unwrap();
+        gen_project(&config, &["hub".to_string()], false).unwrap_or_else(|e| panic!("{e}"));
+        let rs = recovery_rom_addr_rs(&dir.join("boot/hub"));
+        assert!(
+            rs.contains("pub const RECOVERY_ROM_ADDR: Option<u8> = Some(0x3b);\n"),
+            "{name}: {rs}"
+        );
+        let _ = std::fs::remove_dir_all(&d);
+    }
+}
+
 #[test]
 fn the_own_board_guide_runs_through_gen() {
     let pages = [
@@ -1255,11 +1281,24 @@ fn a_project_slot_override_reaches_the_firmware() {
 
     // A node definition of another MCU or format is refused, even with
     // hashes that match it.
-    use dagon_topology::defs::boot_folder::{defs_text, BOARD_FILE, DEFS_FILE, MCU_FILE};
+    use dagon_topology::defs::boot_folder::{defs_text, DEFS_FILE, MCU_FILE};
     let good = std::fs::read_to_string(&mcu_toml).unwrap();
-    let board = std::fs::read_to_string(dir.join("boot/hub").join(BOARD_FILE)).unwrap();
     let defs = dir.join("boot/hub").join(DEFS_FILE);
     let good_defs = std::fs::read_to_string(&defs).unwrap();
+    // Every line gen wrote, the node definition's hashing `mcu`.
+    let rehashed = |mcu: &str| -> String {
+        let own = format!("  {MCU_FILE}");
+        good_defs
+            .lines()
+            .map(|l| {
+                if l.ends_with(&own) {
+                    defs_text(&[(MCU_FILE, mcu)])
+                } else {
+                    format!("{l}\n")
+                }
+            })
+            .collect()
+    };
     for (bad, says) in [
         (
             good.replace("id = \"rp2040\"", "id = \"stm32f401re\""),
@@ -1271,7 +1310,7 @@ fn a_project_slot_override_reaches_the_firmware() {
         ),
     ] {
         assert_ne!(bad, good);
-        std::fs::write(&defs, defs_text(&[(MCU_FILE, &bad), (BOARD_FILE, &board)])).unwrap();
+        std::fs::write(&defs, rehashed(&bad)).unwrap();
         std::fs::write(&mcu_toml, bad).unwrap();
         let mut log = Vec::new();
         let r = crate::nodebuild::build_nodes(

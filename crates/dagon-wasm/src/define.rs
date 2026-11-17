@@ -4,7 +4,8 @@
 //! checks it with `topo_check`, so every rule stays in dagon-topology.
 
 use crate::defs::with_registry;
-use dagon_topology::schema::{ControlKind, LinkKind, RomEntry, UartIface};
+use crate::kinds::code;
+use dagon_topology::schema::{ControlKind, RomEntry, UartIface};
 use js_sys::{Array, Object, Reflect};
 use wasm_bindgen::prelude::*;
 use yaml_serde::Value;
@@ -103,12 +104,9 @@ pub fn topo_cut(yaml: &str) -> JsValue {
     o.into()
 }
 
-fn link_kind(k: LinkKind) -> &'static str {
-    k.name()
-}
-
-/// Link kinds `mcu`'s firmware implements: `{up: [kind], down: [kind]}`
-/// (the MCU definition's `[links]`; the rest are "not available yet").
+/// Link kinds `mcu`'s firmware implements, by code: `{up: [code], down:
+/// [code]}` (the MCU definition's `[links]`; the rest are "not available
+/// yet").
 #[wasm_bindgen]
 pub fn link_kinds(mcu: &str) -> JsValue {
     use dagon_topology::links::{available_in, Dir};
@@ -116,7 +114,7 @@ pub fn link_kinds(mcu: &str) -> JsValue {
         with_registry(|reg| {
             available_in(reg, mcu, d)
                 .iter()
-                .map(|k| JsValue::from(k.name()))
+                .map(|&k| JsValue::from(code(k)))
                 .collect()
         })
     };
@@ -175,8 +173,8 @@ fn iface(i: UartIface) -> &'static str {
 
 /// What the board table says about placing board `id`: `{mcu, port,
 /// flashMap, i2cTarget, header: [pin], i2cPairs: [{sda, scl}], link:
-/// {kind, iface, addr, baud, control, romEntry} | null}`; null for an
-/// unknown board.
+/// {kind, iface, addr, baud, control, romEntry} | null}` (`kind` a link
+/// kind's code); null for an unknown board.
 #[wasm_bindgen]
 pub fn board_template(id: &str) -> JsValue {
     with_registry(|reg| board_template_in(reg, id))
@@ -216,7 +214,7 @@ fn board_template_in(reg: &dagon_topology::defs::Registry, id: &str) -> JsValue 
     set(&o, "i2cPairs", pairs.into());
     let link = b.default_link.map_or(JsValue::NULL, |l| {
         let x = Object::new();
-        set(&x, "kind", link_kind(l.kind).into());
+        set(&x, "kind", code(l.kind).into());
         set(
             &x,
             "iface",

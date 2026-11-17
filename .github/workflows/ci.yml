@@ -425,7 +425,7 @@ jobs:
       - name: dagon embeds the page and serves it
         env:
           DAGON_REQUIRE_PAGE: "1"
-        run: cargo test -p dagon-cli --locked --lib the_page_built_into_dagon_is_served_with_the_release_key
+        run: cargo test -p dagon-cli --locked --bin dagon the_page_built_into_dagon_is_served_with_the_release_key
 
   scripts:
     runs-on: ubuntu-24.04

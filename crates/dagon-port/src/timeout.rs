@@ -263,9 +263,13 @@ impl Plan<'_> {
                 self.ranges = [None, None];
                 return Some(Err(PlanError::Uncovered { addr: at as u32 }));
             };
-            let unit = u64::from(g.unit.max(1));
-            let addr = u64::from(g.start) + (at - u64::from(g.start)) / unit * unit;
-            self.at = addr + unit;
+            // `at` lies inside the region, so its offset fits 32 bits and
+            // the division is a 32-bit one (no 64-bit divider is linked);
+            // only the sums can pass 2^32.
+            let unit = g.unit.max(1);
+            let off = (at - u64::from(g.start)) as u32;
+            let addr = u64::from(g.start) + u64::from(off / unit * unit);
+            self.at = addr + u64::from(unit);
             Some(Ok(EraseOp {
                 addr: addr as u32,
                 len: g.unit,

@@ -83,6 +83,12 @@ pub enum Error<E> {
         cmd: Cmd,
         status: Status,
     },
+    /// The peer reads another wire version: it refused the request frame
+    /// (`dagon_proto::version_refusal`). `peer` is the version it reads;
+    /// this host speaks `dagon_proto::PROTO_VERSION`.
+    WireVersion {
+        peer: u8,
+    },
     /// A response that does not parse.
     BadResponse,
     /// The release or topology binary failed its checks.
@@ -322,8 +328,9 @@ impl<T: Transport, C: HostClock> Host<T, C> {
     }
 
     /// Next response frame for (`seq`, `cmd`) in the receive buffer; other
-    /// frames and noise are dropped.
-    fn take_response(&mut self, seq: u8, cmd: Cmd) -> Option<Vec<u8>> {
+    /// frames and noise are dropped. An answer to it in another wire
+    /// version is the peer's refusal: `Err` with the version it reads.
+    fn take_response(&mut self, seq: u8, cmd: Cmd) -> Option<core::result::Result<Vec<u8>, u8>> {
         loop {
             let Some(start) = find_sof(&self.rx, 0) else {
                 self.rx.clear();
@@ -335,11 +342,18 @@ impl<T: Transport, C: HostClock> Host<T, C> {
                     let hit = f.flags & flags::RESP != 0 && f.seq == seq && f.cmd == cmd as u8;
                     let payload = hit.then(|| f.payload.to_vec());
                     self.rx.drain(..n);
-                    if payload.is_some() {
-                        return payload;
+                    if let Some(p) = payload {
+                        return Some(Ok(p));
                     }
                 }
                 Err(FrameError::Incomplete) => return None,
+                Err(FrameError::BadVersion) => {
+                    let peer = dagon_proto::refusing_version(&self.rx, seq, cmd as u8);
+                    self.rx.drain(..1);
+                    if let Some(v) = peer {
+                        return Some(Err(v));
+                    }
+                }
                 Err(_) => {
                     self.rx.drain(..1);
                 }
@@ -363,8 +377,10 @@ impl<T: Transport, C: HostClock> Host<T, C> {
         let deadline = self.clock.now_ms() + wait_ms as u64;
         let mut buf = [0u8; READ_CHUNK];
         loop {
-            if let Some(p) = self.take_response(seq, cmd) {
-                return Ok(p);
+            match self.take_response(seq, cmd) {
+                Some(Ok(p)) => return Ok(p),
+                Some(Err(peer)) => return Err(Error::WireVersion { peer }),
+                None => {}
             }
             if self.clock.now_ms() >= deadline {
                 return Err(Error::Timeout);
@@ -586,6 +602,10 @@ fn relayed<E>(resp: &[u8], max: usize, seq: u8, cmd: Cmd) -> Result<Vec<u8>, E> 
         return Err(Error::Relay(status));
     }
     let inner = payload::parse_bulk_resp(Cmd::Relay, body).map_err(|_| Error::BadResponse)?;
+    // The node's refusal of a frame in another wire version comes back as it left.
+    if let Some(peer) = dagon_proto::refusing_version(inner, seq, cmd as u8) {
+        return Err(Error::WireVersion { peer });
+    }
     let (f, _) = Frame::decode(inner, max).map_err(|_| Error::BadResponse)?;
     if f.flags & flags::RESP == 0 || f.seq != seq || f.cmd != cmd as u8 {
         return Err(Error::BadResponse);
@@ -596,6 +616,10 @@ fn relayed<E>(resp: &[u8], max: usize, seq: u8, cmd: Cmd) -> Result<Vec<u8>, E> 
 fn ok_body<E>(cmd: Cmd, payload: &[u8]) -> Result<Vec<u8>, E> {
     match split_status(payload) {
         Some((Status::Ok, body)) => Ok(body.to_vec()),
+        Some((Status::Frame, body)) if payload::refused_wire(body).is_some() => {
+            let peer = payload::refused_wire(body).unwrap_or_default();
+            Err(Error::WireVersion { peer })
+        }
         Some((status, _)) => Err(Error::Rejected { cmd, status }),
         None => Err(Error::BadResponse),
     }

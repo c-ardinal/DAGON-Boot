@@ -76,6 +76,26 @@ pub fn compile_with(reg: &Registry, t: &Topology) -> Result<Vec<u8>, CompileErro
     }
 }
 
+/// The MCU of the node on node `id`'s ROM recovery link: its
+/// [`TopologyView::rom_peer`](tp::TopologyView::rom_peer) in the binary of
+/// the part of `t` updating reaches, `reg` saying which MCUs have a ROM I2C
+/// loader. The relay at `id` is built for that loader's address (`dagon
+/// gen`); the host takes the ROM path to the same node. `None`: `id` has
+/// no such link, or that part does not compile.
+pub fn recovery_peer_mcu(reg: &Registry, t: &Topology, id: &str) -> Option<String> {
+    let part = crate::cut_with(reg, t).topology?;
+    let bin = encode(reg, &part).ok()?;
+    let view = tp::TopologyView::parse(&bin).ok()?;
+    let at = u8::try_from(part.nodes.iter().position(|n| n.id == id)?).ok()?;
+    let has_loader = |w: u16| {
+        reg.mcus()
+            .iter()
+            .any(|m| m.wire_id == w && m.rom_i2c.is_some())
+    };
+    let peer = view.rom_peer(at, has_loader)?;
+    Some(part.nodes.get(usize::from(peer))?.mcu.clone())
+}
+
 pub fn parse_str(yaml: &str) -> Result<Topology, CompileError> {
     yaml_serde::from_str(yaml).map_err(|e| CompileError::Parse(e.to_string()))
 }

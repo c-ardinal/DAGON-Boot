@@ -489,8 +489,8 @@ impl SimRelay {
 
     /// Raw transactions to the ROM loader on the wired node's port,
     /// accepted only while BOOT0 is high, each within the buffer of that
-    /// port's relay link (one frame of its max_payload, as the relay's
-    /// `cmd::buffer_len`): E_ARG for longer data or reads.
+    /// port's relay link (`RelayLinkDef::buffer_len`, the relay's limit
+    /// too): E_ARG for longer data or reads.
     fn i2c_raw(&mut self, p: &[u8]) -> Answer {
         let raw = match I2cRaw::parse(p) {
             Ok(r) => r,
@@ -509,7 +509,7 @@ impl SimRelay {
         else {
             return (Status::Unsupported, Vec::new());
         };
-        let limit = frame_len(link.max_payload.into());
+        let limit = link.buffer_len();
         if usize::from(raw.read_len) > limit || raw.data.len() > limit {
             return (Status::Arg, Vec::new());
         }

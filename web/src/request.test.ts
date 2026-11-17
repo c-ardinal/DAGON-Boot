@@ -1,5 +1,5 @@
 import { describe, expect, test, vi } from 'vitest';
-import { request } from './request.ts';
+import { request, requestFile } from './request.ts';
 
 describe('request()', () => {
   const sent = () => vi.fn(async (_url: string, _init?: RequestInit) => new Response(''));
@@ -25,10 +25,14 @@ describe('request()', () => {
     expect(via).not.toHaveBeenCalled();
   });
 
-  test('a file beside the page is a plain GET of its address', async () => {
-    const via = sent();
-    await request({ file: '/assets/x.dgb' }, { via: via as unknown as typeof fetch });
-    expect(via.mock.calls).toEqual([['/assets/x.dgb']]);
+  test('a file beside the page is a plain GET of the address its import gave', async () => {
+    const file = (await import('../../crates/dagon-sim/fixtures/sample-full-1.1.0.dgb?url')).default;
+    const browser = sent();
+    vi.stubGlobal('fetch', browser);
+    await requestFile(file);
+    vi.unstubAllGlobals();
+    expect(file).toMatch(/sample-full-1\.1\.0\.dgb$/);
+    expect(browser.mock.calls).toEqual([[file, undefined]]);
   });
 
   test('without a stand-in it is the browser that sends, looked up when sending', async () => {

@@ -1,5 +1,5 @@
 import type { LinkClock } from './hostLink.ts';
-import { request } from '../request.ts';
+import { requestFile, type PageFile } from '../request.ts';
 import { MockTransport, type DeviceKey } from './mock.ts';
 import { simulator } from './simHub.ts';
 import type { Transport } from './transport.ts';
@@ -22,9 +22,9 @@ export interface DevHub {
 const FIXTURED = import.meta.env.DEV || import.meta.env.MODE === 'demo';
 
 /** A repository fixture served with the page (development builds and the demo page only). */
-async function fixture(url: string | null): Promise<Uint8Array | null> {
+async function fixture(url: PageFile | null): Promise<Uint8Array | null> {
   if (!FIXTURED || !url) return null;
-  const r = await request({ file: url });
+  const r = await requestFile(url);
   return r.ok ? new Uint8Array(await r.arrayBuffer()) : null;
 }
 

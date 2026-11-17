@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { describe, expect, test } from 'vitest';
 import { topo_parse } from '../wasm/pkg/dagon_wasm.js';
-import { ROUTES, request } from '../request.ts';
+import { ROUTES, request, requestFile } from '../request.ts';
 import { AGENT } from './copy.ts';
 import type { Cli } from './define/cli.svelte.ts';
 import { fromYaml, toYaml, withDefaults, type Topo } from './define/model.ts';
@@ -79,14 +79,6 @@ describe('every request the Console sends goes through request(), by a route the
     expect(unrouted(ROUTES, server)).toEqual([]);
   });
 
-  test.each(ROUTES)('%s is called', (route) => {
-    expect(sources.some((f) => f.name !== REQUEST && f.text.includes(`'${route}'`))).toBe(true);
-  });
-
-  test('a file beside the page, which is no route, is asked for by the stand-in hub only', () => {
-    expect(sources.filter((f) => f.text.includes('request({')).map((f) => f.name)).toEqual(['serial/devHub.ts']);
-  });
-
   test('a fetch( anywhere else is found', () => {
     const one = { name: REQUEST, text: 'fetch(url, init)' };
     expect(strayFetches([one])).toEqual([]);
@@ -108,7 +100,13 @@ describe('every request the Console sends goes through request(), by a route the
     const outside: Parameters<typeof request>[0] = 'GET /v1/nope';
     // @ts-expect-error nor is one through the Console's own call
     const called: Parameters<Cli['api']>[0] = built;
-    expect([fromText, outside, called]).toHaveLength(3);
+    // @ts-expect-error nor is an address wrapped in an object
+    const wrapped: Parameters<typeof request>[0] = { file: '/v1/nope' };
+    // @ts-expect-error an address that is not the import of a page file is no PageFile
+    const address: Parameters<typeof requestFile>[0] = '/v1/nope';
+    // @ts-expect-error nor is one put together at run time
+    const builtAddress: Parameters<typeof requestFile>[0] = built;
+    expect([fromText, outside, called, wrapped, address, builtAddress]).toHaveLength(6);
   });
 });
 

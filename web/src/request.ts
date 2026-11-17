@@ -44,10 +44,14 @@ export const ROUTES = [
 
 export type Route = (typeof ROUTES)[number];
 
-/** A file the bundler put beside the page: `file` is the address its import gave, and no serve route. */
-export interface PageFile {
-  file: string;
-}
+declare const pageFile: unique symbol;
+
+/**
+ * The address of a file the bundler put beside the page, which is no serve
+ * route. Only the import of such a file has this type (page-file.d.ts), so no
+ * other text can be asked for.
+ */
+export type PageFile = string & { readonly [pageFile]: true };
 
 export interface RequestOptions {
   /** The values of the route's `:name` segments. */
@@ -60,10 +64,12 @@ export interface RequestOptions {
   via?: typeof fetch;
 }
 
-/** Sends `to`: a serve route with its parameters, headers and body, or a GET of a page file. */
-export function request(to: Route | PageFile, o: RequestOptions = {}): Promise<Response> {
-  const send = o.via ?? ((url: string, init?: RequestInit) => fetch(url, init));
-  if (typeof to !== 'string') return send(to.file);
+/** The browser's own sending, looked up when sending. */
+const browser = (url: string, init?: RequestInit): Promise<Response> => fetch(url, init);
+
+/** Sends `to`, a serve route, with its parameters, headers and body. */
+export function request(to: Route, o: RequestOptions = {}): Promise<Response> {
+  const send = o.via ?? browser;
   const [method, template] = to.split(' ');
   const path = template.replace(/:(\w+)/g, (_, name: string) => {
     const value = o.params?.[name];
@@ -72,4 +78,9 @@ export function request(to: Route | PageFile, o: RequestOptions = {}): Promise<R
   });
   const query = Object.entries(o.query ?? {}).map(([k, v]) => `${k}=${encodeURIComponent(v)}`);
   return send(query.length ? `${path}?${query.join('&')}` : path, { method, headers: o.headers, body: o.body });
+}
+
+/** A plain GET of a file beside the page. */
+export function requestFile(file: PageFile): Promise<Response> {
+  return browser(file);
 }

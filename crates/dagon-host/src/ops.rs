@@ -6,7 +6,7 @@ use alloc::vec::Vec;
 use dagon_ed25519::Ed25519Compact;
 use dagon_format::bundle::BundleView;
 use dagon_format::header::{header_digest16, image_kind, slot_binding, HEADER_SIZE};
-use dagon_format::topology::{self, TopologyView};
+use dagon_format::topology::TopologyView;
 use dagon_format::{sha256, ImageHeader, Version};
 use dagon_port::timeout::{
     CONFIRM_RETRY_MS, ERASE_FALLBACK_MS, REBOOT_WAIT_MS, REQUEST_MS, VERIFY_MS,
@@ -1002,18 +1002,18 @@ pub fn check_release<'a, E>(
 
 /// An STM32F401 on I2C whose link enters the ROM loader through NRST/BOOT0.
 /// The ROM map for `node` when it is reached through its ROM I2C loader:
-/// an I2C link with ROM entry stm32-i2c-rom and a map for its MCU.
+/// it is the ROM recovery peer of a node ([`TopologyView::rom_peer`], the
+/// relay's choice too) and `roms` has a map for its MCU.
 fn rom_map<'m>(topo: &TopologyView<'_>, node: u8, roms: &'m [RomMap]) -> Option<&'m RomMap> {
     if (node as usize) >= topo.node_count() {
         return None;
     }
-    let rom = (0..topo.link_count()).map(|i| topo.link(i)).any(|l| {
-        l.end(node).is_some()
-            && l.iface == topology::iface::I2C_BUS
-            && l.rom_entry == topology::rom_entry::STM32_I2C_ROM
-    });
+    let has_loader = |w: u16| roms.iter().any(|m| m.wire_id == w);
+    let peer = (0..topo.node_count())
+        .filter_map(|r| u8::try_from(r).ok())
+        .any(|r| topo.rom_peer(r, has_loader) == Some(node));
     let mcu = topo.node(node as usize).mcu_id;
-    roms.iter().find(|m| rom && m.wire_id == mcu)
+    roms.iter().find(|m| peer && m.wire_id == mcu)
 }
 
 /// What [`Host::recover`] needs: the release, the current topology binary,

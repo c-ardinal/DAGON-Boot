@@ -82,8 +82,8 @@ const UART: usize = slot(RELAY_LINK_PIO_UART);
 
 /// Each link's request port, of its generated buffer size
 /// ([`RELAY_LINK_BUFFERS`]); a size that is not the link's stops the build.
-static I2C_PORT: Port<[u8; RELAY_LINK_BUFFERS[I2C]]> = Port::new(&RELAY_LINKS[I2C]);
-static UART_PORT: Port<[u8; RELAY_LINK_BUFFERS[UART]]> = Port::new(&RELAY_LINKS[UART]);
+static I2C0_PORT: Port<[u8; RELAY_LINK_BUFFERS[I2C]]> = Port::new(&RELAY_LINKS[I2C]);
+static PIO_UART_PORT: Port<[u8; RELAY_LINK_BUFFERS[UART]]> = Port::new(&RELAY_LINKS[UART]);
 
 /// Embassy time as the relay's clock.
 #[derive(Clone, Copy)]
@@ -187,8 +187,8 @@ pub fn start<B: BoardDef, const N: usize>(
     // One entry per link of this package; a port only where the board
     // wires the link.
     let mut ports: [Option<&'static Port>; LINKS] = [None; LINKS];
-    ports[I2C] = links.i2c.is_some().then_some(&I2C_PORT as &Port);
-    ports[UART] = uart.is_some().then_some(&UART_PORT as &Port);
+    ports[I2C] = links.i2c.is_some().then_some(&I2C0_PORT as &Port);
+    ports[UART] = uart.is_some().then_some(&PIO_UART_PORT as &Port);
     static ROUTES: StaticCell<[LinkRoute<'static>; LINKS]> = StaticCell::new();
     let routes = ROUTES.init(core::array::from_fn(|i| LinkRoute {
         link: RELAY_LINKS[i],
@@ -239,12 +239,12 @@ async fn pc_task(
 /// in [`RELAY_LINKS`].
 #[embassy_executor::task]
 async fn i2c_task(mut link: I2cLink<RpI2c<'static, I2C0>>, watch: RpWatch) -> ! {
-    run_link(&mut link, &I2C_PORT, watch, task::link(I2C)).await
+    run_link(&mut link, &I2C0_PORT, watch, task::link(I2C)).await
 }
 
 #[embassy_executor::task]
 async fn uart_task(mut link: RpUart, watch: RpWatch) -> ! {
-    run_link(&mut link, &UART_PORT, watch, task::link(UART)).await
+    run_link(&mut link, &PIO_UART_PORT, watch, task::link(UART)).await
 }
 
 #[embassy_executor::task]

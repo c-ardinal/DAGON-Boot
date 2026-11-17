@@ -66,8 +66,23 @@ dagon-format = { path = "../../../crates/dagon-format" }
 
 [dev-dependencies]
 dagon-ed25519 = { path = "../../../crates/dagon-ed25519", features = ["compact"] }
-dagon-sim = { path = "../../../crates/dagon-sim" }
 ed25519-compact = { version = "2.6", default-features = false }
 
 [target.'cfg(target_os = "none")'.dependencies]
 cortex-m = "0.7"
+
+# The relay firmware scripts/relay_ram.py builds and measures: what a
+# generated node adds to this package (template/Cargo.toml.tpl).
+[[example]]
+name = "relay"
+required-features = ["relay"]
+
+# The host tests' simulator (std), kept out of the firmware examples.
+[target.'cfg(not(target_os = "none"))'.dev-dependencies]
+dagon-sim = { path = "../../../crates/dagon-sim" }
+
+[target.'cfg(target_os = "none")'.dev-dependencies]
+embassy-rp = { version = "0.10.0", features = ["rp2040", "time-driver", "critical-section-impl"] }
+embassy-executor = { version = "0.10", features = ["platform-cortex-m", "executor-thread"] }
+cortex-m-rt = "0.7"
+panic-halt = "1"

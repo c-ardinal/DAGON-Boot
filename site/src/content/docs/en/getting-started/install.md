@@ -73,18 +73,20 @@ The PowerShell script clears `DAGON_UNINSTALL` when it runs, so running it again
 
 ## Build it yourself
 
-These are the steps to build the `dagon` command from source, whether or not you change DAGON.
+These are the steps to build the `dagon` command from a clone of this repository, whether or not you change DAGON. To only use DAGON, install it from a release with the scripts above.
 
 | What | How |
 |---|---|
 | Rust 1.95.0 or later | <https://rustup.rs> |
 | A C compiler (the `ring` crate) | the Visual Studio 2022 C++ build tools on Windows, gcc 13 or later on Linux, Xcode Command Line Tools 16.4 or later on macOS |
+| Python 3, Node.js and npm, `wasm-pack` 0.15.1 (the DAGON Console page) | <https://www.python.org>, <https://nodejs.org>, `npm install --global wasm-pack@0.15.1` |
+
+Build the DAGON Console page first; `dagon` embeds it when it is built. Without the page, `dagon serve` only tells you how to build it.
 
 ```sh
-cargo install --git https://github.com/c-ardinal/DAGON-Boot --tag cli-v<version> dagon-cli
+python scripts/page.py build
+cargo install --path crates/dagon-cli
 ```
-
-From a clone, it is `cargo install --path crates/dagon-cli`.
 
 ## The tools for developing firmware
 

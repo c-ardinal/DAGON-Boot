@@ -27,13 +27,13 @@ description: "リポジトリにあるもの、その場所、DAGONそのもの�
 
 ### クローンを使う
 
-`cargo install --path crates/dagon-cli`で、クローンから`dagon`コマンドを入れます。
+`python scripts/page.py build`でDAGON Consoleのページを`crates/dagon-cli/page`にビルドしてから、`cargo install --path crates/dagon-cli`で、クローンから`dagon`コマンドを入れます。`dagon`はビルドのときにそのページを組み込みます。ページはビルドの成果物なので、gitには入れません。`web/`を変えたら、ページをビルドし直します。
 
 プロジェクトは`dagon new --dagon-path <クローン>`（または`DAGON_HOME`を設定）でそのクローンを使います。`dagon.toml`には`[dagon] path`が書かれます。
 
 ### リリースのアーカイブを作る
 
-`python scripts/release.py [--target <triple>]`が、ページを組み込んだ`out/release/dagon-cli-<version>-<target>.*`を作ります。
+`python scripts/release.py [--target <triple>]`が、そのツリーからページをビルドし、ページを組み込んだ`out/release/dagon-cli-<version>-<target>.*`を作ります。組み込むページがないときは、ビルドが止まります。
 
 `.github/workflows/release.yml`は、`cli-v*`のタグがpushされたときに同じことを各プラットフォームで行います。
 

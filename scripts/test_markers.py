@@ -79,7 +79,6 @@ ALLOWED = [
 SKIP = [
     "Cargo.lock",
     "web/package-lock.json",
-    "crates/dagon-cli/page/",
     "targets/mcu/esp32s3/vendor/",
     "scripts/test_markers.py",
 ]

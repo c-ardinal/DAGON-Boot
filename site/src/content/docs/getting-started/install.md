@@ -73,18 +73,20 @@ PowerShellのスクリプトは、実行したあとで`DAGON_UNINSTALL`を消�
 
 ## 自分でビルドする
 
-`dagon`コマンドをソースからビルドする手順です。DAGONに手を加えるかどうかによらず同じです。
+`dagon`コマンドを、このリポジトリのクローンからビルドする手順です。DAGONに手を加えるかどうかによらず同じです。使うだけなら、上のスクリプトでリリースから入れます。
 
 | 要るもの | 入れ方 |
 |---|---|
 | Rust 1.95.0以降 | <https://rustup.rs> |
 | Cコンパイラ（`ring` crate） | WindowsはVisual Studio 2022のC++ビルドツール、Linuxはgcc 13以降、macOSはXcode Command Line Tools 16.4以降 |
+| Python 3、Node.jsとnpm、`wasm-pack` 0.15.1（DAGON Consoleのページ） | <https://www.python.org>、<https://nodejs.org>、`npm install --global wasm-pack@0.15.1` |
+
+DAGON Consoleのページを先にビルドします。`dagon`はビルドのときにそのページを組み込みます。ページがないと、`dagon serve`はページのビルドのしかたを表示するだけです。
 
 ```sh
-cargo install --git https://github.com/c-ardinal/DAGON-Boot --tag cli-v<version> dagon-cli
+python scripts/page.py build
+cargo install --path crates/dagon-cli
 ```
-
-クローンからビルドするときは`cargo install --path crates/dagon-cli`です。
 
 ## ファームウェアを開発するためのツール
 

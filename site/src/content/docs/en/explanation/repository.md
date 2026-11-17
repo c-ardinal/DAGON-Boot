@@ -27,13 +27,13 @@ description: "What the repository holds, where, and how to work on DAGON itself.
 
 ### Using a clone
 
-`cargo install --path crates/dagon-cli` installs the `dagon` command from your clone.
+`python scripts/page.py build` builds the DAGON Console page into `crates/dagon-cli/page`; then `cargo install --path crates/dagon-cli` installs the `dagon` command from your clone, with that page built in. The page is build output and is not kept in git; rebuild it after changing `web/`.
 
 Projects use the clone with `dagon new --dagon-path <clone>` (or by setting `DAGON_HOME`), which writes `[dagon] path` in `dagon.toml`.
 
 ### Building the release archives
 
-`python scripts/release.py [--target <triple>]` builds `out/release/dagon-cli-<version>-<target>.*` with the page built in.
+`python scripts/release.py [--target <triple>]` builds the page from the tree, then `out/release/dagon-cli-<version>-<target>.*` with that page built in. The build stops when there is no page to embed.
 
 `.github/workflows/release.yml` does the same for each platform when a `cli-v*` tag is pushed:
 

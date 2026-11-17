@@ -125,13 +125,20 @@ class Examples(unittest.TestCase):
 
 
 class BuiltPages(unittest.TestCase):
+    # The CI page job builds the page and runs pages.py on it.
+    @unittest.skipUnless((pages.SERVED / "index.html").is_file(), "no built page (python scripts/page.py build)")
     def test_the_served_page_carries_none_of_the_demo(self):
         self.assertEqual(pages.served_problems(), [])
+
+    def test_a_missing_page_is_found(self):
+        with tempfile.TemporaryDirectory() as d:
+            self.assertEqual(len(pages.served_problems(pathlib.Path(d))), 1)
 
     def test_a_fixture_a_stand_in_hub_or_an_agent_name_is_found(self):
         with tempfile.TemporaryDirectory() as d:
             root = pathlib.Path(d)
             (root / "assets").mkdir()
+            (root / "index.html").write_bytes(b"<!doctype html>")
             (root / "assets" / "sample-full-1.1.0-x.dgb").write_bytes(b"\0")
             (root / "assets" / "index-x.js").write_bytes(b'devHub(new URLSearchParams("sim")); "Claude Code"')
             self.assertEqual(len(pages.served_problems(root)), 3)
@@ -151,8 +158,8 @@ class MovedDocuments(unittest.TestCase):
         missing = []
         for name in names:
             path = ROOT / name
-            # The built page, and the checks whose own samples name such paths on purpose.
-            if not name or name.startswith("crates/dagon-cli/page/") or name in self.SAMPLES or not path.is_file():
+            # The checks whose own samples name such paths on purpose.
+            if not name or name in self.SAMPLES or not path.is_file():
                 continue
             data = path.read_bytes()
             if b"\0" in data:

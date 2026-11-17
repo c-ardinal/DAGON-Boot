@@ -123,7 +123,8 @@ pub fn command(a: &ServeArgs) -> Result<(), String> {
         println!("DAGON Console: built into this executable");
     } else if !web.join("index.html").exists() {
         eprintln!(
-            "note: {} has no index.html; build DAGON Console (npm run build in web/) or pass --web",
+            "note: no DAGON Console page ({} has no index.html): in a DAGON checkout run \
+             python scripts/page.py build and rebuild dagon, or pass --web <built page folder>",
             web.display()
         );
     }

@@ -133,6 +133,9 @@ pub const PROGRAM: &[Action] = &[
     Action { on: "watchdog_armed", ops: &[Op::Gpio { pin: "GPIO5", level: Level::High }, Op::Delay { ms: 2 }, Op::Led(LedState::On)] },
 ];
 
+/// This node's I2C target address from its end in the topology (`None`:
+/// the topology gives none; the board's `[default_link] addr` applies).
+pub const LINK_ADDR: Option<u8> = Some(0x45);
 pub const WATCHDOG_KIND: &str = "rp-watchdog";
 pub const WATCHDOG_TRIAL_MS: u32 = 8000;
 pub const WATCHDOG_CONFIRMED_MS: u32 = 8000;

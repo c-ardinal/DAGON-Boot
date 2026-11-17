@@ -191,13 +191,17 @@ The board's flash size is check-only: a board with less fails to build.
 
 | Address | Size | Content |
 |---|---|---|
-| 0x08000000 | 16 KiB | stage0 (`stage0/`, never updated: the reset vector) |
-| 0x08004000 | 2 x 16 KiB | state log faces A/B (APP and boot core records) |
+| 0x08000000 | 16 KiB | stage0 |
+| 0x08004000 | 2 x 16 KiB | state log faces A/B (app and boot core records) |
 | 0x0800C000 | 16 KiB | conformance scratch |
-| 0x08010000 | 64 KiB | boot core slot A (`bootcore/`): 512-byte header, body at 0x08010200 |
-| 0x08020000 | 128 KiB | APP-A: 512-byte header, body at 0x08020200 |
-| 0x08040000 | 128 KiB | APP-B: same, body at 0x08040200 |
-| 0x08060000 | 128 KiB | boot core slot B: same, body at 0x08060200 |
+| 0x08010000 | 64 KiB | boot core slot A: 512-byte header, body at 0x08010200 |
+| 0x08020000 | 128 KiB | app slot A: 512-byte header, body at 0x08020200 |
+| 0x08040000 | 128 KiB | app slot B: 512-byte header, body at 0x08040200 |
+| 0x08060000 | 128 KiB | boot core slot B: 512-byte header, body at 0x08060200 |
+
+The table is the definition's (a test in `targets/mcu/build` writes it).
+Stage0 (`stage0/`) is never updated: the reset vector is in it. The boot
+core is built from `bootcore/`.
 
 Stage0 starts the boot core: the pending one (written by the running app's
 agent from a release) on trial, up to 3 starts counted in the RTC backup

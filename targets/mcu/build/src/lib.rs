@@ -1848,10 +1848,7 @@ mod tests {
             let head = d.t.get("stage0").and_then(|s| s.get("head_bytes"));
             let what = match head.map_or(0, |h| int(h, "head_bytes")) {
                 0 => "stage0".to_string(),
-                h => format!(
-                    "stage0, after the {} the boot ROM reads first",
-                    size_text(h)
-                ),
+                h => format!("{} head the boot ROM reads, then stage0", size_text(h)),
             };
             rows.push((at, size_text(size), what));
         }

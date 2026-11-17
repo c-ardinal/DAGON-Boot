@@ -241,7 +241,8 @@ app's agent refuses a boot core transfer while the app is on trial.
 Stage0 halts only when there is no such app.
 
 The boot core receives on the board's DAGON buses (`dagon = true`): its
-I2C bus as a target at the board's `[default_link] addr`, its UART bus
+I2C bus as a target at the node's address in the topology (else the
+board's `[default_link] addr`), its UART bus
 (a hardware UART or a PIO). Right after its start it listens on them for
 the listen window the MCU definition gives; a STAY there, or the app's
 hand-over (REBOOT mode 1 writes UPDATE_STAY), keeps it in update mode,

@@ -251,6 +251,15 @@ impl StreamPort for HwUart {
     }
 }
 
+/// Stops both I2C blocks answering their address (the boot core's target
+/// takes it up again when it next reads), so no controller is held by a
+/// stretched clock while the boot core works without reading.
+pub fn pause_i2c() {
+    for regs in [embassy_rp::pac::I2C0, embassy_rp::pac::I2C1] {
+        regs.ic_enable().write(|w| w.set_enable(false));
+    }
+}
+
 /// Puts the blocks the links ran on back to their reset state before the
 /// app starts, so none of them is still serving the bus.
 pub fn release() {

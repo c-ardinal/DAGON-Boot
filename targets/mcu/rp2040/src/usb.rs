@@ -184,8 +184,18 @@ pub async fn run(mut usb: UsbDevice<'static, UsbDriver>) -> ! {
 
 const _: () = assert!(dagon_mcu_common::reattach::SPAN_MS <= crate::TRIAL_WDT_MS as u64);
 
+/// Runs the USB device and its re-attach together, without an executor
+/// (a boot core polls it among its other futures).
+pub async fn run_here(mut usb: UsbDevice<'static, UsbDriver>) {
+    embassy_futures::join::join(usb.run(), reattach_loop()).await;
+}
+
 #[embassy_executor::task]
 async fn reattach() {
+    reattach_loop().await
+}
+
+async fn reattach_loop() {
     let resets = || BUS_RESETS.load(Ordering::Relaxed);
     let now = || embassy_time::Instant::now().as_millis();
     let mut r = dagon_mcu_common::reattach::Reattach::new(now(), resets());

@@ -109,6 +109,34 @@ fn the_host_times_and_maps_each_node_by_its_overridden_definition() {
     }
 }
 
+/// The hub's first ROM link reaches an MCU with `[rom_i2c]` but no APP
+/// log, so no first install through its loader; the second, one with a
+/// full map. `dagon gen` and the host pick the same ROM recovery peer, the
+/// second, by the one rule (`McuDef::has_rom_loader`).
+#[test]
+fn gen_and_the_host_skip_a_rom_peer_without_a_full_map() {
+    let p = project("rom-peer");
+    let def = p.tree.join("targets/mcu/stm32f401re/dagon-mcu.toml");
+    let text = std::fs::read_to_string(&def).unwrap();
+    let line = text.lines().find(|l| l.starts_with("app_log = ")).unwrap();
+    std::fs::write(&def, text.replace(&format!("{line}\n"), "")).unwrap();
+    let reg = loaded(&p);
+    assert!(reg.mcu(BUILTIN.0).unwrap().rom_i2c.is_some());
+    let t = topology();
+    let gen = dagon_topology::recovery_peer_mcu(&reg, &t, "hub");
+    assert_eq!(gen.as_deref(), Some(SYNTHETIC.0));
+    let roms = dagon_host::rom::rom_maps(&reg);
+    let bin = dagon_topology::compile_with(&reg, &t).unwrap();
+    let view = dagon_format::topology::TopologyView::parse(&bin).unwrap();
+    let hub = (0..view.node_count())
+        .find(|&i| view.node(i).mcu_id == reg.mcu("rp2040").unwrap().wire_id)
+        .unwrap();
+    let peer = view
+        .rom_peer(hub as u8, |w| roms.iter().any(|m| m.wire_id == w))
+        .unwrap();
+    assert_eq!(view.node(usize::from(peer)).mcu_id, SYNTHETIC_WIRE_ID);
+}
+
 #[test]
 fn signing_takes_the_overridden_slot() {
     let p = project("sign");

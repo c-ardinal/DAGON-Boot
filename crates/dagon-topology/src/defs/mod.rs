@@ -890,6 +890,24 @@ impl McuDef {
     pub fn flash_is_cpu_mapped(&self) -> bool {
         self.flash_maps.iter().all(|f| f.xip)
     }
+
+    /// The slot an image of `kind` takes as slot A (bound to A or to any).
+    pub fn slot_a(&self, kind: ImageKind) -> Option<&Slot> {
+        self.slots
+            .iter()
+            .find(|s| s.image == kind && matches!(s.binding, Binding::A | Binding::Any))
+    }
+
+    /// Whether a first install can go through this MCU's ROM I2C loader: it
+    /// has one, a boot core slot A, an APP slot A and an APP log. The one
+    /// rule for a ROM recovery peer, in `dagon gen` and in the host's ROM
+    /// maps alike.
+    pub fn has_rom_loader(&self) -> bool {
+        self.rom_i2c.is_some()
+            && self.slot_a(ImageKind::Bootcore).is_some()
+            && self.slot_a(ImageKind::App).is_some()
+            && self.layout.app_log.is_some()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]

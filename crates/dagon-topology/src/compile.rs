@@ -90,7 +90,7 @@ pub fn recovery_peer_mcu(reg: &Registry, t: &Topology, id: &str) -> Option<Strin
     let has_loader = |w: u16| {
         reg.mcus()
             .iter()
-            .any(|m| m.wire_id == w && m.rom_i2c.is_some())
+            .any(|m| m.wire_id == w && m.has_rom_loader())
     };
     let peer = view.rom_peer(at, has_loader)?;
     Some(part.nodes.get(usize::from(peer))?.mcu.clone())

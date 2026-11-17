@@ -43,6 +43,11 @@ pub enum Cmd {
     /// version, MCU id (`payload::VersionResp`). Additive: an agent that
     /// predates it answers `Status::Unsupported`.
     Version = 0x03,
+    /// To a node's boot core while its listen window is open: stay in
+    /// update mode instead of starting the app (empty request and reply).
+    /// A boot core already in update mode answers OK; an app answers
+    /// `Status::State`; an agent that predates it, `Status::Unsupported`.
+    Stay = 0x05,
     XferBegin = 0x10,
     XferData = 0x11,
     XferEnd = 0x12,
@@ -64,10 +69,11 @@ pub enum Cmd {
 }
 
 impl Cmd {
-    pub const ALL: [Cmd; 16] = [
+    pub const ALL: [Cmd; 17] = [
         Cmd::Hello,
         Cmd::Status,
         Cmd::Version,
+        Cmd::Stay,
         Cmd::XferBegin,
         Cmd::XferData,
         Cmd::XferEnd,
@@ -297,7 +303,7 @@ mod tests {
 
     #[test]
     fn command_and_status_tables() {
-        assert_eq!(Cmd::ALL.len(), 16);
+        assert_eq!(Cmd::ALL.len(), 17);
         assert_eq!(Cmd::from_u8(0x03), Some(Cmd::Version));
         assert_eq!(Cmd::from_u8(0x24), Some(Cmd::EnterRom));
         assert_eq!(Status::ALL.len(), 12);
@@ -305,6 +311,29 @@ mod tests {
         assert_eq!(Cmd::from_u8(0x04), None);
         assert_eq!(Status::from_u8(0x0F), Some(Status::Timeout));
         assert_eq!(Status::from_u8(0x04), None);
+    }
+
+    /// STAY (0x05): an empty request a boot core takes in its listen
+    /// window; the number is the design's and new beside the others.
+    #[test]
+    fn stay_round_trips() {
+        assert_eq!(Cmd::Stay as u8, 0x05);
+        assert_eq!(Cmd::from_u8(0x05), Some(Cmd::Stay));
+        let mut buf = [0u8; 16];
+        let f = Frame {
+            flags: 0,
+            seq: 9,
+            cmd: Cmd::Stay as u8,
+            payload: &[],
+        };
+        let n = f.encode(&mut buf).unwrap();
+        assert_eq!(n, frame_len(0));
+        assert_eq!(Frame::decode(&buf[..n], max_payload::I2C), Ok((f, n)));
+        let mut seen = [false; 256];
+        for c in Cmd::ALL {
+            assert!(!seen[c as usize], "{c:?} reuses a number");
+            seen[c as usize] = true;
+        }
     }
 
     #[test]

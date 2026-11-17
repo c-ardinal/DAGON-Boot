@@ -489,6 +489,17 @@ pub trait SlotStore {
         Ok(())
     }
 
+    /// The app's hand-over to its boot core's update mode (REBOOT mode
+    /// 1): records UPDATE_STAY, after making room for it, for the boot
+    /// core's UPDATE_DONE and for the trials
+    /// (`dagon_core::log::Log::request_stay`), so the boot core enters
+    /// update mode at the next start without erasing. Without its own
+    /// implementation: `Unsupported`, a board whose boot core has no
+    /// update mode.
+    fn request_update_mode(&mut self) -> Result<(), StoreError> {
+        Err(StoreError::Unsupported)
+    }
+
     /// STATUS of `target`'s slots: `target::APP` is [`SlotStore::status`];
     /// `target::BOOTCORE` the boot core slots (`active` the core that
     /// started this app), folded from the boot core records. `None`: this
@@ -577,8 +588,10 @@ pub mod writer {
     /// from, nor the one it goes back to (the session's guards). Only the
     /// app's session serves the app's own trial (CONFIRM and its
     /// self-check), replays the boot stage's changes at its start, takes the
-    /// recovery agent's target and SHOW, and makes log room when it starts;
-    /// the other writers' sessions are built without them.
+    /// recovery agent's target and SHOW, makes log room when it starts and
+    /// hands over to the boot core (REBOOT mode 1); the other writers'
+    /// sessions are built without them. The boot core's session takes STAY
+    /// and makes log room when a write starts.
     pub trait Writer: sealed::Sealed {
         /// The XFER target of the image kind it runs from.
         const TARGET: u8;
@@ -764,6 +777,9 @@ impl<S: SlotStore + ?Sized> SlotStore for &core::cell::RefCell<S> {
     }
     fn keep_room(&mut self) -> Result<(), StoreError> {
         self.borrow_mut().keep_room()
+    }
+    fn request_update_mode(&mut self) -> Result<(), StoreError> {
+        self.borrow_mut().request_update_mode()
     }
     fn stage0_version(&mut self) -> Option<Version> {
         self.borrow_mut().stage0_version()

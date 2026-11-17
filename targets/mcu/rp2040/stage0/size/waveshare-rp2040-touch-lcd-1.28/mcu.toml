@@ -55,6 +55,14 @@ at = 537133568
 size = 1536
 writer = "bootcore"
 
+[boot_receive]
+listen_window_ms = 50
+
+[boot_receive.kinds]
+i2c = true
+uart = true
+usb-cdc = false
+
 [[bootcore.clock]]
 out_hz = 6500000
 source = "internal"
@@ -536,5 +544,5 @@ kind = "uf2-drive"
 sector = 4096
 
 [writers]
-app = ["app"]
+app = ["app", "bootcore"]
 bootcore = ["app"]

@@ -87,9 +87,10 @@ at = 0x0804_0000
 size = 0x2_0000
 
 # What writes each image kind: the app's agent writes the app slot it is
-# not running from and either boot core slot.
+# not running from and either boot core slot; the boot core writes either
+# app slot in update or recovery mode.
 [writers]
-app = ["app"]
+app = ["app", "bootcore"]
 bootcore = ["app"]
 
 # What the node receives into: each slot above, header inline at its start.
@@ -157,6 +158,12 @@ hzs = [100_000, 400_000]
 # Link kinds the firmware implements (src/links.rs LINK_KINDS).
 [links]
 up = ["i2c"]
+
+# How the boot core receives when the app does not answer: it waits the
+# design's 50 ms for STAY on its I2C target link.
+[boot_receive]
+listen_window_ms = 50
+kinds = { i2c = true }
 
 # The interfaces a topology link end names (STM32F401 datasheet: USB OTG FS,
 # I2C1/2/3, USART1/2/6).

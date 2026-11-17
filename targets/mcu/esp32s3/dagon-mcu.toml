@@ -94,6 +94,13 @@ bauds = [115_200, 230_400, 460_800, 921_600]
 [links]
 up = ["uart", "usb-cdc"]
 
+# How the factory agent receives when the app does not answer: it waits the
+# design's 50 ms for STAY on its UART link. USB Serial/JTAG is enumerated
+# first, so it receives on USB only in update or recovery mode.
+[boot_receive]
+listen_window_ms = 50
+kinds = { uart = true, usb-cdc = false }
+
 # The interfaces a topology link end names (ESP32-S3 technical reference:
 # USB Serial/JTAG, UART0/1/2, I2C0/1, TWAI).
 

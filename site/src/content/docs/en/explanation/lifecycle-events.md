@@ -164,6 +164,38 @@ slots come from the MCU definition's `[[slot]] image = "bootcore"`
 entries (one or two; what one slot cannot do is in
 [Limitations](/en/explanation/limitations/)).
 
+Update mode and recovery mode. The boot loader also receives: it runs the
+same update session as the app (1.3), as the session's boot-loader writer,
+and only in update mode or recovery mode, answering HELLO with `mode` 1
+(update) or 2 (recovery); an app answers 0 and a recovery agent 3. It
+enters update mode by a STAY (0x05) that arrives within its listen window,
+or by an UPDATE_STAY record no UPDATE_DONE has consumed; it enters
+recovery mode when no log face is valid or no app may start. The listen
+window counts from the boot loader's start and is the MCU definition's
+`[boot_receive] listen_window_ms` (0 to 200 ms, 50 when left out, 0 for
+none; a project changes it with `[mcu_override]`). It opens on each link
+kind of `[links]` that `[boot_receive] kinds` marks as taking part; a kind
+the other end enumerates first (USB) cannot, and the boot loader receives
+on it in update or recovery mode only. The boot loader receives on every
+link its definition gives, none above another. An app hands over with
+REBOOT mode 1: its store makes room for the trials, the UPDATE_STAY (0x06)
+and the UPDATE_DONE (0x09) (`Log::request_stay`, which compacts while the
+app runs), appends UPDATE_STAY and the app resets. The boot loader appends
+UPDATE_DONE into that room as it enters update mode (`Log::take_stay`,
+which never erases), so a stay is used once; a compaction keeps an
+unconsumed stay. In update mode the boot loader erases and writes only the
+slots a write names, makes the log's room before a write starts with the
+shared reservation (`Log::reserve`: it compacts into the other face and
+writes that face's header last, never erasing the only valid face), and
+never erases the log before a REBOOT. STAY and REBOOT mode 1 keep it in
+update mode; REBOOT mode 0 leaves it, and so do 60 s without a request
+when STAY or UPDATE_STAY brought it there. Recovery mode has no app to
+start, so the boot loader stays in it. While the app runs it refuses STAY
+(`E_STATE`). Outside update mode the boot stages never erase. Readers
+that predate these records skip them and an agent that predates STAY
+answers `E_UNSUPPORTED`, so `wire` and `state-log` keep their numbers.
+The boot loader does not relay ([Limitations](/en/explanation/limitations/)).
+
 Boot-stage extensions (2) and the boot action program (5.2) run only
 from `WatchdogArmed` on: every event before it is recorded and replayed
 but has no live observer, so nothing outside DAGON runs before the

@@ -206,6 +206,13 @@ impl LinkKind {
     pub fn addressed(self) -> bool {
         matches!(self, LinkKind::I2c)
     }
+
+    /// Kinds the other end enumerates before they carry a frame (USB): a
+    /// link of such a kind cannot take part in a boot stage's listen
+    /// window, which ends long before an enumeration.
+    pub fn enumerated(self) -> bool {
+        matches!(self, LinkKind::UsbCdc)
+    }
 }
 
 /// A node's I2C pin names (MCU pin names such as `PB4`).

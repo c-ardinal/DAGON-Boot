@@ -97,6 +97,14 @@ fn link_rate(kind: dagon_port::LinkKind) -> Option<f64> {
     }
 }
 
+/// Bytes per simulated ms over a link of `kind`, whichever end it is:
+/// the relay links' rate, or the uplink's for a kind only an uplink has.
+pub(crate) fn kind_bytes_per_ms(kind: LinkKind) -> Option<f64> {
+    dagon_port::LinkKind::from_name(kind.name())
+        .and_then(link_rate)
+        .or_else(|| Some(Medium::of(kind)?.rate_and_latency().0))
+}
+
 /// Simulated ms the exchange of request `frame` takes on its links: the
 /// uplink, and for a RELAY the link of `links` its id names, at the rate of
 /// that link's kind (an id `links` does not list is refused at once).

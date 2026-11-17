@@ -99,9 +99,10 @@ at = 0x1014_8000
 size = 0x10_0000
 
 # What writes each image kind: the app's agent writes the app slot it is
-# not running from and either boot core slot.
+# not running from and either boot core slot; the boot core writes either
+# app slot in update or recovery mode.
 [writers]
-app = ["app"]
+app = ["app", "bootcore"]
 bootcore = ["app"]
 
 # What the node receives into: each slot above (header inline at its
@@ -180,6 +181,15 @@ hzs = [100_000, 400_000]
 [links]
 up = ["usb-cdc"]
 down = ["i2c", "uart"]
+
+# How the boot core receives when the app does not answer: it waits the
+# design's 50 ms for STAY on its I2C and UART links. USB is enumerated
+# first, and the ring oscillator gives it no 48 MHz clock (RP2040 datasheet
+# section 4.1), so the boot core receives on USB only in update or
+# recovery mode.
+[boot_receive]
+listen_window_ms = 50
+kinds = { i2c = true, uart = true, usb-cdc = false }
 
 # The interfaces a topology link end names (RP2040 datasheet: USB, I2C0/1,
 # UART0/1; pio-uart is the PIO UART program src/links.rs runs).

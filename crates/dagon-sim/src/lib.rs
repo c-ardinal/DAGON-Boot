@@ -13,12 +13,15 @@
 //!   transactions.
 //! - [`TimedRelay`]: a [`SimRelay`] whose answers take the links' and
 //!   flash's real time (one model for `dagon demo` and the browser demo).
+//! - [`listen`]: when the hub's STAY reaches a node's boot core on each
+//!   link kind, against the listen window its MCU definition opens.
 //!
 //! Randomness comes only from [`SimRng`] seeds, so a seed replays a run.
 #![forbid(unsafe_code)]
 
 pub mod flash;
 pub mod link;
+pub mod listen;
 pub mod node;
 mod ports;
 pub mod relay;

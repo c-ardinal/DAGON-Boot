@@ -13,7 +13,6 @@ use std::collections::BTreeMap;
 
 use crate::link::SimLink;
 use crate::node::SimNode;
-use crate::rom::ROM_ADDR;
 use dagon_port::{BusError, LinkKind, Nrst, RelayLinkDef};
 use dagon_proto::mailbox::{State, STATE_LEN};
 use dagon_proto::payload::{boot0, nrst, I2cRaw, Relay, SubCtl};
@@ -311,6 +310,10 @@ pub struct SimRelay {
     ports: Vec<PortDef>,
     /// That definition's `[[relay_link]]`: the links RELAY reaches nodes over.
     links: Vec<RelayLinkDef>,
+    /// The address I2C_RAW goes to: the ROM loader of the node wired to
+    /// NRST/BOOT0, from its MCU definition (set by [`SimRelay::add_i2c`],
+    /// as the MCU package's build generates it for the relay).
+    pub rom_addr: Option<u8>,
 }
 
 type Answer = (Status, Vec<u8>);
@@ -341,6 +344,7 @@ impl SimRelay {
             mcu: def.id.clone(),
             ports: def.ports.clone(),
             links: def.relay_link_defs(),
+            rom_addr: None,
         }
     }
 
@@ -377,9 +381,12 @@ impl SimRelay {
     }
 
     /// Adds a node on I2C port `port` at its `i2c_addr`; `wired` connects
-    /// NRST/BOOT0 to it.
+    /// NRST/BOOT0 to it and points I2C_RAW at its ROM loader.
     pub fn add_i2c(&mut self, port: &str, node: SimNode, wired: bool) -> usize {
         let p = self.port(port, LinkKind::I2c);
+        if wired {
+            self.rom_addr = node.rom_addr;
+        }
         let nodes = self.bus.i2c.entry(p).or_default();
         nodes.push(node);
         let i = nodes.len() - 1;
@@ -509,15 +516,18 @@ impl SimRelay {
         else {
             return (Status::Unsupported, Vec::new());
         };
+        let Some(rom) = self.rom_addr else {
+            return (Status::Unsupported, Vec::new());
+        };
         let limit = link.buffer_len();
         if usize::from(raw.read_len) > limit || raw.data.len() > limit {
             return (Status::Arg, Vec::new());
         }
-        if !raw.data.is_empty() && self.bus.i2c_write(port, ROM_ADDR, raw.data).is_err() {
+        if !raw.data.is_empty() && self.bus.i2c_write(port, rom, raw.data).is_err() {
             return (Status::Timeout, Vec::new());
         }
         let mut buf = vec![0u8; raw.read_len as usize];
-        if !buf.is_empty() && self.bus.i2c_read(port, ROM_ADDR, &mut buf).is_err() {
+        if !buf.is_empty() && self.bus.i2c_read(port, rom, &mut buf).is_err() {
             return (Status::Timeout, Vec::new());
         }
         (Status::Ok, buf)

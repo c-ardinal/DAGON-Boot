@@ -35,9 +35,6 @@ pub use port::{fits_link, run_link, LinkRoute, Port};
 /// package or app changes only what its wiring needs.
 #[derive(Clone, Copy, Debug)]
 pub struct Config {
-    /// I2C address I2C_RAW talks to: the ROM boot loader of the node on
-    /// the recovery lines (`0x39`, the STM32 system memory loader).
-    pub rom_addr: u8,
     /// Bound on one I2C_RAW request at the link worker.
     pub raw_timeout_ms: u16,
     /// How much longer than a request's own timeout [`serve`] waits for
@@ -48,7 +45,6 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Config {
-            rom_addr: 0x39,
             raw_timeout_ms: 1_000,
             port_margin_ms: 1_000,
         }

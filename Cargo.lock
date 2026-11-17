@@ -737,7 +737,6 @@ dependencies = [
  "dagon-mcu-build",
  "dagon-port",
  "dagon-proto",
- "dagon-romlink",
  "dagon-sign",
  "serde",
  "serde_json",

@@ -82,7 +82,6 @@ fn host_rom_path_matches() {
     assert_eq!(m.stage0, Some((0x0800_0000, 0x4000)));
     assert!(m.shared_log);
     assert_eq!(m.erase, [0, 1, 2, 4, 5]);
-    assert_eq!(m.addr, dagon_romlink::ROM_ADDR);
 }
 
 /// The part of a source file before its tests.

@@ -25,7 +25,8 @@ use std::path::{Path, PathBuf};
 use dagon_extension::node::{self, Ext, Image, ImagePlan};
 use dagon_extension::{gen, Known, Manifest, MANIFEST_FILE};
 use dagon_topology::defs::boot_folder::{
-    board_file_text, defs_text, mcu_file_text, source_sha256, BOARD_FILE, DEFS_FILE, MCU_FILE,
+    board_file_text, defs_text, mcu_file_text, recovery_file_text, source_sha256, BOARD_FILE,
+    DEFS_FILE, MCU_FILE, RECOVERY_FILE,
 };
 use dagon_topology::defs::{ImageKind, McuDef, PortKind, Registry};
 use dagon_topology::schema::{Node, Role};
@@ -335,6 +336,8 @@ pub struct ProjectRef<'a> {
     pub check_boot_graph: bool,
     /// A node's I2C target address from the topology, for its boot wiring.
     pub link_addr: &'a dyn Fn(&str) -> Option<u8>,
+    /// The MCU of the node on a node's recovery lines, from the topology.
+    pub recovery_mcu: &'a dyn Fn(&str) -> Option<String>,
 }
 
 /// The host check of node `id`'s boot crate (`boot/<id>/`): cargo
@@ -464,6 +467,12 @@ fn plan_files(
     if let Some(b) = n.board.as_deref() {
         let text = board_file_text(reg, b).ok_or_else(|| format!("unknown board {b}"))?;
         defs.push((BOARD_FILE, text));
+    }
+    // The recovery node's, for a node that drives one: its relay's build
+    // takes the ROM loader's address from it.
+    if let Some(m) = (p.recovery_mcu)(&n.id) {
+        let text = recovery_file_text(reg, &m).ok_or_else(|| format!("unknown MCU {m}"))?;
+        defs.push((RECOVERY_FILE, text));
     }
     let named: Vec<(&str, &str)> = defs.iter().map(|(f, t)| (*f, t.as_str())).collect();
     let hashes = defs_text(&named);
@@ -700,6 +709,7 @@ mod tests {
             src: &src,
             check_boot_graph: false,
             link_addr: &|_| None,
+            recovery_mcu: &|_| None,
         };
         write_nodes(Registry::builtin(), &p, nodes, only, failed, cfg)
     }
@@ -776,6 +786,56 @@ mod tests {
             read(&format!("boot/seg/{DEFS_FILE}")),
             Some(defs_text(&[(MCU_FILE, &mcu)]))
         );
+        std::fs::remove_dir_all(&base).unwrap();
+    }
+
+    /// A relay's boot folder holds the MCU definition, as the project
+    /// resolves it, of the node on its recovery link, listed in
+    /// `defs.sha256`; the relay's build generates its ROM loader's address
+    /// from it. A relay with no recovery link has none and gets `None`.
+    #[test]
+    fn a_relays_boot_folder_holds_its_recovery_nodes_definition() {
+        use dagon_topology::defs::boot_folder::{check_defs, recovery_rom_addr_rs, RECOVERY_FILE};
+        use dagon_topology::defs::Source;
+        let base = scratch("recovery");
+        let over = base.join("over.toml");
+        let moved = "format = 1\n\n[mcu_override.stm32f401re.rom_i2c]\naddr = 0x3B\n";
+        std::fs::create_dir_all(&base).unwrap();
+        std::fs::write(&over, moved).unwrap();
+        let reg = Registry::load(&[Source::Project(&over)]).unwrap();
+        let src = dagon_src();
+        let gen = |yaml: &str| {
+            let t = dagon_topology::parse_str(yaml).unwrap();
+            let p = ProjectRef {
+                base: &base,
+                config: "dagon.toml",
+                src: &src,
+                check_boot_graph: false,
+                link_addr: &|_| None,
+                recovery_mcu: &|id| dagon_topology::recovery_peer_mcu(&reg, &t, id),
+            };
+            write_nodes(&reg, &p, &t.nodes, &[], &[], &Extensions::default()).unwrap()
+        };
+        let hub = base.join("boot/hub");
+        let some = "pub const RECOVERY_ROM_ADDR: Option<u8> = Some(0x3b);\n";
+        let none = "pub const RECOVERY_ROM_ADDR: Option<u8> = None;\n";
+
+        let lines = gen(crate::scaffold::SAMPLE);
+        check_defs(&hub).unwrap();
+        let text = std::fs::read_to_string(hub.join(RECOVERY_FILE)).unwrap();
+        assert!(
+            text.contains("addr = 0x3b") || text.contains("addr = 59"),
+            "{text}"
+        );
+        assert!(recovery_rom_addr_rs(&hub).contains(some), "{lines:?}");
+        assert!(!base.join("boot/seg").join(RECOVERY_FILE).exists());
+        assert!(recovery_rom_addr_rs(&base.join("boot/seg")).contains(none));
+
+        // The hub's I2C link no longer enters a ROM loader.
+        gen(&crate::scaffold::SAMPLE.replace("      rom_entry: stm32-i2c-rom\n", ""));
+        check_defs(&hub).unwrap();
+        assert!(!hub.join(RECOVERY_FILE).exists());
+        assert!(recovery_rom_addr_rs(&hub).contains(none));
         std::fs::remove_dir_all(&base).unwrap();
     }
 
@@ -951,6 +1011,7 @@ mod tests {
             src: &src,
             check_boot_graph: true,
             link_addr: &|_| None,
+            recovery_mcu: &|_| None,
         };
         let lines = write_nodes(Registry::builtin(), &p, &hub, &[], &[], &cfg).unwrap();
         assert!(
@@ -1074,6 +1135,7 @@ mod tests {
             src: &src,
             check_boot_graph: true,
             link_addr: &|_| None,
+            recovery_mcu: &|_| None,
         };
         let none = Extensions::default();
         write_nodes(Registry::builtin(), &p, &hub, &[], &[], &none).unwrap();

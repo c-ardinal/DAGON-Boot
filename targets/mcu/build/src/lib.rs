@@ -116,8 +116,48 @@ pub const NODE_DEFINITION: &str = "mcu.toml";
 pub fn definition() -> Definition {
     let dir = manifest_dir();
     let def = Definition::parse(&node_definition_text(), |rel| read(&dir.join(rel)));
-    fs::write(out_dir().join("definition.rs"), def.rs()).unwrap();
+    let recovery = env::var_os(BOOT_FOLDER_ENV).and_then(|f| recovery_text(Path::new(&f)));
+    let rs = def.rs() + &recovery_rom_rs(recovery.as_deref());
+    fs::write(out_dir().join("definition.rs"), rs).unwrap();
     def
+}
+
+/// The MCU definition of the node on this node's recovery lines (the node
+/// its relay resets and reaches through its ROM loader), with the
+/// project's overrides applied, as `dagon gen` writes it beside
+/// [`NODE_DEFINITION`]; absent when no node is there.
+pub const RECOVERY_DEFINITION: &str = "recovery-mcu.toml";
+
+/// The text of the boot folder's [`RECOVERY_DEFINITION`], if it holds one
+/// ([`definition`] has checked the folder's hashes first).
+fn recovery_text(folder: &Path) -> Option<String> {
+    let path = folder.join(RECOVERY_DEFINITION);
+    println!("cargo:rerun-if-changed={}", path.display());
+    path.is_file().then(|| read(&path))
+}
+
+/// `RECOVERY_ROM_ADDR` of the node whose boot folder is `folder`, as
+/// [`definition`] generates it.
+pub fn recovery_rom_addr_rs(folder: &Path) -> String {
+    recovery_rom_rs(recovery_text(folder).as_deref())
+}
+
+/// `RECOVERY_ROM_ADDR`, the I2C address of the ROM loader the relay's
+/// recovery reaches: `[rom_i2c] addr` of the recovery node's definition
+/// (`recovery`); `None` without one or for an MCU with no ROM loader.
+fn recovery_rom_rs(recovery: Option<&str>) -> String {
+    let addr = recovery.and_then(|text| {
+        let t: toml::Table = text.parse().expect("the recovery node's MCU definition");
+        let a = t.get("rom_i2c")?.get("addr")?;
+        Some(u8::try_from(int(a, "[rom_i2c] addr")).expect("[rom_i2c] addr fits a u8"))
+    });
+    format!(
+        "/// The I2C address of the ROM loader on this node's recovery lines: the\n\
+         /// `[rom_i2c] addr` of that node's MCU definition (`None`: no node there,\n\
+         /// or its MCU has no ROM loader).\n\
+         pub const RECOVERY_ROM_ADDR: Option<u8> = {};\n",
+        addr.map_or("None".into(), |a| format!("Some({a:#04x})"))
+    )
 }
 
 fn manifest_dir() -> PathBuf {
@@ -233,7 +273,7 @@ pub fn check_defs(folder: &Path, read: &mut dyn FnMut(&Path)) -> Result<(), Stri
         }
         listed.push(name);
     }
-    for f in [NODE_DEFINITION, NODE_BOARD] {
+    for f in [NODE_DEFINITION, NODE_BOARD, RECOVERY_DEFINITION] {
         if folder.join(f).is_file() && !listed.contains(&f) {
             return Err(format!(
                 "{}: no line in {DEFS_FILE} for it; {gen}",
@@ -1195,6 +1235,40 @@ mod tests {
             rs.contains("pub const RELAY_LINK_BUFFERS: [usize; 0] = [];\n"),
             "{rs}"
         );
+    }
+
+    /// The address of the ROM loader on this node's recovery lines comes
+    /// from the MCU definition of the node there (`[rom_i2c] addr`), which
+    /// the boot folder holds beside the node's own; without one, or for an
+    /// MCU with no ROM loader, there is none. An unlisted one is refused.
+    #[test]
+    fn the_recovery_rom_address_comes_from_the_linked_definition() {
+        let some = "pub const RECOVERY_ROM_ADDR: Option<u8> = Some(0x3b);\n";
+        let none = "pub const RECOVERY_ROM_ADDR: Option<u8> = None;\n";
+        let linked = "id = \"m\"\n[rom_i2c]\naddr = 0x3B\n";
+        let rs = recovery_rom_rs(Some(linked));
+        assert!(rs.contains(some), "{rs}");
+        assert!(recovery_rom_rs(Some("id = \"m\"\n")).contains(none));
+        assert!(recovery_rom_rs(None).contains(none));
+
+        let d = std::env::temp_dir().join(format!("dagon-mcu-build-rec-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&d);
+        fs::create_dir_all(&d).unwrap();
+        assert_eq!(recovery_text(&d), None);
+        let mcu = "id = \"n\"\n";
+        fs::write(d.join(NODE_DEFINITION), mcu).unwrap();
+        fs::write(d.join(RECOVERY_DEFINITION), linked).unwrap();
+        fs::write(d.join(DEFS_FILE), defs_text(&[(NODE_DEFINITION, mcu)])).unwrap();
+        let e = check_defs(&d, &mut |_| {}).unwrap_err();
+        assert!(
+            e.contains(RECOVERY_DEFINITION) && e.contains("no line"),
+            "{e}"
+        );
+        let listed = defs_text(&[(NODE_DEFINITION, mcu), (RECOVERY_DEFINITION, linked)]);
+        fs::write(d.join(DEFS_FILE), listed).unwrap();
+        check_defs(&d, &mut |_| {}).unwrap();
+        assert_eq!(recovery_text(&d).as_deref(), Some(linked));
+        fs::remove_dir_all(&d).unwrap();
     }
 
     /// The key place stage0 reads comes from `[stage0] key` (flash when

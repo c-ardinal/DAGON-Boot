@@ -28,7 +28,7 @@ mod port;
 
 use dagon_port::RelayLinkDef;
 
-pub use pc::{serve, Recovery, Relay};
+pub use pc::{cmds, serve, Recovery, Relay};
 pub use port::{fits_link, run_link, LinkRoute, Port};
 
 /// The relay's settings. The defaults are the relay's own values; an MCU
@@ -95,6 +95,10 @@ pub trait OwnAgent {
     fn handle(&mut self, request: &[u8]) -> Option<(&[u8], Option<u32>)>;
     /// The reset after a reboot request is next.
     fn before_reboot(&mut self);
+    /// The relay answers the commands of `front` itself, before a request
+    /// reaches this agent: its HELLO and CAPS name them with its own
+    /// (`dagon_agent::Agent::also_serves`).
+    fn also_serves(&mut self, front: dagon_proto::payload::CmdSet);
 }
 
 /// The guard tasks of the relay. All of them run preempting the app's

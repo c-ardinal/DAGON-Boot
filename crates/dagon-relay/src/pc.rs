@@ -1,11 +1,12 @@
 //! Serving the PC: DAGON frames from the uplink. RELAY and I2C_RAW go to
 //! the worker of the link they name, SUBCTL to the recovery lines (owned
 //! here); everything else, SHOW included, is this node's own agent (owned
-//! here). A link or recovery lines the node does not have answer
-//! E_UNSUPPORTED.
+//! here). A link the board does not wire answers E_UNSUPPORTED; a node
+//! without recovery lines does not serve SUBCTL and I2C_RAW at all.
 
 use dagon_port::{Link, Nrst, SubControl};
-use dagon_proto::payload::{self, boot0, nrst, Relay as RelayReq, SubCtl};
+use dagon_proto::handler::{self, Handler};
+use dagon_proto::payload::{self, boot0, nrst, CmdSet, I2cRaw, Relay as RelayReq, SubCtl};
 use dagon_proto::{flags, Cmd, Frame, FrameError, Status, HEADER_LEN, MAX_FRAME};
 
 use crate::port::{Op, Port, Req};
@@ -35,6 +36,50 @@ pub struct Relay<'a, A, C, W, T> {
     pub config: Config,
 }
 
+/// What a row of [`TABLE`] read from a request; its bulk (RELAY's inner
+/// frame, I2C_RAW's bytes to write) stays where the reader left it.
+#[derive(Clone, Copy)]
+enum Asked {
+    Relay {
+        link: u8,
+        addr: u8,
+        timeout_ms: Option<u16>,
+    },
+    Lines(SubCtl),
+    Raw {
+        read_len: u16,
+    },
+}
+
+/// The commands the relay answers itself. Its handlers wait on the
+/// node's links, so a row hands back the request it read and
+/// [`Pc::handle`] runs it.
+const TABLE: [Handler<(), Asked>; 3] = [
+    Handler::new(Cmd::Relay, |_, p| {
+        let r = RelayReq::of(p)?;
+        Ok(Asked::Relay {
+            link: r.link,
+            addr: r.addr,
+            timeout_ms: r.timeout_ms,
+        })
+    }),
+    Handler::new(Cmd::SubCtl, |_, p| SubCtl::of(p).map(Asked::Lines)),
+    Handler::new(Cmd::I2cRaw, |_, p| {
+        let read_len = I2cRaw::of(p)?.read_len;
+        Ok(Asked::Raw { read_len })
+    }),
+];
+
+/// The commands of its own a relay serves: RELAY, and with recovery lines
+/// SUBCTL and I2C_RAW. The node's HELLO names them with its agent's.
+pub const fn cmds(recovery: bool) -> CmdSet {
+    if recovery {
+        handler::cmds(&TABLE)
+    } else {
+        CmdSet::EMPTY.with(Cmd::Relay as u8)
+    }
+}
+
 struct Pc<'a, A, C, W, T> {
     r: Relay<'a, A, C, W, T>,
     resp: [u8; MAX_FRAME],
@@ -60,6 +105,7 @@ where
         next_id: 1,
         boot0_high: false,
     };
+    pc.r.agent.also_serves(cmds(pc.r.recovery.is_some()));
     let max = up.max_payload();
     let (via, addr) = (up.kind().code(), up.addr());
     let mut link_up = false;
@@ -124,23 +170,42 @@ where
             Err(_) => return (0, None),
         };
         let is_request = f.flags & (flags::RESP | flags::EVENT) == 0;
-        let (status, bulk) = match Cmd::from_u8(f.cmd) {
-            Some(Cmd::Relay) if is_request => match RelayReq::parse(f.payload) {
-                Ok(r) => self.relay(&r, max).await,
-                Err(s) => (s, 0),
-            },
-            Some(Cmd::SubCtl) if is_request => (self.lines(f.payload).await, 0),
-            Some(Cmd::I2cRaw) if is_request => self.i2c_raw(f.payload, max).await,
-            _ => return self.own(request),
+        let served = cmds(self.r.recovery.is_some());
+        let row = handler::find(&TABLE, f.cmd).filter(|h| is_request && served.has(h.cmd as u8));
+        let Some(row) = row else {
+            return self.own(request);
+        };
+        // The whole request is read before any of it runs.
+        let (status, bulk) = match row.read(f.payload) {
+            Err(refused) => (refused, 0),
+            Ok((Asked::Lines(s), _)) => (self.lines(s).await, 0),
+            Ok((Asked::Raw { read_len }, data)) => {
+                self.i2c_raw(I2cRaw { read_len, data }, max).await
+            }
+            Ok((
+                Asked::Relay {
+                    link,
+                    addr,
+                    timeout_ms,
+                },
+                inner,
+            )) => {
+                let r = RelayReq {
+                    link,
+                    addr,
+                    timeout_ms,
+                    inner,
+                };
+                self.relay(&r, max).await
+            }
         };
         let out = &mut self.resp[HEADER_LEN..];
-        let len = match (status, Cmd::from_u8(f.cmd)) {
+        let len = if status == Status::Ok && row.spec.resp.bulk {
             // The worker's answer is the bulk, already in place.
-            (Status::Ok, Some(Cmd::Relay | Cmd::I2cRaw)) => {
-                out[0] = Status::Ok as u8;
-                1 + payload::finish_bulk_resp(&mut out[1..], bulk).unwrap_or(0)
-            }
-            _ => payload::put_refusal(out, status, f.cmd, f.payload),
+            out[0] = Status::Ok as u8;
+            1 + payload::finish_bulk_resp(&mut out[1..], bulk).unwrap_or(0)
+        } else {
+            payload::put_refusal(out, status, f.cmd, f.payload)
         };
         let n = dagon_proto::finish(&mut self.resp, flags::RESP, f.seq, f.cmd, len).unwrap_or(0);
         (n, None)
@@ -209,11 +274,7 @@ where
     }
 
     /// SUBCTL: BOOT0 first, then NRST (a pulse samples the new BOOT0).
-    async fn lines(&mut self, p: &[u8]) -> Status {
-        let s = match SubCtl::parse(p) {
-            Ok(s) => s,
-            Err(e) => return e,
-        };
+    async fn lines(&mut self, s: SubCtl) -> Status {
         let line = match s.nrst {
             nrst::RELEASE => Nrst::Release,
             nrst::LOW => Nrst::Low,
@@ -234,7 +295,7 @@ where
 
     /// Raw transactions to the ROM loader, only while BOOT0 is high, each
     /// within the recovery link's buffer.
-    async fn i2c_raw(&mut self, p: &[u8], max: usize) -> (Status, usize) {
+    async fn i2c_raw(&mut self, raw: I2cRaw<'_>, max: usize) -> (Status, usize) {
         let Some(rec) = self.r.recovery.as_ref() else {
             return (Status::Unsupported, 0);
         };
@@ -243,10 +304,9 @@ where
         let Some((link, port)) = route.and_then(|k| Some((k.link, k.port?))) else {
             return (Status::Unsupported, 0);
         };
-        let raw = match cmd::i2c_raw(p, self.boot0_high, &link) {
-            Ok(r) => r,
-            Err(e) => return (e, 0),
-        };
+        if let Err(e) = cmd::i2c_raw(&raw, self.boot0_high, &link) {
+            return (e, 0);
+        }
         let timeout = self.r.config.raw_timeout_ms;
         let req = self.req(Op::Raw, addr, timeout, raw.read_len);
         self.via(port, req, raw.data, max).await

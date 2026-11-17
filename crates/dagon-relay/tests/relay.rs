@@ -21,8 +21,11 @@ use dagon_port::{
     hello_request, BusError, Link, LinkError, LinkKind, NodeLink, Nrst, Reconnect, SubControl,
 };
 use dagon_port::{Addressing, RelayLinkDef};
-use dagon_proto::payload::{boot0, nrst, I2cRaw, Relay as RelayReq, Show, SubCtl};
-use dagon_proto::{finish, frame_len, max_payload, split_status, Cmd, Frame, Status};
+use dagon_proto::payload::{
+    boot0, encode_caps_req, nrst, CapsResp, CmdSet, HelloResp, I2cRaw, Relay as RelayReq, Show,
+    SubCtl,
+};
+use dagon_proto::{finish, frame_len, max_payload, plant, split_status, Cmd, Frame, Status};
 use dagon_relay::{
     run_link, serve, task, Config, LinkRoute, Liveness, OwnAgent, Port, Recovery, Relay, RelayClock,
 };
@@ -293,6 +296,9 @@ impl OwnAgent for NodeAgent {
     fn before_reboot(&mut self) {
         self.0.before_reboot()
     }
+    fn also_serves(&mut self, front: dagon_proto::payload::CmdSet) {
+        self.0.also_serves(front)
+    }
 }
 
 /// This node's agent, and what its app reads from it.
@@ -359,6 +365,20 @@ struct Pc<'a> {
 }
 
 impl Pc<'_> {
+    /// The status a request of any command number is answered with.
+    async fn status(&self, cmd: u8, payload: &[u8]) -> Status {
+        let seq = self.seq.get().wrapping_add(1);
+        self.seq.set(seq);
+        let mut buf = vec![0u8; frame_len(payload.len())];
+        buf[8..8 + payload.len()].copy_from_slice(payload);
+        finish(&mut buf, 0, seq, cmd, payload.len()).unwrap();
+        self.requests.send(buf).await;
+        let reply = self.replies.receive().await;
+        let (f, _) = Frame::decode(&reply, max_payload::USB).unwrap();
+        assert_eq!((f.seq, f.cmd), (seq, cmd));
+        split_status(f.payload).unwrap().0
+    }
+
     async fn ask(&self, cmd: Cmd, payload: &[u8]) -> (Status, Vec<u8>) {
         let seq = self.seq.get().wrapping_add(1);
         self.seq.set(seq);
@@ -666,6 +686,162 @@ fn a_relay_without_a_recovery_answers_i2c_raw_unsupported() {
     let (mut serving, mut scenario) = (std::pin::pin!(serving), std::pin::pin!(scenario));
     let workers: Vec<Pin<&mut dyn Future<Output = ()>>> = vec![serving.as_mut()];
     run(&clock, &bus, workers, scenario.as_mut());
+}
+
+/// A node link and recovery lines that count what reaches them.
+struct Counted<'a>(&'a Cell<usize>);
+
+impl Counted<'_> {
+    fn reached(&self) {
+        self.0.set(self.0.get() + 1);
+    }
+}
+
+impl NodeLink for Counted<'_> {
+    fn link_id(&self) -> u8 {
+        BUS
+    }
+    fn max_payload(&self) -> usize {
+        max_payload::I2C
+    }
+    fn hello_timeout_ms(&self) -> u16 {
+        50
+    }
+    async fn exchange(&mut self, _: u8, _: &[u8], _: u16, _: &mut [u8]) -> Result<usize, Status> {
+        self.reached();
+        Err(Status::Timeout)
+    }
+    async fn raw(&mut self, _: u8, _: &[u8], _: &mut [u8]) -> Result<(), Status> {
+        self.reached();
+        Err(Status::Timeout)
+    }
+}
+
+impl SubControl for Counted<'_> {
+    async fn set_lines(&mut self, _: Nrst, _: bool) -> Result<(), BusError> {
+        self.reached();
+        Ok(())
+    }
+}
+
+/// The node's HELLO names the relay's commands with its agent's, and a
+/// request with an unknown must field, a field sent twice or a bad length
+/// is refused in every one of them with nothing sent on a link and the
+/// recovery lines left alone.
+#[test]
+fn the_relay_says_what_it_serves_and_reads_before_it_acts() {
+    let (bus, _) = sample_bus();
+    let clock = VirtualClock::default();
+    let reached = Cell::new(0);
+    let port: Port<[u8; frame_len(max_payload::I2C)]> = Port::new(&LINKS[0]);
+    let links = [LinkRoute {
+        link: LINKS[0],
+        port: Some(&port),
+    }];
+    let (requests, replies) = (Frames::new(), Frames::new());
+    let (own, _app) = agent();
+    let relay = Relay {
+        agent: own,
+        links: &links,
+        recovery: Some(Recovery {
+            lines: Counted(&reached),
+            link: BUS,
+            rom_addr: 0x38,
+        }),
+        watch: NoWatchdog,
+        clock: clock.clone(),
+        config: Config::default(),
+    };
+    let up = ScriptedPc {
+        requests: &requests,
+        replies: &replies,
+        frame: Vec::new(),
+    };
+    let pc = Pc {
+        requests: &requests,
+        replies: &replies,
+        seq: Cell::new(0),
+    };
+    let scenario = async {
+        use Cmd::*;
+        let want = [
+            Hello, Status, Version, Caps, Stay, XferBegin, XferData, XferEnd, XferHdr, SetPending,
+            Reboot, Confirm, Show, Relay, SubCtl, I2cRaw,
+        ];
+        let mut req = [0u8; 32];
+        let n = hello_request(max_payload::USB, 1, &mut req).unwrap();
+        let (f, _) = Frame::decode(&req[..n], max_payload::USB).unwrap();
+        let (st, body) = pc.ask(Hello, f.payload).await;
+        assert_eq!(st, dagon_proto::Status::Ok);
+        let cmds = HelloResp::parse(&body).unwrap().cmds;
+        assert_eq!(
+            cmds,
+            want.iter().fold(CmdSet::EMPTY, |s, c| s.with(*c as u8))
+        );
+
+        let mut probes = Vec::new();
+        plant::each_probe(|n, p| probes.push((n, p.to_vec())));
+        let mut served = CmdSet::EMPTY;
+        for (n, p) in probes {
+            if pc.status(n, &p).await == dagon_proto::Status::Field {
+                served = served.with(n);
+            }
+        }
+        assert_eq!(served, cmds, "what answers is what HELLO says");
+
+        let mut planted = Vec::new();
+        let commands = plant::each(&cmds, |n, plant, p| planted.push((n, plant, p.to_vec())));
+        assert_eq!(commands, want.len(), "every command it serves");
+        for (n, plant, p) in planted {
+            assert_eq!(pc.status(n, &p).await, plant.status(), "{n:#x} {plant:?}");
+            assert_eq!(reached.get(), 0, "{n:#x} {plant:?}");
+        }
+
+        // CAPS about a command of the relay's own.
+        let mut p = [0u8; 4];
+        let n = encode_caps_req(Relay as u8, &mut p).unwrap();
+        let (st, body) = pc.ask(Caps, &p[..n]).await;
+        assert_eq!(st, dagon_proto::Status::Ok);
+        assert_eq!(CapsResp::parse(&body), Ok(CapsResp::of(Relay)));
+
+        // What is well formed does reach them.
+        assert_eq!(pc.lines(true, nrst::RELEASE).await, dagon_proto::Status::Ok);
+        assert_eq!(
+            pc.hello(BUS, NODE_I2C_ADDR).await.0,
+            dagon_proto::Status::Timeout
+        );
+        assert_eq!(pc.rom_get().await.0, dagon_proto::Status::Timeout);
+        assert_eq!(reached.get(), 3);
+    };
+    let serving = async move {
+        serve(relay, up).await;
+    };
+    let on_bus = async {
+        let mut l = Counted(&reached);
+        run_link(&mut l, &port, NoWatchdog, task::link(0)).await;
+    };
+    let (mut serving, mut on_bus, mut scenario) = (
+        std::pin::pin!(serving),
+        std::pin::pin!(on_bus),
+        std::pin::pin!(scenario),
+    );
+    let workers: Vec<Pin<&mut dyn Future<Output = ()>>> = vec![serving.as_mut(), on_bus.as_mut()];
+    run(&clock, &bus, workers, scenario.as_mut());
+}
+
+/// A relay without recovery lines does not say it serves SUBCTL and
+/// I2C_RAW.
+#[test]
+fn a_relay_without_a_recovery_serves_relay_alone() {
+    assert_eq!(
+        dagon_relay::cmds(false),
+        CmdSet::EMPTY.with(Cmd::Relay as u8)
+    );
+    let all = [Cmd::Relay, Cmd::SubCtl, Cmd::I2cRaw];
+    assert_eq!(
+        dagon_relay::cmds(true),
+        all.iter().fold(CmdSet::EMPTY, |s, c| s.with(*c as u8))
+    );
 }
 
 #[test]

@@ -458,15 +458,17 @@ fn hello_answered(status: Status, body: &[u8], max: usize) -> bool {
 fn the_relay_serves_the_pc_over_its_links() {
     let (bus, sim_ports) = sample_bus();
     let clock = VirtualClock::default();
-    let ports = [Port::new(), Port::new()];
+    // Each port one frame of its link's max_payload.
+    let bus_port: Port<[u8; frame_len(max_payload::I2C)]> = Port::new(&LINKS[0]);
+    let stream_port: Port<[u8; frame_len(max_payload::UART)]> = Port::new(&LINKS[1]);
     let links = [
         LinkRoute {
             link: LINKS[0],
-            port: Some(&ports[0]),
+            port: Some(&bus_port),
         },
         LinkRoute {
             link: LINKS[1],
-            port: Some(&ports[1]),
+            port: Some(&stream_port),
         },
         LinkRoute {
             link: LINKS[2],
@@ -562,7 +564,11 @@ fn the_relay_serves_the_pc_over_its_links() {
         assert_eq!(pc.raw(limit as u16 + 1, &[]).await.0, Status::Arg);
         assert_eq!(pc.raw(0, &vec![0; limit + 1]).await.0, Status::Arg);
         let (s, read) = pc.raw(limit as u16, &[]).await;
-        assert!(s != Status::Ok || read.len() == limit, "{s:?} {}", read.len());
+        assert!(
+            s != Status::Ok || read.len() == limit,
+            "{s:?} {}",
+            read.len()
+        );
         assert_ne!(s, Status::Arg);
         bus.borrow_mut().sub = None;
         assert_eq!(pc.lines(false, nrst::PULSE).await, Status::Timeout);
@@ -589,11 +595,11 @@ fn the_relay_serves_the_pc_over_its_links() {
     };
     let on_bus = async {
         let mut l = link(0, bus_asked.clone());
-        run_link(&mut l, &ports[0], NoWatchdog, task::link(0)).await;
+        run_link(&mut l, &bus_port, NoWatchdog, task::link(0)).await;
     };
     let on_stream = async {
         let mut l = link(1, Rc::new(RefCell::new(Vec::new())));
-        run_link(&mut l, &ports[1], NoWatchdog, task::link(1)).await;
+        run_link(&mut l, &stream_port, NoWatchdog, task::link(1)).await;
     };
     let (mut serving, mut on_bus, mut on_stream, mut scenario) = (
         std::pin::pin!(serving),

@@ -682,7 +682,6 @@ dependencies = [
  "dagon-sim",
  "embassy-futures",
  "embassy-sync",
- "heapless",
 ]
 
 [[package]]

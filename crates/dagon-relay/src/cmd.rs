@@ -3,7 +3,7 @@
 //! node.
 
 use dagon_proto::payload::I2cRaw;
-use dagon_proto::{max_payload, Status};
+use dagon_proto::{frame_len, Status};
 
 use crate::RelayLinkDef;
 
@@ -17,17 +17,27 @@ pub fn relay_fits(links: &[RelayLinkDef], l: u8, addr: u8, inner_len: usize) -> 
         .is_some_and(|k| k.fits(addr, inner_len))
 }
 
-/// Longest I2C_RAW read that fits the USB response.
-pub const RAW_READ_MAX: usize = max_payload::USB - 1;
+/// The bytes the port and the worker of `link` hold: one frame of its
+/// largest payload (an MCU package's build generates the same value for
+/// each of its links, `RELAY_LINK_BUFFERS`).
+pub const fn buffer_len(link: &RelayLinkDef) -> usize {
+    frame_len(link.max_payload as usize)
+}
 
-/// I2C_RAW: parse errors as parsed, E_STATE unless BOOT0 is high, E_ARG for
-/// a read longer than [`RAW_READ_MAX`].
-pub fn i2c_raw(p: &[u8], boot0_high: bool) -> Result<I2cRaw<'_>, Status> {
+/// I2C_RAW over the recovery link `link`: parse errors as parsed, E_STATE
+/// unless BOOT0 is high, E_ARG for data to write or a read longer than the
+/// link's buffer ([`buffer_len`]).
+pub fn i2c_raw<'a>(
+    p: &'a [u8],
+    boot0_high: bool,
+    link: &RelayLinkDef,
+) -> Result<I2cRaw<'a>, Status> {
     let raw = I2cRaw::parse(p)?;
     if !boot0_high {
         return Err(Status::State);
     }
-    if raw.read_len as usize > RAW_READ_MAX {
+    let limit = buffer_len(link);
+    if usize::from(raw.read_len) > limit || raw.data.len() > limit {
         return Err(Status::Arg);
     }
     Ok(raw)

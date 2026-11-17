@@ -68,6 +68,8 @@ flag = "unmeasured"
 [execution]
 masked_max_us = "unmeasured"
 flash_op = "fetch-stall"
+write_unit = 4
+erased_value = 0xFF
 erase_regions = [
     { start = 0x0800_0000, len = 0x2_0000, unit = 0x4000, unit_max_ms = UNIT_MS },
     { start = 0x0802_0000, len = 0x2_0000, unit = 0x8000, unit_max_ms = 700 },

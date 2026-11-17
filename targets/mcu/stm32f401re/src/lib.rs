@@ -7,7 +7,7 @@
 //!   definitions' constants ([`clock`]); with `hal`, its embassy-stm32
 //!   configuration.
 //! - `hal` (embassy-stm32): the flash port ([`flash`]), the liveness-gated
-//!   IWDG ([`watchdog`]).
+//!   IWDG ([`watchdog`]), the boot core's polled I2C target ([`boot_link`]).
 //! - `hal` and `image-stage0`: the verifying key embedded at build time
 //!   ([`PUBKEY`], [`TEST_KEY`]); stage0 holds it in its own flash
 //!   ([`STAGE0_KEY_PLACE`]).
@@ -41,6 +41,8 @@ pub const LINKED_SLOT: u8 = if cfg!(feature = "slot-b") { 1 } else { 0 };
 
 #[cfg(feature = "node")]
 pub mod exec;
+#[cfg(feature = "hal")]
+pub mod boot_link;
 #[cfg(feature = "hal")]
 pub mod flash;
 #[cfg(feature = "node")]

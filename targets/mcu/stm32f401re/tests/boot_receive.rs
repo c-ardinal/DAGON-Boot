@@ -255,7 +255,11 @@ fn the_listen_window_ends_on_time_without_a_stay() {
         let now = Rc::new(Cell::new(0));
         let mut hub = Hub::new(now.clone(), due);
         assert!(listen(&mut hub, &mut clock(&now), 50, &mut || {}).is_none());
-        assert!(now.get() >= ms(50) && now.get() <= ms(50) + STEP_US, "{}", now.get());
+        assert!(
+            now.get() >= ms(50) && now.get() <= ms(50) + STEP_US,
+            "{}",
+            now.get()
+        );
         assert!(hub.replies.is_empty());
     }
 }
@@ -296,7 +300,11 @@ fn update_mode_answers_stay_and_hello_with_its_mode() {
         Some(&stay(1)),
     );
     assert_eq!(exit, Exit::Idle);
-    let answers: Vec<_> = hub.replies.iter().map(|r| answer(r.as_ref().unwrap())).collect();
+    let answers: Vec<_> = hub
+        .replies
+        .iter()
+        .map(|r| answer(r.as_ref().unwrap()))
+        .collect();
     assert_eq!(answers[0], (Status::Ok, vec![]));
     assert_eq!(answers[1], (Status::Ok, vec![]));
     assert_eq!(answers[2].0, Status::Ok);
@@ -322,9 +330,15 @@ fn update_mode_ends_60_s_after_the_last_request() {
     let exit = serve(&mut hub, &mut agent, &mut clock(&now), &mut feed, None);
     assert_eq!(exit, Exit::Idle);
     let ended = now.get();
-    assert!(ended >= ms(90_000) && ended <= ms(90_000) + 2 * STEP_US, "{ended}");
+    assert!(
+        ended >= ms(90_000) && ended <= ms(90_000) + 2 * STEP_US,
+        "{ended}"
+    );
     assert_eq!(hub.replies.len(), 1);
-    assert!(longest_gap <= STEP_US, "longest gap between feeds {longest_gap} us");
+    assert!(
+        longest_gap <= STEP_US,
+        "longest gap between feeds {longest_gap} us"
+    );
 }
 
 /// REBOOT ends update mode once the hub has read its reply whole.
@@ -370,7 +384,10 @@ fn a_write_through_update_mode_is_tried_at_the_next_start() {
         for r in &hub.replies {
             assert_eq!(answer(r.as_ref().unwrap()).0, Status::Ok, "slot {slot}");
         }
-        assert!(TICKS.load(Ordering::Relaxed) > ticks, "the check ticks the watchdog");
+        assert!(
+            TICKS.load(Ordering::Relaxed) > ticks,
+            "the check ticks the watchdog"
+        );
         let mut log = Log::load(&mut f, &LOG).unwrap();
         let cfg = BootConfig {
             mcu_id: MCU_ID,

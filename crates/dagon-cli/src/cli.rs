@@ -248,14 +248,12 @@ pub(crate) fn slot_choices() -> String {
     or_list(crate::commands::slot_letters().map(String::from).collect())
 }
 
+/// The image kind names `--kind` takes; each resolves through `dagon_sign::image::image_kind_of`.
+pub(crate) const KIND_NAMES: &[&str] = &["app", "bootcore", "agent"];
+
 /// The image kinds `--kind` takes, as help and errors say them.
 pub(crate) fn kind_choices() -> String {
-    or_list(
-        dagon_sign::image::IMAGE_KIND_NAMES
-            .iter()
-            .map(|(n, _)| n.to_string())
-            .collect(),
-    )
+    or_list(KIND_NAMES.iter().map(|n| n.to_string()).collect())
 }
 
 fn slot_help() -> String {

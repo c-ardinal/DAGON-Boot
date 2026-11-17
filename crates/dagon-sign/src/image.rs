@@ -66,18 +66,13 @@ pub fn slot_of(reg: &Registry, mcu: &str, h: &ImageHeader) -> Option<Slot> {
     slot_with(reg, mcu, h.image_kind, s)
 }
 
-/// The image kinds a command line names, with their header values.
-pub const IMAGE_KIND_NAMES: &[(&str, u8)] = &[
-    ("app", image_kind::APP),
-    ("bootcore", image_kind::BOOTCORE),
-    ("agent", image_kind::AGENT),
-];
-
 pub fn image_kind_of(name: &str) -> Option<u8> {
-    IMAGE_KIND_NAMES
-        .iter()
-        .find(|(n, _)| *n == name)
-        .map(|(_, k)| *k)
+    match name {
+        "app" => Some(image_kind::APP),
+        "bootcore" => Some(image_kind::BOOTCORE),
+        "agent" => Some(image_kind::AGENT),
+        _ => None,
+    }
 }
 
 /// Comma-separated flag names into a bit set.

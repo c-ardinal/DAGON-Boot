@@ -711,12 +711,13 @@ impl<T: Transport, C: HostClock> Host<T, C> {
         }
         let regions = crate::rom::regions(boot, app, &log, stage0, map);
         let plan = dagon_romlink::Plan {
+            addr: map.addr,
             erase: &map.erase,
             regions: &regions,
         };
         self.report(on_event, node, phase::ROM, 0, v);
         let stats = {
-            let mut link = crate::rom::HubRom::new(self, on_event, node, v);
+            let mut link = crate::rom::HubRom::new(self, on_event, node, map.addr, v);
             dagon_romlink::flash(&mut link, &plan).await
         };
         let stats = match stats {

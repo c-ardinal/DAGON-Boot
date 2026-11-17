@@ -934,9 +934,7 @@ fn rom_moved() -> dagon_topology::defs::Registry {
     let toml = dir.join("dagon.toml");
     let text = "format = 1\n\n[mcu_override.stm32f401re.rom_i2c]\naddr = 0x3B\n";
     std::fs::write(&toml, text).unwrap();
-    let reg = dagon_topology::defs::Registry::load(&[dagon_topology::defs::Source::Project(
-        &toml,
-    )]);
+    let reg = dagon_topology::defs::Registry::load(&[dagon_topology::defs::Source::Project(&toml)]);
     std::fs::remove_dir_all(&dir).unwrap();
     reg.expect("the override loads")
 }
@@ -947,7 +945,13 @@ fn rom_moved() -> dagon_topology::defs::Registry {
 #[test]
 fn the_rom_path_reaches_the_loader_at_its_definitions_address() {
     let reg = rom_moved();
-    let at = reg.mcu("stm32f401re").unwrap().rom_i2c.as_ref().unwrap().addr;
+    let at = reg
+        .mcu("stm32f401re")
+        .unwrap()
+        .rom_i2c
+        .as_ref()
+        .unwrap()
+        .addr;
     assert_eq!(at, 0x3B);
     let s = sim();
     {

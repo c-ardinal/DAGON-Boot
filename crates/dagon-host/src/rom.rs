@@ -12,7 +12,7 @@ use dagon_port::timeout::REQUEST_MS;
 use dagon_port::{BusError, I2cBus, Nrst, SubControl};
 use dagon_proto::payload::{phase, I2cRaw};
 use dagon_proto::{Cmd, Status};
-use dagon_romlink::{Region, RomLink, FRAME_TIMEOUT_MS, ROM_ADDR};
+use dagon_romlink::{Region, RomLink, FRAME_TIMEOUT_MS};
 
 use crate::ops::Event;
 use crate::{Error, Host, HostClock, Target, Transport};
@@ -201,6 +201,9 @@ pub(crate) struct HubRom<'h, T: Transport, C: HostClock> {
     pub host: &'h mut Host<T, C>,
     pub on_event: &'h mut dyn FnMut(Event),
     pub node: u8,
+    /// The loader's address ([`RomMap::addr`]): the only one I2C_RAW
+    /// reaches (the relay's recovery is built for it).
+    pub addr: u8,
     pub version: dagon_format::Version,
     pub timeout: u32,
     pub shown: u8,
@@ -220,7 +223,7 @@ fn bus_error<E>(e: Error<E>) -> BusError {
 
 impl<T: Transport, C: HostClock> HubRom<'_, T, C> {
     async fn raw(&mut self, addr: u8, data: &[u8], buf: &mut [u8]) -> Result<(), BusError> {
-        if addr != ROM_ADDR {
+        if addr != self.addr {
             return Err(BusError::Nack);
         }
         let req = I2cRaw {
@@ -300,12 +303,14 @@ impl<'h, T: Transport, C: HostClock> HubRom<'h, T, C> {
         host: &'h mut Host<T, C>,
         on_event: &'h mut dyn FnMut(Event),
         node: u8,
+        addr: u8,
         version: dagon_format::Version,
     ) -> Self {
         HubRom {
             host,
             on_event,
             node,
+            addr,
             version,
             timeout: FRAME_TIMEOUT_MS,
             shown: 0,

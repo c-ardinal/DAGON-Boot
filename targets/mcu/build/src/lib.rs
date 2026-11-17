@@ -1197,6 +1197,37 @@ mod tests {
         );
     }
 
+    /// The address of the ROM loader on this node's recovery lines comes
+    /// from the MCU definition of the node there (`[rom_i2c] addr`), which
+    /// the boot folder holds beside the node's own; without one, or for an
+    /// MCU with no ROM loader, there is none. An unlisted one is refused.
+    #[test]
+    fn the_recovery_rom_address_comes_from_the_linked_definition() {
+        let some = "pub const RECOVERY_ROM_ADDR: Option<u8> = Some(0x3b);\n";
+        let none = "pub const RECOVERY_ROM_ADDR: Option<u8> = None;\n";
+        let linked = "id = \"m\"\n[rom_i2c]\naddr = 0x3B\n";
+        let rs = recovery_rom_rs(Some(linked));
+        assert!(rs.contains(some), "{rs}");
+        assert!(recovery_rom_rs(Some("id = \"m\"\n")).contains(none));
+        assert!(recovery_rom_rs(None).contains(none));
+
+        let d = std::env::temp_dir().join(format!("dagon-mcu-build-rec-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&d);
+        fs::create_dir_all(&d).unwrap();
+        assert_eq!(recovery_text(&d), None);
+        let mcu = "id = \"n\"\n";
+        fs::write(d.join(NODE_DEFINITION), mcu).unwrap();
+        fs::write(d.join(RECOVERY_DEFINITION), linked).unwrap();
+        fs::write(d.join(DEFS_FILE), defs_text(&[(NODE_DEFINITION, mcu)])).unwrap();
+        let e = check_defs(&d, &mut |_| {}).unwrap_err();
+        assert!(e.contains(RECOVERY_DEFINITION) && e.contains("no line"), "{e}");
+        let listed = defs_text(&[(NODE_DEFINITION, mcu), (RECOVERY_DEFINITION, linked)]);
+        fs::write(d.join(DEFS_FILE), listed).unwrap();
+        check_defs(&d, &mut |_| {}).unwrap();
+        assert_eq!(recovery_text(&d).as_deref(), Some(linked));
+        fs::remove_dir_all(&d).unwrap();
+    }
+
     /// The key place stage0 reads comes from `[stage0] key` (flash when
     /// left out); a place stage0 cannot read is refused.
     #[test]

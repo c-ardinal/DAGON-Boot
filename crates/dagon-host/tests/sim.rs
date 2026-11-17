@@ -926,6 +926,53 @@ fn erased_f401_comes_back_through_the_rom_loader() {
     }
 }
 
+/// The definitions with the STM32F401's ROM loader moved to an address no
+/// built-in definition uses, as a project's dagon.toml loads them.
+fn rom_moved() -> dagon_topology::defs::Registry {
+    let dir = std::env::temp_dir().join(format!("dagon-host-rom-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let toml = dir.join("dagon.toml");
+    let text = "format = 1\n\n[mcu_override.stm32f401re.rom_i2c]\naddr = 0x3B\n";
+    std::fs::write(&toml, text).unwrap();
+    let reg = dagon_topology::defs::Registry::load(&[dagon_topology::defs::Source::Project(
+        &toml,
+    )]);
+    std::fs::remove_dir_all(&dir).unwrap();
+    reg.expect("the override loads")
+}
+
+/// The ROM path reaches the loader where the node's MCU definition puts it:
+/// the host's ROM map, the relay's recovery and the loader all take it from
+/// there.
+#[test]
+fn the_rom_path_reaches_the_loader_at_its_definitions_address() {
+    let reg = rom_moved();
+    let at = reg.mcu("stm32f401re").unwrap().rom_i2c.as_ref().unwrap().addr;
+    assert_eq!(at, 0x3B);
+    let s = sim();
+    {
+        let mut hub = s.relay.borrow_mut();
+        hub.rom_addr = Some(at);
+        hub.i2c_node(NODE_I2C_PORT, NODE_I2C_ADDR).unwrap().rom_addr = Some(at);
+    }
+    wipe_seg(&s);
+    let (rel, topo, boot) = (release(), topology(&yaml()), bootcore());
+    let roms = rom::rom_maps(&reg);
+    assert_eq!(roms.iter().map(|m| m.addr).collect::<Vec<_>>(), [at]);
+    let assets = RecoverAssets {
+        release: &rel,
+        topology: &topo,
+        pubkey: &key().pk,
+        bootcore: Some(&boot),
+        stage0: Some(&STAGE0),
+        roms: &roms,
+        rom_confirmed: true,
+    };
+    let (path, v) = block_on(host(&s).recover(SEG, &assets, &mut |_| {})).unwrap();
+    assert!(matches!(path, RecoverPath::Rom(_)), "{path:?}");
+    assert_eq!(v, Version::new(1, 1, 0));
+}
+
 /// A silent node with a ROM entry waits for the confirmation: nothing is
 /// erased, no line moves and no ROM event goes out before it.
 #[test]

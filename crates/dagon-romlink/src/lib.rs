@@ -522,13 +522,13 @@ mod tests {
 
     impl I2cBus for Fake {
         async fn write(&mut self, addr: u8, data: &[u8]) -> Result<(), BusError> {
-            assert_eq!(addr, ROM_ADDR);
+            assert_eq!(addr, LOADER);
             self.now += 1;
             self.step(data);
             Ok(())
         }
         async fn read(&mut self, addr: u8, buf: &mut [u8]) -> Result<(), BusError> {
-            assert_eq!(addr, ROM_ADDR);
+            assert_eq!(addr, LOADER);
             self.now += 1;
             // One read takes one whole frame: a shorter read loses the rest
             // of it, a longer one is padded or (strict) fails.
@@ -601,7 +601,10 @@ mod tests {
             data: &HDR,
         },
     ];
+    /// The loader's address the plan gives: one no built-in definition uses.
+    const LOADER: u8 = 0x3B;
     const PLAN: Plan<'static> = Plan {
+        addr: LOADER,
         erase: &[5],
         regions: &REGIONS,
     };

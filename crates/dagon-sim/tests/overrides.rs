@@ -46,21 +46,28 @@ addressing = { fixed = 0xFF }
 max_payload = 1024
 "#;
 
-/// The RP2040 definition with [`OVERRIDE`] merged in, as a project loads it.
-fn overridden() -> McuDef {
+/// A project's dagon.toml that moves the STM32F401's ROM loader to an
+/// address no built-in definition uses.
+const ROM_OVERRIDE: &str = "format = 1\n\n[mcu_override.stm32f401re.rom_i2c]\naddr = 0x3B\n";
+
+/// MCU `mcu`'s definition with the project's dagon.toml `text` merged in,
+/// as a project loads it.
+fn loaded(text: &str, mcu: &str) -> McuDef {
     static CALLS: AtomicUsize = AtomicUsize::new(0);
     let call = CALLS.fetch_add(1, Ordering::Relaxed);
     let dir: PathBuf =
         std::env::temp_dir().join(format!("dagon-sim-override-{}-{call}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let toml = dir.join("dagon.toml");
-    std::fs::write(&toml, OVERRIDE).unwrap();
+    std::fs::write(&toml, text).unwrap();
     let reg = Registry::load(&[Source::Project(&toml)]);
     std::fs::remove_dir_all(&dir).unwrap();
-    reg.expect("the override loads")
-        .mcu("rp2040")
-        .unwrap()
-        .clone()
+    reg.expect("the override loads").mcu(mcu).unwrap().clone()
+}
+
+/// The RP2040 definition with [`OVERRIDE`] merged in.
+fn overridden() -> McuDef {
+    loaded(OVERRIDE, "rp2040")
 }
 
 /// The relay id `def` gives its port `port`.
@@ -191,6 +198,36 @@ fn i2c_raw_reaches_the_wired_node_on_its_own_port() {
         ask(&mut r, &frame(Cmd::I2cRaw, &p[..n])),
         (Status::Ok, vec![ACK]),
         "the ROM loader of the node on i2c2 answers"
+    );
+}
+
+/// A node whose MCU definition moves its ROM loader is reached there: the
+/// loader answers at the definition's address, and the relay's recovery,
+/// built from the wired node's definition, sends I2C_RAW to it.
+#[test]
+fn i2c_raw_reaches_the_rom_loader_at_its_definitions_address() {
+    let def = loaded(ROM_OVERRIDE, "stm32f401re");
+    let at = def.rom_i2c.as_ref().map(|r| r.addr);
+    assert_eq!(at, Some(0x3B));
+    let mut node = f401(3, 100);
+    node.rom_addr = at;
+    let mut r = SimRelay::new(relaying_node());
+    r.add_i2c(NODE_I2C_PORT, node, true);
+    assert_eq!(r.rom_addr, at, "the relay's recovery takes the wired node's");
+    let (s, _) = ask(&mut r, &frame(Cmd::SubCtl, &[nrst::PULSE, boot0::HIGH]));
+    assert_eq!(s, Status::Ok);
+    let port = r.port(NODE_I2C_PORT, dagon_port::LinkKind::I2c);
+    assert_eq!(r.bus.scan(port), vec![0x3B], "the loader answers there only");
+    let mut p = [0u8; 8];
+    let n = I2cRaw {
+        read_len: 1,
+        data: &[cmd::GET, 0xFF],
+    }
+    .encode(&mut p)
+    .unwrap();
+    assert_eq!(
+        ask(&mut r, &frame(Cmd::I2cRaw, &p[..n])),
+        (Status::Ok, vec![ACK])
     );
 }
 

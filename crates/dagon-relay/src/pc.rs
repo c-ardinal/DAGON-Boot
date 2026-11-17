@@ -7,7 +7,6 @@
 use dagon_port::{Link, Nrst, SubControl};
 use dagon_proto::payload::{boot0, nrst, Relay as RelayReq, SubCtl};
 use dagon_proto::{flags, Cmd, Frame, Status, HEADER_LEN, MAX_FRAME};
-use heapless::Vec;
 
 use crate::port::{Op, Port, Req};
 use crate::{cmd, task, Config, LinkRoute, Liveness, OwnAgent, RelayClock};
@@ -118,11 +117,11 @@ where
         let is_request = f.flags & (flags::RESP | flags::EVENT) == 0;
         let (status, body) = match Cmd::from_u8(f.cmd) {
             Some(Cmd::Relay) if is_request => match RelayReq::parse(f.payload) {
-                Ok(r) => self.relay(&r).await,
+                Ok(r) => self.relay(&r, max).await,
                 Err(s) => (s, 0),
             },
             Some(Cmd::SubCtl) if is_request => (self.lines(f.payload).await, 0),
-            Some(Cmd::I2cRaw) if is_request => self.i2c_raw(f.payload).await,
+            Some(Cmd::I2cRaw) if is_request => self.i2c_raw(f.payload, max).await,
             _ => return self.own(request),
         };
         self.resp[HEADER_LEN] = status as u8;
@@ -143,34 +142,31 @@ where
         }
     }
 
-    /// Passes a request to the worker behind `port`; its answer body goes
-    /// to `resp[9..]`.
-    async fn via(
-        &mut self,
-        port: &Port,
-        op: Op,
-        addr: u8,
-        timeout_ms: u16,
-        read_len: u16,
-        data: &[u8],
-    ) -> (Status, usize) {
-        let req = Req {
-            id: self.next_id,
+    /// Passes `req` with `data` to the worker behind `port`; its answer
+    /// body goes to `resp[9..]`, within the uplink's `max` payload (after
+    /// the status byte): E_ARG for one longer than that.
+    async fn via(&mut self, port: &Port, req: Req, data: &[u8], max: usize) -> (Status, usize) {
+        // The link worker holds the deadline while it works on the request.
+        self.r.watch.idle(task::PC);
+        let margin = self.r.config.port_margin_ms;
+        // An uplink carries at most MAX_FRAME (the largest frame of any link).
+        let body = &mut self.resp[HEADER_LEN + 1..HEADER_LEN + max];
+        let answer = port.call(req, data, body, &self.r.clock, margin).await;
+        self.r.watch.busy(task::PC);
+        answer
+    }
+
+    /// A request to a link worker, with the next id.
+    fn req(&mut self, op: Op, addr: u8, timeout_ms: u16, read_len: u16) -> Req {
+        let id = self.next_id;
+        self.next_id = id.wrapping_add(1);
+        Req {
+            id,
             op,
             addr,
             timeout_ms,
             read_len,
-            data: Vec::from_slice(data).unwrap_or_default(),
-        };
-        self.next_id = self.next_id.wrapping_add(1);
-        // The link worker holds the deadline while it works on the request.
-        self.r.watch.idle(task::PC);
-        let margin = self.r.config.port_margin_ms;
-        let resp = port.call(req, &self.r.clock, margin).await;
-        self.r.watch.busy(task::PC);
-        let n = resp.data.len();
-        self.resp[HEADER_LEN + 1..HEADER_LEN + 1 + n].copy_from_slice(&resp.data);
-        (resp.status, if resp.status == Status::Ok { n } else { 0 })
+        }
     }
 
     fn route(&self, link: u8) -> Option<LinkRoute<'a>> {
@@ -180,7 +176,7 @@ where
     /// RELAY: E_ARG for a link the node does not have, or an address or
     /// frame that link does not take; E_UNSUPPORTED for a link the board
     /// does not wire.
-    async fn relay(&mut self, r: &RelayReq<'_>) -> (Status, usize) {
+    async fn relay(&mut self, r: &RelayReq<'_>, max: usize) -> (Status, usize) {
         let Some(route) = self.route(r.link) else {
             return (Status::Arg, 0);
         };
@@ -190,8 +186,8 @@ where
         let Some(port) = route.port else {
             return (Status::Unsupported, 0);
         };
-        self.via(port, Op::Relay, r.addr, r.timeout_ms, 0, r.inner)
-            .await
+        let req = self.req(Op::Relay, r.addr, r.timeout_ms, 0);
+        self.via(port, req, r.inner, max).await
     }
 
     /// SUBCTL: BOOT0 first, then NRST (a pulse samples the new BOOT0).
@@ -218,22 +214,23 @@ where
         }
     }
 
-    /// Raw transactions to the ROM loader, only while BOOT0 is high.
-    async fn i2c_raw(&mut self, p: &[u8]) -> (Status, usize) {
+    /// Raw transactions to the ROM loader, only while BOOT0 is high, each
+    /// within the recovery link's buffer.
+    async fn i2c_raw(&mut self, p: &[u8], max: usize) -> (Status, usize) {
         let route = self
             .r
             .recovery
             .as_ref()
             .and_then(|rec| self.route(rec.link));
-        let Some(port) = route.and_then(|k| k.port) else {
+        let Some((link, port)) = route.and_then(|k| Some((k.link, k.port?))) else {
             return (Status::Unsupported, 0);
         };
-        let raw = match cmd::i2c_raw(p, self.boot0_high) {
+        let raw = match cmd::i2c_raw(p, self.boot0_high, &link) {
             Ok(r) => r,
             Err(e) => return (e, 0),
         };
-        let (len, data) = (raw.read_len, raw.data);
         let (addr, timeout) = (self.r.config.rom_addr, self.r.config.raw_timeout_ms);
-        self.via(port, Op::Raw, addr, timeout, len, data).await
+        let req = self.req(Op::Raw, addr, timeout, raw.read_len);
+        self.via(port, req, raw.data, max).await
     }
 }

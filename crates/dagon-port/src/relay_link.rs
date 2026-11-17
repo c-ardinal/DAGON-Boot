@@ -42,11 +42,18 @@ pub struct RelayLinkDef {
 }
 
 impl RelayLinkDef {
+    /// The most bytes one transfer over this link carries: one frame of
+    /// its largest payload. A relay's port and worker for the link hold
+    /// this much, and on the recovery link it bounds I2C_RAW's data and
+    /// read length.
+    pub const fn buffer_len(&self) -> usize {
+        dagon_proto::frame_len(self.max_payload as usize)
+    }
+
     /// Whether a RELAY over this link may go to `addr` with an inner frame
     /// of `inner_len` bytes.
     pub const fn fits(&self, addr: u8, inner_len: usize) -> bool {
-        self.addressing.accepts(addr)
-            && inner_len <= dagon_proto::frame_len(self.max_payload as usize)
+        self.addressing.accepts(addr) && inner_len <= self.buffer_len()
     }
 }
 
@@ -61,6 +68,19 @@ mod tests {
         addressing: Addressing::SevenBit,
         max_payload: 32,
     };
+
+    #[test]
+    fn a_links_buffer_is_one_frame_of_its_largest_payload() {
+        // Header (8) + payload + CRC (4).
+        assert_eq!(BUS.buffer_len(), 8 + 32 + 4);
+        let uart = RelayLinkDef {
+            max_payload: 1024,
+            ..BUS
+        };
+        assert_eq!(uart.buffer_len(), 1036);
+        assert!(BUS.fits(0x42, BUS.buffer_len()));
+        assert!(!BUS.fits(0x42, BUS.buffer_len() + 1));
+    }
 
     #[test]
     fn a_link_takes_the_addresses_and_frames_it_carries() {

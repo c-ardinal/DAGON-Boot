@@ -243,6 +243,15 @@ port = "pio-uart"
 addressing = { fixed = 0xFF }
 max_payload = 1024
 
+# Static RAM (.bss + .data) of the relay firmware (examples/relay.rs, both
+# links wired; scripts/relay_ram.py): 18_136 bytes measured with the pinned
+# Rust, plus 1/16 of it (the margin the stage0 size check leaves), rounded up
+# to 256 bytes. The margin takes a toolchain's or a dependency's small
+# changes; the I2C link's port and worker grown back to the USB frame
+# (1_664 bytes more) do not fit.
+[relay]
+ram_bytes = 19_456
+
 [watchdog]
 kind = "rp-watchdog"
 trial_ms = 8_000

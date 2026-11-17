@@ -37,7 +37,8 @@ pub use dagon_mcu_common::{frames, liveness, mapped, tag, uart};
 // `SLOT_LAYOUTS`,
 // `ERASE_UNIT_MAX_MS` (the longest single erase), the `_KNOWN` flags (checked against their source),
 // `CONFORM_SCRATCH`, and `RELAY_LINKS` with one `RELAY_LINK_<PORT>` id per
-// relay port (`[[relay_link]]`). The boot stage and the app layer read these.
+// relay port and each link's buffer size in `RELAY_LINK_BUFFERS`
+// (`[[relay_link]]`). The boot stage and the app layer read these.
 include!(concat!(env!("OUT_DIR"), "/definition.rs"));
 
 /// An erase region, for a board's `BoardDef` (`EraseRegion::table` turns its

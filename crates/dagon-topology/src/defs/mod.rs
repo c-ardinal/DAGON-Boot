@@ -505,6 +505,14 @@ pub struct PortDef {
     pub kind: LinkKind,
 }
 
+/// `[relay]` of an MCU definition ([`McuDef::relay`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RelayFirmware {
+    /// Static RAM (`.bss` and `.data`) the relaying app firmware may take, bytes.
+    pub ram_bytes: u32,
+}
+
 /// One `[[relay_link]]` as written; [`McuDef::relay_link_defs`] gives the runtime table.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -723,9 +731,18 @@ pub struct McuDef {
     /// the reached end's address from the topology, on a kind with addresses; `{ fixed = N }`, N
     /// 0 to 255: the one peer of a kind without addresses) and `max_payload` (1 up to the protocol
     /// maximum of the port's kind). An MCU package's build generates them as its `RELAY_LINKS`,
-    /// and the PC reads the same entries.
+    /// and the PC reads the same entries. The relay keeps, per link, a buffer of one frame of its
+    /// `max_payload` (`RELAY_LINK_BUFFERS`) and no more; the build stops when that buffer cannot
+    /// hold the largest frame of the link's kind. Data longer than the buffer (a RELAY's inner
+    /// frame, the data I2C_RAW writes and the length it reads) is refused with `E_ARG`, never
+    /// cut. The I2C_RAW limit is the buffer of the link used for recovery.
     #[serde(default, rename = "relay_link")]
     pub relay_links: Vec<RelayLinkSpec>,
+    /// The budget of the relaying app firmware: `ram_bytes` (static RAM, `.bss` plus `.data`, in
+    /// bytes; 1 up to the MCU's RAM size). Only an MCU with `[[relay_link]]` gives it. CI builds
+    /// the MCU package's `examples/relay.rs`, measures it and fails above this value
+    /// (`scripts/relay_ram.py`).
+    pub relay: Option<RelayFirmware>,
     /// How the user connects it for a write: `label`, `hint`.
     pub connection: Connection,
     /// Tool check: `what`, `probe` (command), `expect` (`"runs"`, `{ line = "..." }`, `{ prefix =

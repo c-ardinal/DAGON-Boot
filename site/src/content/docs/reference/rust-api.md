@@ -26,7 +26,7 @@ rustdocの本文は元のソースのままで、英語です。
 | [`dagon-format`](/api/dagon_format/) | DAGONのすべての部品が共有するバイトのレイアウト: イメージのヘッダ、マニフェスト、リリースのバンドル（`.dgb`）、状態ログ、構成の正規のバイナリ、そしてCRC-32、SHA-256、署名を検証する部品の取り決め（`SigVerifier`）。複数バイトの欄はすべてリトルエンディアンです。 |
 | [`dagon-host`](/api/dagon_host/) | CLIとブラウザが共有するホスト側の手順: 検出、状態、適用、ロールバック、確定、復旧。 |
 | [`dagon-port`](/api/dagon_port/) | ポートの取り決め: ボードがDAGONに用意するもの。 |
-| [`dagon-proto`](/api/dagon_proto/) | DAGONのリンクv1: フレームの形式（USB CDC、UART、I2Cで共通）、コマンドの集合、ステータスコード、リクエストとレスポンスのペイロード、I2Cのメールボックスの状態。 |
+| [`dagon-proto`](/api/dagon_proto/) | DAGONのリンクv2: フレームの形式（USB CDC、UART、I2Cで共通）、コマンドの表、ステータスコード、すべてのペイロードの欄の文法とその唯一の読み手と書き手、型の付いたペイロード、I2Cのメールボックスの状態。 |
 | [`dagon-relay`](/api/dagon_relay/) | リレー: ノードが、リンクでつながったほかのノードに届く仕組み。どのMCUにも依存しません。 |
 | [`dagon-retained-model`](/api/dagon_retained_model/) | 障害注入の下での、DAGONの保持と永続の形式の実行可能なモデル |
 | [`dagon-romlink`](/api/dagon_romlink/) | I2CのSTM32システムメモリのブートローダ（ST AN4221）。ホストから、親機のNRST/BOOT0の線と生のI2Cのやり取りで動かします。 |

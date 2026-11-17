@@ -104,6 +104,64 @@ class BootcoreSize(unittest.TestCase):
             self.assertEqual(bootcore_size.check(path, mcu),
                              [f"{mcu} boot core: {size + 1} bytes, over its {size}-byte slot"])
 
+    def test_a_package_check_finding_fails_the_image(self):
+        with tempfile.TemporaryDirectory() as d:
+            pkg = pathlib.Path(d)
+            self.assertEqual(bootcore_size.package_check(pkg, pkg / "e", pkg, "x"), [])
+            (pkg / bootcore_size.PACKAGE_CHECK).write_text(
+                "import sys\nprint('vector A is DefaultHandler')\nsys.exit(1)\n", encoding="utf-8")
+            self.assertEqual(bootcore_size.package_check(pkg, pkg / "e", pkg, "x"),
+                             ["x: vector A is DefaultHandler"])
+            (pkg / bootcore_size.PACKAGE_CHECK).write_text("", encoding="utf-8")
+            self.assertEqual(bootcore_size.package_check(pkg, pkg / "e", pkg, "x"), [])
+
+
+def symtab_elf(syms):
+    """An ELF32 image holding only a symbol table of `syms` (name, value)."""
+    strtab = b"\0" + b"".join(n.encode() + b"\0" for n, _ in syms)
+    entries, at = b"\0" * 16, 1
+    for n, v in syms:
+        entries += struct.pack("<IIIBBH", at, v, 0, 0, 0, 1)
+        at += len(n) + 1
+    body = 52
+    shoff = body + len(strtab) + len(entries)
+    head = bytearray(52)
+    head[:6] = b"\x7fELF\x01\x01"
+    struct.pack_into("<I", head, 0x20, shoff)
+    struct.pack_into("<HHH", head, 0x2E, 40, 3, 0)
+    secs = struct.pack("<10I", *[0] * 10)
+    secs += struct.pack("<10I", 0, 3, 0, 0, body, len(strtab), 0, 0, 1, 0)
+    secs += struct.pack("<10I", 0, 2, 0, 0, body + len(strtab), len(entries), 1, 0, 4, 16)
+    return bytes(head) + strtab + entries + secs
+
+
+class F401Vectors(unittest.TestCase):
+    """The STM32F401RE boot core's image check: the link's I2C event and
+    error vectors are its own handlers, never DefaultHandler."""
+
+    def check(self, syms, board):
+        import importlib.util
+        path = stage0_size.MCU / "stm32f401re" / "bootcore" / bootcore_size.PACKAGE_CHECK
+        spec = importlib.util.spec_from_file_location("f401_image_check", path)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        with tempfile.TemporaryDirectory() as d:
+            if board:
+                (pathlib.Path(d) / "board.toml").write_text(board, encoding="utf-8")
+            return mod.findings(symtab_elf(syms), pathlib.Path(d))
+
+    BOARD = '[[bus]]\nid = "link"\nkind = "i2c"\ncontroller = "i2c3"\ndagon = true\n'
+
+    def test_the_link_vectors_must_not_be_the_default_handler(self):
+        default = [("DefaultHandler_", 0x101), ("DefaultHandler", 0x101)]
+        self.assertEqual(
+            self.check(default + [("I2C3_EV", 0x101), ("I2C3_ER", 0x201)], self.BOARD),
+            ["vector I2C3_EV is DefaultHandler: a wake-up taken as an exception hangs the boot core"])
+        self.assertEqual(
+            self.check(default + [("I2C3_EV", 0x301), ("I2C3_ER", 0x201)], self.BOARD), [])
+        # No board, or no DAGON I2C bus: no link to wake on.
+        self.assertEqual(self.check(default, None), [])
+
 
 if __name__ == "__main__":
     unittest.main()

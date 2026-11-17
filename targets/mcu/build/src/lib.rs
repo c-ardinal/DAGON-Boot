@@ -1393,7 +1393,7 @@ mod tests {
 
     /// A definition with every layout fact the generated module carries:
     /// boot core slot B written before A, one app slot.
-    const LAYOUT: &str = "format = 2\nid = \"m\"\nwire_id = 0x0042\n\
+    const LAYOUT: &str = "format = 3\nid = \"m\"\nwire_id = 0x0042\n\
                           ram = { at = 0x2000_0000, size = 0x1_0000 }\n\
                           [[flash_map]]\nname = \"m-1m\"\nxip = true\nbase = 0x1000_0000\nbytes = 0x10_0000\n\
                           [layout]\nstage0 = { at = 0x1000_0000, size = 0x4000 }\n\
@@ -1487,7 +1487,7 @@ mod tests {
     /// table the definition names; the table itself is generated too.
     #[test]
     fn a_partition_slot_takes_the_partition_table() {
-        let def = "format = 2\nid = \"e\"\nwire_id = 3\npartitions = \"p.csv\"\n\
+        let def = "format = 3\nid = \"e\"\nwire_id = 3\npartitions = \"p.csv\"\n\
                    [[flash_map]]\nname = \"e-16m\"\nxip = false\nbase = 0x0\nbytes = 0x100_0000\n\
                    [[slot]]\nimage = \"app\"\nbinding = \"any\"\nheader = \"detached\"\npartition = \"ota_0\"\n\
                    [watchdog]\ntrial_attempts = 3\ntrial_ms = 4000\nconfirmed_ms = 4000\n\
@@ -1526,15 +1526,15 @@ mod tests {
     /// for this package's MCU, in this package's definition format.
     #[test]
     fn the_node_definition_is_the_packages_mcu_in_its_format() {
-        let own = "format = 2\nid = \"m\"\n";
+        let own = "format = 3\nid = \"m\"\n";
         assert_eq!(
-            same_mcu(own, "format = 2\nid = \"m\"\nwire_id = 1\n"),
+            same_mcu(own, "format = 3\nid = \"m\"\nwire_id = 1\n"),
             Ok(())
         );
-        let e = same_mcu(own, "format = 2\nid = \"other\"\n").unwrap_err();
+        let e = same_mcu(own, "format = 3\nid = \"other\"\n").unwrap_err();
         assert!(e.contains("'other'") && e.contains("'m'"), "{e}");
-        let e = same_mcu(own, "format = 3\nid = \"m\"\n").unwrap_err();
-        assert!(e.contains("format 3") && e.contains("format 2"), "{e}");
+        let e = same_mcu(own, "format = 4\nid = \"m\"\n").unwrap_err();
+        assert!(e.contains("format 4") && e.contains("format 3"), "{e}");
         let e = same_mcu(own, "id = \"m\"\n").unwrap_err();
         assert!(e.contains("format 1"), "{e}");
         assert!(same_mcu(own, "not toml [").is_err());

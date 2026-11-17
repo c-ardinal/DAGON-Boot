@@ -6,9 +6,10 @@ use dagon_events::{
 };
 use dagon_format::header::{self, image_kind, slot_binding, ImageHeader, HEADER_SIZE};
 use dagon_format::{FormatError, Sha256, SigVerifier};
+use dagon_proto::handler::{self, Handler};
 use dagon_proto::payload::{
-    self, mode, phase, reboot_mode, target, HelloReq, HelloResp, SetPending, Show, SlotState,
-    StatusResp, VersionResp, VersionSlots, XferBegin, XferChunk, IMAGE_HDR_LEN,
+    self, mode, phase, reboot_mode, target, CapsResp, CmdSet, HelloReq, HelloResp, SetPending,
+    Show, SlotState, StatusResp, VersionResp, VersionSlots, XferBegin, XferChunk, IMAGE_HDR_LEN,
 };
 use dagon_proto::{
     flags, frame_len, max_payload, split_status, Cmd, Frame, FrameError, Status, HEADER_LEN,
@@ -28,6 +29,8 @@ const RESP_BUF: usize = frame_len(1 + StatusResp::MAX_LEN);
 // The largest reply body is STATUS's; VERSION's and HELLO's fit the same buffer.
 const _: () = assert!(VersionResp::MAX_LEN <= StatusResp::MAX_LEN);
 const _: () = assert!(HelloResp::MAX_LEN <= StatusResp::MAX_LEN);
+// CAPS from a session carries no tunnel entries.
+const _: () = assert!(CapsResp::FIELDS_LEN <= StatusResp::MAX_LEN);
 /// The answer to a frame of another wire version: a status and one field.
 const REFUSAL_BUF: usize = frame_len(4);
 const BODY_AT: usize = HEADER_LEN + 1;
@@ -92,9 +95,14 @@ pub struct Agent<S, X, V, W = writer::App> {
     resp_reboot: Option<u32>,
     /// Kept apart from `resp`, which a repeated request is answered from.
     refusal: [u8; REFUSAL_BUF],
+    /// The commands the node serves in front of this session.
+    front: CmdSet,
 }
 
-type Handled = Result<(usize, Option<u32>), Status>;
+/// A handled request: the length of the reply's body, and the delay of
+/// the reboot that follows the reply.
+type Done = (usize, Option<u32>);
+type Handled = Result<Done, Status>;
 
 /// A notification of [`requests`] leaves from its only state.
 fn noted(r: Result<(), Refused>) {
@@ -133,6 +141,7 @@ impl<S: SlotStore, X: AppChain, V: SigVerifier, W: Writer> Agent<S, X, V, W> {
             resp_len: 0,
             resp_reboot: None,
             refusal: [0; REFUSAL_BUF],
+            front: CmdSet::EMPTY,
         };
         agent.opened();
         agent
@@ -169,6 +178,13 @@ impl<S: SlotStore, X: AppChain, V: SigVerifier, W: Writer> Agent<S, X, V, W> {
         if W::APP {
             self.images.replay_boot(&mut self.chain);
         }
+    }
+
+    /// The node answers the commands of `front` itself, before a request
+    /// reaches this session (a relay's commands, a ROM entry, a
+    /// conformance build's): HELLO and CAPS say so with the session's own.
+    pub fn also_serves(&mut self, front: CmdSet) {
+        self.front = self.front.union(front);
     }
 
     /// The slots, read-only.
@@ -293,22 +309,52 @@ impl<S: SlotStore, X: AppChain, V: SigVerifier, W: Writer> Agent<S, X, V, W> {
         })
     }
 
-    fn dispatch(&mut self, cmd: u8, p: &[u8]) -> Handled {
-        match Cmd::from_u8(cmd) {
-            Some(Cmd::Hello) => self.hello(p),
-            Some(Cmd::Status) => self.status(p),
-            Some(Cmd::Version) => self.version(p),
-            Some(Cmd::XferBegin) => self.xfer_begin(XferBegin::parse(p)?),
-            Some(Cmd::XferHdr) => self.xfer_hdr(XferChunk::parse(p)?),
-            Some(Cmd::XferData) => self.xfer_data(XferChunk::parse(p)?),
-            Some(Cmd::XferEnd) => self.xfer_end(p),
-            Some(Cmd::SetPending) => self.set_pending(SetPending::parse(p)?),
-            Some(Cmd::Stay) => self.stay(p),
-            Some(Cmd::Reboot) => self.reboot(payload::parse_reboot(p)?),
-            Some(Cmd::Confirm) => self.confirm(payload::parse_confirm(p)?),
-            Some(Cmd::Show) if W::APP => self.show(Show::parse(p)?),
-            _ => Err(Status::Unsupported),
+    /// The commands every writer's session serves.
+    const COMMON: [Handler<Self, Done>; 12] = [
+        Handler::new(Cmd::Hello, |a, p| a.hello(HelloReq::of(p)?)),
+        Handler::new(Cmd::Status, |a, p| a.status(payload::status_req_of(p)?)),
+        Handler::new(Cmd::Version, |a, _| a.version()),
+        Handler::new(Cmd::Caps, |a, p| a.caps(payload::caps_req_of(p)?)),
+        Handler::new(Cmd::Stay, |a, _| a.stay()),
+        Handler::new(Cmd::XferBegin, |a, p| a.xfer_begin(XferBegin::of(p)?)),
+        Handler::new(Cmd::XferData, |a, p| a.xfer_data(XferChunk::of(p)?)),
+        Handler::new(Cmd::XferEnd, |a, _| a.xfer_end()),
+        Handler::new(Cmd::XferHdr, |a, p| a.xfer_hdr(XferChunk::of(p)?)),
+        Handler::new(Cmd::SetPending, |a, p| a.set_pending(SetPending::of(p)?)),
+        Handler::new(Cmd::Reboot, |a, p| a.reboot(payload::reboot_of(p)?)),
+        Handler::new(Cmd::Confirm, |a, p| a.confirm(payload::confirm_of(p)?)),
+    ];
+
+    /// The commands only the app's session serves.
+    const APP_ONLY: [Handler<Self, Done>; 1] =
+        [Handler::new(Cmd::Show, |a, p| a.show(Show::of(p)?))];
+
+    /// What this writer's session serves: HELLO's `cmds`, less what the
+    /// node serves in front of it.
+    const CMDS: CmdSet = {
+        let common = handler::cmds(&Self::COMMON);
+        if W::APP {
+            common.union(handler::cmds(&Self::APP_ONLY))
+        } else {
+            common
         }
+    };
+
+    /// The command's row reads the whole request, then runs its handler.
+    fn dispatch(&mut self, cmd: u8, p: &[u8]) -> Handled {
+        let app_only: &[Handler<Self, Done>] = if W::APP { &Self::APP_ONLY } else { &[] };
+        let row = handler::find(&Self::COMMON, cmd).or_else(|| handler::find(app_only, cmd));
+        row.ok_or(Status::Unsupported)?.call(self, p)
+    }
+
+    /// CAPS: the fields of a command the node serves, as the command
+    /// table this session is built with has them.
+    fn caps(&mut self, cmd: u8) -> Handled {
+        let served = Self::CMDS.union(self.front);
+        let cmd = Cmd::from_u8(cmd)
+            .filter(|c| served.has(*c as u8))
+            .ok_or(Status::Unsupported)?;
+        Ok((CapsResp::of(cmd).encode(self.body()).expect("fits"), None))
     }
 
     /// SHOW to a node: touches no flash and no session, so it is safe
@@ -334,8 +380,7 @@ impl<S: SlotStore, X: AppChain, V: SigVerifier, W: Writer> Agent<S, X, V, W> {
         }
     }
 
-    fn hello(&mut self, p: &[u8]) -> Handled {
-        HelloReq::parse(p)?;
+    fn hello(&mut self, _: HelloReq) -> Handled {
         noted(self.requests.hello(&mut self.chain));
         let st = self.images.status();
         let active = st
@@ -353,12 +398,12 @@ impl<S: SlotStore, X: AppChain, V: SigVerifier, W: Writer> Agent<S, X, V, W> {
             trial: active.state == SlotState::Trying,
             key_id: self.verifier.key_id(),
             max_payload: self.cfg.max_payload,
+            cmds: Self::CMDS.union(self.front),
         };
         Ok((resp.encode(self.body()).expect("fits"), None))
     }
 
-    fn status(&mut self, p: &[u8]) -> Handled {
-        let t = payload::parse_status_req(p)?;
+    fn status(&mut self, t: u8) -> Handled {
         let st = self.images.target_status(t).ok_or(Status::Unsupported)?;
         noted(self.requests.status_asked(&mut self.chain));
         Ok((st.encode(self.body()).expect("fits"), None))
@@ -367,8 +412,7 @@ impl<S: SlotStore, X: AppChain, V: SigVerifier, W: Writer> Agent<S, X, V, W> {
     /// VERSION's summary set: what this node runs, read from flash. A
     /// value it cannot read (a stage0 without its mark, no boot core
     /// slots) is left out.
-    fn version(&mut self, p: &[u8]) -> Handled {
-        payload::parse_version_req(p)?;
+    fn version(&mut self) -> Handled {
         let core = self
             .images
             .target_status(target::BOOTCORE)
@@ -606,8 +650,7 @@ impl<S: SlotStore, X: AppChain, V: SigVerifier, W: Writer> Agent<S, X, V, W> {
         Ok((n.expect("fits"), None))
     }
 
-    fn xfer_end(&mut self, p: &[u8]) -> Handled {
-        payload::parse_empty(&Cmd::XferEnd.spec().req, p)?;
+    fn xfer_end(&mut self) -> Handled {
         let session::State::Body {
             target,
             slot,
@@ -712,8 +755,7 @@ impl<S: SlotStore, X: AppChain, V: SigVerifier, W: Writer> Agent<S, X, V, W> {
     /// STAY: the boot core in update mode stays there (the listen window
     /// that takes the first STAY is the boot core's own loop); a running
     /// app refuses it.
-    fn stay(&mut self, p: &[u8]) -> Handled {
-        payload::parse_empty(&Cmd::Stay.spec().req, p)?;
+    fn stay(&mut self) -> Handled {
         if W::APP {
             return Err(Status::State);
         }

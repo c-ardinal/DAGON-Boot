@@ -2,7 +2,7 @@
 //! run the same engine with their drivers injected, give the same verdict
 //! on every image, and differ only in the slot each one runs from.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::BTreeMap;
 
 use dagon_agent::writer::{self, Writer};
@@ -12,7 +12,7 @@ use dagon_events::{compose, Bounds, Composed, Layer, Nop, Published, Watchdog};
 use dagon_format::header::*;
 use dagon_format::{key_id, sha256, SigVerifier, Version};
 use dagon_proto::payload::*;
-use dagon_proto::{flags, max_payload, split_status, Cmd, Frame, Status};
+use dagon_proto::{flags, max_payload, plant, split_status, Cmd, Frame, Status};
 use ed25519_compact::{KeyPair, Seed};
 
 /// A node of an MCU that only this file knows: its id, tag and slot size.
@@ -57,7 +57,10 @@ fn config() -> Config {
 
 /// The flash of the fake MCU: image slots of APP and BOOTCORE, each with
 /// an inline header, and the STATUS its boot stage would fold.
+#[derive(Clone, Debug, PartialEq)]
 struct Mem {
+    /// Times the session called the store, whatever for.
+    calls: Cell<usize>,
     /// Slots each target has (APP, BOOTCORE).
     count: [u8; 2],
     status: [StatusResp; 2],
@@ -86,6 +89,7 @@ impl Mem {
             st.slots[0].version = Version::new(1, 0, 0);
         }
         Mem {
+            calls: Cell::new(0),
             count: [apps, cores],
             status,
             bodies: BTreeMap::new(),
@@ -107,9 +111,11 @@ impl Mem {
 
 impl SlotStore for Mem {
     fn status(&mut self) -> StatusResp {
+        self.calls.set(self.calls.get() + 1);
         self.status[0]
     }
     fn capacity(&self, t: u8, slot: u8) -> u32 {
+        self.calls.set(self.calls.get() + 1);
         let has = self.count.get(usize::from(t)).is_some_and(|&n| slot < n)
             || (self.reserved_room && (t, slot) == (RESERVED_TARGET, 0));
         if has {
@@ -119,6 +125,7 @@ impl SlotStore for Mem {
         }
     }
     fn erase(&mut self, t: u8, slot: u8, _len: u32, _: &Transition) -> Result<(), StoreError> {
+        self.calls.set(self.calls.get() + 1);
         self.bodies.insert((t, slot), vec![0xFF; CAP as usize]);
         self.headers.remove(&(t, slot));
         self.st(t)?.slots[usize::from(slot)].state = SlotState::Empty;
@@ -132,11 +139,13 @@ impl SlotStore for Mem {
         data: &[u8],
         _: &Transition,
     ) -> Result<(), StoreError> {
+        self.calls.set(self.calls.get() + 1);
         let body = self.bodies.get_mut(&(t, slot)).ok_or(StoreError::Flash)?;
         body[off as usize..][..data.len()].copy_from_slice(data);
         Ok(())
     }
     fn read(&mut self, t: u8, slot: u8, off: u32, buf: &mut [u8]) -> Result<(), StoreError> {
+        self.calls.set(self.calls.get() + 1);
         let body = self.bodies.get(&(t, slot)).ok_or(StoreError::Flash)?;
         buf.copy_from_slice(&body[off as usize..][..buf.len()]);
         Ok(())
@@ -147,9 +156,11 @@ impl SlotStore for Mem {
         h: &[u8; HEADER_SIZE],
         t: &Transition,
     ) -> Result<(), StoreError> {
+        self.calls.set(self.calls.get() + 1);
         self.write_target_header(target::APP, slot, h, t)
     }
     fn read_header(&mut self, slot: u8, out: &mut [u8; HEADER_SIZE]) -> Result<(), StoreError> {
+        self.calls.set(self.calls.get() + 1);
         self.read_target_header(target::APP, slot, out)
     }
     fn set_pending(
@@ -158,6 +169,7 @@ impl SlotStore for Mem {
         h: &[u8; HEADER_SIZE],
         t: &Transition,
     ) -> Result<(), StoreError> {
+        self.calls.set(self.calls.get() + 1);
         self.set_target_pending(target::APP, slot, h, t)
     }
     fn confirm(
@@ -166,12 +178,14 @@ impl SlotStore for Mem {
         _: &[u8; HEADER_SIZE],
         _: &Transition,
     ) -> Result<(), StoreError> {
+        self.calls.set(self.calls.get() + 1);
         let st = self.st(target::APP)?;
         st.slots[usize::from(slot)].state = SlotState::Confirmed;
         st.confirmed = slot;
         Ok(())
     }
     fn keep_room(&mut self) -> Result<(), StoreError> {
+        self.calls.set(self.calls.get() + 1);
         if self.room_fails {
             return Err(StoreError::Flash);
         }
@@ -179,6 +193,7 @@ impl SlotStore for Mem {
         Ok(())
     }
     fn request_update_mode(&mut self) -> Result<(), StoreError> {
+        self.calls.set(self.calls.get() + 1);
         if !self.update_mode {
             return Err(StoreError::Unsupported);
         }
@@ -186,6 +201,7 @@ impl SlotStore for Mem {
         Ok(())
     }
     fn target_status(&mut self, t: u8) -> Option<StatusResp> {
+        self.calls.set(self.calls.get() + 1);
         let n = *self.count.get(usize::from(t))?;
         (n > 0).then(|| self.status[usize::from(t)])
     }
@@ -196,6 +212,7 @@ impl SlotStore for Mem {
         h: &[u8; HEADER_SIZE],
         _: &Transition,
     ) -> Result<(), StoreError> {
+        self.calls.set(self.calls.get() + 1);
         self.headers.insert((t, slot), *h);
         let info = &mut self.st(t)?.slots[usize::from(slot)];
         info.state = SlotState::Written;
@@ -208,6 +225,7 @@ impl SlotStore for Mem {
         slot: u8,
         out: &mut [u8; HEADER_SIZE],
     ) -> Result<(), StoreError> {
+        self.calls.set(self.calls.get() + 1);
         *out = self
             .headers
             .get(&(t, slot))
@@ -222,6 +240,7 @@ impl SlotStore for Mem {
         _: &[u8; HEADER_SIZE],
         _: &Transition,
     ) -> Result<(), StoreError> {
+        self.calls.set(self.calls.get() + 1);
         self.st(t)?.slots[usize::from(slot)].state = SlotState::Pending;
         Ok(())
     }
@@ -332,12 +351,17 @@ impl<V: SigVerifier, W: Writer> Bench<V, W> {
 
     /// The reply's status, body and whether the node resets after it.
     fn exchange(&mut self, cmd: Cmd, payload: &[u8]) -> (Status, Vec<u8>, bool) {
+        self.raw(cmd as u8, payload)
+    }
+
+    /// The same for any command number.
+    fn raw(&mut self, cmd: u8, payload: &[u8]) -> (Status, Vec<u8>, bool) {
         self.seq = self.seq.wrapping_add(1);
         let mut buf = vec![0u8; 300];
         let n = Frame {
             flags: 0,
             seq: self.seq,
-            cmd: cmd as u8,
+            cmd,
             payload,
         }
         .encode(&mut buf)
@@ -582,6 +606,125 @@ fn the_boot_core_serves_none_of_the_app_only_requests() {
     assert_eq!(app.call(Cmd::XferBegin, &p), Status::Unsupported);
     // No MCU's [writers] lists the boot core for the recovery agent.
     assert_eq!(core.call(Cmd::XferBegin, &p), Status::Unsupported);
+}
+
+/// The commands each writer's session serves, in the command table's order.
+fn served_by<W: Writer>() -> Vec<Cmd> {
+    use Cmd::*;
+    let mut cmds = vec![
+        Hello, Status, Version, Caps, Stay, XferBegin, XferData, XferEnd, XferHdr, SetPending,
+        Reboot, Confirm,
+    ];
+    if W::APP {
+        cmds.push(Show);
+    }
+    cmds
+}
+
+fn set_of(cmds: &[Cmd]) -> CmdSet {
+    cmds.iter().fold(CmdSet::EMPTY, |s, c| s.with(*c as u8))
+}
+
+/// HELLO's `cmds` is what the session serves, CAPS names the fields of
+/// each of those commands, and a request with an unknown must field, a
+/// field sent twice or a bad length is refused in every one of them with
+/// the store not called once and a transfer in progress left where it was.
+fn capabilities_and_planted_requests<W: Writer>() {
+    let kp = keypair();
+    let mut b = Bench::<_, W>::new(ed25519(&kp), Mem::new(2, 2));
+    let want = served_by::<W>();
+    let (st, body, _) = b.exchange(Cmd::Hello, &wire(|p| hello_req().encode(p)));
+    assert_eq!(st, Status::Ok);
+    let hello = HelloResp::parse(&body).unwrap();
+    assert_eq!(hello.cmds, set_of(&want), "HELLO cmds");
+
+    // A transfer under way: its header half received.
+    assert_eq!(
+        b.call(Cmd::XferBegin, &begin(target::APP, 1, HEADER_SIZE as u16)),
+        Status::Ok
+    );
+    let chunk = |offset: u32| {
+        wire(|p| {
+            XferChunk {
+                offset,
+                data: &[0; 100],
+            }
+            .encode(p)
+        })
+    };
+    assert_eq!(b.call(Cmd::XferHdr, &chunk(0)), Status::Ok);
+
+    let before = b.mem.borrow().clone();
+    let mut served = CmdSet::EMPTY;
+    plant::each_probe(|n, p| {
+        let (st, _, reboot) = b.raw(n, p);
+        assert!(
+            matches!(st, Status::Field | Status::Unsupported),
+            "{n:#x}: {st:?}"
+        );
+        assert!(!reboot);
+        if st == Status::Field {
+            served = served.with(n);
+        }
+    });
+    assert_eq!(served, hello.cmds, "what answers is what HELLO says");
+    let commands = plant::each(&hello.cmds, |n, plant, p| {
+        let (st, _, reboot) = b.raw(n, p);
+        assert_eq!(st, plant.status(), "{n:#x} {plant:?}");
+        assert!(!reboot, "{n:#x} {plant:?}");
+        assert_eq!(*b.mem.borrow(), before, "{n:#x} {plant:?}: the store");
+    });
+    assert_eq!(commands, want.len(), "every command it serves");
+    assert_eq!(*b.mem.borrow(), before, "no call, nothing changed");
+    assert_eq!(
+        b.exchange(Cmd::XferHdr, &chunk(100)).1,
+        wire(|p| encode_next_offset(200, p)),
+        "the transfer goes on"
+    );
+
+    for c in &want {
+        let (st, body, _) = b.exchange(Cmd::Caps, &wire(|p| encode_caps_req(*c as u8, p)));
+        assert_eq!(st, Status::Ok, "{c:?}");
+        assert_eq!(CapsResp::parse(&body), Ok(CapsResp::of(*c)), "{c:?}");
+    }
+    for not in [Cmd::Relay as u8, 0xEE] {
+        let p = wire(|p| encode_caps_req(not, p));
+        assert_eq!(b.call(Cmd::Caps, &p), Status::Unsupported);
+    }
+}
+
+fn hello_req() -> HelloReq {
+    HelloReq {
+        proto_ver: dagon_proto::PROTO_VERSION.into(),
+        max_payload: max_payload::I2C as u16,
+    }
+}
+
+#[test]
+fn the_app_says_what_it_serves_and_reads_before_it_acts() {
+    capabilities_and_planted_requests::<writer::App>();
+}
+
+#[test]
+fn the_boot_core_says_what_it_serves_and_reads_before_it_acts() {
+    capabilities_and_planted_requests::<writer::BootCore>();
+}
+
+/// What a node serves in front of its session (a relay's commands, a ROM
+/// entry) is in the session's HELLO and CAPS too.
+#[test]
+fn hello_names_what_the_node_serves_in_front_of_the_session() {
+    let kp = keypair();
+    let mut b = Bench::<_, writer::App>::new(ed25519(&kp), Mem::new(2, 2));
+    let front = set_of(&[Cmd::Relay, Cmd::SubCtl]);
+    b.agent.also_serves(front);
+    let (_, body, _) = b.exchange(Cmd::Hello, &wire(|p| hello_req().encode(p)));
+    let cmds = HelloResp::parse(&body).unwrap().cmds;
+    assert_eq!(cmds, set_of(&served_by::<writer::App>()).union(front));
+    let p = wire(|p| encode_caps_req(Cmd::Relay as u8, p));
+    let (st, body, _) = b.exchange(Cmd::Caps, &p);
+    assert_eq!(st, Status::Ok);
+    assert_eq!(CapsResp::parse(&body), Ok(CapsResp::of(Cmd::Relay)));
 }
 
 /// XFER_BEGIN of 600 bytes into `slot` of `t` with `hdr` header bytes.

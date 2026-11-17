@@ -193,6 +193,11 @@ so both ends are built with the same value. A build without it (plain
 `cargo build`) takes `[default_link] baud`, or the `baud` of the board's
 `dagon = true` UART bus.
 
+A node's I2C target address is the `addr` of its end in the topology:
+`dagon gen` writes it as `LINK_ADDR` into the app's `wiring.rs` and the
+boot loader's `boot_wiring.rs`, so both answer at the address the hub
+reaches. Where the topology gives none, both take `[default_link] addr`.
+
 No pin appears twice across `[[pin]]` and the buses, and every name code is
 generated from (pin names, bus ids and their signals, device ids, with `-`
 read as `_`) appears once. On a board that declares buses, the

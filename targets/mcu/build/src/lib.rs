@@ -650,6 +650,7 @@ fn constants_rs(t: &toml::Table) -> String {
 
     out += &stage0_key_place_rs(t);
     out += &stage0_internal_hz_rs(t);
+    out += &flash_write_rs(t);
 
     let (masked, masked_known) = fact(required(t, "execution", "masked_max_us"), "masked_max_us");
     out += "/// Longest DAGON's own code masks interrupts, us (`[execution]\n";
@@ -781,6 +782,35 @@ fn stage0_internal_hz_rs(t: &toml::Table) -> String {
     )
 }
 
+/// The flash's write unit and erased value (`[execution] write_unit`,
+/// `erased_value`) and, for a definition with `[stage0]`, the head the boot
+/// ROM reads before stage0 (`[stage0] head_bytes`). Hardware facts with no
+/// default: a definition without one is refused, naming the key.
+fn flash_write_rs(t: &toml::Table) -> String {
+    let unit = int(required(t, "execution", "write_unit"), "write_unit");
+    let erased = int(required(t, "execution", "erased_value"), "erased_value");
+    let erased = u8::try_from(erased).expect("dagon-mcu.toml: [execution] erased_value fits a u8");
+    let mut out = format!(
+        "/// Bytes one flash write covers (`[execution] write_unit`).\n\
+         pub const WRITE_UNIT: u32 = {unit};\n\
+         /// The byte erased flash reads as (`[execution] erased_value`).\n\
+         pub const ERASED_VALUE: u8 = {erased:#x};\n"
+    );
+    if t.contains_key("stage0") {
+        out += &format!(
+            "/// Bytes at the start of stage0's region the boot ROM reads before\n\
+             /// stage0 (`[stage0] head_bytes`); 0: none.\n\
+             pub const STAGE0_HEAD_LEN: u32 = {:#x};\n",
+            stage0_head_of(t)
+        );
+    }
+    out
+}
+
+fn stage0_head_of(t: &toml::Table) -> u32 {
+    int(required(t, "stage0", "head_bytes"), "head_bytes")
+}
+
 fn array_in<'a>(v: &'a toml::Value, key: &str) -> &'a [toml::Value] {
     v.get(key)
         .and_then(|v| v.as_array())
@@ -857,15 +887,16 @@ fn stage0_region_of(text: &str) -> (u32, u32) {
 }
 
 /// Writes `$OUT_DIR/memory.x` for stage0: `STAGE0` is its whole region
-/// ([`stage0_region`]); its first `head` bytes are the `HEAD` region (a
-/// block the boot ROM reads before stage0, such as the RP2040's boot2;
-/// 0: none) placed by `head_sections`, `FLASH` the rest; RAM at
+/// ([`stage0_region`]); its first `[stage0] head_bytes` are the `HEAD`
+/// region (a block the boot ROM reads before stage0, such as the RP2040's
+/// boot2; none when 0) placed by `head_sections`, `FLASH` the rest; RAM at
 /// `ram`/`ram_len`; with [`STAGE0_ASSERT`].
-pub fn stage0_memory_x(head: u32, head_sections: &str, ram: u32, ram_len: u32) {
-    let region = stage0_region();
+pub fn stage0_memory_x(head_sections: &str, ram: u32, ram_len: u32) {
+    let text = node_definition_text();
+    let t: toml::Table = text.parse().expect("dagon-mcu.toml");
     write_memory_x(&stage0_memory_text(
-        region,
-        head,
+        stage0_region_of(&text),
+        stage0_head_of(&t),
         head_sections,
         (ram, ram_len),
     ));
@@ -1309,8 +1340,9 @@ mod tests {
     #[test]
     fn stage0_memory_holds_the_region_and_its_assertion() {
         let def = "[layout]\nstage0 = { at = 0x1000_0000, size = 0x4000 }\n\
-                   [stage0]\nregion_bytes = 0x4000\n";
+                   [stage0]\nregion_bytes = 0x4000\nhead_bytes = 0x100\n";
         assert_eq!(stage0_region_of(def), (0x1000_0000, 0x4000));
+        assert_eq!(stage0_head_of(&def.parse().unwrap()), 0x100);
         let x = stage0_memory_text(
             (0x1000_0000, 0x4000),
             0x100,

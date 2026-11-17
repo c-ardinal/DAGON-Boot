@@ -33,7 +33,7 @@ fn main() {
     );
     let (ram, ram_len) = def.ram().expect("the STM32F401RE definition gives its RAM");
     if feature("IMAGE_STAGE0") {
-        dagon_mcu_build::stage0_memory_x(0, "", ram, ram_len);
+        dagon_mcu_build::stage0_memory_x("", ram, ram_len);
         return;
     }
     let image = if feature("IMAGE_BOOTCORE") {

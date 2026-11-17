@@ -366,6 +366,11 @@ impl Link {
             store,
             start.chain,
         );
+        agent.also_serves(rom::CMDS);
+        #[cfg(feature = "conform")]
+        if crate::CONFORM_SCRATCH.is_some() {
+            agent.also_serves(dagon_conform::node::CMDS);
+        }
         // The trial watchdog never feeds while on trial; a confirmed image
         // runs the confirmed period.
         let period = if trial {

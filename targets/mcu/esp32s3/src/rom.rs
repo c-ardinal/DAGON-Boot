@@ -12,7 +12,8 @@
 //! This module is the request side and is tested on the host; the register
 //! work is in `node`, method 2 in the board crate.
 
-use dagon_proto::payload::{rom_method, EnterRom};
+use dagon_proto::handler::{self, Handler};
+use dagon_proto::payload::{rom_method, CmdSet, EnterRom};
 use dagon_proto::{flags, Cmd, Frame, Status, HEADER_LEN};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -46,6 +47,15 @@ pub const fn steps(method: Method) -> &'static [Step] {
     }
 }
 
+/// The command this MCU answers in front of the agent. What follows it
+/// runs after the reply has left, so the row hands back the request it
+/// read.
+const TABLE: [Handler<(), EnterRom>; 1] = [Handler::new(Cmd::EnterRom, |_, p| EnterRom::of(p))];
+
+/// What [`enter_rom_request`] answers: the node's HELLO names it with its
+/// agent's commands.
+pub const CMDS: CmdSet = handler::cmds(&TABLE);
+
 /// Reply frame size of [`enter_rom_request`].
 pub const REPLY_LEN: usize = dagon_proto::frame_len(dagon_proto::payload::REFUSAL_MAX);
 
@@ -60,10 +70,11 @@ pub fn enter_rom_request(
     out: &mut [u8; REPLY_LEN],
 ) -> Option<(usize, Option<Method>)> {
     let (f, _) = Frame::decode(request, max_payload).ok()?;
-    if f.cmd != Cmd::EnterRom as u8 || f.flags & (flags::RESP | flags::EVENT) != 0 {
+    let row = handler::find(&TABLE, f.cmd)?;
+    if f.flags & (flags::RESP | flags::EVENT) != 0 {
         return None;
     }
-    let (status, method) = match EnterRom::parse(f.payload).map(|r| r.method) {
+    let (status, method) = match row.read(f.payload).map(|(r, _)| r.method) {
         Ok(rom_method::FORCE_DOWNLOAD_BOOT) => (Status::Ok, Some(Method::ForceDownloadBoot)),
         Ok(rom_method::PMIC) if pmic => (Status::Ok, Some(Method::Pmic)),
         Ok(_) => (Status::Unsupported, None),
@@ -127,6 +138,31 @@ mod tests {
             answer(&req(Cmd::EnterRom as u8, &[2]), false),
             (Status::Unsupported, None)
         );
+    }
+
+    /// ENTER_ROM is the one command answered here, and with an unknown
+    /// must field, a field sent twice or a bad length it is refused with
+    /// no method to run after the reply.
+    #[test]
+    fn enter_rom_is_read_before_anything_follows() {
+        assert_eq!(CMDS, CmdSet::EMPTY.with(Cmd::EnterRom as u8));
+        let mut served = CmdSet::EMPTY;
+        dagon_proto::plant::each_probe(|n, p| {
+            let mut out = [0u8; REPLY_LEN];
+            if let Some((_, method)) = enter_rom_request(&req(n, p), 1024, true, &mut out) {
+                assert_eq!(method, None);
+                served = served.with(n);
+            }
+        });
+        assert_eq!(served, CMDS, "what answers is what it says");
+        let commands = dagon_proto::plant::each(&CMDS, |n, plant, p| {
+            assert_eq!(
+                answer(&req(n, p), true),
+                (plant.status(), None),
+                "{plant:?}"
+            );
+        });
+        assert_eq!(commands, 1);
     }
 
     #[test]

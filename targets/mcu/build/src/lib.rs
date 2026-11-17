@@ -737,14 +737,14 @@ fn relay_links_rs(t: &toml::Table) -> String {
             "    dagon_port::RelayLinkDef {{ id: {id}, port: {index}, kind: dagon_port::LinkKind::{kind}, \
              addressing: dagon_port::Addressing::{addressing}, max_payload: {max} }},\n"
         );
-        buffers.push(format!("dagon_proto::frame_len({max})"));
+        buffers.push(format!("RELAY_LINKS[{}].buffer_len()", buffers.len()));
         let constant = name.to_uppercase().replace('-', "_");
         ids += &format!("/// The id of the relay link on port `{name}`.\n");
         ids += &format!("pub const RELAY_LINK_{constant}: u8 = {id};\n");
     }
     out += "];\n";
     out += "/// The bytes each relay link's port and worker hold, in `RELAY_LINKS`\n";
-    out += "/// order: one frame of the link's `max_payload`.\n";
+    out += "/// order: `RelayLinkDef::buffer_len`, one frame of the link's `max_payload`.\n";
     out += &format!(
         "pub const RELAY_LINK_BUFFERS: [usize; {}] = [{}];\n",
         buffers.len(),
@@ -1145,12 +1145,12 @@ mod tests {
             "{rs}"
         );
         assert!(rs.contains("pub const RELAY_LINK_I2C0: u8 = 4;\n"), "{rs}");
-        // Each link's buffer, next to the table and in its order: one frame
-        // of the link's max_payload.
+        // Each link's buffer, next to the table and in its order, from the
+        // one limit function (`RelayLinkDef::buffer_len`).
         assert!(
             rs.contains(
                 "pub const RELAY_LINK_BUFFERS: [usize; 2] = [\
-                 dagon_proto::frame_len(1024), dagon_proto::frame_len(256)];\n"
+                 RELAY_LINKS[0].buffer_len(), RELAY_LINKS[1].buffer_len()];\n"
             ),
             "{rs}"
         );

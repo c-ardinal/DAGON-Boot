@@ -3,6 +3,8 @@
 - One `trait Link` (dagon-port's); link kinds as an enum only where
   `dagon_format::with_link_kinds!` generates them; no `Agent::run`;
   dagon-port does not depend on dagon-agent (dagon-agent depends on it).
+- The Console (web/src) names a link kind only in copy.ts's table of
+  display words; everywhere else it decides on the codes dagon-wasm gives.
 - The existing-firmware guide's serving loop is the MCU definitions'
   serving loop, whole: one contiguous run of its lines from the link's
   kind to the end of the loop, comments aside; every `dagon_*` path the
@@ -28,6 +30,17 @@ GUIDES = [
 SUBSET_ENUMS = {
     ("crates/dagon-sim/src/timing.rs", "Medium"): "the simulator's uplinks with their timing; Medium::of maps a LinkKind",
 }
+WEB_SRC = ROOT / "web/src"
+# The one place the Console writes a link kind's name: its display words.
+NAME_TABLE = ("web/src/app/copy.ts", "export const LINK_KIND_WORDS")
+# Lines in web/src holding a kind's name that is not a link kind: line -> why.
+TS_NAME_LINES = {
+    ("web/src/app/define/model.ts", "const BUS_KIND = 'i2c';"): "a bus's kind (dagon-topology's BusKind), not a link kind",
+}
+# Files whose kind-like strings are keys of their own: file -> why.
+TS_NAME_FILES = {
+    "web/src/serial/mock.ts": "the stand-in hub's device keys, one per node of the sample",
+}
 
 
 def rust_files():
@@ -44,6 +57,35 @@ def rel(p):
 def kind_variants():
     text = (ROOT / "crates/dagon-format/src/link.rs").read_text(encoding="utf-8")
     return set(re.findall(r"^\s*(\w+) = \d+, \"[a-z0-9-]+\";", text, re.M))
+
+
+def kind_names():
+    text = (ROOT / "crates/dagon-format/src/link.rs").read_text(encoding="utf-8")
+    return re.findall(r"^\s*\w+ = \d+, \"([a-z0-9-]+)\";", text, re.M)
+
+
+def web_files():
+    for p in sorted(WEB_SRC.rglob("*")):
+        parts = p.relative_to(WEB_SRC).parts
+        if p.suffix in (".ts", ".svelte", ".js") and "pkg" not in parts and not p.name.endswith((".test.ts", ".spec.ts")):
+            yield p
+
+
+def ts_kind_literals(path, text, names):
+    """`path:line` of every line of `text` holding a link kind's name as a
+    string literal, outside copy.ts's table of display words and the
+    allowed lines."""
+    literal = re.compile(r"(['\"`])(?:" + "|".join(map(re.escape, names)) + r")\1")
+    out, in_table = [], False
+    for i, line in enumerate(text.splitlines(), 1):
+        if path == NAME_TABLE[0] and line.startswith(NAME_TABLE[1]):
+            in_table = True
+        if in_table:
+            in_table = not line.startswith("}")
+            continue
+        if literal.search(line) and (path, line.strip()) not in TS_NAME_LINES:
+            out.append(f"{path}:{i}: {line.strip()}")
+    return out
 
 
 ENUM = re.compile(r"\benum\s+(\w+)[^{;]*\{(.*?)^\s*\}", re.M | re.S)
@@ -149,6 +191,23 @@ class OneLinkContract(unittest.TestCase):
     def test_the_check_catches_a_hand_written_kind_enum(self):
         old = "pub enum LinkKind {\n    Uart,\n    I2cTarget,\n    UsbCdc,\n}\n"
         self.assertEqual(kind_enums(old, kind_variants()), ["LinkKind"])
+
+    def test_console_names_link_kinds_only_in_its_words(self):
+        names = kind_names()
+        self.assertGreaterEqual(len(names), 7)
+        found = []
+        for p in web_files():
+            if rel(p) not in TS_NAME_FILES:
+                found += ts_kind_literals(rel(p), p.read_text(encoding="utf-8"), names)
+        self.assertEqual(found, [], "a link kind's name in the Console; decide on dagon-wasm's LinkKind codes and show copy.ts's LINK_KIND_WORDS")
+
+    def test_the_ts_check_catches_a_planted_name(self):
+        names = kind_names()
+        table = f"{NAME_TABLE[1]} = {{\n  'usb-cdc': {{ label: 'USB' }},\n}};\n"
+        self.assertEqual(ts_kind_literals(NAME_TABLE[0], table, names), [])
+        planted = "const UPLINK = ['usb-cdc', \"ble\"];\nif (k === `can`) go();\nconst id = 'i2c-main';\n"
+        self.assertEqual(len(ts_kind_literals("web/src/x.ts", planted, names)), 2)
+        self.assertEqual(ts_kind_literals("web/src/app/define/model.ts", "const BUS_KIND = 'i2c';\n", names), [])
 
     def test_no_agent_run(self):
         agent = "\n".join(p.read_text(encoding="utf-8") for p in (ROOT / "crates/dagon-agent/src").rglob("*.rs"))

@@ -47,16 +47,13 @@ pub struct RomMap {
     pub erase: Vec<u16>,
 }
 
-/// The ROM maps of every MCU in `reg` with a ROM I2C loader whose boot core
-/// slot, APP slot A and APP log are defined.
+/// The ROM maps of every MCU in `reg` a first install can go through
+/// ([`McuDef::has_rom_loader`](dagon_topology::defs::McuDef::has_rom_loader)).
 #[cfg(feature = "defs")]
 pub fn rom_maps(reg: &dagon_topology::defs::Registry) -> Vec<RomMap> {
-    use dagon_topology::defs::{Binding, ImageKind, McuDef, Slot};
+    use dagon_topology::defs::{ImageKind, McuDef};
     let slot = |m: &McuDef, kind| -> Option<RomSlot> {
-        let s: &Slot = m
-            .slots
-            .iter()
-            .find(|s| s.image == kind && matches!(s.binding, Binding::A | Binding::Any))?;
+        let s = m.slot_a(kind)?;
         Some(RomSlot {
             header: s.header_addr,
             load: s.load_addr,
@@ -65,6 +62,7 @@ pub fn rom_maps(reg: &dagon_topology::defs::Registry) -> Vec<RomMap> {
     };
     reg.mcus()
         .iter()
+        .filter(|m| m.has_rom_loader())
         .filter_map(|m| {
             let rom = m.rom_i2c.as_ref()?;
             Some(RomMap {

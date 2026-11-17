@@ -4,7 +4,9 @@
 //! request, and a write through update mode that the next start tries. The
 //! link is the boot core's polled port (`dagon_agent::update_mode::Port`)
 //! with the I2C mailbox the app's link uses; the hub's requests arrive at
-//! set times on a clock the boot core reads.
+//! set times. Between events the boot core sleeps in the port's wait (on
+//! hardware WFE until the link or a timer wakes it): the clock advances
+//! only there, so a loop that polls without waiting never sees time pass.
 
 mod cut;
 
@@ -32,12 +34,12 @@ use dagon_proto::payload::{
 use dagon_proto::{max_payload, split_status, Cmd, Frame, Status, PROTO_VERSION};
 use ed25519_compact::{KeyPair, Seed};
 
-/// Microseconds the boot core's clock advances at each read.
-const STEP_US: u64 = 1_000;
+/// The longest the boot core goes without feeding its watchdog.
+const FEED_EVERY_MS: u32 = 2_000;
 
 /// The hub's side of the I2C mailbox, as the boot core's port sees it:
 /// each request arrives once the clock reaches its time; a reply held is
-/// read whole by the hub at the next poll.
+/// read whole by the hub right away (an event that ends a wait).
 struct Hub {
     now: Rc<Cell<u64>>,
     due: VecDeque<(u64, Vec<u8>)>,
@@ -45,6 +47,7 @@ struct Hub {
     mailbox: Mailbox,
     delivered: bool,
     polls: usize,
+    waits: usize,
     replies: Vec<Option<Vec<u8>>>,
 }
 
@@ -57,6 +60,7 @@ impl Hub {
             mailbox: Mailbox::default(),
             delivered: false,
             polls: 0,
+            waits: 0,
             replies: Vec::new(),
         }
     }
@@ -93,15 +97,25 @@ impl Port for Hub {
     fn delivered(&mut self) -> bool {
         self.delivered
     }
+
+    /// Sleeps until the next request arrives or `max_us` pass, whichever
+    /// comes first; a reply waiting to be read wakes it at once.
+    fn wait(&mut self, max_us: u32) {
+        self.waits += 1;
+        if matches!(self.mailbox.read_data().first(), Some(1)) {
+            self.read_reply();
+            return;
+        }
+        let until = self.now.get() + u64::from(max_us);
+        let next = self.due.front().map_or(until, |(at, _)| (*at).min(until));
+        self.now.set(next.max(self.now.get()));
+    }
 }
 
-/// The boot core's clock: `STEP_US` further at each read.
+/// The boot core's clock: the time the waits have let pass.
 fn clock(now: &Rc<Cell<u64>>) -> impl FnMut() -> u64 {
     let now = now.clone();
-    move || {
-        now.set(now.get() + STEP_US);
-        now.get()
-    }
+    move || now.get()
 }
 
 fn frame(seq: u8, cmd: Cmd, payload: &[u8]) -> Vec<u8> {
@@ -241,25 +255,23 @@ fn a_stay_within_the_listen_window_keeps_the_boot_core() {
     let now = Rc::new(Cell::new(0));
     let mut hub = Hub::new(now.clone(), vec![(ms(2), stay(7))]);
     let mut feeds = 0;
-    let kept = listen(&mut hub, &mut clock(&now), 50, &mut || feeds += 1);
+    let kept = listen(&mut hub, &mut clock(&now), 50, FEED_EVERY_MS, &mut || feeds += 1);
     assert_eq!(kept.as_ref().map(|s| s.frame().to_vec()), Some(stay(7)));
-    assert!(now.get() < ms(50), "the window ended at the STAY");
+    assert_eq!(now.get(), ms(2), "the window ended at the STAY");
     assert!(feeds > 0, "the watchdog is fed while the window is open");
 }
 
-/// No STAY, or one after the window, and the window ends on time (within
-/// one clock step of its length); the late STAY is left unanswered.
+/// No STAY, or one after the window, and the window ends exactly at its
+/// length, having slept rather than polled; the late STAY is left
+/// unanswered.
 #[test]
 fn the_listen_window_ends_on_time_without_a_stay() {
     for due in [vec![], vec![(ms(60), stay(1))]] {
         let now = Rc::new(Cell::new(0));
         let mut hub = Hub::new(now.clone(), due);
-        assert!(listen(&mut hub, &mut clock(&now), 50, &mut || {}).is_none());
-        assert!(
-            now.get() >= ms(50) && now.get() <= ms(50) + STEP_US,
-            "{}",
-            now.get()
-        );
+        assert!(listen(&mut hub, &mut clock(&now), 50, FEED_EVERY_MS, &mut || {}).is_none());
+        assert_eq!(now.get(), ms(50));
+        assert!(hub.polls <= 3, "{} polls", hub.polls);
         assert!(hub.replies.is_empty());
     }
 }
@@ -269,7 +281,7 @@ fn the_listen_window_ends_on_time_without_a_stay() {
 fn a_listen_window_of_0_opens_none() {
     let now = Rc::new(Cell::new(0));
     let mut hub = Hub::new(now.clone(), vec![(0, stay(1))]);
-    assert!(listen(&mut hub, &mut clock(&now), 0, &mut || {}).is_none());
+    assert!(listen(&mut hub, &mut clock(&now), 0, FEED_EVERY_MS, &mut || {}).is_none());
     assert_eq!(hub.polls, 0);
 }
 
@@ -279,9 +291,9 @@ fn a_listen_window_of_0_opens_none() {
 fn a_request_other_than_stay_does_not_keep_the_boot_core() {
     let now = Rc::new(Cell::new(0));
     let mut hub = Hub::new(now.clone(), vec![(ms(2), hello(1))]);
-    assert!(listen(&mut hub, &mut clock(&now), 50, &mut || {}).is_none());
+    assert!(listen(&mut hub, &mut clock(&now), 50, FEED_EVERY_MS, &mut || {}).is_none());
     assert_eq!(hub.replies, [None]);
-    assert!(now.get() >= ms(50));
+    assert_eq!(now.get(), ms(50));
 }
 
 /// In update mode the session answers the window's STAY, a later STAY and
@@ -296,6 +308,7 @@ fn update_mode_answers_stay_and_hello_with_its_mode() {
         &mut hub,
         &mut agent,
         &mut clock(&now),
+        FEED_EVERY_MS,
         &mut || {},
         Some(&stay(1)),
     );
@@ -311,8 +324,10 @@ fn update_mode_answers_stay_and_hello_with_its_mode() {
     assert_eq!(HelloResp::parse(&answers[2].1).unwrap().mode, mode::UPDATE);
 }
 
-/// Update mode ends 60 s after the last request, not before; each request
-/// starts the 60 s again. The watchdog is fed at every step meanwhile.
+/// Update mode ends exactly 60 s after the last request; each request
+/// starts the 60 s again. Meanwhile the boot core sleeps between events
+/// (a few waits, not a busy poll) and feeds the watchdog at least every
+/// `FEED_EVERY_MS`.
 #[test]
 fn update_mode_ends_60_s_after_the_last_request() {
     assert_eq!(EXIT_IDLE_MS, 60_000);
@@ -327,18 +342,17 @@ fn update_mode_ends_60_s_after_the_last_request() {
         last_feed = now.get();
         fed.set(fed.get() + 1);
     };
-    let exit = serve(&mut hub, &mut agent, &mut clock(&now), &mut feed, None);
+    let exit = serve(&mut hub, &mut agent, &mut clock(&now), FEED_EVERY_MS, &mut feed, None);
     assert_eq!(exit, Exit::Idle);
     let ended = now.get();
-    assert!(
-        ended >= ms(90_000) && ended <= ms(90_000) + 2 * STEP_US,
-        "{ended}"
-    );
+    assert_eq!(ended, ms(90_000));
     assert_eq!(hub.replies.len(), 1);
     assert!(
-        longest_gap <= STEP_US,
+        longest_gap <= ms(u64::from(FEED_EVERY_MS)),
         "longest gap between feeds {longest_gap} us"
     );
+    let most = 2 * (90_000 / FEED_EVERY_MS as usize) + 10;
+    assert!(hub.polls <= most && hub.waits <= most, "{} polls, {} waits", hub.polls, hub.waits);
 }
 
 /// REBOOT ends update mode once the hub has read its reply whole.
@@ -349,7 +363,7 @@ fn reboot_ends_update_mode_once_its_reply_is_read() {
     let reboot = frame(2, Cmd::Reboot, &[reboot_mode::NORMAL]);
     let mut hub = Hub::new(now.clone(), vec![(ms(5), reboot)]);
     let mut agent = session(&f);
-    let exit = serve(&mut hub, &mut agent, &mut clock(&now), &mut || {}, None);
+    let exit = serve(&mut hub, &mut agent, &mut clock(&now), FEED_EVERY_MS, &mut || {}, None);
     assert_eq!(exit, Exit::Reboot);
     assert_eq!(answer(hub.replies[0].as_ref().unwrap()).0, Status::Ok);
     assert!(now.get() < ms(1_000));
@@ -377,6 +391,7 @@ fn a_write_through_update_mode_is_tried_at_the_next_start() {
             &mut hub,
             &mut agent,
             &mut clock(&now),
+            FEED_EVERY_MS,
             &mut || {},
             Some(&stay(1)),
         );

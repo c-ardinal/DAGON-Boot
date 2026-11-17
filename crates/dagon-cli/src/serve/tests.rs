@@ -716,7 +716,11 @@ fn the_page_built_into_dagon_is_served_with_the_release_key() {
     // A checkout without `python scripts/page.py build` embeds no page; CI
     // and release builds set DAGON_REQUIRE_PAGE=1, whose build has one.
     if !super::api::page_embedded() {
-        assert_ne!(option_env!("DAGON_REQUIRE_PAGE"), Some("1"), "no page built in");
+        assert_ne!(
+            option_env!("DAGON_REQUIRE_PAGE"),
+            Some("1"),
+            "no page built in"
+        );
         return;
     }
     let server = Server::new("p".repeat(32), 1, None, std::path::PathBuf::new());

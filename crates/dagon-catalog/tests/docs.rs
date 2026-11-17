@@ -148,6 +148,46 @@ fn the_registry_has_no_conflicts() {
     assert_eq!(conflicts(&machines()), Vec::<String>::new());
 }
 
+/// Every machine's transition table, generated from its declaration and
+/// used by the code that decides, says what its catalog says.
+#[test]
+fn every_generated_transition_table_agrees_with_its_catalog() {
+    for c in machines() {
+        let states = u8::try_from(c.states.len()).unwrap();
+        for (i, state) in (0..states).zip(c.states) {
+            for e in c.entries {
+                let named = e.from.contains(&"*") || e.from.contains(state);
+                assert_eq!(
+                    c.leaves(i, e.code),
+                    Some(named),
+                    "{}.{}: {} from {state}",
+                    c.layer.name(),
+                    c.machine,
+                    e.trigger
+                );
+            }
+        }
+        assert_eq!(c.leaves(states, c.entries[0].code), None, "{}", c.machine);
+    }
+}
+
+/// Events carry their layer and code; the host's display names them as
+/// the Events page does (`layer.kind`), from the same catalogs.
+#[test]
+fn the_display_name_of_every_kind_is_its_catalog_name() {
+    for c in machines() {
+        for e in c.entries {
+            let want = format!("{}.{}", c.layer.name(), e.kind);
+            assert_eq!(dagon_catalog::name(c.layer, e.code).as_deref(), Some(&*want));
+        }
+    }
+    assert_eq!(dagon_catalog::name(Layer::App, 0xEE), None);
+    assert_eq!(
+        dagon_catalog::BOOT_OVERRAN,
+        dagon_events::boot_extensions::ExtensionOverran::ENTRY.code
+    );
+}
+
 /// Workspace packages whose resolved normal dependencies reach
 /// `dagon-events` other than through this registry: each declares
 /// machines and must be in REGISTRY, once, by its own `MACHINES`.

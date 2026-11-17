@@ -133,6 +133,38 @@ mod tests {
         assert_eq!(crc32(b""), 0);
     }
 
+    /// The same CRC computed one bit at a time, the definition.
+    fn crc32_bitwise(data: &[u8]) -> u32 {
+        let mut crc = 0xFFFF_FFFFu32;
+        for &b in data {
+            crc ^= u32::from(b);
+            for _ in 0..8 {
+                crc = if crc & 1 != 0 {
+                    0xEDB8_8320 ^ (crc >> 1)
+                } else {
+                    crc >> 1
+                };
+            }
+        }
+        crc ^ 0xFFFF_FFFF
+    }
+
+    #[test]
+    fn crc32_matches_the_bitwise_definition_and_uses_a_16_entry_table() {
+        // Known answers beyond the check value (IEEE 802.3 CRC-32).
+        assert_eq!(crc32(b"a"), 0xE8B7_BE43);
+        assert_eq!(
+            crc32(b"The quick brown fox jumps over the lazy dog"),
+            0x414F_A339
+        );
+        // Every byte value at every position of a run, and every length.
+        let data: [u8; 512] = core::array::from_fn(|i| if i < 256 { i as u8 } else { !(i as u8) });
+        for n in 0..data.len() {
+            assert_eq!(crc32(&data[..n]), crc32_bitwise(&data[..n]), "{n} bytes");
+        }
+        assert_eq!(core::mem::size_of_val(&CRC_TABLE), 16 * 4);
+    }
+
     #[test]
     fn sha256_abc() {
         assert_eq!(

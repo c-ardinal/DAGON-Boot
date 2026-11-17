@@ -2,6 +2,7 @@ import { describe, expect, test } from 'vitest';
 import * as copy from './copy.ts';
 import { MACHINE, view, type Action } from './machine.ts';
 import { MOCK_TEXTS } from './agentMock.ts';
+import { link_kind_table } from '../wasm/pkg/dagon_wasm.js';
 
 const strings = (v: unknown): string[] =>
   typeof v === 'string' ? [v] : v && typeof v === 'object' ? Object.values(v).flatMap(strings) : [];
@@ -159,5 +160,14 @@ describe('copy names no sample', () => {
   });
   test('no screen text contains a sample name', () => {
     expect(shownExcept().filter((s) => samples.some((n) => s.includes(n)))).toEqual([]);
+  });
+});
+
+describe('the link kind words', () => {
+  // One table of display words, keyed by the names dagon-wasm's kind table gives: a kind added to
+  // dagon_format::with_link_kinds! fails here until it has its words, and a key no kind has fails too.
+  test('are keyed by every kind and nothing else', () => {
+    const names = (link_kind_table() as { name: string }[]).map((k) => k.name);
+    expect(Object.keys(copy.LINK_KIND_WORDS).sort()).toEqual([...names].sort());
   });
 });

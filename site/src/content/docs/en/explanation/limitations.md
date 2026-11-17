@@ -38,7 +38,9 @@ Extension isolation:
 
 Links:
 
+<!-- generated from the MCU definitions' [links]: python site/scripts/gen.py -->
 - Firmware exists only for the link kinds `usb-cdc`, `uart` and `i2c`. `ble`, `wifi-tcp`, `ethernet` and `can` have none.
+<!-- end of generated table -->
 
 Identity and VERSION:
 

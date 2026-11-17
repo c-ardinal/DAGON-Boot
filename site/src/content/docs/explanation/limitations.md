@@ -38,7 +38,9 @@ description: "設計との違いと、DAGONがしないことです。仕様上�
 
 リンク:
 
+<!-- generated from the MCU definitions' [links]: python site/scripts/gen.py -->
 - ファームウェアがあるリンクの種類は`usb-cdc`、`uart`、`i2c`だけです。`ble`、`wifi-tcp`、`ethernet`、`can`にはありません。
+<!-- end of generated table -->
 
 識別とVERSION:
 

@@ -4,7 +4,7 @@
 import { topo_check } from '../../wasm/dagon.ts';
 import { topo_cut } from '../../wasm/pkg/dagon_wasm.js';
 import { INSPECT, RULE_FIX, RULE_SHORT, type FixWords } from '../copy.ts';
-import { busNodes, definedPins, i2cHzs, linkKey, maxNodes, romI2cPairs, sides, type Doc } from './model.ts';
+import { busNodes, definedPins, i2cHzs, linkKey, maxNodes, romI2cPairs, sides, topoWithNames, type Doc } from './model.ts';
 
 export interface Issue {
   rule: string;
@@ -104,7 +104,7 @@ const RANK: Record<Issue['severity'], number> = { error: 0, warning: 1, info: 2 
 
 /** topo_check on the document (as JSON, which the YAML parser reads): errors, then cautions, then what is not updatable yet. */
 export function problems(doc: Doc): Problem[] {
-  const text = JSON.stringify(doc.topo);
+  const text = JSON.stringify(topoWithNames(doc.topo));
   const report = JSON.parse(topo_check(text)) as { issues: Issue[] };
   const skipped = (topo_cut(text) as { skipped: Record<string, string> } | null)?.skipped ?? {};
   return report.issues

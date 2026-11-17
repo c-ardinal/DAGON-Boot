@@ -34,7 +34,7 @@
   import { easeOut, fade, draw, lateFade, moves, rise, tokenMs, tokenNumber, waterEnd } from '../app/motion.ts';
   import { lightsStill, nodeState, STATE_ICON, type NodeState } from '../app/nodeState.ts';
   import Icon from '../screens/Icon.svelte';
-  import { KIND_LABEL, type LinkKind } from '../app/define/model.ts';
+  import { kindLabel, LinkKind } from '../app/define/model.ts';
   import type { Live } from '../app/operate.svelte.ts';
   import type { Config, Link, Node } from '../app/sample.ts';
   import { imageRows } from '../app/slots.ts';
@@ -391,14 +391,14 @@
       // Beside the strands, on the side the cable leans out to.
       const outward = route[3].x < route[0].x ? -1 : 1;
       const label = bundleLabel(l);
-      return { l, key, open, outward, clear: clearOf(width, midDir), start: route[0], strands: offsets.map((o) => strandPath(points, o)), ties, mid, label, name: LINK.name(LINK.bundle(l.kind, l.wires.length, l.wires.filter((w) => w.shared).length, label.slice(l.kind.length + 1)), nameOf(l.from), nameOf(l.to), l.addr), skipped: !!config?.nodes.find((n) => n.id === l.to)?.notYet };
+      return { l, key, open, outward, clear: clearOf(width, midDir), start: route[0], strands: offsets.map((o) => strandPath(points, o)), ties, mid, label, name: LINK.name(LINK.bundle(kindLabel(l.kind), l.wires.length, l.wires.filter((w) => w.shared).length, label.slice(kindLabel(l.kind).length + 1)), nameOf(l.from), nameOf(l.to), l.addr), skipped: !!config?.nodes.find((n) => n.id === l.to)?.notYet };
     }),
   );
 
   function bundleLabel(l: Link): string {
     // The bus and its value: the strands show their count, and the words for it are in the name and the sheet.
     const value = l.addr || config?.nodes.find((n) => n.id === l.to)?.via.split(' ')[1] || '';
-    return [l.kind, value].filter(Boolean).join(' ');
+    return [kindLabel(l.kind), value].filter(Boolean).join(' ');
   }
 
   /** Focus stops in screen order: nodes, then link chips. */
@@ -473,7 +473,7 @@
   /** A 親機's own connection line: its uplink as the 構成 writes it, or the link from the node above it. */
   function hubVia(n: Node): string {
     if (!n.uplink) return n.via || NODE.usb;
-    return NODE.uplinkVia(KIND_LABEL[n.uplink.kind as LinkKind] ?? n.uplink.kind, n.uplink.host);
+    return NODE.uplinkVia(kindLabel(n.uplink.kind), n.uplink.host);
   }
 
   /** The card's one mono line: MCU and how it is reached. */
@@ -722,7 +722,7 @@
           transition:fade
           class="port end"
           class:out={!!onlink}
-          class:i2c={d.l.kind === 'I2C'}
+          class:i2c={d.l.kind === LinkKind.I2c}
           aria-hidden="true"
           title={onlink ? LINK.portOut(nameOf(d.l.from)) : undefined}
           style:left="{d.start.x}px"

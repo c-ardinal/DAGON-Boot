@@ -7,7 +7,10 @@
     freeAddrs,
     definedPins,
     hopAvailable,
-    LINK_KINDS,
+    kindChoice,
+    LinkKind,
+    linkKindCodes,
+    linkKinds,
     ownFlash,
     removeLink,
     setBus,
@@ -24,9 +27,8 @@
     linkIndexOf,
     linkKey,
     linkView,
-    type LinkKind,
+    type Kind,
     type LinkView,
-    type TLink,
     type UplinkHost,
   } from '../../app/define/model.ts';
   import { problemChip, type Problem } from '../../app/define/problems.ts';
@@ -55,11 +57,13 @@
   const flash = $derived(node ? ownFlash(d.doc, node.id) : null);
   const name = (id: string) => d.doc.names[id] ?? id;
   const byId = (id: string) => t.nodes.find((n) => n.id === id);
-  /** Kinds a 親機's uplink may be (not I2C or CAN towards a PC). */
-  const UPLINK_KINDS: LinkKind[] = ['usb-cdc', 'uart', 'ble', 'wifi-tcp', 'ethernet'];
   const HOSTS: UplinkHost[] = ['pc-cli', 'browser', 'embedded'];
-  const kindLabel = (k: string) => INSPECT.kinds[k] ?? INSPECT.kindsMore[k] ?? k;
-  const kindOption = (k: LinkKind, ok: boolean) => (ok ? kindLabel(k) : INSPECT.notYetOption(kindLabel(k)));
+  const kindOption = (k: Kind, ok: boolean) => (ok ? kindChoice(k) : INSPECT.notYetOption(kindChoice(k)));
+  /** A 親機's uplink: the kinds its MCU definition offers upwards, and the one the 構成 writes when it is not among them. */
+  const uplinkKinds = (mcu: string, current: Kind): Kind[] => {
+    const up: Kind[] = linkKinds(mcu).up;
+    return up.includes(current) ? up : [...up, current];
+  };
   const hex = (a: number) => `0x${a.toString(16).padStart(2, '0')}`;
 
   /** Problems on the selected item at `field` (or below it). */
@@ -162,10 +166,10 @@
       >
       <!-- A 親機 linked from another node has that node above it (つなぐ先); one nobody links to has its own uplink. -->
       {#if node.role === 'coordinator' && nodeLink < 0}
-        {@const up = node.uplink ?? { kind: 'usb-cdc' as LinkKind, host: 'pc-cli' as UplinkHost }}
+        {@const up = node.uplink ?? { kind: LinkKind.UsbCdc, host: 'pc-cli' as UplinkHost }}
         <label
-          >{INSPECT.uplink}<select data-field="uplink" value={up.kind} onchange={(e) => d.apply(setUplink(d.doc, node.id, { kind: e.currentTarget.value as LinkKind, host: up.host ?? 'pc-cli' }))}>
-            {#each UPLINK_KINDS as k (k)}<option value={k}>{kindOption(k, hopAvailable(k, undefined, node))}</option>{/each}
+          >{INSPECT.uplink}<select data-field="uplink" value={up.kind} onchange={(e) => d.apply(setUplink(d.doc, node.id, { kind: Number(e.currentTarget.value), host: up.host ?? 'pc-cli' }))}>
+            {#each uplinkKinds(node.mcu, up.kind) as k (k)}<option value={k}>{kindOption(k, hopAvailable(k, undefined, node))}</option>{/each}
           </select>{@render bad('uplink')}</label
         >
         <label
@@ -204,11 +208,11 @@
     </div>
     <div class="fields">
       <label
-        >{INSPECT.kind}<select data-field="kind" value={link.kind} aria-invalid={issues('kind').length > 0} onchange={(e) => d.apply(setLinkKind(d.doc, linkIndex, e.currentTarget.value as TLink['kind']))}>
-          {#each LINK_KINDS as k (k)}<option value={k}>{kindOption(k, hopAvailable(k, from, to))}</option>{/each}
+        >{INSPECT.kind}<select data-field="kind" value={link.kind} aria-invalid={issues('kind').length > 0} onchange={(e) => d.apply(setLinkKind(d.doc, linkIndex, Number(e.currentTarget.value)))}>
+          {#each linkKindCodes() as k (k)}<option value={k}>{kindOption(k, hopAvailable(k, from, to))}</option>{/each}
         </select>{@render bad('kind')}</label
       >
-      {#if link.kind === 'i2c'}
+      {#if link.kind === LinkKind.I2c}
         <label
           >{INSPECT.addr}<select data-field="addr" value={link.addr} aria-invalid={issues('addr').length > 0} onchange={(e) => d.apply(setLink(d.doc, linkIndex, 'addr', Number(e.currentTarget.value)))}>
             {#each [...new Set([...(link.addr !== undefined ? [link.addr] : []), ...freeAddrs(t, linkIndex)])].sort((a, b) => a - b) as a (a)}
@@ -231,7 +235,7 @@
             {/each}
           </select>{@render bad('node_pins')}</label
         >
-      {:else if link.kind === 'uart'}
+      {:else if link.kind === LinkKind.Uart}
         {@const bauds = uartBauds(from, to)}
         {@const uart0 = link.iface === 'hw-uart0' ? uart0Pins(from) : null}
         {@render pinSelect('pins', INSPECT.uartTx(name(link.from)), link.pins?.tx, `${link.to}.tx`, uart0?.tx ?? definedPins(from), (n) => d.apply(setLink(d.doc, linkIndex, 'pins.tx', n)))}
@@ -245,7 +249,7 @@
         >
       {/if}
       {@render controlPins(link, linkIndex)}
-      {#if link.kind === 'i2c'}
+      {#if link.kind === LinkKind.I2c}
         {@const b = (t.buses ?? []).findIndex((x) => x.id === link.bus)}
         {#if b >= 0}<button class="secondary" onclick={() => (d.selected = `bus:${b}`)}>{INSPECT.bus}</button>{/if}
       {/if}

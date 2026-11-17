@@ -182,6 +182,10 @@ flag = "unmeasured"
 [execution]
 masked_max_us = "unmeasured"
 flash_op = "cache-off-masked"
+# The ROM SPI flash write takes 4-byte aligned words (esp-storage 0.10,
+# FlashStorage::WORD_SIZE), and erased NOR flash reads 0xFF.
+write_unit = 4
+erased_value = 0xFF
 erase_regions = [
     { start = 0x0, len = 0x100_0000, unit = 0x1000, unit_max_ms = { unverified = 500 } },
 ]

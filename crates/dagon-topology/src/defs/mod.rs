@@ -219,6 +219,9 @@ pub struct Stage0Def {
     pub key: String,
     /// Bytes of its region, `[layout] stage0` included (the same size).
     pub region_bytes: u32,
+    /// Bytes at the start of the region the boot ROM reads before stage0
+    /// (the RP2040's boot2); 0 when it reads none.
+    pub head_bytes: u32,
     /// `[[stage0.clock]]`: the clock setups stage0 may run on.
     #[serde(default)]
     pub clock: Vec<ClockSetup>,
@@ -624,9 +627,11 @@ pub struct McuDef {
     pub layout: Layout,
     /// The MCU's DAGON stage0, exactly when `[layout]` has `stage0`: `key` (where stage0 reads
     /// the key it checks a boot core's signature with: `"flash"`, the default and the only place,
-    /// a constant in stage0's own flash written when stage0 is built; any other place is refused)
-    /// and `region_bytes` (the whole region, equal to `[layout] stage0` size; stage0's image
-    /// leaves 1/16 of it free, which its link checks). `[[stage0.clock]]` lists the clock setups
+    /// a constant in stage0's own flash written when stage0 is built; any other place is refused),
+    /// `region_bytes` (the whole region, equal to `[layout] stage0` size; stage0's image
+    /// leaves 1/16 of it free, which its link checks) and `head_bytes` (required: the bytes at
+    /// the region start the boot ROM reads before stage0, such as the RP2040's boot2; 0 for
+    /// none; less than `region_bytes`). `[[stage0.clock]]` lists the clock setups
     /// stage0 may run on: exactly one `{ source = "internal", out_hz }` (the MCU's own oscillator
     /// as it runs from reset) and any number of `{ source = "crystal" | "external", in_hz, out_hz,
     /// pll = { ... } }`, where `pll` holds the MCU's own fields (RP2040: `refdiv`, `fbdiv`,
@@ -765,7 +770,9 @@ pub struct McuDef {
     /// Hardware facts of the execution model
     /// (site/src/content/docs/en/explanation/lifecycle-events.md, "Execution model"): `masked_max_us`
     /// (longest DAGON's own code masks interrupts, 1..=1000), `flash_op` (what an erase or program
-    /// stops: `fetch-stall`, `xip-off-masked`, `cache-off-masked`), `erase_regions = [{ start, len,
+    /// stops: `fetch-stall`, `xip-off-masked`, `cache-off-masked`), `write_unit` (required: the
+    /// bytes one flash write covers, a power of two dividing every erase unit), `erased_value`
+    /// (required: the byte erased flash reads as), `erase_regions = [{ start, len,
     /// unit, unit_max_ms }]` (the flash DAGON erases in: each region's erase unit and that unit's
     /// datasheet maximum erase time; whole units, not overlapping; 2 x `unit_max_ms` at most
     /// `watchdog.trial_ms` and `watchdog.confirmed_ms`). A fact is a number checked against its

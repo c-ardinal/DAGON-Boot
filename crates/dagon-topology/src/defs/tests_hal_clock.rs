@@ -246,7 +246,7 @@ fn the_rp2040_usb_pll_makes_48_mhz_for_the_app() {
     let s0 = FAKE_MCU.replace(
         "[layout]\n",
         "[layout]\nstage0 = { at = 0x0010_A000, size = 0x4000 }\n",
-    ) + "\n[stage0]\nregion_bytes = 0x4000\n"
+    ) + "\n[stage0]\nregion_bytes = 0x4000\nhead_bytes = 0\n"
         + &rosc("stage0")
         + &rp_xtal("stage0", true);
     let e = mcu_err(&s0.replace("\"fake-m0\"", "\"rp2040\""));

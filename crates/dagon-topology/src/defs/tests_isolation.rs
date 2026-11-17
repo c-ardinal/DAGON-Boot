@@ -98,6 +98,8 @@ header = "inline"
 [execution]
 masked_max_us = 50
 flash_op = "fetch-stall"
+write_unit = 4
+erased_value = 0xFF
 erase_regions = [
     {{ start = 0x0010_0000, len = 0x8000, unit = 0x4000, unit_max_ms = 500 }},
     {{ start = 0x0010_8000, len = 0xF_8000, unit = 0x4000, unit_max_ms = 1_000 }},
@@ -584,6 +586,7 @@ fn a_stage0_halt_blink_period_is_at_least_ten_ms() {
     m.stage0 = Some(super::Stage0Def {
         key: "flash".into(),
         region_bytes: 0x4000,
+        head_bytes: 0,
         clock: Vec::new(),
     });
     let e = requirements::check_board(&at(9), &m).unwrap_err();

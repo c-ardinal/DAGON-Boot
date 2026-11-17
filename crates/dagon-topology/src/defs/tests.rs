@@ -806,6 +806,28 @@ fn the_flash_write_facts_are_required_keys() {
         }
     }
     assert!(seen >= 3, "{seen}");
+    let rp =
+        std::fs::read_to_string(source_root().join("targets/mcu/rp2040/dagon-mcu.toml")).unwrap();
+    for (from, to, want) in [
+        (
+            "write_unit = 1\n",
+            "write_unit = 3\n",
+            "write_unit 3 must be a power of two",
+        ),
+        (
+            "write_unit = 1\n",
+            "write_unit = 0x2000\n",
+            "write_unit 8192 does not divide execution.erase_regions[0].unit 4096",
+        ),
+        (
+            "head_bytes = 0x100\n",
+            "head_bytes = 0x4000\n",
+            "head_bytes 0x4000 leaves stage0 no room",
+        ),
+    ] {
+        let e = mcu_err(&rp.replace(from, to));
+        assert!(e.contains(want), "{e}");
+    }
 }
 
 #[test]
@@ -818,7 +840,7 @@ fn stage0_states_its_region_and_a_key_place_it_can_read() {
     };
     let m = parse_mcu_text(
         &with(
-            "\n[stage0]\nregion_bytes = 0x4000\n\
+            "\n[stage0]\nregion_bytes = 0x4000\nhead_bytes = 0\n\
              [[stage0.clock]]\nsource = \"internal\"\nout_hz = 1_000_000\n",
         ),
         &[],
@@ -826,22 +848,25 @@ fn stage0_states_its_region_and_a_key_place_it_can_read() {
     .unwrap();
     let s = m.stage0.unwrap();
     assert_eq!((s.key.as_str(), s.region_bytes), ("flash", 0x4000));
-    let e = mcu_err(&with("\n[stage0]\nkey = \"otp\"\nregion_bytes = 0x4000\n"));
+    let e = mcu_err(&with(
+        "\n[stage0]\nkey = \"otp\"\nregion_bytes = 0x4000\nhead_bytes = 0\n",
+    ));
     assert!(
         e.contains("stage0.key \"otp\": this MCU's stage0 cannot read a key from that place"),
         "{e}"
     );
-    let e = mcu_err(&with("\n[stage0]\nregion_bytes = 0x2000\n"));
+    let e = mcu_err(&with("\n[stage0]\nregion_bytes = 0x2000\nhead_bytes = 0\n"));
     assert!(
         e.contains("is not the 0x4000 bytes of layout.stage0"),
         "{e}"
     );
     let e = mcu_err(&with(""));
     assert!(e.contains("layout.stage0 needs a [stage0] table"), "{e}");
-    let e = mcu_err(&(FAKE_MCU.to_string() + "\n[stage0]\nregion_bytes = 0x4000\n"));
+    let e =
+        mcu_err(&(FAKE_MCU.to_string() + "\n[stage0]\nregion_bytes = 0x4000\nhead_bytes = 0\n"));
     assert!(e.contains("[stage0] needs layout.stage0"), "{e}");
     let e = mcu_err(&with(
-        "\n[stage0]\nregion_bytes = 0x4000\nverifies = true\n",
+        "\n[stage0]\nregion_bytes = 0x4000\nhead_bytes = 0\nverifies = true\n",
     ));
     assert!(e.contains("unknown field `verifies`"), "{e}");
 }

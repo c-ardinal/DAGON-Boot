@@ -129,8 +129,8 @@ pub const MCU: &[Requirement<McuCheck>] = &[
     },
     Requirement {
         engine: "stage0 (its build and its key)",
-        fields: &["stage0.region_bytes"],
-        rule: "[stage0] exactly when layout.stage0; region_bytes = layout.stage0.size; key one of KEY_PLACES",
+        fields: &["stage0.region_bytes", "stage0.head_bytes"],
+        rule: "[stage0] exactly when layout.stage0; region_bytes = layout.stage0.size; head_bytes < region_bytes; key one of KEY_PLACES",
         check: stage0,
     },
     Requirement {
@@ -307,13 +307,15 @@ pub const MCU: &[Requirement<McuCheck>] = &[
         engine: "execution model (flash operations, masking budget)",
         fields: &[
             "execution.masked_max_us",
+            "execution.write_unit",
+            "execution.erased_value",
             "execution.erase_regions[].start",
             "execution.erase_regions[].len",
             "execution.erase_regions[].unit",
             "execution.erase_regions[].unit_max_ms",
             "execution.erase_regions[].unit_max_ms.unverified",
         ],
-        rule: "each fact a number (checked against its source), { unverified = N } or \"unmeasured\" (unit_max_ms needs a number either way); masked_max_us 1..=MASKED_MAX_US_LIMIT; at least one erase region; each region's len a whole number of units >= 1, start + len <= 2^32, no two overlapping; unit_max_ms >= 1, and 2 x unit_max_ms <= watchdog.trial_ms and watchdog.confirmed_ms",
+        rule: "each fact a number (checked against its source), { unverified = N } or \"unmeasured\" (unit_max_ms needs a number either way); masked_max_us 1..=MASKED_MAX_US_LIMIT; at least one erase region; each region's len a whole number of units >= 1, start + len <= 2^32, no two overlapping; unit_max_ms >= 1, and 2 x unit_max_ms <= watchdog.trial_ms and watchdog.confirmed_ms; write_unit a power of two dividing every region's unit",
         check: execution::execution,
     },
     Requirement {
@@ -695,6 +697,12 @@ fn stage0(m: &McuDef) -> Result<(), String> {
                 format!(
                     "stage0.region_bytes {:#x} is not the {:#x} bytes of layout.stage0",
                     s.region_bytes, r.size
+                )
+            })?;
+            fail(s.head_bytes >= s.region_bytes, || {
+                format!(
+                    "stage0.head_bytes {:#x} leaves stage0 no room in its {:#x} bytes",
+                    s.head_bytes, s.region_bytes
                 )
             })?;
             s

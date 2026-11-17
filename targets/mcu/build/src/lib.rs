@@ -689,7 +689,8 @@ fn text<'a>(v: &'a toml::Value, key: &str, what: &str) -> &'a str {
 
 /// `[[relay_link]]` as `RELAY_LINKS`, the same values the definitions
 /// loader (dagon-topology) reads for the PC, each with its `[[link_port]]`'s
-/// index and kind; and each link's id by its port (`RELAY_LINK_<PORT>`), for
+/// index and kind; each link's buffer next to it (`RELAY_LINK_BUFFERS`, one
+/// frame of its `max_payload`); and each link's id by its port (`RELAY_LINK_<PORT>`), for
 /// the code that drives that port's link. The loader checks the entries;
 /// this only writes them out.
 fn relay_links_rs(t: &toml::Table) -> String {
@@ -702,6 +703,7 @@ fn relay_links_rs(t: &toml::Table) -> String {
         links.len()
     );
     let mut ids = String::new();
+    let mut buffers = Vec::new();
     for l in links {
         let name = text(l, "port", "[[relay_link]]");
         let port = ports
@@ -727,16 +729,27 @@ fn relay_links_rs(t: &toml::Table) -> String {
             None => panic!("dagon-mcu.toml: relay_link addressing is missing"),
         };
         let id = int(l.get("id").expect("[[relay_link]] id"), "id");
+        let max = int(
+            l.get("max_payload").expect("[[relay_link]] max_payload"),
+            "max_payload",
+        );
         out += &format!(
             "    dagon_port::RelayLinkDef {{ id: {id}, port: {index}, kind: dagon_port::LinkKind::{kind}, \
-             addressing: dagon_port::Addressing::{addressing}, max_payload: {} }},\n",
-            int(l.get("max_payload").expect("[[relay_link]] max_payload"), "max_payload")
+             addressing: dagon_port::Addressing::{addressing}, max_payload: {max} }},\n"
         );
+        buffers.push(format!("dagon_proto::frame_len({max})"));
         let constant = name.to_uppercase().replace('-', "_");
         ids += &format!("/// The id of the relay link on port `{name}`.\n");
         ids += &format!("pub const RELAY_LINK_{constant}: u8 = {id};\n");
     }
     out += "];\n";
+    out += "/// The bytes each relay link's port and worker hold, in `RELAY_LINKS`\n";
+    out += "/// order: one frame of the link's `max_payload`.\n";
+    out += &format!(
+        "pub const RELAY_LINK_BUFFERS: [usize; {}] = [{}];\n",
+        buffers.len(),
+        buffers.join(", ")
+    );
     out + &ids
 }
 

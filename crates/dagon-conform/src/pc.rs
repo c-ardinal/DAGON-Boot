@@ -118,10 +118,13 @@ impl core::fmt::Display for SetupError {
     }
 }
 
-/// Smallest usable HELLO `max_payload`: 4-byte offset + 1 data byte.
-const MIN_MAX_PAYLOAD: u16 = 5;
+/// Smallest usable HELLO `max_payload`: a chunk's offset and delimiter + 1 data byte.
+const MIN_MAX_PAYLOAD: u16 = XferChunk::OVERHEAD as u16 + 1;
 
-const RESP_MAX: usize = 1 + StatusResp::LEN;
+/// Room for the longest request without bulk these steps send (XFER_BEGIN, 12 bytes).
+const REQ_MAX: usize = 16;
+
+const RESP_MAX: usize = 1 + StatusResp::MAX_LEN;
 const HELLO_ROUNDS: u32 = 20;
 
 /// What HELLO and STATUS should show after CT-11 / CT-12.
@@ -343,14 +346,14 @@ impl<'a, 's, C: Channel> Runner<'a, 's, C> {
     }
 
     fn conf_run(&mut self, id: u8) -> Step<(u32, Detail)> {
-        let mut p = [0u8; 5];
-        ConfRunReq {
+        let mut p = [0u8; REQ_MAX];
+        let n = ConfRunReq {
             test_id: id,
             param: 0,
         }
         .encode(&mut p)
         .map_err(|_| detail!("encode"))?;
-        let r = self.ok(Cmd::ConfRun, &p, timeout::CONF_RUN_MS)?;
+        let r = self.ok(Cmd::ConfRun, &p[..n], timeout::CONF_RUN_MS)?;
         let c = ConfRunResp::parse(r.body()).map_err(|_| detail!("CONF_RUN: bad body"))?;
         let d = Detail::from_bytes(c.detail);
         match c.verdict {
@@ -406,8 +409,8 @@ impl<'a, 's, C: Channel> Runner<'a, 's, C> {
     }
 
     fn begin(&mut self, slot: u8, total_len: u32) -> Step<Resp> {
-        let mut p = [0u8; 8];
-        XferBegin {
+        let mut p = [0u8; REQ_MAX];
+        let n = XferBegin {
             target: target::APP,
             slot,
             total_len,
@@ -415,7 +418,7 @@ impl<'a, 's, C: Channel> Runner<'a, 's, C> {
         }
         .encode(&mut p)
         .map_err(|_| detail!("encode"))?;
-        self.call(Cmd::XferBegin, &p, timeout::REQUEST_MS)
+        self.call(Cmd::XferBegin, &p[..n], timeout::REQUEST_MS)
     }
 
     /// Data bytes per XFER chunk. Clamped so that a bad HELLO seen later (for
@@ -423,7 +426,7 @@ impl<'a, 's, C: Channel> Runner<'a, 's, C> {
     fn chunk_max(&self) -> usize {
         (self.hello.max_payload as usize)
             .min(dagon_proto::max_payload::USB)
-            .saturating_sub(4)
+            .saturating_sub(XferChunk::OVERHEAD)
             .max(1)
     }
 
@@ -490,20 +493,23 @@ impl<'a, 's, C: Channel> Runner<'a, 's, C> {
     }
 
     fn set_pending(&mut self, slot: u8) -> Step<()> {
-        let mut p = [0u8; 2];
-        SetPending {
+        let mut p = [0u8; REQ_MAX];
+        let n = SetPending {
             target: target::APP,
             slot,
         }
         .encode(&mut p)
         .map_err(|_| detail!("encode"))?;
-        self.ok(Cmd::SetPending, &p, timeout::VERIFY_MS).map(|_| ())
+        self.ok(Cmd::SetPending, &p[..n], timeout::VERIFY_MS)
+            .map(|_| ())
     }
 
     /// REBOOT, then polls HELLO until `want` holds. Returns the elapsed ms
     /// and the HELLO that matched.
     fn reboot_until(&mut self, want: impl Fn(&HelloResp) -> bool) -> Step<(u32, HelloResp)> {
-        self.ok(Cmd::Reboot, &[reboot_mode::NORMAL], timeout::REQUEST_MS)?;
+        let mut p = [0u8; REQ_MAX];
+        let n = payload::encode_reboot(reboot_mode::NORMAL, &mut p).unwrap_or(0);
+        self.ok(Cmd::Reboot, &p[..n], timeout::REQUEST_MS)?;
         let t0 = self.ch.now_ms();
         let mut last: Option<HelloResp> = None;
         loop {
@@ -618,7 +624,9 @@ impl<'a, 's, C: Channel> Runner<'a, 's, C> {
                 st2.slots[slot as usize].state
             ));
         }
-        self.ok(Cmd::Confirm, &[target::APP], timeout::VERIFY_MS)?;
+        let mut p = [0u8; REQ_MAX];
+        let n = payload::encode_confirm(target::APP, &mut p).unwrap_or(0);
+        self.ok(Cmd::Confirm, &p[..n], timeout::VERIFY_MS)?;
         let st3 = self.status()?;
         if st3.confirmed != slot || st3.slots[slot as usize].state != SlotState::Confirmed {
             return Err(detail!(

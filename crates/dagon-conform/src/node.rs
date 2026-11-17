@@ -119,8 +119,13 @@ pub fn handle_frame<F: Flash>(
             }
         },
     };
-    out[HEADER_LEN] = status as u8;
-    dagon_proto::finish(out, flags::RESP, frame.seq, frame.cmd, 1 + len).ok()
+    let len = if status == Status::Ok {
+        out[HEADER_LEN] = status as u8;
+        1 + len
+    } else {
+        dagon_proto::payload::put_refusal(&mut out[HEADER_LEN..], status, frame.cmd, frame.payload)
+    };
+    dagon_proto::finish(out, flags::RESP, frame.seq, frame.cmd, len).ok()
 }
 
 fn ct01_geometry<F: Flash>(flash: &mut F, setup: &NodeSetup<'_>) -> TestResult {

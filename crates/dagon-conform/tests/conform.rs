@@ -419,9 +419,9 @@ impl FakeNode {
                 *body = [&[Status::Ok as u8][..], &next.to_le_bytes()].concat();
             }
             (Cmd::Hello, 0) if f.hello_max_payload.is_some() => {
-                let n = body.len();
+                // After the status: the core's proto_ver u32, then max_payload.
                 let mp = f.hello_max_payload.unwrap_or_default();
-                body[n - 2..].copy_from_slice(&mp.to_le_bytes());
+                body[5..7].copy_from_slice(&mp.to_le_bytes());
             }
             _ => {}
         }
@@ -811,7 +811,7 @@ fn handle_frame_passes_other_commands_on() {
         flags: 0,
         seq: 2,
         cmd: Cmd::ConfRun as u8,
-        payload: &[12, 0, 0, 0, 0],
+        payload: &[12],
     }
     .encode(&mut req)
     .unwrap();

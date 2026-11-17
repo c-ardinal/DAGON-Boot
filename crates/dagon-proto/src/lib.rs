@@ -198,6 +198,16 @@ pub fn version_refusal(request: &[u8], out: &mut [u8]) -> Option<usize> {
     finish(out, flags::RESP, seq, cmd, n).ok()
 }
 
+/// The wire version of the peer when `frame` is its answer to the request
+/// (`seq`, `cmd`) in another wire version, as [`version_refusal`] makes it:
+/// read from the bytes every version keeps in place (start, version, flags,
+/// then the echoed seq and cmd).
+pub fn refusing_version(frame: &[u8], seq: u8, cmd: u8) -> Option<u8> {
+    let (&[s0, s1, ver, fl, q, c], _) = frame.split_first_chunk::<6>()?;
+    let answers = [s0, s1] == SOF && fl & flags::RESP != 0 && (q, c) == (seq, cmd);
+    (answers && ver != PROTO_VERSION).then_some(ver)
+}
+
 /// Length of the refused frame's start a stream cutter hands over.
 pub const REFUSED_LEN: usize = HEADER_LEN;
 

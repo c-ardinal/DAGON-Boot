@@ -118,3 +118,127 @@ fn command_numbers_and_resend_rules_come_from_the_table() {
     assert_eq!(enums.len(), 1, "{enums:?}");
     assert!(enums[0].starts_with("crates/dagon-proto/src/table.rs"));
 }
+
+fn web_sources(dir: &Path, out: &mut Vec<PathBuf>) {
+    for e in std::fs::read_dir(dir).unwrap().flatten() {
+        let p = e.path();
+        let name = e.file_name().to_string_lossy().into_owned();
+        if p.is_dir() {
+            if name != "pkg" {
+                web_sources(&p, out);
+            }
+        } else if (name.ends_with(".ts") || name.ends_with(".svelte"))
+            && !name.ends_with(".test.ts")
+            && !name.ends_with(".d.ts")
+        {
+            out.push(p);
+        }
+    }
+}
+
+/// Whether a line of the page's source gives a command, status or field
+/// its number: a name starting with `CMD`, `STATUS_`, `FIELD` or `F_`, or
+/// (`entries`: in the files that speak the wire) an all-capitals command
+/// or status name, set to a number with `=` or `:`.
+fn names_a_wire_number(line: &str, entries: bool) -> bool {
+    const ENTRY: [&str; 9] = [
+        "CMD",
+        "STATUS",
+        "HELLO",
+        "RELAY",
+        "XFER",
+        "REBOOT",
+        "CONFIRM",
+        "SHOW",
+        "SET_PENDING",
+    ];
+    let b = line.as_bytes();
+    let word = |c: u8| c.is_ascii_alphanumeric() || c == b'_';
+    let mut i = 0;
+    while i < b.len() {
+        if !word(b[i]) || (i > 0 && (word(b[i - 1]) || b[i - 1] == b'.')) {
+            i += 1;
+            continue;
+        }
+        let start = i;
+        while i < b.len() && word(b[i]) {
+            i += 1;
+        }
+        let name = &line[start..i];
+        let wire = ["CMD", "STATUS_", "FIELD", "F_"]
+            .iter()
+            .any(|p| name.starts_with(p));
+        let capitals = name.bytes().all(|c| c.is_ascii_uppercase() || c == b'_')
+            && ENTRY.iter().any(|p| name.starts_with(p));
+        if !(wire || (entries && capitals)) {
+            continue;
+        }
+        let rest = line[i..].trim_start();
+        let value = match rest.as_bytes().first() {
+            Some(b'=') if !rest.starts_with("==") && !rest.starts_with("=>") => &rest[1..],
+            Some(b':') => &rest[1..],
+            _ => continue,
+        };
+        if value.trim_start().starts_with(|c: char| c.is_ascii_digit()) {
+            return true;
+        }
+    }
+    false
+}
+
+/// The page takes every command, status and field number from dagon-proto
+/// through dagon-wasm: its source writes none, and names no field at all.
+#[test]
+fn the_page_holds_no_command_status_or_field_number() {
+    // The rule itself: what it catches and what it lets through.
+    for planted in [
+        "const CMD_XFER_BEGIN = 0x10;",
+        "  HELLO: 0x01,",
+        "const STATUS_ARG = 3;",
+        "const F_SLOT = 1;",
+        "export const CMD = { STATUS: 2 };",
+    ] {
+        assert!(names_a_wire_number(planted, true), "not caught: {planted}");
+    }
+    for fine in [
+        "    get HELLO() {",
+        "    case CMD.HELLO:",
+        "    if (frame.cmd === CMD.REBOOT && body[0] === STATUS.OK) {",
+        "const HDR_VERSION_AT = 0x018;",
+        "  const status = 0;",
+    ] {
+        assert!(!names_a_wire_number(fine, true), "caught: {fine}");
+    }
+    let mut files = Vec::new();
+    web_sources(&root().join("web/src"), &mut files);
+    assert!(files.len() > 20, "the page's source was not found");
+    let mut hits = Vec::new();
+    for p in files {
+        let path = p.strip_prefix(root()).unwrap().to_string_lossy();
+        let name = path.replace(std::path::MAIN_SEPARATOR, "/");
+        let speaks_wire = name.contains("/serial/") || name.contains("/wasm/");
+        let text = std::fs::read_to_string(&p).unwrap();
+        for (i, l) in text.lines().enumerate() {
+            let code = l.trim_start();
+            if code.starts_with("//") || code.starts_with("*") || code.starts_with("/*") {
+                continue;
+            }
+            let field_code = [
+                "payload_read",
+                "PayloadWriter",
+                "readPayload",
+                "writePayload",
+            ]
+            .iter()
+            .any(|w| l.contains(w));
+            if names_a_wire_number(l, speaks_wire) || field_code {
+                hits.push(format!("{name}:{}: {}", i + 1, code));
+            }
+        }
+    }
+    assert!(
+        hits.is_empty(),
+        "wire numbers written in the page:\n{}",
+        hits.join("\n")
+    );
+}

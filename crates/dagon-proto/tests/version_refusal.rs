@@ -32,6 +32,21 @@ fn unknown_version_is_refused_explicitly() {
     assert_eq!(f.payload[0], Status::Frame as u8);
     let body = read(&f.payload[1..], &table::ERROR).unwrap();
     assert_eq!(body.field(&table::error::WIRE), Some(&[PROTO_VERSION][..]));
+    assert_eq!(
+        dagon_proto::payload::refused_wire(&f.payload[1..]),
+        Some(PROTO_VERSION)
+    );
+    // What the sender of the request reads from an answer in another version.
+    let mut theirs = out[..n].to_vec();
+    theirs[2] = PROTO_VERSION + 1;
+    let hello = Cmd::Hello as u8;
+    assert_eq!(
+        dagon_proto::refusing_version(&theirs, 0x33, hello),
+        Some(PROTO_VERSION + 1)
+    );
+    assert_eq!(dagon_proto::refusing_version(&theirs, 0x34, hello), None);
+    assert_eq!(dagon_proto::refusing_version(&out[..n], 0x33, hello), None);
+    assert_eq!(dagon_proto::refusing_version(&req, 0x33, hello), None);
     // The stream cutters hand over the first HEADER_LEN bytes: enough.
     assert_eq!(version_refusal(&req[..HEADER_LEN], &mut out), Some(n));
     assert!(dagon_proto::is_refused_start(&req));

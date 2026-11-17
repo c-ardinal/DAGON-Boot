@@ -203,6 +203,16 @@ pub fn refused_field(body: &[u8]) -> Option<u32> {
     shortest_value(read(body, &ERROR).ok()?.field(&error::BAD_FIELD)?)
 }
 
+/// The wire version a `Status::Frame` response names (`body`: what follows
+/// the status byte): the one its sender reads.
+pub fn refused_wire(body: &[u8]) -> Option<u8> {
+    read(body, &ERROR)
+        .ok()?
+        .field(&error::WIRE)?
+        .first()
+        .copied()
+}
+
 /// HELLO request.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct HelloReq {

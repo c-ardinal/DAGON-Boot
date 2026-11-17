@@ -24,7 +24,7 @@ writes, as `compat.toml` holds them. The rules for changing them are in
 | `bundle` | 1 | release file .dgb: offset 4 (dagon-format bundle::BN_VERSION) |
 | `topology-bin` | 2 | compiled topology: offset 4 (dagon-format topology::TP_VERSION) |
 | `topology-yaml` | 2 | topology source: its `dagon:` key (dagon-topology SCHEMA_VERSION) |
-| `definitions` | 2 | dagon-mcu.toml / dagon-board.toml / [board.&lt;id&gt;]: `format` key, left out = 1 (dagon-topology defs::FORMAT) |
+| `definitions` | 3 | dagon-mcu.toml / dagon-board.toml / [board.&lt;id&gt;]: `format` key, left out = 1 (dagon-topology defs::FORMAT) |
 | `serve-api` | 1 | dagon serve HTTP API: GET /v1/hello `api` (dagon-cli versions::SERVE_API) |
 | `layout` | 1 | the layout file beside the 構成: its `format` (dagon-cli versions::LAYOUT_FORMAT) |
 | `event` | 1 | lifecycle event kinds, codes, payloads and EventRecord (dagon-events EVENT_FORMAT) |
@@ -36,17 +36,17 @@ writes, as `compat.toml` holds them. The rules for changing them are in
 
 | Component | Version | Packages | Formats |
 |---|---|---|---|
-| `cli` | 0.1.0 | `dagon-cli` | `wire` 1, `image-header` 1, `state-log` 1, `manifest` 1, `bundle` 1, `topology-bin` 2, `topology-yaml` 2, `definitions` 2, `serve-api` 1, `layout` 1, `event` 1, `extension-manifest` 1, `boot-program` 1, `project` 1 |
+| `cli` | 0.1.0 | `dagon-cli` | `wire` 1, `image-header` 1, `state-log` 1, `manifest` 1, `bundle` 1, `topology-bin` 2, `topology-yaml` 2, `definitions` 3, `serve-api` 1, `layout` 1, `event` 1, `extension-manifest` 1, `boot-program` 1, `project` 1 |
 | `boot-rp2040` | 0.1.0 | `dagon-rp2040-stage0`, `dagon-rp2040-bootcore` | `image-header` 1, `state-log` 1, `event` 1 |
 | `boot-stm32f401re` | 0.1.0 | `dagon-stm32f401re-stage0`, `dagon-stm32f401re-bootcore` | `image-header` 1, `state-log` 1, `event` 1 |
-| `mcu-rp2040` | 0.1.0 | `dagon-mcu-rp2040` | `wire` 1, `image-header` 1, `state-log` 1, `definitions` 2 |
-| `mcu-stm32f401re` | 0.1.0 | `dagon-mcu-stm32f401re` | `wire` 1, `image-header` 1, `state-log` 1, `definitions` 2 |
-| `mcu-esp32s3` | 0.1.0 | `dagon-mcu-esp32s3` | `wire` 1, `image-header` 1, `state-log` 1, `definitions` 2 |
+| `mcu-rp2040` | 0.1.0 | `dagon-mcu-rp2040` | `wire` 1, `image-header` 1, `state-log` 1, `definitions` 3 |
+| `mcu-stm32f401re` | 0.1.0 | `dagon-mcu-stm32f401re` | `wire` 1, `image-header` 1, `state-log` 1, `definitions` 3 |
+| `mcu-esp32s3` | 0.1.0 | `dagon-mcu-esp32s3` | `wire` 1, `image-header` 1, `state-log` 1, `definitions` 3 |
 | `mcu-common` | 0.1.0 | `dagon-mcu-common` | `wire` 1 |
 | `mcu-build` | 0.1.0 | `dagon-mcu-build` |  |
-| `board-waveshare-rp2040-touch-lcd-1.28` | 0.1.0 | `dagon-board-waveshare-rp2040-touch-lcd-1-28` | `definitions` 2 |
-| `board-nucleo-f401re` | 0.1.0 | `dagon-board-nucleo-f401re` | `definitions` 2 |
-| `board-m5stopwatch` | 0.1.0 | `dagon-board-m5stopwatch` | `definitions` 2 |
+| `board-waveshare-rp2040-touch-lcd-1.28` | 0.1.0 | `dagon-board-waveshare-rp2040-touch-lcd-1-28` | `definitions` 3 |
+| `board-nucleo-f401re` | 0.1.0 | `dagon-board-nucleo-f401re` | `definitions` 3 |
+| `board-m5stopwatch` | 0.1.0 | `dagon-board-m5stopwatch` | `definitions` 3 |
 | `format` | 0.1.0 | `dagon-format` | `image-header` 1, `state-log` 1, `manifest` 1, `bundle` 1, `topology-bin` 2 |
 | `ed25519` | 0.1.0 | `dagon-ed25519` |  |
 | `proto` | 0.1.0 | `dagon-proto` | `wire` 1 |
@@ -57,8 +57,8 @@ writes, as `compat.toml` holds them. The rules for changing them are in
 | `agent` | 0.1.0 | `dagon-agent` | `wire` 1, `image-header` 1 |
 | `relay` | 0.1.0 | `dagon-relay` | `wire` 1 |
 | `host` | 0.1.0 | `dagon-host` | `wire` 1, `image-header` 1, `state-log` 1, `bundle` 1, `topology-bin` 2 |
-| `extension` | 0.1.0 | `dagon-extension` | `extension-manifest` 1, `definitions` 2, `boot-program` 1 |
-| `topology` | 0.1.0 | `dagon-topology` | `topology-bin` 2, `topology-yaml` 2, `definitions` 2, `boot-program` 1, `project` 1 |
+| `extension` | 0.1.0 | `dagon-extension` | `extension-manifest` 1, `definitions` 3, `boot-program` 1 |
+| `topology` | 0.1.0 | `dagon-topology` | `topology-bin` 2, `topology-yaml` 2, `definitions` 3, `boot-program` 1, `project` 1 |
 | `sign` | 0.1.0 | `dagon-sign` | `image-header` 1, `state-log` 1, `manifest` 1, `bundle` 1, `topology-bin` 2 |
 | `sim` | 0.1.0 | `dagon-sim` | `wire` 1, `image-header` 1, `state-log` 1 |
 | `conform` | 0.1.0 | `dagon-conform` | `wire` 1, `image-header` 1, `state-log` 1 |

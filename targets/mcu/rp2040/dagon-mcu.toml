@@ -1,7 +1,7 @@
 # DAGON MCU definition (format: targets/README.md). The firmware's layout
 # is generated from it; these addresses never move (a project moves its
 # slots by overriding them).
-format = 2
+format = 3
 id = "rp2040"
 name = "RP2040"
 wire_id = 0x0001

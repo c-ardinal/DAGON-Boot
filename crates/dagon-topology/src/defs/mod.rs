@@ -56,7 +56,7 @@ pub use slot_layout::{HeaderDef, OwnedLayout, SlotLayoutDef, SlotName, TargetNam
 
 /// The `dagon-mcu.toml` / `dagon-board.toml` format number this reader
 /// reads (their `format` key; absent means 1, which this reader refuses).
-pub const FORMAT: u32 = 2;
+pub const FORMAT: u32 = 3;
 
 use requirements::HEADER;
 
@@ -598,7 +598,7 @@ pub struct DoctorCheck {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct McuDef {
-    /// Definition format number (`2`; left out means 1). A dagon that does not read the number
+    /// Definition format number (`3`; left out means 1). A dagon that does not read the number
     /// refuses the file (site/src/content/docs/explanation/versioning.md).
     pub format: Option<u32>,
     /// MCU id used in topologies (`stm32f401re`).
@@ -899,7 +899,7 @@ pub struct DefaultLink {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct BoardDef {
-    /// Definition format number (`2`; left out means 1). A dagon that does not read the number
+    /// Definition format number (`3`; left out means 1). A dagon that does not read the number
     /// refuses the file (site/src/content/docs/explanation/versioning.md).
     pub format: Option<u32>,
     /// Board id used in `nodes[].board`.

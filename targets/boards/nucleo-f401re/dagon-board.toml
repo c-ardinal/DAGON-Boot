@@ -1,5 +1,5 @@
 # DAGON board definition (format: targets/README.md).
-format = 2
+format = 3
 id = "nucleo-f401re"
 product = "NUCLEO-F401RE"
 mcu = "stm32f401re"

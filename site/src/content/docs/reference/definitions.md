@@ -15,7 +15,7 @@ description: "dagon-mcu.tomlとdagon-board.toml: DAGONがマイコンやボー�
 <!-- generated from dagon-topology's McuDef: python site/scripts/gen.py -->
 | キー | 型 | 必須か | 意味 |
 |---|---|---|---|
-| `format` | 整数 | 任意 | 定義の形式番号（`2`。省くと1です）。その番号を読まないdagonは、ファイルを受け付けません（site/src/content/docs/explanation/versioning.md）。 |
+| `format` | 整数 | 任意 | 定義の形式番号（`3`。省くと1です）。その番号を読まないdagonは、ファイルを受け付けません（site/src/content/docs/explanation/versioning.md）。 |
 | `id` | 文字列 | 必須 | 構成で使うマイコンのid（`stm32f401re`）。 |
 | `name` | 文字列 | 必須 | 表示名（`STM32F401RE`）。 |
 | `wire_id` | 整数 | 必須 | イメージのヘッダの`mcu_id`。重複しないこと。 |
@@ -93,7 +93,7 @@ description: "dagon-mcu.tomlとdagon-board.toml: DAGONがマイコンやボー�
 <!-- generated from dagon-topology's BoardDef: python site/scripts/gen.py -->
 | キー | 型 | 必須か | 意味 |
 |---|---|---|---|
-| `format` | 整数 | 任意 | 定義の形式番号（`2`。省くと1です）。その番号を読まないdagonは、ファイルを受け付けません（site/src/content/docs/explanation/versioning.md）。 |
+| `format` | 整数 | 任意 | 定義の形式番号（`3`。省くと1です）。その番号を読まないdagonは、ファイルを受け付けません（site/src/content/docs/explanation/versioning.md）。 |
 | `id` | 文字列 | 必須 | `nodes[].board`で使うボードのid。 |
 | `product` | 文字列 | 必須 | 製品名。 |
 | `mcu` | 文字列 | 必須 | マイコンのid（定義されていること）。 |

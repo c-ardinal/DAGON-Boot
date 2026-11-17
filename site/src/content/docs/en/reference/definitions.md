@@ -28,7 +28,7 @@ errors; kind fields accept only the values listed below.
 <!-- generated from dagon-topology's McuDef: python site/scripts/gen.py -->
 | Key | Type | Required | Meaning |
 |---|---|---|---|
-| `format` | integer | no | Definition format number (`2`; left out means 1). A dagon that does not read the number refuses the file (site/src/content/docs/explanation/versioning.md). |
+| `format` | integer | no | Definition format number (`3`; left out means 1). A dagon that does not read the number refuses the file (site/src/content/docs/explanation/versioning.md). |
 | `id` | string | yes | MCU id used in topologies (`stm32f401re`). |
 | `name` | string | yes | Display name (`STM32F401RE`). |
 | `wire_id` | integer | yes | Image header `mcu_id`; unique. |
@@ -164,7 +164,7 @@ definition that leaves a class out is refused with the class named.
 <!-- generated from dagon-topology's BoardDef: python site/scripts/gen.py -->
 | Key | Type | Required | Meaning |
 |---|---|---|---|
-| `format` | integer | no | Definition format number (`2`; left out means 1). A dagon that does not read the number refuses the file (site/src/content/docs/explanation/versioning.md). |
+| `format` | integer | no | Definition format number (`3`; left out means 1). A dagon that does not read the number refuses the file (site/src/content/docs/explanation/versioning.md). |
 | `id` | string | yes | Board id used in `nodes[].board`. |
 | `product` | string | yes | Product name. |
 | `mcu` | string | yes | MCU id (must be defined). |

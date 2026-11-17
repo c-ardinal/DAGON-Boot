@@ -3,10 +3,10 @@
 // link. The YAML is the repository's sample topology; it is what "send to the
 // hub" compiles and sends.
 import sampleYaml from '../../../topology/sample.yaml?raw';
+import { LinkKind } from '../wasm/pkg/dagon_wasm.js';
+import type { Kind } from './define/model.ts';
 
 export const SAMPLE_YAML: string = sampleYaml;
-
-export type LinkKind = 'USB' | 'UART' | 'I2C' | 'BLE' | 'Wi-Fi' | 'Ethernet' | 'CAN';
 
 export interface Node {
   id: string;
@@ -27,7 +27,7 @@ export interface Node {
   /** Row on the graph: 0 親機, 1 子機, 2 and on deeper. Absent: by role. */
   depth?: number;
   /** A 親機's uplink as the 構成 writes it; absent when none is written (USB to the PC) or the 親機 is linked from another node. */
-  uplink?: { kind: string; host: UplinkHost };
+  uplink?: { kind: Kind; host: UplinkHost };
   /** Why updating skips this node (V-23); absent when updating reaches it. */
   notYet?: Skip;
 }
@@ -48,7 +48,7 @@ export interface Wire {
 export interface Link {
   from: string;
   to: string;
-  kind: LinkKind;
+  kind: Kind;
   /** Address value for the spoken name ("0x42"), empty for UART. */
   addr: string;
   wires: Wire[];
@@ -84,7 +84,7 @@ export const SAMPLE_CONFIG: Config = {
     {
       from: 'hub',
       to: 'seg',
-      kind: 'I2C',
+      kind: LinkKind.I2c,
       addr: '0x42',
       wires: [
         { signal: 'SDA', hubPin: 'GPIO16', nodePin: 'PB4 · D5', shared: true },
@@ -97,7 +97,7 @@ export const SAMPLE_CONFIG: Config = {
     {
       from: 'hub',
       to: 'watch',
-      kind: 'UART',
+      kind: LinkKind.Uart,
       addr: '',
       wires: [
         { signal: 'TX → RX', hubPin: 'GPIO26', nodePin: 'G44', shared: false },

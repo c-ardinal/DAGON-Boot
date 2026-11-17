@@ -35,6 +35,7 @@ import { ConnectError, wasmReady } from './connect.ts';
 import { ANNOUNCE, FILE, WRITE } from './copy.ts';
 import { HUB_LOCKED, NODE_WRITE, WATCHED, next, type ConnectFailure, type Ctx, type Ev, type L } from './machine.ts';
 import { SAMPLE_CONFIG, type Config, type Node } from './sample.ts';
+import { topoFromNames, type Topo } from './define/model.ts';
 import { imageRows } from './slots.ts';
 
 /** What the page knows about one node from the hub. */
@@ -233,9 +234,10 @@ export function hubBack(r: ConfirmResult, sent: number | undefined, coreSent: nu
 }
 
 /** The 構成 in a release's topology item (dagon-wasm reads it), or null when it has none or cannot be read. */
-function fileTopologyOf(bytes: Uint8Array, yaml: string): Record<string, unknown> | null {
+function fileTopologyOf(bytes: Uint8Array, yaml: string): Topo | null {
   try {
-    return (release_topology(bytes, yaml) as Record<string, unknown> | null) ?? null;
+    const t = release_topology(bytes, yaml) as Topo | null;
+    return t ? topoFromNames(t) : null;
   } catch {
     return null;
   }
@@ -278,7 +280,7 @@ export class Operate {
    * as differences, and taken in 定義 by "ファイルの構成を取り込む". Null when
    * the file carries none.
    */
-  fileTopology = $state<Record<string, unknown> | null>(null);
+  fileTopology = $state<Topo | null>(null);
   /** "最新のリリースを使う" found no release (M58 in the band until the next step). */
   latestMissing = $state(false);
   /** The version the chosen release gives each node (shown as "↑ 1.0.0 → 1.1.0" before the update). */

@@ -10,6 +10,7 @@ mod defs;
 mod frame;
 mod host;
 mod kinds;
+mod mock;
 mod release_topo;
 #[cfg(feature = "sim")]
 mod sim;
@@ -181,6 +182,12 @@ impl Hello {
 }
 
 /// HELLO request body.
+/// The wire version this build speaks (`dagon_proto::PROTO_VERSION`).
+#[wasm_bindgen]
+pub fn wire_version() -> u32 {
+    u32::from(dagon_proto::PROTO_VERSION)
+}
+
 #[wasm_bindgen]
 pub fn hello_request(proto_ver: u32, max_payload: u16) -> Vec<u8> {
     let mut out = [0u8; 6];
@@ -321,7 +328,7 @@ mod tests {
     fn hello_round_trip_against_golden_frames() {
         // Frame = 8-byte header + payload + 4-byte CRC; a response payload starts with the status byte.
         let req = golden("frame_hello_req.bin");
-        assert_eq!(hello_request(1, 1088), req[8..req.len() - 4]);
+        assert_eq!(hello_request(wire_version(), 1088), req[8..req.len() - 4]);
         let resp = golden("frame_hello_resp.bin");
         let h = decode(&resp[9..resp.len() - 4]).unwrap();
         assert_eq!(version_text(h.active_version), "1.1.0");

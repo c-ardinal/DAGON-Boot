@@ -115,11 +115,11 @@ fn frame(cmd: Cmd, payload: &[u8]) -> Vec<u8> {
 }
 
 fn relay_frame(link: u8, addr: u8, inner: &[u8]) -> Vec<u8> {
-    let mut p = vec![0u8; Relay::HEAD_LEN + inner.len()];
+    let mut p = vec![0u8; Relay::OVERHEAD_MAX + inner.len()];
     let n = Relay {
         link,
         addr,
-        timeout_ms: 300,
+        timeout_ms: Some(300),
         inner,
     }
     .encode(&mut p)
@@ -146,6 +146,7 @@ fn hello_over(r: &mut SimRelay, link: u8, addr: u8) -> (Status, Option<u16>) {
         .expect("answers");
     let (f, _) = Frame::decode(&resp, max_payload::USB).unwrap();
     let (s, body) = split_status(f.payload).unwrap();
+    let body = bulk_of(f.cmd, s, body);
     let max = (s == Status::Ok).then(|| {
         let (inner, _) = Frame::decode(body, max_payload::USB).unwrap();
         let (st, h) = split_status(inner.payload).unwrap();
@@ -212,4 +213,17 @@ fn a_link_takes_the_time_of_its_ports_kind() {
     assert!(t(&a, 1) < t(&a, 2));
     assert_eq!(t(&a, 1), t(&b, 2));
     assert_eq!(t(&a, 2), t(&b, 1));
+}
+
+/// The bulk of an OK RELAY or I2C_RAW response; any other body as it is.
+#[allow(dead_code)]
+fn bulk_of(cmd: u8, status: dagon_proto::Status, body: &[u8]) -> &[u8] {
+    match dagon_proto::Cmd::from_u8(cmd) {
+        Some(c @ (dagon_proto::Cmd::Relay | dagon_proto::Cmd::I2cRaw))
+            if status == dagon_proto::Status::Ok =>
+        {
+            dagon_proto::payload::parse_bulk_resp(c, body).unwrap()
+        }
+        _ => body,
+    }
 }

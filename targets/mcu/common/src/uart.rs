@@ -280,7 +280,7 @@ mod tests {
         let head = [
             0xDA,
             0x6F,
-            0x01,
+            dagon_proto::PROTO_VERSION,
             flags::RESP,
             0x82,
             Cmd::Hello as u8,

@@ -1,7 +1,6 @@
 //! The procedures: discover, status, apply, confirm, rollback, recover.
 
 use alloc::format;
-use alloc::vec;
 use alloc::vec::Vec;
 use dagon_ed25519::Ed25519Compact;
 use dagon_format::bundle::BundleView;
@@ -19,7 +18,7 @@ use dagon_proto::payload::{
 use dagon_proto::{Cmd, Status};
 
 use crate::rom::RomMap;
-use crate::{Error, Host, HostClock, Result, RouteError, Target, Transport};
+use crate::{request, Error, Host, HostClock, Result, RouteError, Target, Transport};
 
 /// REBOOT until the hub's new HELLO, reopening the port meanwhile. A host
 /// margin, not an MCU or link property: it stays well inside the 60 s the
@@ -33,7 +32,7 @@ pub const REOPEN_MS: u32 = 1_000;
 pub const DISCOVER_MS: u32 = 20;
 const I2C_SCAN: core::ops::RangeInclusive<u8> = 0x08..=0x77;
 /// XFER_HDR / XFER_DATA bytes before the data: the offset.
-const CHUNK_HEAD: usize = 4;
+const CHUNK_HEAD: usize = XferChunk::OVERHEAD;
 const PERCENT_STEP: u8 = 10;
 /// The recovery agent's slot (STATUS slot 2).
 const FACTORY_SLOT: u8 = 2;
@@ -133,9 +132,8 @@ impl<T: Transport, C: HostClock> Host<T, C> {
     /// no boot core slots answers `Unsupported` (`Error::Rejected`); one
     /// that predates the request answers `Arg`.
     pub async fn boot_core_status(&mut self, to: Target) -> Result<StatusResp, T::Error> {
-        let body = self
-            .call(to, Cmd::Status, &[target::BOOTCORE], REQUEST_MS)
-            .await?;
+        let core_status = request(|b| payload::encode_status_req(target::BOOTCORE, b));
+        let body = self.call(to, Cmd::Status, &core_status, REQUEST_MS).await?;
         StatusResp::parse(&body).map_err(|_| Error::BadResponse)
     }
 
@@ -423,17 +421,15 @@ impl<T: Transport, C: HostClock> Host<T, C> {
             r => r?,
         };
         self.report_verified(on_event, node, v, times);
-        let mut p = [0u8; 2];
-        SetPending {
+        let sp = SetPending {
             target: target::BOOTCORE,
             slot,
-        }
-        .encode(&mut p)
-        .expect("2 bytes");
+        };
+        let p = request(|b| sp.encode(b));
         self.call(to, Cmd::SetPending, &p, VERIFY_MS).await?;
         self.report(on_event, node, phase::REBOOT, 0, v);
         match self
-            .call(to, Cmd::Reboot, &[reboot_mode::NORMAL], REQUEST_MS)
+            .call(to, Cmd::Reboot, &reboot_request(), REQUEST_MS)
             .await
         {
             Ok(_) | Err(Error::Timeout | Error::Relay(Status::Timeout)) => {}
@@ -526,14 +522,13 @@ impl<T: Transport, C: HostClock> Host<T, C> {
             target: target::APP,
             slot,
         };
-        let mut p = [0u8; 2];
-        sp.encode(&mut p).expect("2 bytes");
+        let p = request(|b| sp.encode(b));
         self.call(to, Cmd::SetPending, &p, VERIFY_MS).await?;
         self.report(on_event, node, phase::REBOOT, 0, v);
         // Not resent: a node that already reset has forgotten the seq and
         // would reboot again. A lost reply is settled by the HELLO polls.
         match self
-            .call(to, Cmd::Reboot, &[reboot_mode::NORMAL], REQUEST_MS)
+            .call(to, Cmd::Reboot, &reboot_request(), REQUEST_MS)
             .await
         {
             Ok(_) | Err(Error::Timeout | Error::Relay(Status::Timeout)) => {}
@@ -553,7 +548,9 @@ impl<T: Transport, C: HostClock> Host<T, C> {
     async fn confirm_trial(&mut self, to: Target, v: Version) -> Result<(), T::Error> {
         let mut pauses = CONFIRM_RETRY_MS.iter();
         loop {
-            let r = self.call(to, Cmd::Confirm, &[target::APP], VERIFY_MS).await;
+            let r = self
+                .call(to, Cmd::Confirm, &confirm_request(), VERIFY_MS)
+                .await;
             let not_ready = matches!(
                 r,
                 Err(Error::Rejected {
@@ -626,7 +623,7 @@ impl<T: Transport, C: HostClock> Host<T, C> {
         if !force && self.applied(to) != Some(v) {
             return Ok(ConfirmOutcome::NeedsChoice(v));
         }
-        self.call(to, Cmd::Confirm, &[target::APP], VERIFY_MS)
+        self.call(to, Cmd::Confirm, &confirm_request(), VERIFY_MS)
             .await?;
         Ok(ConfirmOutcome::Confirmed(v))
     }
@@ -783,8 +780,8 @@ impl<T: Transport, C: HostClock> Host<T, C> {
         let mut tell = show;
         let mut told = None;
         self.tell(to, &mut tell, &mut told).await;
-        let mut p = [0u8; 8];
-        let n = begin.encode(&mut p).expect("8 bytes");
+        let p = request(|b| begin.encode(b));
+        let n = p.len();
         let begin_wait = if hdr.is_empty() { erase } else { REQUEST_MS };
         let t0 = self.clock.now_ms();
         self.call(to, Cmd::XferBegin, &p[..n], begin_wait).await?;
@@ -838,13 +835,11 @@ impl<T: Transport, C: HostClock> Host<T, C> {
         data: &[u8],
         wait: u32,
     ) -> Result<(), T::Error> {
-        let mut p = vec![0u8; CHUNK_HEAD + data.len()];
-        XferChunk {
+        let chunk = XferChunk {
             offset: offset as u32,
             data,
-        }
-        .encode(&mut p)
-        .expect("sized for the chunk");
+        };
+        let p = request(|b| chunk.encode(b));
         let r = self.call(to, cmd, &p, wait).await?;
         let next = payload::parse_next_offset(&r).map_err(|_| Error::BadResponse)?;
         if next as usize != offset + data.len() {
@@ -912,7 +907,7 @@ impl<T: Transport, C: HostClock> Host<T, C> {
 
     /// One SHOW, never resent.
     async fn show_to(&mut self, to: Target, show: &Show<'_>) -> Result<(), T::Error> {
-        let mut p = [0u8; 7 + payload::SHOW_TEXT_MAX];
+        let mut p = [0u8; Show::MAX_LEN];
         let n = show.encode(&mut p).map_err(|_| Error::BadResponse)?;
         self.call_once(to, Cmd::Show, &p[..n], REQUEST_MS)
             .await
@@ -949,6 +944,14 @@ impl<T: Transport, C: HostClock> Host<T, C> {
             Err(_) => {}
         }
     }
+}
+
+fn reboot_request() -> Vec<u8> {
+    request(|b| payload::encode_reboot(reboot_mode::NORMAL, b))
+}
+
+fn confirm_request() -> Vec<u8> {
+    request(|b| payload::encode_confirm(target::APP, b))
 }
 
 /// XFER data bytes per chunk for a peer announcing `max_payload` on a link
@@ -1258,9 +1261,9 @@ mod tests {
     #[test]
     fn chunk_len_needs_room_for_one_byte() {
         assert_eq!(chunk_len(0, 256), None);
-        assert_eq!(chunk_len(4, 256), None);
-        assert_eq!(chunk_len(5, 256), Some(1));
-        assert_eq!(chunk_len(1088, 256), Some(252), "link limit wins");
+        assert_eq!(chunk_len(5, 256), None);
+        assert_eq!(chunk_len(6, 256), Some(1));
+        assert_eq!(chunk_len(1088, 256), Some(251), "link limit wins");
     }
 
     /// The slot written is one the release has an image for: the free one

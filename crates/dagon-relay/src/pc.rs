@@ -5,8 +5,8 @@
 //! E_UNSUPPORTED.
 
 use dagon_port::{Link, Nrst, SubControl};
-use dagon_proto::payload::{boot0, nrst, Relay as RelayReq, SubCtl};
-use dagon_proto::{flags, Cmd, Frame, Status, HEADER_LEN, MAX_FRAME};
+use dagon_proto::payload::{self, boot0, nrst, Relay as RelayReq, SubCtl};
+use dagon_proto::{flags, Cmd, Frame, FrameError, Status, HEADER_LEN, MAX_FRAME};
 
 use crate::port::{Op, Port, Req};
 use crate::{cmd, task, Config, LinkRoute, Liveness, OwnAgent, RelayClock};
@@ -114,11 +114,17 @@ where
     /// Answers one request into `self.resp`; returns its length (0: no
     /// answer) and, when a reboot follows the reply, its delay in ms.
     async fn handle(&mut self, request: &[u8], max: usize) -> (usize, Option<u32>) {
-        let Ok((f, _)) = Frame::decode(request, max) else {
-            return (0, None);
+        let f = match Frame::decode(request, max) {
+            Ok((f, _)) => f,
+            // A request of another wire version is told so.
+            Err(FrameError::BadVersion) => {
+                let n = dagon_proto::version_refusal(request, &mut self.resp);
+                return (n.unwrap_or(0), None);
+            }
+            Err(_) => return (0, None),
         };
         let is_request = f.flags & (flags::RESP | flags::EVENT) == 0;
-        let (status, body) = match Cmd::from_u8(f.cmd) {
+        let (status, bulk) = match Cmd::from_u8(f.cmd) {
             Some(Cmd::Relay) if is_request => match RelayReq::parse(f.payload) {
                 Ok(r) => self.relay(&r, max).await,
                 Err(s) => (s, 0),
@@ -127,9 +133,16 @@ where
             Some(Cmd::I2cRaw) if is_request => self.i2c_raw(f.payload, max).await,
             _ => return self.own(request),
         };
-        self.resp[HEADER_LEN] = status as u8;
-        let n =
-            dagon_proto::finish(&mut self.resp, flags::RESP, f.seq, f.cmd, 1 + body).unwrap_or(0);
+        let out = &mut self.resp[HEADER_LEN..];
+        let len = match (status, Cmd::from_u8(f.cmd)) {
+            // The worker's answer is the bulk, already in place.
+            (Status::Ok, Some(Cmd::Relay | Cmd::I2cRaw)) => {
+                out[0] = Status::Ok as u8;
+                1 + payload::finish_bulk_resp(&mut out[1..], bulk).unwrap_or(0)
+            }
+            _ => payload::put_refusal(out, status, f.cmd, f.payload),
+        };
+        let n = dagon_proto::finish(&mut self.resp, flags::RESP, f.seq, f.cmd, len).unwrap_or(0);
         (n, None)
     }
 
@@ -146,14 +159,15 @@ where
     }
 
     /// Passes `req` with `data` to the worker behind `port`; its answer
-    /// body goes to `resp[9..]`, within the uplink's `max` payload (after
-    /// the status byte): E_ARG for one longer than that.
+    /// goes where the response's bulk starts, within the uplink's `max`
+    /// payload (after the status byte and the delimiter): E_ARG for one
+    /// longer than that.
     async fn via(&mut self, port: &Port, req: Req, data: &[u8], max: usize) -> (Status, usize) {
         // The link worker holds the deadline while it works on the request.
         self.r.watch.idle(task::PC);
         let margin = self.r.config.port_margin_ms;
         // An uplink carries at most MAX_FRAME (the largest frame of any link).
-        let body = &mut self.resp[HEADER_LEN + 1..HEADER_LEN + max];
+        let body = &mut self.resp[HEADER_LEN + 1 + payload::BULK_RESP_AT..HEADER_LEN + max];
         let answer = port.call(req, data, body, &self.r.clock, margin).await;
         self.r.watch.busy(task::PC);
         answer
@@ -189,7 +203,8 @@ where
         let Some(port) = route.port else {
             return (Status::Unsupported, 0);
         };
-        let req = self.req(Op::Relay, r.addr, r.timeout_ms, 0);
+        let wait = r.timeout_ms.unwrap_or(dagon_port::timeout::RELAY_WAIT_MS);
+        let req = self.req(Op::Relay, r.addr, wait, 0);
         self.via(port, req, r.inner, max).await
     }
 

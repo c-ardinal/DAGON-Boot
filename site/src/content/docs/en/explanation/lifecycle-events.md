@@ -1646,31 +1646,34 @@ A board resource several parties need is shared, not owned.
 Command `Cmd::Version`, part of the wire contract. A node that does not
 implement it (a recovery agent, a minimal image) answers `E_UNSUPPORTED`
 through the unknown-command rule, which the host shows as "versions
-unknown". Request: empty for the summary set, or one selector `[0x21,
-offset u16 LE, len u8]` for a page of the boot record. Response: TLV,
-`u8 count` then `u8 id, u8 len, bytes`; a reader ignores ids it does not
+unknown". Request: no field for the summary set, or the must field 0x12
+(`offset u16 LE, len u8`) for a page of the boot record; a node that keeps
+no boot record does not know that field and answers `E_FIELD` with its
+number. Response: one field per value, in the field form every payload
+uses (`key, len, bytes`; the key is the number below times two, and the
+numbers rise through the response); a reader skips the numbers it does not
 know; a value the device cannot determine is omitted, never a sentinel.
-Every TLV value is at most 255 bytes and the whole response fits the
-smallest link payload (10).
+Every value is at most 255 bytes and the whole response fits the smallest
+link payload (10).
 
-| id | Value |
+| number | Value |
 |---|---|
 | 0x01 | boot loader version (`Version`, LE u32) |
 | 0x02 | installed boot image identity: first 8 bytes of its SHA-256 |
 | 0x03 | agent (`dagon-agent`) version |
 | 0x04 | MCU definition version |
 | 0x05 | board definition version |
-| 0x06 | MCU identity (5.5): the value the image header and the compiled topology carry; with len 2 the image header's `mcu_id`, u16 LE |
+| 0x06 | MCU identity (5.5): the image header's `mcu_id`, u16 LE |
 | 0x07 | isolation (4.5): `level u8`, `kind u8`, `boot_extensions u8`, `root_protection` (kind and exact level as the definition enumerates them, e.g. `rdp1`/`rdp2`, the write-protected sectors, and whether the level is reversible), `fuse` (Clear, or Tripped with the disabled extension's identity as the model encodes it, 5.5) |
-| 0x08 | extensions, for display: per linked extension `id` (up to 32 bytes), `trusted u8`, first 8 bytes of its source hash (4.7); repeated TLVs, one per extension |
-| 0x09 | extensions, for identity: per trusted extension its full 32-byte source hash (4.7); repeated TLVs |
+| 0x08 | extensions, for display: a packed array, per linked extension `id` (32 bytes, zero padded), `trusted u8`, first 8 bytes of its source hash (4.7) |
+| 0x09 | extensions, for identity: a packed array, per trusted extension its full 32-byte source hash (4.7) |
 | 0x0A | stage0 version: the version mark stage0 carries in its region (`dagon_format::stage0`; `Version`, LE u32); omitted for a stage0 without the mark and on a vendor-stage2 MCU |
 | 0x0B | boot loader slots A, B: `active u8` (the running slot), then per slot `state u8` (STATUS slot state) and `version` (LE u32) |
 | 0x0C | app slots A, B, factory, in the shape of 0x0B |
 | 0x0D | wire version the agent speaks (`PROTO_VERSION`, u8) |
 | 0x10 | formats: pairs `(format id u8, number u8)`: wire, image-header, state-log, event, definitions, boot-program, boot-record, extension-manifest |
-| 0x20 | boot record summary (5.5): which boots the record holds and the decision and reason of the newest; layout by the model |
-| 0x21 | one page of the raw boot record region: `offset u16`, then `len` bytes (`len ≤ RECORD_PAGE`, 10); the host reads the region page by page and decodes it with the model's reader |
+| 0x11 | boot record summary (5.5): which boots the record holds and the decision and reason of the newest; layout by the model |
+| 0x12 | one page of the raw boot record region: `offset u16`, then `len` bytes (`len ≤ RECORD_PAGE`, 10); the host reads the region page by page and decodes it with the model's reader |
 
 The running boot loader is identified from flash, never from what the app
 was compiled against:
@@ -1827,7 +1830,7 @@ and the limits of each claim.
 Every other byte-level structure in this document is either generated at
 build time and validated before it reaches a device (the boot action
 program table, `boot_wiring.rs` constants, the extension protection map), or a
-request/response encoding with no persistence (VERSION's TLV framing,
+request/response encoding with no persistence (VERSION's fields,
 the serve JSON messages), or an existing contract this model does not
 change (the image header's signature and digest fields, the state log,
 the vendor selection data, the release bundle). None of them is written
@@ -1857,7 +1860,7 @@ number 1, and nothing reads or writes a development format that preceded
 them. From that release on, the rules above apply.
 
 Component kinds: a change in a crate's public API that is incompatible
-is breaking for that component; a new event, port, op, TLV id or
+is breaking for that component; a new event, port, op, VERSION field or
 definition key with a default is a feature; everything else follows the
 general rules. A port trait gains methods only with defaults; removing
 or changing a port method is breaking for the layer's component.
@@ -2077,10 +2080,10 @@ listed, and a test asserts each pair.
 |---|---|---|---|
 | Link payload per kind | USB 1088, UART 1024, I2C 256 bytes | `dagon_proto::max_payload` | every request and reply; `RECORD_PAGE`; VERSION response; display text; conformance detail |
 | Smallest link payload | `max_payload::MIN` = the minimum over the kinds above (derived, not written) | `dagon-proto` | VERSION response as a whole (every TLV set the device may answer, asserted with the largest 0x08 set, 0x20 and a full 0x21 page) |
-| TLV value | ≤ 255 bytes (`len u8`) | VERSION encoding (`dagon-proto` payload) | every id in 5.4; 0x21 pages |
-| VERSION 0x21 fixed overhead | `VERSION_PAGE_OVERHEAD = 6` = status (1) + TLV count (1) + id (1) + len (1) + offset (2) | `dagon-proto` constant with a `const` assertion that it equals the sum of the field widths | `RECORD_PAGE` |
-| `RECORD_PAGE` per link | `RECORD_PAGE(link) = min(255 − 2, max_payload(link) − VERSION_PAGE_OVERHEAD)`: I2C 250, UART 253, USB 253; `RECORD_PAGE_MIN = 250` | `dagon-proto` `const fn` with one `const` assertion per link kind | VERSION 0x21; the host's paged reader asks at most `RECORD_PAGE_MIN` |
-| Boot record region | `bytes ≤ RECORD_MAX = 4096` (so `offset u16` of 0x21 addresses all of it); internal bounds are the model's constants (5.5) | `dagon_format::bootrecord::RECORD_MAX`; the MCU definition's `[boot.record]` | the definition validator; every image's `memory.x`; the agent's reader |
+| VERSION value | ≤ 255 bytes | VERSION encoding (`dagon-proto` command table) | every number in 5.4; 0x12 pages |
+| VERSION 0x12 fixed overhead | `VERSION_PAGE_OVERHEAD = 6` = status (1) + TLV count (1) + id (1) + len (1) + offset (2) | `dagon-proto` constant with a `const` assertion that it equals the sum of the field widths | `RECORD_PAGE` |
+| `RECORD_PAGE` per link | `RECORD_PAGE(link) = min(255 − 2, max_payload(link) − VERSION_PAGE_OVERHEAD)`: I2C 250, UART 253, USB 253; `RECORD_PAGE_MIN = 250` | `dagon-proto` `const fn` with one `const` assertion per link kind | VERSION 0x12; the host's paged reader asks at most `RECORD_PAGE_MIN` |
+| Boot record region | `bytes ≤ RECORD_MAX = 4096` (so `offset u16` of 0x12 addresses all of it); internal bounds are the model's constants (5.5) | `dagon_format::bootrecord::RECORD_MAX`; the MCU definition's `[boot.record]` | the definition validator; every image's `memory.x`; the agent's reader |
 | Service non-preemptible part | `np_max_us` per service and kind, `COPY_MAX`, each `[[device]]`'s `max_transfer`, `dma_stop_max_us` | the port catalog and the kind capability records (4.4), asserted against the implementation's measured worst case | the service implementations; the timer mask; validation 5 of 4.2 |
 | Extension time budget | `max_run_us ≤ BOOT_EXT_MAX_US`, `≤ APP_EXT_MAX_US`; `Σ (calls × budget)` over a boot ≤ `trial_ms / 4` | `dagon-events` `const fn` from the MCU definition's `[watchdog]`; `boot_wiring.rs` | `dagon gen` validator; the sandbox timer; the manifest |
 | Extension memory | `stack_bytes + ram_bytes ≤` the MCU definition's `[isolation] ext_ram_max`; entries ≤ the kind's budget after code, data and stack | the MCU definition; `boot_wiring.rs` protection map | `dagon gen` validator; `memory.x` |

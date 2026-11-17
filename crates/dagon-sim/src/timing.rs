@@ -229,11 +229,12 @@ mod tests {
         let r = Relay {
             link,
             addr: 0x42,
-            timeout_ms: 300,
+            timeout_ms: Some(300),
             inner,
         };
-        let mut p = vec![0u8; Relay::HEAD_LEN + inner.len()];
-        r.encode(&mut p).unwrap();
+        let mut p = vec![0u8; Relay::OVERHEAD_MAX + inner.len()];
+        let n = r.encode(&mut p).unwrap();
+        p.truncate(n);
         frame(Cmd::Relay as u8, &p)
     }
 

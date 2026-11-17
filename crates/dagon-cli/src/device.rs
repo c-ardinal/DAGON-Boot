@@ -455,6 +455,9 @@ where
             let hub = connected(t).unwrap_or("hub");
             format!("the hub does not answer; write it directly: dagon flash {hub}")
         }
+        dagon_host::Error::WireVersion { peer } => {
+            crate::versions::wire_warning("the hub", peer.into()).unwrap_or(format!("{e:?}"))
+        }
         e => format!("{e:?}"),
     })?;
     let mut answering = Vec::new();
@@ -668,7 +671,7 @@ mod tests {
     fn version_line_names_each_part_and_unknown_or_none() {
         let sv = |state, version| SlotVersion { state, version };
         let v = VersionResp {
-            wire: Some(1),
+            wire: Some(2),
             mcu_id: Some(2),
             stage0: Some(Version::new(0, 1, 0)),
             boot_core: Some(Version::new(1, 0, 0)),
@@ -692,7 +695,7 @@ mod tests {
         assert_eq!(
             version_line::<()>("seg", Ok(Some(v)), self_boot, None),
             "seg: versions: stage0 0.1.0; boot core A:Confirmed 1.0.0 (running), B:Empty; \
-             app A:Written 1.0.0, B:Confirmed 1.1.0 (running), F:Empty; wire 1; mcu 0x0002"
+             app A:Written 1.0.0, B:Confirmed 1.1.0 (running), F:Empty; wire 2; mcu 0x0002"
         );
         let left_out = VersionResp {
             stage0: None,
@@ -763,7 +766,7 @@ mod tests {
             version: Version::new(1, 0, 0),
         };
         let v = VersionResp {
-            wire: Some(1),
+            wire: Some(2),
             mcu_id: Some(2),
             stage0: None,
             boot_core: None,

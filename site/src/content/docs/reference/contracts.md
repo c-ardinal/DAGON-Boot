@@ -16,7 +16,7 @@ DAGONの部品のあいだの取り決めとその番号、部品ごとのバー
 
 | 取り決め | 形式の番号 | 番号の置き場所 |
 |---|---|---|
-| `wire` | 1 | ホスト、親機、ノードのあいだのフレームとペイロード: すべてのフレームのバイト2、HELLOのproto_ver（dagon-proto PROTO_VERSION） |
+| `wire` | 2 | ホスト、親機、ノードのあいだのフレームとペイロード: すべてのフレームのバイト2、HELLOのproto_ver（dagon-proto PROTO_VERSION） |
 | `image-header` | 1 | 署名付きの512バイトのイメージのヘッダ: オフセット0x004（dagon-format header::HDR_VERSION） |
 | `state-log` | 1 | ブートローダとアプリの状態ログの面: オフセット0x004（dagon-format statelog::FORMAT_VERSION） |
 | `manifest` | 1 | リリースのマニフェスト: オフセット4（dagon-format manifest::MF_VERSION） |
@@ -35,30 +35,30 @@ DAGONの部品のあいだの取り決めとその番号、部品ごとのバー
 
 | 部品 | バージョン | crate | 形式 |
 |---|---|---|---|
-| `cli` | 0.1.0 | `dagon-cli` | `wire` 1, `image-header` 1, `state-log` 1, `manifest` 1, `bundle` 1, `topology-bin` 2, `topology-yaml` 2, `definitions` 3, `serve-api` 1, `layout` 1, `event` 1, `extension-manifest` 1, `boot-program` 1, `project` 1 |
+| `cli` | 0.1.0 | `dagon-cli` | `wire` 2, `image-header` 1, `state-log` 1, `manifest` 1, `bundle` 1, `topology-bin` 2, `topology-yaml` 2, `definitions` 3, `serve-api` 1, `layout` 1, `event` 1, `extension-manifest` 1, `boot-program` 1, `project` 1 |
 | `boot-rp2040` | 0.1.0 | `dagon-rp2040-stage0`, `dagon-rp2040-bootcore` | `image-header` 1, `state-log` 1, `event` 1 |
 | `boot-stm32f401re` | 0.1.0 | `dagon-stm32f401re-stage0`, `dagon-stm32f401re-bootcore` | `image-header` 1, `state-log` 1, `event` 1 |
-| `mcu-rp2040` | 0.1.0 | `dagon-mcu-rp2040` | `wire` 1, `image-header` 1, `state-log` 1, `definitions` 3 |
-| `mcu-stm32f401re` | 0.1.0 | `dagon-mcu-stm32f401re` | `wire` 1, `image-header` 1, `state-log` 1, `definitions` 3 |
-| `mcu-esp32s3` | 0.1.0 | `dagon-mcu-esp32s3` | `wire` 1, `image-header` 1, `state-log` 1, `definitions` 3 |
-| `mcu-common` | 0.1.0 | `dagon-mcu-common` | `wire` 1 |
+| `mcu-rp2040` | 0.1.0 | `dagon-mcu-rp2040` | `wire` 2, `image-header` 1, `state-log` 1, `definitions` 3 |
+| `mcu-stm32f401re` | 0.1.0 | `dagon-mcu-stm32f401re` | `wire` 2, `image-header` 1, `state-log` 1, `definitions` 3 |
+| `mcu-esp32s3` | 0.1.0 | `dagon-mcu-esp32s3` | `wire` 2, `image-header` 1, `state-log` 1, `definitions` 3 |
+| `mcu-common` | 0.1.0 | `dagon-mcu-common` | `wire` 2 |
 | `mcu-build` | 0.1.0 | `dagon-mcu-build` |  |
 | `board-waveshare-rp2040-touch-lcd-1.28` | 0.1.0 | `dagon-board-waveshare-rp2040-touch-lcd-1-28` | `definitions` 3 |
 | `board-nucleo-f401re` | 0.1.0 | `dagon-board-nucleo-f401re` | `definitions` 3 |
 | `board-m5stopwatch` | 0.1.0 | `dagon-board-m5stopwatch` | `definitions` 3 |
 | `format` | 0.1.0 | `dagon-format` | `image-header` 1, `state-log` 1, `manifest` 1, `bundle` 1, `topology-bin` 2 |
 | `ed25519` | 0.1.0 | `dagon-ed25519` |  |
-| `proto` | 0.1.0 | `dagon-proto` | `wire` 1 |
+| `proto` | 0.1.0 | `dagon-proto` | `wire` 2 |
 | `core` | 0.1.0 | `dagon-core` | `image-header` 1, `state-log` 1 |
 | `boot` | 0.1.0 | `dagon-boot` | `state-log` 1, `event` 1 |
 | `events` | 0.1.0 | `dagon-events` | `event` 1 |
 | `port` | 0.1.0 | `dagon-port` |  |
-| `agent` | 0.1.0 | `dagon-agent` | `wire` 1, `image-header` 1 |
-| `relay` | 0.1.0 | `dagon-relay` | `wire` 1 |
-| `host` | 0.1.0 | `dagon-host` | `wire` 1, `image-header` 1, `state-log` 1, `bundle` 1, `topology-bin` 2 |
+| `agent` | 0.1.0 | `dagon-agent` | `wire` 2, `image-header` 1 |
+| `relay` | 0.1.0 | `dagon-relay` | `wire` 2 |
+| `host` | 0.1.0 | `dagon-host` | `wire` 2, `image-header` 1, `state-log` 1, `bundle` 1, `topology-bin` 2 |
 | `extension` | 0.1.0 | `dagon-extension` | `extension-manifest` 1, `definitions` 3, `boot-program` 1 |
 | `topology` | 0.1.0 | `dagon-topology` | `topology-bin` 2, `topology-yaml` 2, `definitions` 3, `boot-program` 1, `project` 1 |
 | `sign` | 0.1.0 | `dagon-sign` | `image-header` 1, `state-log` 1, `manifest` 1, `bundle` 1, `topology-bin` 2 |
-| `sim` | 0.1.0 | `dagon-sim` | `wire` 1, `image-header` 1, `state-log` 1 |
-| `conform` | 0.1.0 | `dagon-conform` | `wire` 1, `image-header` 1, `state-log` 1 |
+| `sim` | 0.1.0 | `dagon-sim` | `wire` 2, `image-header` 1, `state-log` 1 |
+| `conform` | 0.1.0 | `dagon-conform` | `wire` 2, `image-header` 1, `state-log` 1 |
 | `romlink` | 0.1.0 | `dagon-romlink` |  |

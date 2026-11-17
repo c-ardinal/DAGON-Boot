@@ -18,6 +18,10 @@
 use crate::LinkKind;
 
 pub const REQUEST_MS: u32 = 300;
+
+/// How long a relay waits for a node when the RELAY request names no
+/// timeout: the plain-response wait.
+pub const RELAY_WAIT_MS: u16 = REQUEST_MS as u16;
 pub const VERIFY_MS: u32 = 5_000;
 pub const CONF_RUN_MS: u32 = 30_000;
 pub const REBOOT_WAIT_MS: u32 = 30_000;

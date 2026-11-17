@@ -89,6 +89,7 @@ impl Pc {
         let (f, _) = Frame::decode(resp, max_payload::USB).unwrap();
         assert_eq!((f.flags, f.seq, f.cmd), (flags::RESP, seq, cmd as u8));
         let (s, body) = split_status(f.payload).unwrap();
+        let body = bulk_of(f.cmd, s, body);
         (s, body.to_vec())
     }
 
@@ -108,11 +109,11 @@ impl Pc {
     ) -> (Status, Option<(Status, Vec<u8>)>) {
         let inner = self.frame(cmd, payload);
         let inner_seq = self.seq;
-        let mut p = vec![0u8; 4 + inner.len()];
+        let mut p = vec![0u8; 9 + inner.len()];
         let n = Relay {
             link: link_on(NODE_I2C_PORT),
             addr,
-            timeout_ms: 200,
+            timeout_ms: Some(200),
             inner: &inner,
         }
         .encode(&mut p)
@@ -133,7 +134,7 @@ impl Pc {
     }
 
     fn rom(&mut self, relay: &mut SimRelay, write: &[u8], read_len: u16) -> Vec<u8> {
-        let mut p = vec![0u8; 4 + write.len()];
+        let mut p = vec![0u8; 16 + write.len()];
         let n = I2cRaw {
             read_len,
             data: write,
@@ -146,7 +147,11 @@ impl Pc {
     }
 
     fn subctl(&mut self, relay: &mut SimRelay, nrst: u8, boot0: u8) {
-        let (s, _) = self.ask(relay, Cmd::SubCtl, &[nrst, boot0]);
+        let (s, _) = self.ask(
+            relay,
+            Cmd::SubCtl,
+            &wire(|b| dagon_proto::payload::SubCtl { nrst, boot0 }.encode(b)),
+        );
         assert_eq!(s, Status::Ok);
     }
 }
@@ -272,7 +277,7 @@ fn i2c_scan_finds_only_present_targets() {
 fn rom_get_and_get_id() {
     let mut relay = relay_with_f401();
     let mut pc = Pc { seq: 0 };
-    let mut p = [0u8; 8];
+    let mut p = [0u8; 32];
     let n = I2cRaw {
         read_len: 1,
         data: &[cmd::GET, 0xFF],
@@ -315,7 +320,7 @@ fn i2c_raw_above_the_recovery_links_buffer_is_refused() {
     pc.subctl(&mut relay, nrst::PULSE, boot0::HIGH);
     let limit = dagon_proto::frame_len(max_payload::I2C);
     let raw = |read_len: u16, data: &[u8]| {
-        let mut p = vec![0u8; 4 + data.len()];
+        let mut p = vec![0u8; 16 + data.len()];
         let n = I2cRaw { read_len, data }.encode(&mut p).unwrap();
         p.truncate(n);
         p
@@ -417,7 +422,7 @@ fn rom_stretched_erase_through_i2c_raw() {
 
 /// XFER_BEGIN .. XFER_END, SET_PENDING and REBOOT to the I2C node.
 fn transfer(pc: &mut Pc, relay: &mut SimRelay, slot: u8, img: &[u8]) {
-    let mut b = [0u8; 8];
+    let mut b = [0u8; 32];
     let total_len = img.len() as u32;
     let begin = XferBegin {
         target: target::APP,
@@ -430,7 +435,7 @@ fn transfer(pc: &mut Pc, relay: &mut SimRelay, slot: u8, img: &[u8]) {
     let (hdr, body) = img.split_at(512);
     for (cmd, part) in [(Cmd::XferHdr, hdr), (Cmd::XferData, body)] {
         for (i, c) in part.chunks(240).enumerate() {
-            let mut p = vec![0u8; 4 + c.len()];
+            let mut p = vec![0u8; 16 + c.len()];
             let n = XferChunk {
                 offset: (i * 240) as u32,
                 data: c,
@@ -440,9 +445,26 @@ fn transfer(pc: &mut Pc, relay: &mut SimRelay, slot: u8, img: &[u8]) {
             pc.ok(relay, cmd, &p[..n]);
         }
     }
-    assert_eq!(pc.ok(relay, Cmd::XferEnd, &[]), sha256(body));
-    pc.ok(relay, Cmd::SetPending, &[target::APP, slot]);
-    pc.ok(relay, Cmd::Reboot, &[reboot_mode::NORMAL]);
+    assert_eq!(
+        dagon_proto::payload::parse_digest(&pc.ok(relay, Cmd::XferEnd, &[])),
+        Ok(sha256(body))
+    );
+    pc.ok(
+        relay,
+        Cmd::SetPending,
+        &wire(|b| {
+            dagon_proto::payload::SetPending {
+                target: target::APP,
+                slot,
+            }
+            .encode(b)
+        }),
+    );
+    pc.ok(
+        relay,
+        Cmd::Reboot,
+        &wire(|b| dagon_proto::payload::encode_reboot(reboot_mode::NORMAL, b)),
+    );
 }
 
 #[test]
@@ -457,7 +479,11 @@ fn update_through_relay_trial_confirm_and_rollback() {
     );
     let h = HelloResp::parse(&pc.ok(&mut relay, Cmd::Hello, &hello())).unwrap();
     assert_eq!((h.active_version, h.trial), (Version::new(1, 1, 0), true));
-    pc.ok(&mut relay, Cmd::Confirm, &[target::APP]);
+    pc.ok(
+        &mut relay,
+        Cmd::Confirm,
+        &wire(|b| dagon_proto::payload::encode_confirm(target::APP, b)),
+    );
     relay.advance_ms(20_000);
     let st = StatusResp::parse(&pc.ok(&mut relay, Cmd::Status, &[])).unwrap();
     assert_eq!(
@@ -477,7 +503,12 @@ fn update_through_relay_trial_confirm_and_rollback() {
         0,
         &image(0, Version::new(1, 2, 0), &[0x33; 700]),
     );
-    let (_, inner) = pc2.node(&mut relay, NODE_I2C_ADDR, Cmd::Confirm, &[target::APP]);
+    let (_, inner) = pc2.node(
+        &mut relay,
+        NODE_I2C_ADDR,
+        Cmd::Confirm,
+        &wire(|b| dagon_proto::payload::encode_confirm(target::APP, b)),
+    );
     assert_eq!(inner.unwrap().0, Status::State, "self-check refuses");
     for _ in 0..4 {
         relay.advance_ms(10_000);
@@ -497,7 +528,7 @@ fn power_cut_mid_transfer_keeps_the_confirmed_image() {
     node.flash().arm_cut(CutPoint::During(before + 3));
 
     let img = image(1, Version::new(1, 1, 0), &[0x77; 4000]);
-    let mut b = [0u8; 8];
+    let mut b = [0u8; 32];
     let n = XferBegin {
         target: target::APP,
         slot: 1,
@@ -510,7 +541,7 @@ fn power_cut_mid_transfer_keeps_the_confirmed_image() {
     let mut lost = false;
     for (cmd, part) in [(Cmd::XferHdr, &img[..512]), (Cmd::XferData, &img[512..])] {
         for (i, c) in part.chunks(240).enumerate() {
-            let mut p = vec![0u8; 4 + c.len()];
+            let mut p = vec![0u8; 16 + c.len()];
             let n = XferChunk {
                 offset: (i * 240) as u32,
                 data: c,
@@ -546,11 +577,11 @@ fn uart_node_behind_a_lossy_link() {
     let mut pc = Pc { seq: 0 };
     let hello_over = |pc: &mut Pc, relay: &mut SimRelay| {
         let inner = pc.frame(Cmd::Hello, &hello());
-        let mut p = vec![0u8; 4 + inner.len()];
+        let mut p = vec![0u8; 9 + inner.len()];
         let n = Relay {
             link: link_on(WATCH_UART_PORT),
             addr: link::UART_ADDR,
-            timeout_ms: 500,
+            timeout_ms: Some(500),
             inner: &inner,
         }
         .encode(&mut p)
@@ -569,4 +600,26 @@ fn uart_node_behind_a_lossy_link() {
         HelloResp::parse(&h).unwrap().active_version,
         Version::new(2, 0, 0)
     );
+}
+
+/// The request payload `enc` writes.
+#[allow(dead_code)]
+fn wire(enc: impl FnOnce(&mut [u8]) -> Result<usize, dagon_proto::FrameError>) -> Vec<u8> {
+    let mut b = vec![0u8; 1100];
+    let n = enc(&mut b).unwrap();
+    b.truncate(n);
+    b
+}
+
+/// The bulk of an OK RELAY or I2C_RAW response; any other body as it is.
+#[allow(dead_code)]
+fn bulk_of(cmd: u8, status: dagon_proto::Status, body: &[u8]) -> &[u8] {
+    match dagon_proto::Cmd::from_u8(cmd) {
+        Some(c @ (dagon_proto::Cmd::Relay | dagon_proto::Cmd::I2cRaw))
+            if status == dagon_proto::Status::Ok =>
+        {
+            dagon_proto::payload::parse_bulk_resp(c, body).unwrap()
+        }
+        _ => body,
+    }
 }

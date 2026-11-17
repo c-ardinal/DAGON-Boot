@@ -154,6 +154,7 @@ fn ms(ms: u64) -> u64 {
 fn answer(reply: &[u8]) -> (Status, Vec<u8>) {
     let (f, _) = Frame::decode(reply, 300).unwrap();
     let (st, body) = split_status(f.payload).unwrap();
+    let body = bulk_of(f.cmd, st, body);
     (st, body.to_vec())
 }
 
@@ -374,7 +375,11 @@ fn update_mode_ends_60_s_after_the_last_request() {
 fn reboot_ends_update_mode_once_its_reply_is_read() {
     let f = installed();
     let now = Rc::new(Cell::new(0));
-    let reboot = frame(2, Cmd::Reboot, &[reboot_mode::NORMAL]);
+    let reboot = frame(
+        2,
+        Cmd::Reboot,
+        &wire(|b| dagon_proto::payload::encode_reboot(reboot_mode::NORMAL, b)),
+    );
     let mut hub = Hub::new(now.clone(), vec![(ms(5), reboot)]);
     let mut agent = session(&f);
     let exit = serve(
@@ -404,7 +409,14 @@ fn a_write_through_update_mode_is_tried_at_the_next_start() {
             .map(|(i, r)| (ms(10 + i as u64), r))
             .collect();
         let at = ms(10 + due.len() as u64);
-        due.push((at, frame(250, Cmd::Reboot, &[reboot_mode::NORMAL])));
+        due.push((
+            at,
+            frame(
+                250,
+                Cmd::Reboot,
+                &wire(|b| dagon_proto::payload::encode_reboot(reboot_mode::NORMAL, b)),
+            ),
+        ));
         let mut hub = Hub::new(now.clone(), due);
         let mut agent = session(&f);
         let ticks = TICKS.load(Ordering::Relaxed);
@@ -439,5 +451,27 @@ fn a_write_through_update_mode_is_tried_at_the_next_start() {
             },
             "slot {slot}"
         );
+    }
+}
+
+/// The request payload `enc` writes.
+#[allow(dead_code)]
+fn wire(enc: impl FnOnce(&mut [u8]) -> Result<usize, dagon_proto::FrameError>) -> Vec<u8> {
+    let mut b = vec![0u8; 1100];
+    let n = enc(&mut b).unwrap();
+    b.truncate(n);
+    b
+}
+
+/// The bulk of an OK RELAY or I2C_RAW response; any other body as it is.
+#[allow(dead_code)]
+fn bulk_of(cmd: u8, status: dagon_proto::Status, body: &[u8]) -> &[u8] {
+    match dagon_proto::Cmd::from_u8(cmd) {
+        Some(c @ (dagon_proto::Cmd::Relay | dagon_proto::Cmd::I2cRaw))
+            if status == dagon_proto::Status::Ok =>
+        {
+            dagon_proto::payload::parse_bulk_resp(c, body).unwrap()
+        }
+        _ => body,
     }
 }

@@ -148,10 +148,10 @@ fn unknown_format_numbers_are_refused_with_both_numbers() {
 
 #[test]
 fn a_device_on_another_wire_protocol_is_warned_about() {
-    assert_eq!(wire_warning("hub", 1), None);
-    let w = wire_warning("hub", 2).unwrap();
+    assert_eq!(wire_warning("hub", 2), None);
+    let w = wire_warning("hub", 1).unwrap();
     assert!(
-        w.contains("wire protocol 2") && w.contains("speaks 1"),
+        w.contains("wire protocol 1") && w.contains("speaks 2"),
         "{w}"
     );
 }

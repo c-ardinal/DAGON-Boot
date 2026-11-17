@@ -47,7 +47,7 @@ pub const fn steps(method: Method) -> &'static [Step] {
 }
 
 /// Reply frame size of [`enter_rom_request`].
-pub const REPLY_LEN: usize = dagon_proto::frame_len(1);
+pub const REPLY_LEN: usize = dagon_proto::frame_len(dagon_proto::payload::REFUSAL_MAX);
 
 /// Answers an ENTER_ROM request: OK with the method to run after the reply
 /// has been sent, E_UNSUPPORTED for method 2 when `pmic` (the board supports
@@ -69,8 +69,8 @@ pub fn enter_rom_request(
         Ok(_) => (Status::Unsupported, None),
         Err(s) => (s, None),
     };
-    out[HEADER_LEN] = status as u8;
-    let n = dagon_proto::finish(out, flags::RESP, f.seq, f.cmd, 1).ok()?;
+    let len = dagon_proto::payload::put_refusal(&mut out[HEADER_LEN..], status, f.cmd, f.payload);
+    let n = dagon_proto::finish(out, flags::RESP, f.seq, f.cmd, len).ok()?;
     Some((n, method))
 }
 

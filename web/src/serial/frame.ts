@@ -1,21 +1,91 @@
-// DAGON link v1 frame: SOF DA 6F | ver 01 | flags | seq | cmd | len u16 LE |
+// DAGON link frame: SOF | ver | flags | seq | cmd | len u16 LE |
 // payload | crc32 LE. Encoding, CRC and the stream cutter come from
 // dagon-wasm (crates/dagon-proto); this file only names fields and splits a
 // frame that has already been checked.
-import { encodeFrameBytes, frameStream, type FrameStream } from '../wasm/dagon.ts';
+import { encodeFrameBytes, frameStream, wireNumbers, type FrameStream } from '../wasm/dagon.ts';
 
-export const HEADER_LEN = 8;
-export const CRC_LEN = 4;
-export const MAX_PAYLOAD_USB = 1088;
+const n = () => wireNumbers();
 
-export const FLAG_RESP = 1 << 0;
+/** Frame sizes, payload limits and flags, as dagon-proto has them. */
+export const WIRE = {
+  get HEADER_LEN() {
+    return n().headerLen;
+  },
+  get CRC_LEN() {
+    return n().crcLen;
+  },
+  get MAX_PAYLOAD_USB() {
+    return n().maxPayloadUsb;
+  },
+  get MAX_PAYLOAD_UART() {
+    return n().maxPayloadUart;
+  },
+  get MAX_PAYLOAD_I2C() {
+    return n().maxPayloadI2c;
+  },
+  get FLAG_RESP() {
+    return n().flagResp;
+  },
+};
 
+/** Command numbers, as dagon-proto's command table has them. */
 export const CMD = {
-  HELLO: 0x01,
-  STATUS: 0x02,
-} as const;
+  get HELLO() {
+    return n().cmdHello;
+  },
+  get STATUS() {
+    return n().cmdStatus;
+  },
+  get XFER_BEGIN() {
+    return n().cmdXferBegin;
+  },
+  get XFER_DATA() {
+    return n().cmdXferData;
+  },
+  get XFER_END() {
+    return n().cmdXferEnd;
+  },
+  get XFER_HDR() {
+    return n().cmdXferHdr;
+  },
+  get SET_PENDING() {
+    return n().cmdSetPending;
+  },
+  get REBOOT() {
+    return n().cmdReboot;
+  },
+  get CONFIRM() {
+    return n().cmdConfirm;
+  },
+  get SHOW() {
+    return n().cmdShow;
+  },
+  get RELAY() {
+    return n().cmdRelay;
+  },
+};
 
-export const STATUS_OK = 0x00;
+/** Status numbers, as dagon-proto has them. */
+export const STATUS = {
+  get OK() {
+    return n().statusOk;
+  },
+  get UNSUPPORTED() {
+    return n().statusUnsupported;
+  },
+  get ARG() {
+    return n().statusArg;
+  },
+  get FIELD() {
+    return n().statusField;
+  },
+  get STATE() {
+    return n().statusState;
+  },
+  get TIMEOUT() {
+    return n().statusTimeout;
+  },
+};
 
 export interface Frame {
   flags: number;
@@ -30,10 +100,10 @@ export function encodeFrame(f: Frame): Uint8Array {
 
 /** Splits a frame that came from {@link newFrameStream} or {@link encodeFrame}. */
 export function parseFrame(raw: Uint8Array): Frame {
-  return { flags: raw[3], seq: raw[4], cmd: raw[5], payload: raw.slice(HEADER_LEN, raw.length - CRC_LEN) };
+  return { flags: raw[3], seq: raw[4], cmd: raw[5], payload: raw.slice(WIRE.HEADER_LEN, raw.length - WIRE.CRC_LEN) };
 }
 
 /** Cuts complete, CRC-checked frames out of a byte stream (dagon-wasm). */
-export function newFrameStream(maxPayload = MAX_PAYLOAD_USB): FrameStream {
+export function newFrameStream(maxPayload = WIRE.MAX_PAYLOAD_USB): FrameStream {
   return frameStream(maxPayload);
 }

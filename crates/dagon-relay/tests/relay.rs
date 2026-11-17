@@ -370,15 +370,22 @@ impl Pc<'_> {
         let (f, _) = Frame::decode(&reply, max_payload::USB).unwrap();
         assert_eq!((f.seq, f.cmd), (seq, cmd as u8));
         let (status, body) = split_status(f.payload).unwrap();
+        // RELAY and I2C_RAW answer with bulk: the node's frame, the bytes read.
+        let body = match (status, cmd) {
+            (Status::Ok, Cmd::Relay | Cmd::I2cRaw) => {
+                dagon_proto::payload::parse_bulk_resp(cmd, body).unwrap()
+            }
+            _ => body,
+        };
         (status, body.to_vec())
     }
 
     async fn relay(&self, link: u8, addr: u8, timeout_ms: u16, inner: &[u8]) -> (Status, Vec<u8>) {
-        let mut p = vec![0u8; RelayReq::HEAD_LEN + inner.len()];
+        let mut p = vec![0u8; RelayReq::OVERHEAD_MAX + inner.len()];
         let r = RelayReq {
             link,
             addr,
-            timeout_ms,
+            timeout_ms: Some(timeout_ms),
             inner,
         };
         let n = r.encode(&mut p).unwrap();
@@ -412,7 +419,7 @@ impl Pc<'_> {
 
     async fn raw(&self, read_len: u16, data: &[u8]) -> (Status, Vec<u8>) {
         let raw = I2cRaw { read_len, data };
-        let mut p = vec![0u8; 4 + data.len()];
+        let mut p = vec![0u8; I2cRaw::OVERHEAD_MAX + data.len()];
         let n = raw.encode(&mut p).unwrap();
         self.ask(Cmd::I2cRaw, &p[..n]).await
     }

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { CMD, FLAG_RESP, STATUS_OK, encodeFrame, parseFrame } from './frame.ts';
+import { CMD, encodeFrame, parseFrame, STATUS, WIRE } from './frame.ts';
 import { ROLE_NODE, encodeHelloResp, versionRaw, type HelloResp } from './hello.ts';
 import { SAMPLE_HUB_HELLO } from './mock.ts';
 import { WebSerialTransport } from './transport.ts';
@@ -133,8 +133,8 @@ describe('WebSerialTransport read loop', () => {
             write(raw) {
               const req = parseFrame(raw);
               if (!hello) return;
-              const body = Uint8Array.of(STATUS_OK, ...encodeHelloResp(hello));
-              ctrl?.enqueue(encodeFrame({ flags: FLAG_RESP, seq: req.seq, cmd: req.cmd, payload: body }));
+              const body = Uint8Array.of(STATUS.OK, ...encodeHelloResp(hello));
+              ctrl?.enqueue(encodeFrame({ flags: WIRE.FLAG_RESP, seq: req.seq, cmd: req.cmd, payload: body }));
             },
           });
         },

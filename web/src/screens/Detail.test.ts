@@ -12,7 +12,7 @@ const PORT_SELF_BOOT = 1;
 const PORT_VENDOR_STAGE2 = 2;
 
 const hello = (portKind: number): HelloResp => ({
-  protoVer: 1,
+  protoVer: 2,
   role: 1,
   portKind,
   mcuId: 2,
@@ -42,7 +42,7 @@ function row(body: string, key: string): string | null {
 }
 
 const VERSION: VersionResp = {
-  wire: 1,
+  wire: 2,
   mcuId: 2,
   stage0: V(0, 1, 0),
   bootCore: V(1, 0, 0),

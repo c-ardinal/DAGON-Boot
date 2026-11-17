@@ -376,19 +376,20 @@ impl Node {
         let (f, _) = Frame::decode(reply.frame, 1200).unwrap();
         assert_eq!(f.flags, flags::RESP);
         let (st, body) = split_status(f.payload).unwrap();
+        let body = bulk_of(f.cmd, st, body);
         (st, body.to_vec())
     }
 
     fn transfer(&mut self, t: u8, slot: u8, img: &[u8]) -> Status {
-        let mut p = [0u8; 8];
-        XferBegin {
-            target: t,
-            slot,
-            total_len: img.len() as u32,
-            hdr_len: IMAGE_HDR_LEN,
-        }
-        .encode(&mut p)
-        .unwrap();
+        let p = wire(|b| {
+            XferBegin {
+                target: t,
+                slot,
+                total_len: img.len() as u32,
+                hdr_len: IMAGE_HDR_LEN,
+            }
+            .encode(b)
+        });
         let st = self.call(Cmd::XferBegin, &p).0;
         if st != Status::Ok {
             return st;
@@ -396,13 +397,13 @@ impl Node {
         let (hdr, body) = img.split_at(HEADER_SIZE);
         for (cmd, part) in [(Cmd::XferHdr, hdr), (Cmd::XferData, body)] {
             for (i, c) in part.chunks(256).enumerate() {
-                let mut b = vec![0u8; 4 + c.len()];
-                XferChunk {
-                    offset: (i * 256) as u32,
-                    data: c,
-                }
-                .encode(&mut b)
-                .unwrap();
+                let b = wire(|b| {
+                    XferChunk {
+                        offset: (i * 256) as u32,
+                        data: c,
+                    }
+                    .encode(b)
+                });
                 let st = self.call(cmd, &b).0;
                 if st != Status::Ok {
                     return st;
@@ -413,8 +414,12 @@ impl Node {
     }
 
     fn core_status(&mut self) -> (Status, Option<StatusResp>) {
-        let (st, body) = self.call(Cmd::Status, &[target::BOOTCORE]);
-        (st, StatusResp::parse(&body).ok())
+        let (st, body) = self.call(
+            Cmd::Status,
+            &wire(|b| dagon_proto::payload::encode_status_req(target::BOOTCORE, b)),
+        );
+        let parsed = StatusResp::parse(&body).ok();
+        (st, parsed.filter(|_| st == Status::Ok))
     }
 }
 
@@ -444,7 +449,15 @@ fn a_new_boot_core_goes_to_the_idle_slot_and_is_recorded_pending() {
     }
     assert_eq!(n.agent.core_state(1), Some(core_image::State::Written));
     assert_eq!(
-        n.call(Cmd::SetPending, &[target::BOOTCORE, 1]).0,
+        n.call(
+            Cmd::SetPending,
+            &wire(|b| dagon_proto::payload::SetPending {
+                target: target::BOOTCORE,
+                slot: 1
+            }
+            .encode(b))
+        )
+        .0,
         Status::Ok
     );
     assert!(n.events().contains(&"core_pending_set".to_string()));
@@ -460,7 +473,16 @@ fn a_new_boot_core_goes_to_the_idle_slot_and_is_recorded_pending() {
 fn the_new_cores_own_confirmation_and_a_rollback_are_seen_after_the_reset() {
     let mut n = Node::new(installed(true));
     assert_eq!(n.transfer(target::BOOTCORE, 1, &bootcore(1, 1)), Status::Ok);
-    n.call(Cmd::SetPending, &[target::BOOTCORE, 1]);
+    n.call(
+        Cmd::SetPending,
+        &wire(|b| {
+            dagon_proto::payload::SetPending {
+                target: target::BOOTCORE,
+                slot: 1,
+            }
+            .encode(b)
+        }),
+    );
     // The new core confirmed itself (dagon_core::bootcore::settle).
     n.reset(|s| {
         let p = s.log().core.pending.unwrap();
@@ -480,7 +502,16 @@ fn the_new_cores_own_confirmation_and_a_rollback_are_seen_after_the_reset() {
 
     // Another update that stage0 gives up on: the old core records ROLLBACK.
     assert_eq!(n.transfer(target::BOOTCORE, 0, &bootcore(0, 2)), Status::Ok);
-    n.call(Cmd::SetPending, &[target::BOOTCORE, 0]);
+    n.call(
+        Cmd::SetPending,
+        &wire(|b| {
+            dagon_proto::payload::SetPending {
+                target: target::BOOTCORE,
+                slot: 0,
+            }
+            .encode(b)
+        }),
+    );
     n.reset(|s| {
         let p = s.log().core.pending.unwrap();
         let mut log = s.log();
@@ -505,16 +536,36 @@ fn the_running_and_the_confirmed_core_slots_are_never_written() {
         Status::State
     );
     assert_eq!(
-        n.call(Cmd::SetPending, &[target::BOOTCORE, 0]).0,
+        n.call(
+            Cmd::SetPending,
+            &wire(|b| dagon_proto::payload::SetPending {
+                target: target::BOOTCORE,
+                slot: 0
+            }
+            .encode(b))
+        )
+        .0,
         Status::State
     );
     assert_eq!(
-        n.call(Cmd::SetPending, &[target::BOOTCORE, 1]).0,
+        n.call(
+            Cmd::SetPending,
+            &wire(|b| dagon_proto::payload::SetPending {
+                target: target::BOOTCORE,
+                slot: 1
+            }
+            .encode(b))
+        )
+        .0,
         Status::State,
         "an empty slot is not set pending"
     );
     assert_eq!(
-        n.call(Cmd::Confirm, &[target::BOOTCORE]).0,
+        n.call(
+            Cmd::Confirm,
+            &wire(|b| dagon_proto::payload::encode_confirm(target::BOOTCORE, b))
+        )
+        .0,
         Status::Arg,
         "a boot core confirms itself"
     );
@@ -544,7 +595,15 @@ fn the_only_boot_core_slot_is_written_by_the_app() {
     // The confirmed core is gone from its slot: no core version runs.
     assert_eq!(version(&mut n).boot_core, None);
     assert_eq!(
-        n.call(Cmd::SetPending, &[target::BOOTCORE, 0]).0,
+        n.call(
+            Cmd::SetPending,
+            &wire(|b| dagon_proto::payload::SetPending {
+                target: target::BOOTCORE,
+                slot: 0
+            }
+            .encode(b))
+        )
+        .0,
         Status::Ok
     );
     let s = n.core_status().1.unwrap();
@@ -593,13 +652,29 @@ fn the_only_boot_core_slot_is_left_alone_while_the_app_is_on_trial() {
     assert_eq!(n.transfer(target::BOOTCORE, 0, &bootcore(0, 1)), Status::Ok);
     n.reset(|s| s.app_trial = true);
     assert_eq!(
-        n.call(Cmd::SetPending, &[target::BOOTCORE, 0]).0,
+        n.call(
+            Cmd::SetPending,
+            &wire(|b| dagon_proto::payload::SetPending {
+                target: target::BOOTCORE,
+                slot: 0
+            }
+            .encode(b))
+        )
+        .0,
         Status::State
     );
     // Confirmed (off trial), it is.
     n.reset(|s| s.app_trial = false);
     assert_eq!(
-        n.call(Cmd::SetPending, &[target::BOOTCORE, 0]).0,
+        n.call(
+            Cmd::SetPending,
+            &wire(|b| dagon_proto::payload::SetPending {
+                target: target::BOOTCORE,
+                slot: 0
+            }
+            .encode(b))
+        )
+        .0,
         Status::Ok
     );
 
@@ -649,7 +724,15 @@ fn a_board_without_boot_core_slots_refuses_with_the_reason() {
     );
     assert!(n.events().contains(&"update_refused".to_string()));
     assert_eq!(
-        n.call(Cmd::SetPending, &[target::BOOTCORE, 1]).0,
+        n.call(
+            Cmd::SetPending,
+            &wire(|b| dagon_proto::payload::SetPending {
+                target: target::BOOTCORE,
+                slot: 1
+            }
+            .encode(b))
+        )
+        .0,
         Status::Unsupported
     );
 }
@@ -657,8 +740,16 @@ fn a_board_without_boot_core_slots_refuses_with_the_reason() {
 #[test]
 fn status_of_an_unknown_target_or_shape_is_refused() {
     let mut n = Node::new(installed(true));
-    assert_eq!(n.call(Cmd::Status, &[9]).0, Status::Unsupported);
-    assert_eq!(n.call(Cmd::Status, &[1, 1]).0, Status::Arg);
+    assert_eq!(
+        n.call(
+            Cmd::Status,
+            &wire(|b| dagon_proto::payload::encode_status_req(9, b))
+        )
+        .0,
+        Status::Unsupported
+    );
+    // The target field with two bytes.
+    assert_eq!(n.call(Cmd::Status, &[0x03, 2, 1, 1]).0, Status::Arg);
     assert_eq!(n.call(Cmd::Status, &[]).0, Status::Ok, "APP as before");
 }
 
@@ -672,17 +763,17 @@ fn version(n: &mut Node) -> VersionResp {
 fn version_names_stage0_the_boot_core_slots_and_the_app() {
     let mut n = Node::new(installed(true));
     let v = version(&mut n);
-    assert_eq!((v.wire, v.mcu_id), (Some(1), Some(mcu_id::RP2040)));
+    assert_eq!((v.wire, v.mcu_id), (Some(2), Some(mcu_id::RP2040)));
     assert_eq!(v.stage0, Some(STAGE0));
     let core = v.core_slots.expect("boot core slots");
     assert_eq!(core.active, 0);
     assert_eq!(v.boot_core, Some(Version::new(1, 0, 0)));
     assert_eq!(core.slots[1].state, SlotState::Empty);
     assert_eq!(v.app_slots, Some(VersionSlots::of(&app_status(false))));
-    assert_eq!(
-        n.call(Cmd::Version, &[0x21, 0, 0, 8]).0,
-        Status::Unsupported
-    );
+    // A selector (must field 18) this agent does not know is named back.
+    let (st, body) = n.call(Cmd::Version, &[0x25, 2, 0, 8]);
+    assert_eq!(st, Status::Field);
+    assert_eq!(dagon_proto::payload::refused_field(&body), Some(18));
 
     // A new boot core written to B shows there, A still running.
     assert_eq!(n.transfer(target::BOOTCORE, 1, &bootcore(1, 1)), Status::Ok);
@@ -706,4 +797,26 @@ fn kind_name(e: &dagon_events::Event<'_>) -> &'static str {
         .iter()
         .find_map(|m| m.entry(e.layer(), e.kind()))
         .map_or("?", |x| x.kind)
+}
+
+/// The request payload `enc` writes.
+#[allow(dead_code)]
+fn wire(enc: impl FnOnce(&mut [u8]) -> Result<usize, dagon_proto::FrameError>) -> Vec<u8> {
+    let mut b = vec![0u8; 1100];
+    let n = enc(&mut b).unwrap();
+    b.truncate(n);
+    b
+}
+
+/// The bulk of an OK RELAY or I2C_RAW response; any other body as it is.
+#[allow(dead_code)]
+fn bulk_of(cmd: u8, status: dagon_proto::Status, body: &[u8]) -> &[u8] {
+    match dagon_proto::Cmd::from_u8(cmd) {
+        Some(c @ (dagon_proto::Cmd::Relay | dagon_proto::Cmd::I2cRaw))
+            if status == dagon_proto::Status::Ok =>
+        {
+            dagon_proto::payload::parse_bulk_resp(c, body).unwrap()
+        }
+        _ => body,
+    }
 }

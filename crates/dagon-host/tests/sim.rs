@@ -160,9 +160,11 @@ struct Faults {
 
 /// Command and RETRY flag of a request frame (inner frame for RELAY).
 fn effective(b: &[u8]) -> (u8, bool) {
-    const INNER: usize = 8 + 4;
-    let at = if b[5] == Cmd::Relay as u8 { INNER } else { 0 };
-    (b[at + 5], b[at + 3] & flags::RETRY != 0)
+    let (f, _) = dagon_proto::Frame::decode(b, dagon_proto::max_payload::USB).unwrap();
+    let relayed = f.cmd == Cmd::Relay as u8;
+    let inner = relayed.then(|| dagon_proto::payload::Relay::parse(f.payload).unwrap().inner);
+    let b = inner.unwrap_or(b);
+    (b[5], b[3] & flags::RETRY != 0)
 }
 
 #[derive(Clone)]
@@ -388,7 +390,7 @@ fn version_of_the_hub_and_a_node_and_of_an_agent_that_predates_it() {
         (seg_at(), mcu_id::STM32F401XE),
     ] {
         let v = block_on(h.version(to)).unwrap().expect("answers VERSION");
-        assert_eq!((v.wire, v.mcu_id), (Some(1), Some(mcu)), "{to:?}");
+        assert_eq!((v.wire, v.mcu_id), (Some(2), Some(mcu)), "{to:?}");
         assert_eq!(v.stage0, Some(dagon_sim::store::STAGE0_VERSION));
         assert!(v.core_slots.is_some(), "boot core slots behind stage0");
         assert_eq!(v.boot_core, Some(Version::new(1, 0, 0)));
@@ -612,7 +614,7 @@ fn full_apply_then_rollback() {
     // request per body chunk and one SHOW per new number the hub is told
     // (the first goes before XFER_BEGIN).
     let rt = dagon_sim::relay::PC_ROUND_TRIP_MS as u32;
-    let chunk = hub_max.min(s.max_payload()) - 4;
+    let chunk = hub_max.min(s.max_payload()) - dagon_proto::payload::XferChunk::OVERHEAD;
     let body = hub_img(1, v).len() - dagon_format::header::HEADER_SIZE;
     let numbers: Vec<u8> = events
         .iter()
@@ -1277,7 +1279,7 @@ fn count(s: &Sim, cmd: Cmd) -> usize {
 }
 
 fn xfer_begin(slot: u8, hdr_len: u16) -> Vec<u8> {
-    let mut b = [0u8; 8];
+    let mut b = [0u8; 32];
     let n = dagon_proto::payload::XferBegin {
         target: dagon_proto::payload::target::APP,
         slot,
@@ -1417,7 +1419,12 @@ fn subctl_and_i2c_raw_are_never_resent() {
         .borrow_mut()
         .drop_req
         .extend([(Cmd::SubCtl as u8, 1), (Cmd::I2cRaw as u8, 1)]);
-    let r = block_on(h.call(Target::Local, Cmd::SubCtl, &[0, 0], REQUEST_MS));
+    let r = block_on(h.call(
+        Target::Local,
+        Cmd::SubCtl,
+        &wire(|b| dagon_proto::payload::SubCtl { nrst: 0, boot0: 0 }.encode(b)),
+        REQUEST_MS,
+    ));
     assert!(matches!(r, Err(Error::Timeout)), "{r:?}");
     let raw = [1u8, 0, 1, 0, 0x00];
     let r = block_on(h.call(Target::Local, Cmd::I2cRaw, &raw, REQUEST_MS));
@@ -2432,4 +2439,13 @@ fn a_power_cut_at_every_hub_flash_step_leaves_a_bootable_hub() {
                 .unwrap_or_else(|e| panic!("{cut:?}: hub silent: {e:?}"));
         }
     }
+}
+
+/// The request payload `enc` writes.
+#[allow(dead_code)]
+fn wire(enc: impl FnOnce(&mut [u8]) -> Result<usize, dagon_proto::FrameError>) -> Vec<u8> {
+    let mut b = vec![0u8; 1100];
+    let n = enc(&mut b).unwrap();
+    b.truncate(n);
+    b
 }

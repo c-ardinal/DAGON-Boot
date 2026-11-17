@@ -209,14 +209,29 @@ impl Model {
                 if s == st.active || st.slots[usize::from(s)].state == SlotState::Empty {
                     return false;
                 }
-                let st = self.call(Cmd::SetPending, &[target::APP, s]);
+                let st = self.call(
+                    Cmd::SetPending,
+                    &wire(|b| {
+                        dagon_proto::payload::SetPending {
+                            target: target::APP,
+                            slot: s,
+                        }
+                        .encode(b)
+                    }),
+                );
                 assert_eq!(st, Status::Ok, "set pending {s}");
             }
             Op::Confirm => {
                 if !trying(&st) {
                     return false;
                 }
-                assert_eq!(self.call(Cmd::Confirm, &[target::APP]), Status::Ok);
+                assert_eq!(
+                    self.call(
+                        Cmd::Confirm,
+                        &wire(|b| dagon_proto::payload::encode_confirm(target::APP, b))
+                    ),
+                    Status::Ok
+                );
             }
             Op::Boot => {
                 self.store.boot();
@@ -320,4 +335,13 @@ fn a_retried_confirmed_image_starts_a_fresh_trial() {
     let st = m.store.status();
     assert_eq!((st.active, st.confirmed), (0, 0));
     assert_eq!(st.slots[0].state, SlotState::Confirmed);
+}
+
+/// The request payload `enc` writes.
+#[allow(dead_code)]
+fn wire(enc: impl FnOnce(&mut [u8]) -> Result<usize, dagon_proto::FrameError>) -> Vec<u8> {
+    let mut b = vec![0u8; 1100];
+    let n = enc(&mut b).unwrap();
+    b.truncate(n);
+    b
 }

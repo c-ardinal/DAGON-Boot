@@ -29,7 +29,7 @@
 # scripts/bump_check.py and scripts/changelog.py read it for releases.
 
 [formats]
-wire = 1            # frames and payloads between host, hub and nodes: byte 2 of every frame, HELLO proto_ver (dagon-proto PROTO_VERSION)
+wire = 2            # frames and payloads between host, hub and nodes: byte 2 of every frame, HELLO proto_ver (dagon-proto PROTO_VERSION)
 image-header = 1    # signed 512-byte image header: offset 0x004 (dagon-format header::HDR_VERSION)
 state-log = 1       # boot core and app state log faces: offset 0x004 (dagon-format statelog::FORMAT_VERSION)
 manifest = 1        # release manifest: offset 4 (dagon-format manifest::MF_VERSION)
@@ -49,7 +49,7 @@ name = "cli"
 version = "0.1.0"
 packages = ["dagon-cli"]
 paths = ["crates/dagon-cli", "crates/dagon-wasm", "web"]
-formats = { wire = [1], image-header = [1], state-log = [1], manifest = [1], bundle = [1], topology-bin = [2], topology-yaml = [2], definitions = [3], serve-api = [1], layout = [1], event = [1], extension-manifest = [1], boot-program = [1], project = [1] }
+formats = { wire = [2], image-header = [1], state-log = [1], manifest = [1], bundle = [1], topology-bin = [2], topology-yaml = [2], definitions = [3], serve-api = [1], layout = [1], event = [1], extension-manifest = [1], boot-program = [1], project = [1] }
 
 [[component]]
 name = "boot-rp2040"
@@ -70,14 +70,14 @@ name = "mcu-rp2040"
 version = "0.1.0"
 packages = ["dagon-mcu-rp2040"]
 paths = ["targets/mcu/rp2040"]
-formats = { wire = [1], image-header = [1], state-log = [1], definitions = [3] }
+formats = { wire = [2], image-header = [1], state-log = [1], definitions = [3] }
 
 [[component]]
 name = "mcu-stm32f401re"
 version = "0.1.0"
 packages = ["dagon-mcu-stm32f401re"]
 paths = ["targets/mcu/stm32f401re"]
-formats = { wire = [1], image-header = [1], state-log = [1], definitions = [3] }
+formats = { wire = [2], image-header = [1], state-log = [1], definitions = [3] }
 
 # The ESP32-S3 boots through the vendor 2nd stage (port vendor-stage2),
 # built from targets/esp32s3-2ndstage with the package's vendored options.
@@ -86,14 +86,14 @@ name = "mcu-esp32s3"
 version = "0.1.0"
 packages = ["dagon-mcu-esp32s3"]
 paths = ["targets/mcu/esp32s3", "targets/esp32s3-2ndstage"]
-formats = { wire = [1], image-header = [1], state-log = [1], definitions = [3] }
+formats = { wire = [2], image-header = [1], state-log = [1], definitions = [3] }
 
 [[component]]
 name = "mcu-common"
 version = "0.1.0"
 packages = ["dagon-mcu-common"]
 paths = ["targets/mcu/common"]
-formats = { wire = [1] }
+formats = { wire = [2] }
 
 [[component]]
 name = "mcu-build"
@@ -140,7 +140,7 @@ name = "proto"
 version = "0.1.0"
 packages = ["dagon-proto"]
 paths = ["crates/dagon-proto"]
-formats = { wire = [1] }
+formats = { wire = [2] }
 
 [[component]]
 name = "core"
@@ -174,21 +174,21 @@ name = "agent"
 version = "0.1.0"
 packages = ["dagon-agent"]
 paths = ["crates/dagon-agent"]
-formats = { wire = [1], image-header = [1] }
+formats = { wire = [2], image-header = [1] }
 
 [[component]]
 name = "relay"
 version = "0.1.0"
 packages = ["dagon-relay"]
 paths = ["crates/dagon-relay"]
-formats = { wire = [1] }
+formats = { wire = [2] }
 
 [[component]]
 name = "host"
 version = "0.1.0"
 packages = ["dagon-host"]
 paths = ["crates/dagon-host"]
-formats = { wire = [1], image-header = [1], state-log = [1], bundle = [1], topology-bin = [2] }
+formats = { wire = [2], image-header = [1], state-log = [1], bundle = [1], topology-bin = [2] }
 
 [[component]]
 name = "extension"
@@ -216,14 +216,14 @@ name = "sim"
 version = "0.1.0"
 packages = ["dagon-sim"]
 paths = ["crates/dagon-sim"]
-formats = { wire = [1], image-header = [1], state-log = [1] }
+formats = { wire = [2], image-header = [1], state-log = [1] }
 
 [[component]]
 name = "conform"
 version = "0.1.0"
 packages = ["dagon-conform"]
 paths = ["crates/dagon-conform"]
-formats = { wire = [1], image-header = [1], state-log = [1] }
+formats = { wire = [2], image-header = [1], state-log = [1] }
 
 [[component]]
 name = "romlink"

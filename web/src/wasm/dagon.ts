@@ -3,6 +3,14 @@
 // file has to free WASM memory.
 import init, {
   FrameCutter,
+  hello_response_body,
+  request_read,
+  response_digest,
+  response_next_offset,
+  response_relay,
+  response_status,
+  response_status_slots,
+  wire,
   WasmHost,
   frame_encode,
   hello_decode,
@@ -20,6 +28,7 @@ import init, {
   supported_boards as boards,
   version_older,
   version_text,
+  wire_version,
 } from './pkg/dagon_wasm.js';
 import type { HostLink, Target } from './pkg/dagon_wasm.js';
 import type { HelloReq, HelloResp } from '../serial/hello.ts';
@@ -206,6 +215,119 @@ export function encodeFrameBytes(flags: number, seq: number, cmd: number, payloa
   return frame_encode(flags, seq, cmd, payload);
 }
 
+/** The wire's numbers the page names, as dagon-proto has them (dagon_wasm::Wire). */
+export interface WireNumbers {
+  cmdHello: number;
+  cmdStatus: number;
+  cmdXferBegin: number;
+  cmdXferData: number;
+  cmdXferEnd: number;
+  cmdXferHdr: number;
+  cmdSetPending: number;
+  cmdReboot: number;
+  cmdConfirm: number;
+  cmdShow: number;
+  cmdRelay: number;
+  statusOk: number;
+  statusUnsupported: number;
+  statusArg: number;
+  statusField: number;
+  statusState: number;
+  statusTimeout: number;
+  flagResp: number;
+  headerLen: number;
+  crcLen: number;
+  maxPayloadUsb: number;
+  maxPayloadUart: number;
+  maxPayloadI2c: number;
+}
+
+let numbers: WireNumbers | undefined;
+
+/** Read once, when first asked (dagon-wasm is loaded by then). */
+export function wireNumbers(): WireNumbers {
+  if (numbers) return numbers;
+  const w = wire();
+  try {
+    numbers = {
+      cmdHello: w.cmd_hello,
+      cmdStatus: w.cmd_status,
+      cmdXferBegin: w.cmd_xfer_begin,
+      cmdXferData: w.cmd_xfer_data,
+      cmdXferEnd: w.cmd_xfer_end,
+      cmdXferHdr: w.cmd_xfer_hdr,
+      cmdSetPending: w.cmd_set_pending,
+      cmdReboot: w.cmd_reboot,
+      cmdConfirm: w.cmd_confirm,
+      cmdShow: w.cmd_show,
+      cmdRelay: w.cmd_relay,
+      statusOk: w.status_ok,
+      statusUnsupported: w.status_unsupported,
+      statusArg: w.status_arg,
+      statusField: w.status_field,
+      statusState: w.status_state,
+      statusTimeout: w.status_timeout,
+      flagResp: w.flag_resp,
+      headerLen: w.header_len,
+      crcLen: w.crc_len,
+      maxPayloadUsb: w.max_payload_usb,
+      maxPayloadUart: w.max_payload_uart,
+      maxPayloadI2c: w.max_payload_i2c,
+    };
+    return numbers;
+  } finally {
+    w.free();
+  }
+}
+
+/** A request read by dagon-proto's reader; only the members of its command mean something. */
+export interface WireRequest {
+  /** The response payload that refuses the request; null when it reads. */
+  refusal: Uint8Array | null;
+  target: number;
+  slot: number;
+  offset: number;
+  link: number;
+  addr: number;
+  /** A chunk's data, or a RELAY's inner frame. */
+  bulk: Uint8Array;
+}
+
+/** Reads a request for the in-memory hub: malformed, an unknown must field and an unserved command come back as `refusal`. */
+export function readRequest(cmd: number, payload: Uint8Array): WireRequest {
+  const r = request_read(cmd, payload);
+  try {
+    const refusal = r.refusal;
+    return { refusal: refusal.length ? refusal : null, target: r.target, slot: r.slot, offset: r.offset, link: r.link, addr: r.addr, bulk: r.bulk };
+  } finally {
+    r.free();
+  }
+}
+
+/** Response payloads for the in-memory hub, written by dagon-proto's writer. */
+export const respond = {
+  status: (status: number): Uint8Array => response_status(status),
+  helloBody: (h: HelloResp): Uint8Array =>
+    hello_response_body(h.protoVer, h.role, h.portKind, h.mcuId, h.mode, h.activeVersion, h.trial, h.keyId, h.maxPayload),
+  slots: (
+    slots: { state: number; version: number; digest16: Uint8Array }[],
+    rest: { active: number; confirmed: number; attempts: number; lastReason: number; logGeneration: number },
+  ): Uint8Array =>
+    response_status_slots(
+      Uint8Array.from(slots.map((s) => s.state)),
+      Uint32Array.from(slots.map((s) => s.version)),
+      Uint8Array.from(slots.flatMap((s) => [...s.digest16])),
+      rest.active,
+      rest.confirmed,
+      rest.attempts,
+      rest.lastReason,
+      rest.logGeneration,
+    ),
+  nextOffset: (next: number): Uint8Array => response_next_offset(next),
+  digest: (sha256: Uint8Array): Uint8Array => response_digest(sha256),
+  relay: (frame: Uint8Array): Uint8Array => response_relay(frame),
+};
+
 /** Stream cutter: SOF search, length and CRC checks are dagon-proto's. */
 export interface FrameStream {
   /** Each complete, CRC-checked frame in `chunk` (and earlier partial bytes). */
@@ -316,6 +438,11 @@ export function supportedBoards(): Board[] {
 /** The board a node naming only `mcu` stands for; undefined when the MCU has none (several boards, none marked). */
 export function defaultBoard(mcu: string): string | undefined {
   return supportedBoards().find((b) => b.mcu === mcu && b.isDefault)?.id;
+}
+
+/** The wire version this page speaks (dagon_proto::PROTO_VERSION). */
+export function wireVersion(): number {
+  return wire_version();
 }
 
 export function encodeHelloReq(r: HelloReq): Uint8Array {

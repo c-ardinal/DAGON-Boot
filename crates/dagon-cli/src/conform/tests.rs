@@ -135,22 +135,28 @@ impl RelaySim {
             return None;
         }
         assert!(
-            r.timeout_ms as u32 >= dagon_port::timeout::CONF_RUN_MS,
+            u32::from(r.timeout_ms.unwrap_or(0)) >= dagon_port::timeout::CONF_RUN_MS,
             "CONF_RUN relayed with {} ms",
-            r.timeout_ms
+            r.timeout_ms.unwrap_or(0)
         );
         let mut relay = self.relay.borrow_mut();
         relay.advance_ms(dagon_sim::relay::PC_ROUND_TRIP_MS);
         let port = relay.links().iter().find(|l| l.id == r.link)?.port;
         let inner = conf_run(relay.bus.i2c_node(port, r.addr)?, r.inner, max_payload::I2C);
-        let (status, body) = match &inner {
-            Some(b) => (dagon_proto::Status::Ok, b.as_slice()),
-            None => (dagon_proto::Status::Timeout, &[][..]),
+        // OK with the node's frame as bulk, or the relay's E_TIMEOUT alone.
+        let mut out = vec![0u8; frame_len(2 + inner.as_ref().map_or(0, Vec::len))];
+        let len = match &inner {
+            Some(b) => {
+                out[8] = dagon_proto::Status::Ok as u8;
+                1 + dagon_proto::payload::encode_bulk_resp(b, &mut out[9..]).ok()?
+            }
+            None => {
+                out[8] = dagon_proto::Status::Timeout as u8;
+                1
+            }
         };
-        let mut out = vec![0u8; frame_len(1 + body.len())];
-        out[8] = status as u8;
-        out[9..9 + body.len()].copy_from_slice(body);
-        dagon_proto::finish(&mut out, flags::RESP, f.seq, f.cmd, 1 + body.len()).ok()?;
+        let n = dagon_proto::finish(&mut out, flags::RESP, f.seq, f.cmd, len).ok()?;
+        out.truncate(n);
         Some(out)
     }
 }

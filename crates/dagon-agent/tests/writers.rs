@@ -347,6 +347,7 @@ impl<V: SigVerifier, W: Writer> Bench<V, W> {
         let (f, _) = Frame::decode(reply.frame, 300).unwrap();
         assert_eq!((f.seq, f.flags), (self.seq, flags::RESP));
         let (st, body) = split_status(f.payload).unwrap();
+        let body = bulk_of(f.cmd, st, body);
         (st, body.to_vec(), reboot)
     }
 
@@ -390,7 +391,10 @@ impl<V: SigVerifier, W: Writer> Bench<V, W> {
     }
 
     fn set_pending(&mut self, t: u8, slot: u8) -> Status {
-        self.call(Cmd::SetPending, &[t, slot])
+        self.call(
+            Cmd::SetPending,
+            &wire(|b| dagon_proto::payload::SetPending { target: t, slot }.encode(b)),
+        )
     }
 
     fn state(&self, t: u8, slot: u8) -> SlotState {
@@ -534,7 +538,13 @@ fn only_the_app_confirms_its_trial() {
     mem.status[0].active = 1;
     mem.status[0].slots[1].state = SlotState::Trying;
     let mut core = Bench::<_, writer::BootCore>::new(ed25519(&kp), mem);
-    assert_eq!(core.call(Cmd::Confirm, &[target::APP]), Status::State);
+    assert_eq!(
+        core.call(
+            Cmd::Confirm,
+            &wire(|b| dagon_proto::payload::encode_confirm(target::APP, b))
+        ),
+        Status::State
+    );
     assert_eq!(core.agent.confirm_own(), Err(Status::State));
     assert_eq!(core.state(target::APP, 1), SlotState::Trying);
 }
@@ -563,7 +573,8 @@ fn the_boot_core_serves_none_of_the_app_only_requests() {
     let kp = keypair();
     let mut app = Bench::<_, writer::App>::new(ed25519(&kp), Mem::new(2, 1));
     let mut core = Bench::<_, writer::BootCore>::new(ed25519(&kp), Mem::new(2, 1));
-    let show = [1, 1, 42, 0, 0, 0, 0];
+    // Core: the phase; field 2: the percent.
+    let show = [1, 0x04, 1, 42];
     assert_eq!(app.call(Cmd::Show, &show), Status::Ok);
     assert_eq!(core.call(Cmd::Show, &show), Status::Unsupported);
     let p = begin(target::AGENT, 2, HEADER_SIZE as u16);
@@ -733,19 +744,31 @@ fn sources(dir: &std::path::Path) -> Vec<(String, String)> {
 fn the_app_hands_over_to_the_boot_core_with_reboot_mode_1() {
     let kp = keypair();
     let mut app = Bench::<_, writer::App>::new(ed25519(&kp), Mem::new(2, 1));
-    let (st, _, reboot) = app.exchange(Cmd::Reboot, &[reboot_mode::UPDATE]);
+    let (st, _, reboot) = app.exchange(
+        Cmd::Reboot,
+        &wire(|b| dagon_proto::payload::encode_reboot(reboot_mode::UPDATE, b)),
+    );
     assert_eq!((st, reboot), (Status::Ok, true));
     assert_eq!(app.mem.borrow().stays, 1);
 
     let mut none = Mem::new(2, 1);
     none.update_mode = false;
     let mut app = Bench::<_, writer::App>::new(ed25519(&kp), none);
-    let (st, _, reboot) = app.exchange(Cmd::Reboot, &[reboot_mode::UPDATE]);
+    let (st, _, reboot) = app.exchange(
+        Cmd::Reboot,
+        &wire(|b| dagon_proto::payload::encode_reboot(reboot_mode::UPDATE, b)),
+    );
     assert_eq!((st, reboot), (Status::Unsupported, false));
 
-    let (st, _, reboot) = app.exchange(Cmd::Reboot, &[reboot_mode::NORMAL]);
+    let (st, _, reboot) = app.exchange(
+        Cmd::Reboot,
+        &wire(|b| dagon_proto::payload::encode_reboot(reboot_mode::NORMAL, b)),
+    );
     assert_eq!((st, reboot), (Status::Ok, true), "mode 0 as before");
-    let (st, _, reboot) = app.exchange(Cmd::Reboot, &[2]);
+    let (st, _, reboot) = app.exchange(
+        Cmd::Reboot,
+        &wire(|b| dagon_proto::payload::encode_reboot(2, b)),
+    );
     assert_eq!((st, reboot), (Status::Arg, false), "a mode not defined");
 }
 
@@ -763,10 +786,16 @@ fn stay_and_reboot_mode_1_keep_the_boot_core_in_update_mode() {
         Bench::<_, writer::BootCore>::in_mode(ed25519(&kp), Mem::new(2, 1), mode::UPDATE);
     let (st, _, reboot) = core.exchange(Cmd::Stay, &[]);
     assert_eq!((st, reboot), (Status::Ok, false));
-    let (st, _, reboot) = core.exchange(Cmd::Reboot, &[reboot_mode::UPDATE]);
+    let (st, _, reboot) = core.exchange(
+        Cmd::Reboot,
+        &wire(|b| dagon_proto::payload::encode_reboot(reboot_mode::UPDATE, b)),
+    );
     assert_eq!((st, reboot), (Status::Ok, false));
     assert_eq!(core.mem.borrow().stays, 0);
-    let (st, _, reboot) = core.exchange(Cmd::Reboot, &[reboot_mode::NORMAL]);
+    let (st, _, reboot) = core.exchange(
+        Cmd::Reboot,
+        &wire(|b| dagon_proto::payload::encode_reboot(reboot_mode::NORMAL, b)),
+    );
     assert_eq!((st, reboot), (Status::Ok, true), "leaves update mode");
 }
 
@@ -812,7 +841,10 @@ fn the_boot_core_writes_only_in_update_or_recovery_mode() {
         assert_eq!(core.mem.borrow().rooms, 1, "mode {m}");
         assert_eq!(core.set_pending(target::APP, 1), Status::Ok, "mode {m}");
         assert_eq!(core.state(target::APP, 1), SlotState::Pending, "mode {m}");
-        let (st, _, reboot) = core.exchange(Cmd::Reboot, &[reboot_mode::UPDATE]);
+        let (st, _, reboot) = core.exchange(
+            Cmd::Reboot,
+            &wire(|b| dagon_proto::payload::encode_reboot(reboot_mode::UPDATE, b)),
+        );
         assert_eq!((st, reboot), (Status::Ok, false), "mode {m}");
     }
     for m in [mode::APP, mode::AGENT] {
@@ -830,7 +862,10 @@ fn the_boot_core_writes_only_in_update_or_recovery_mode() {
         assert_eq!(core.set_pending(target::APP, 1), Status::State, "mode {m}");
         assert_eq!(core.state(target::APP, 1), SlotState::Written, "mode {m}");
         // Log: no room reserved, no stay kept.
-        let (st, _, reboot) = core.exchange(Cmd::Reboot, &[reboot_mode::UPDATE]);
+        let (st, _, reboot) = core.exchange(
+            Cmd::Reboot,
+            &wire(|b| dagon_proto::payload::encode_reboot(reboot_mode::UPDATE, b)),
+        );
         assert_eq!((st, reboot), (Status::State, false), "mode {m}");
         {
             let mem = core.mem.borrow();
@@ -840,7 +875,7 @@ fn the_boot_core_writes_only_in_update_or_recovery_mode() {
             assert_eq!(mem.status[0].slots[0].state, SlotState::Confirmed);
         }
 
-        let mut p = [0u8; 8];
+        let mut p = [0u8; 32];
         let n = HelloReq {
             proto_ver: 1,
             max_payload: 256,
@@ -851,7 +886,10 @@ fn the_boot_core_writes_only_in_update_or_recovery_mode() {
         assert_eq!(core.call(Cmd::Status, &[]), Status::Ok, "mode {m}");
         assert_eq!(core.call(Cmd::Version, &[]), Status::Ok, "mode {m}");
         assert_eq!(core.call(Cmd::Stay, &[]), Status::Ok, "mode {m}");
-        let (st, _, reboot) = core.exchange(Cmd::Reboot, &[reboot_mode::NORMAL]);
+        let (st, _, reboot) = core.exchange(
+            Cmd::Reboot,
+            &wire(|b| dagon_proto::payload::encode_reboot(reboot_mode::NORMAL, b)),
+        );
         assert_eq!((st, reboot), (Status::Ok, true), "mode {m}");
     }
 }
@@ -907,9 +945,8 @@ fn old_transfer<W: Writer>(
     let (hdr, body) = img.split_at(HEADER_SIZE);
     for (cmd, part) in [(Cmd::XferHdr, hdr), (Cmd::XferData, body)] {
         for (i, c) in part.chunks(chunk).enumerate() {
-            let mut p = vec![0u8; 4 + c.len()];
             let offset = (i * chunk) as u32;
-            XferChunk { offset, data: c }.encode(&mut p).unwrap();
+            let p = wire(|b| XferChunk { offset, data: c }.encode(b));
             if !step(n, log, cmd, &p) {
                 return false;
             }
@@ -934,7 +971,7 @@ fn old_host_write<W: Writer>(
     (slot, app): (u8, &[u8]),
 ) -> (Vec<Step>, bool) {
     let mut log = Vec::new();
-    let mut p = [0u8; 8];
+    let mut p = [0u8; 32];
     let len = HelloReq {
         proto_ver: 1,
         max_payload: max_payload::USB as u16,
@@ -945,24 +982,42 @@ fn old_host_write<W: Writer>(
     step(n, &mut log, Cmd::Hello, hello);
     let (st, h, _) = n.exchange(Cmd::Hello, hello);
     log.push((Cmd::Hello, st));
-    let chunk = usize::from(HelloResp::parse(&h).unwrap().max_payload) - 4;
+    let chunk = usize::from(HelloResp::parse(&h).unwrap().max_payload) - XferChunk::OVERHEAD;
     if !step(n, &mut log, Cmd::Status, &[]) {
         return (log, false);
     }
     if let Some((cs, img)) = core {
-        let ok = step(n, &mut log, Cmd::Status, &[target::BOOTCORE])
-            && step(n, &mut log, Cmd::Hello, hello)
+        let ok = step(
+            n,
+            &mut log,
+            Cmd::Status,
+            &wire(|b| dagon_proto::payload::encode_status_req(target::BOOTCORE, b)),
+        ) && step(n, &mut log, Cmd::Hello, hello)
             && old_transfer(n, &mut log, (target::BOOTCORE, cs, img), chunk);
         if !ok {
             return (log, false);
         }
     }
     let ok = old_transfer(n, &mut log, (target::APP, slot, app), chunk)
-        && step(n, &mut log, Cmd::SetPending, &[target::APP, slot]);
+        && step(
+            n,
+            &mut log,
+            Cmd::SetPending,
+            &wire(|b| {
+                dagon_proto::payload::SetPending {
+                    target: target::APP,
+                    slot,
+                }
+                .encode(b)
+            }),
+        );
     if !ok {
         return (log, false);
     }
-    let (st, _, reboot) = n.exchange(Cmd::Reboot, &[reboot_mode::NORMAL]);
+    let (st, _, reboot) = n.exchange(
+        Cmd::Reboot,
+        &wire(|b| dagon_proto::payload::encode_reboot(reboot_mode::NORMAL, b)),
+    );
     log.push((Cmd::Reboot, st));
     (log, reboot)
 }
@@ -987,7 +1042,7 @@ fn an_old_hosts_write_through_the_boot_core_writes_the_app_but_never_the_running
     };
     let new_core = image(new_core, &body(), &kp);
     let ok = |c| (c, Status::Ok);
-    let chunk = max_payload::I2C - 4;
+    let chunk = max_payload::I2C - XferChunk::OVERHEAD;
     for m in [mode::UPDATE, mode::RECOVERY] {
         let mut core = Bench::<_, writer::BootCore>::in_mode(ed25519(&kp), Mem::new(2, 1), m);
         let (log, reboot) = old_host_write(&mut core, None, (1, &app));
@@ -1089,4 +1144,26 @@ fn the_writers_targets_are_the_definitions() {
         of(<writer::BootCore as Writer>::WRITES),
         listed(ImageKind::Bootcore)
     );
+}
+
+/// The request payload `enc` writes.
+#[allow(dead_code)]
+fn wire(enc: impl FnOnce(&mut [u8]) -> Result<usize, dagon_proto::FrameError>) -> Vec<u8> {
+    let mut b = vec![0u8; 1100];
+    let n = enc(&mut b).unwrap();
+    b.truncate(n);
+    b
+}
+
+/// The bulk of an OK RELAY or I2C_RAW response; any other body as it is.
+#[allow(dead_code)]
+fn bulk_of(cmd: u8, status: dagon_proto::Status, body: &[u8]) -> &[u8] {
+    match dagon_proto::Cmd::from_u8(cmd) {
+        Some(c @ (dagon_proto::Cmd::Relay | dagon_proto::Cmd::I2cRaw))
+            if status == dagon_proto::Status::Ok =>
+        {
+            dagon_proto::payload::parse_bulk_resp(c, body).unwrap()
+        }
+        _ => body,
+    }
 }

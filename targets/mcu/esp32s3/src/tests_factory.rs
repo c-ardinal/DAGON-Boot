@@ -108,17 +108,18 @@ impl Pc {
         let (f, _) = Frame::decode(reply.frame, MAX).unwrap();
         assert_eq!((f.seq, f.flags), (self.seq, flags::RESP));
         let (st, body) = split_status(f.payload).unwrap();
+        let body = bulk_of(f.cmd, st, body);
         (st, body.to_vec())
     }
 
     fn hello(&mut self) -> HelloResp {
-        let mut p = [0u8; 6];
-        HelloReq {
-            proto_ver: 1,
-            max_payload: MAX as u16,
-        }
-        .encode(&mut p)
-        .unwrap();
+        let p = wire(|b| {
+            HelloReq {
+                proto_ver: 1,
+                max_payload: MAX as u16,
+            }
+            .encode(b)
+        });
         let (st, body) = self.call(Cmd::Hello, &p);
         assert_eq!(st, Status::Ok);
         HelloResp::parse(&body).unwrap()
@@ -140,7 +141,7 @@ impl Pc {
     /// requests (a power cut between two of them): `Status::Timeout` then.
     fn transfer_to(&mut self, t: u8, slot: u8, img: &[u8], requests: usize) -> Status {
         let mut left = requests;
-        let mut p = [0u8; 8];
+        let mut p = [0u8; 32];
         let n = XferBegin {
             target: t,
             slot,
@@ -152,16 +153,20 @@ impl Pc {
         let mut steps: Vec<(Cmd, Vec<u8>)> = vec![(Cmd::XferBegin, p[..n].to_vec())];
         for (cmd, part, size) in [
             (Cmd::XferHdr, &img[..HEADER_SIZE], 128),
-            (Cmd::XferData, &img[HEADER_SIZE..], MAX - 4),
+            (
+                Cmd::XferData,
+                &img[HEADER_SIZE..],
+                MAX - XferChunk::OVERHEAD,
+            ),
         ] {
             for (i, c) in part.chunks(size).enumerate() {
-                let mut b = vec![0u8; c.len() + 4];
-                XferChunk {
-                    offset: (i * size) as u32,
-                    data: c,
-                }
-                .encode(&mut b)
-                .unwrap();
+                let b = wire(|b| {
+                    XferChunk {
+                        offset: (i * size) as u32,
+                        data: c,
+                    }
+                    .encode(b)
+                });
                 steps.push((cmd, b));
             }
         }
@@ -180,7 +185,17 @@ impl Pc {
     }
 
     fn set_pending(&mut self, slot: u8) -> Status {
-        self.call(Cmd::SetPending, &[target::APP, slot]).0
+        self.call(
+            Cmd::SetPending,
+            &wire(|b| {
+                dagon_proto::payload::SetPending {
+                    target: target::APP,
+                    slot,
+                }
+                .encode(b)
+            }),
+        )
+        .0
     }
 
     fn store(&mut self) -> RefMut<'static, Store> {
@@ -210,7 +225,14 @@ fn app_confirmed_in_a(kp: &KeyPair) -> Pc {
     );
     assert_eq!(pc.set_pending(SLOT_A), Status::Ok);
     pc.reboot();
-    assert_eq!(pc.call(Cmd::Confirm, &[target::APP]).0, Status::Ok);
+    assert_eq!(
+        pc.call(
+            Cmd::Confirm,
+            &wire(|b| dagon_proto::payload::encode_confirm(target::APP, b))
+        )
+        .0,
+        Status::Ok
+    );
     pc.reboot();
     let st = pc.status();
     assert_eq!((st.active, st.confirmed), (SLOT_A, SLOT_A));
@@ -240,7 +262,15 @@ fn the_running_app_writes_a_new_factory_agent() {
         as usize;
     assert_eq!(&pc.store().flash.0[h..h + HEADER_SIZE], &ag[..HEADER_SIZE]);
     assert_eq!(
-        pc.call(Cmd::SetPending, &[target::AGENT, SLOT_FACTORY]).0,
+        pc.call(
+            Cmd::SetPending,
+            &wire(|b| dagon_proto::payload::SetPending {
+                target: target::AGENT,
+                slot: SLOT_FACTORY
+            }
+            .encode(b))
+        )
+        .0,
         Status::Arg,
         "the factory is never selected through DAGON"
     );
@@ -288,7 +318,7 @@ fn the_factory_is_written_only_under_a_confirmed_app() {
 fn a_cut_factory_write_keeps_the_app_and_can_be_repeated() {
     let kp = keypair();
     let ag = agent_image(3, &body(5000, 9), &kp);
-    let steps = 1 + HEADER_SIZE.div_ceil(128) + 5000usize.div_ceil(MAX - 4) + 1;
+    let steps = 1 + HEADER_SIZE.div_ceil(128) + 5000usize.div_ceil(MAX - XferChunk::OVERHEAD) + 1;
     for cut in 0..steps {
         let mut pc = app_confirmed_in_a(&kp);
         let first = pc.transfer_to(target::AGENT, SLOT_FACTORY, &ag, cut);
@@ -333,7 +363,14 @@ fn factory_receives_a_signed_app_and_hands_over_to_it() {
     let st = pc.status();
     assert_eq!((st.active, st.confirmed), (SLOT_A, SLOT_FACTORY));
     assert!(pc.hello().trial);
-    assert_eq!(pc.call(Cmd::Confirm, &[target::APP]).0, Status::Ok);
+    assert_eq!(
+        pc.call(
+            Cmd::Confirm,
+            &wire(|b| dagon_proto::payload::encode_confirm(target::APP, b))
+        )
+        .0,
+        Status::Ok
+    );
     pc.reboot();
     let st = pc.status();
     assert_eq!((st.active, st.confirmed), (SLOT_A, SLOT_A));
@@ -399,4 +436,26 @@ fn a_re_transfer_into_the_pending_slot_is_only_written() {
         "no trial without SET_PENDING"
     );
     assert_eq!(pc.agent.images().state(SLOT_A), Some(Image::Written));
+}
+
+/// The request payload `enc` writes.
+#[allow(dead_code)]
+fn wire(enc: impl FnOnce(&mut [u8]) -> Result<usize, dagon_proto::FrameError>) -> Vec<u8> {
+    let mut b = vec![0u8; 1100];
+    let n = enc(&mut b).unwrap();
+    b.truncate(n);
+    b
+}
+
+/// The bulk of an OK RELAY or I2C_RAW response; any other body as it is.
+#[allow(dead_code)]
+fn bulk_of(cmd: u8, status: dagon_proto::Status, body: &[u8]) -> &[u8] {
+    match dagon_proto::Cmd::from_u8(cmd) {
+        Some(c @ (dagon_proto::Cmd::Relay | dagon_proto::Cmd::I2cRaw))
+            if status == dagon_proto::Status::Ok =>
+        {
+            dagon_proto::payload::parse_bulk_resp(c, body).unwrap()
+        }
+        _ => body,
+    }
 }

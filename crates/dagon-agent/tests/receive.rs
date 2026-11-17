@@ -351,6 +351,7 @@ impl Node {
         let (f, _) = Frame::decode(reply.frame, 300).unwrap();
         assert_eq!((f.seq, f.cmd, f.flags), (seq, cmd as u8, flags::RESP));
         let (st, body) = split_status(f.payload).unwrap();
+        let body = bulk_of(f.cmd, st, body);
         (st, body.to_vec(), reply.reboot)
     }
 
@@ -380,9 +381,9 @@ impl Node {
         }
         let (hdr, body) = img.split_at(HEADER_SIZE);
         for (cmd, part) in [(Cmd::XferHdr, hdr), (Cmd::XferData, body)] {
-            for (i, chunk) in part.chunks(252).enumerate() {
+            for (i, chunk) in part.chunks(251).enumerate() {
                 let c = XferChunk {
-                    offset: (i * 252) as u32,
+                    offset: (i * 251) as u32,
                     data: chunk,
                 };
                 let (st, b, _) = self.call(cmd, &Self::enc(c, XferChunk::encode));
@@ -391,13 +392,13 @@ impl Node {
                 }
                 assert_eq!(
                     parse_next_offset(&b).unwrap() as usize,
-                    i * 252 + chunk.len()
+                    i * 251 + chunk.len()
                 );
             }
         }
         let (st, digest, _) = self.call(Cmd::XferEnd, &[]);
         if st == Status::Ok {
-            assert_eq!(digest, sha256(body));
+            assert_eq!(parse_digest(&digest).unwrap(), sha256(body));
         }
         st
     }
@@ -505,9 +506,23 @@ fn update_set_pending_reboot_confirm() {
     );
     assert_eq!(n.agent.images().state(1), Some(image::State::Written));
 
-    assert_eq!(n.call(Cmd::SetPending, &[target::APP, 1]).0, Status::Ok);
+    assert_eq!(
+        n.call(
+            Cmd::SetPending,
+            &wire(|b| dagon_proto::payload::SetPending {
+                target: target::APP,
+                slot: 1
+            }
+            .encode(b))
+        )
+        .0,
+        Status::Ok
+    );
     assert_eq!(n.store().pending, Some(1));
-    let (st, _, reboot) = n.call(Cmd::Reboot, &[reboot_mode::NORMAL]);
+    let (st, _, reboot) = n.call(
+        Cmd::Reboot,
+        &wire(|b| dagon_proto::payload::encode_reboot(reboot_mode::NORMAL, b)),
+    );
     assert_eq!((st, reboot), (Status::Ok, true));
     assert_eq!(n.events(), ["pending_set", "reboot_requested"]);
 
@@ -531,9 +546,20 @@ fn update_set_pending_reboot_confirm() {
         (Status::Ok, Version::new(1, 1, 0), true)
     );
 
-    assert_eq!(n.call(Cmd::Confirm, &[target::APP]).0, Status::Ok);
     assert_eq!(
-        n.call(Cmd::Confirm, &[target::APP]).0,
+        n.call(
+            Cmd::Confirm,
+            &wire(|b| dagon_proto::payload::encode_confirm(target::APP, b))
+        )
+        .0,
+        Status::Ok
+    );
+    assert_eq!(
+        n.call(
+            Cmd::Confirm,
+            &wire(|b| dagon_proto::payload::encode_confirm(target::APP, b))
+        )
+        .0,
         Status::Ok,
         "repeat is OK"
     );
@@ -596,7 +622,18 @@ fn tampered_body_is_rejected_without_header() {
         "slot stays imageless"
     );
     assert_eq!(n.agent.images().state(1), Some(image::State::Empty));
-    assert_eq!(n.call(Cmd::SetPending, &[target::APP, 1]).0, Status::State);
+    assert_eq!(
+        n.call(
+            Cmd::SetPending,
+            &wire(|b| dagon_proto::payload::SetPending {
+                target: target::APP,
+                slot: 1
+            }
+            .encode(b))
+        )
+        .0,
+        Status::State
+    );
     let ev = n.events();
     assert!(
         ev.ends_with(&["verify_failed".into(), "pending_refused".into()]),
@@ -639,7 +676,15 @@ fn running_and_confirmed_slots_are_protected() {
         "confirmed slot"
     );
     assert_eq!(
-        n.call(Cmd::SetPending, &[target::APP, 1]).0,
+        n.call(
+            Cmd::SetPending,
+            &wire(|b| dagon_proto::payload::SetPending {
+                target: target::APP,
+                slot: 1
+            }
+            .encode(b))
+        )
+        .0,
         Status::State,
         "running slot"
     );
@@ -690,7 +735,14 @@ fn extensions_answer_the_decision_points() {
                 ..Default::default()
             },
         );
-        assert_eq!(n.call(Cmd::Confirm, &[target::APP]).0, Status::State);
+        assert_eq!(
+            n.call(
+                Cmd::Confirm,
+                &wire(|b| dagon_proto::payload::encode_confirm(target::APP, b))
+            )
+            .0,
+            Status::State
+        );
         assert_eq!(n.store().confirms, 0);
         assert!(n.agent.images().on_trial());
     }
@@ -705,7 +757,7 @@ fn extensions_answer_the_decision_points() {
             flags: 0,
             seq: 9,
             cmd: Cmd::Reboot as u8,
-            payload: &[reboot_mode::NORMAL],
+            payload: &[],
         }
         .encode(&mut buf)
         .unwrap();
@@ -780,7 +832,18 @@ fn every_failure_lands_in_a_defined_phase() {
     assert_eq!(n.events().last().unwrap(), "verify_failed");
     assert_eq!(n.phase(), Phase::Failed);
     let mut n = Node::new(Probe::default());
-    assert_eq!(n.call(Cmd::SetPending, &[target::APP, 1]).0, Status::State);
+    assert_eq!(
+        n.call(
+            Cmd::SetPending,
+            &wire(|b| dagon_proto::payload::SetPending {
+                target: target::APP,
+                slot: 1
+            }
+            .encode(b))
+        )
+        .0,
+        Status::State
+    );
     assert_eq!(n.events().last().unwrap(), "pending_refused");
     assert_eq!(n.phase(), Phase::Failed);
 
@@ -849,10 +912,10 @@ fn retried_request_is_not_executed_twice() {
         hdr_len: 512,
     };
     n.call(Cmd::XferBegin, &Node::enc(begin, XferBegin::encode));
-    for (i, c) in img[..HEADER_SIZE].chunks(252).enumerate() {
+    for (i, c) in img[..HEADER_SIZE].chunks(251).enumerate() {
         let p = Node::enc(
             XferChunk {
-                offset: (i * 252) as u32,
+                offset: (i * 251) as u32,
                 data: c,
             },
             XferChunk::encode,
@@ -862,7 +925,7 @@ fn retried_request_is_not_executed_twice() {
     let p = Node::enc(
         XferChunk {
             offset: 0,
-            data: &img[HEADER_SIZE..][..252],
+            data: &img[HEADER_SIZE..][..251],
         },
         XferChunk::encode,
     );
@@ -875,9 +938,11 @@ fn retried_request_is_not_executed_twice() {
 #[test]
 fn show_answers_ok_and_a_malformed_one_is_refused() {
     let mut n = Node::new(Probe::default());
-    assert_eq!(n.call(Cmd::Show, &[1, 1, 42, 0, 0, 0, 0]).0, Status::Ok);
-    assert_eq!(n.call(Cmd::Show, &[1, 2, 99, 0, 0, 0, 0]).0, Status::Ok);
-    assert_eq!(n.call(Cmd::Show, &[1, 1]).0, Status::Arg);
+    // Core: the phase; field 2: the percent.
+    assert_eq!(n.call(Cmd::Show, &[1, 0x04, 1, 42]).0, Status::Ok);
+    assert_eq!(n.call(Cmd::Show, &[2, 0x04, 1, 99]).0, Status::Ok);
+    assert_eq!(n.call(Cmd::Show, &[]).0, Status::Arg);
+    assert_eq!(n.call(Cmd::Show, &[1, 0x04, 2, 42, 0]).0, Status::Arg);
 }
 
 #[test]
@@ -899,7 +964,7 @@ fn unknown_and_hub_commands_are_unsupported_on_nodes() {
         Status::Arg
     );
     assert_eq!(
-        n.call(Cmd::XferData, &[0, 0, 0, 0, 1]).0,
+        n.call(Cmd::XferData, &[0, 0, 0, 0, 0, 1]).0,
         Status::State,
         "no session"
     );
@@ -924,7 +989,18 @@ fn the_agent_declares_its_machines() {
 fn switching_away_from_a_pending_or_trial_slot_moves_or_withdraws_it() {
     let mut n = Node::new(Probe::default());
     assert_eq!(n.transfer(1, &image(1, &body())), Status::Ok);
-    assert_eq!(n.call(Cmd::SetPending, &[target::APP, 1]).0, Status::Ok);
+    assert_eq!(
+        n.call(
+            Cmd::SetPending,
+            &wire(|b| dagon_proto::payload::SetPending {
+                target: target::APP,
+                slot: 1
+            }
+            .encode(b))
+        )
+        .0,
+        Status::Ok
+    );
     n.reset(|m| {
         // The confirmed image in A, then B started on trial.
         let a = image(0, &body());
@@ -935,13 +1011,35 @@ fn switching_away_from_a_pending_or_trial_slot_moves_or_withdraws_it() {
     n.events();
 
     // Back to the confirmed slot A while B is on trial: B is an image again.
-    assert_eq!(n.call(Cmd::SetPending, &[target::APP, 0]).0, Status::Ok);
+    assert_eq!(
+        n.call(
+            Cmd::SetPending,
+            &wire(|b| dagon_proto::payload::SetPending {
+                target: target::APP,
+                slot: 0
+            }
+            .encode(b))
+        )
+        .0,
+        Status::Ok
+    );
     assert_eq!(n.events(), ["pending_set", "pending_moved"]);
     assert_eq!(n.agent.images().state(0), Some(image::State::Pending));
     assert_eq!(n.agent.images().state(1), Some(image::State::Written));
 
     // Then B again: A, still the confirmed slot, is the confirmed one again.
-    assert_eq!(n.call(Cmd::SetPending, &[target::APP, 1]).0, Status::Ok);
+    assert_eq!(
+        n.call(
+            Cmd::SetPending,
+            &wire(|b| dagon_proto::payload::SetPending {
+                target: target::APP,
+                slot: 1
+            }
+            .encode(b))
+        )
+        .0,
+        Status::Ok
+    );
     assert_eq!(n.events(), ["pending_set", "pending_withdrawn"]);
     assert_eq!(n.agent.images().state(0), Some(image::State::Confirmed));
     assert_eq!(n.agent.images().state(1), Some(image::State::Pending));
@@ -971,7 +1069,18 @@ fn a_header_that_does_not_read_back_leaves_no_image() {
 fn a_restart_reads_the_slots_again() {
     let mut n = Node::new(Probe::default());
     assert_eq!(n.transfer(1, &image(1, &body())), Status::Ok);
-    assert_eq!(n.call(Cmd::SetPending, &[target::APP, 1]).0, Status::Ok);
+    assert_eq!(
+        n.call(
+            Cmd::SetPending,
+            &wire(|b| dagon_proto::payload::SetPending {
+                target: target::APP,
+                slot: 1
+            }
+            .encode(b))
+        )
+        .0,
+        Status::Ok
+    );
     n.events();
     b_on_trial(&mut n.store());
     n.agent.restart();
@@ -988,4 +1097,59 @@ fn kind_name(e: &dagon_events::Event<'_>) -> &'static str {
         .iter()
         .find_map(|m| m.entry(e.layer(), e.kind()))
         .map_or("?", |x| x.kind)
+}
+
+/// A request frame of another wire version is told so, and the reply kept
+/// for a repeat of the request before it stays.
+#[test]
+fn a_frame_of_another_wire_version_is_refused_with_an_answer() {
+    let mut n = Node::new(Probe::default());
+    let mut buf = [0u8; 16];
+    let k = Frame {
+        flags: 0,
+        seq: 9,
+        cmd: Cmd::Status as u8,
+        payload: &[],
+    }
+    .encode(&mut buf)
+    .unwrap();
+    let first = n.agent.handle(&buf[..k]).unwrap().frame.to_vec();
+    let mut other = buf;
+    other[2] = dagon_proto::PROTO_VERSION + 1;
+    let reply = n.agent.handle(&other[..k]).expect("an answer");
+    let (f, _) = Frame::decode(reply.frame, 300).unwrap();
+    assert_eq!((f.flags, f.seq, f.cmd), (flags::RESP, 9, Cmd::Status as u8));
+    assert_eq!(split_status(f.payload).unwrap().0, Status::Frame);
+    other[3] = flags::RESP;
+    assert!(
+        n.agent.handle(&other[..k]).is_none(),
+        "a response is never answered"
+    );
+    assert_eq!(
+        n.agent.handle(&buf[..k]).unwrap().frame,
+        first,
+        "the repeat's reply"
+    );
+}
+
+/// The request payload `enc` writes.
+#[allow(dead_code)]
+fn wire(enc: impl FnOnce(&mut [u8]) -> Result<usize, dagon_proto::FrameError>) -> Vec<u8> {
+    let mut b = vec![0u8; 1100];
+    let n = enc(&mut b).unwrap();
+    b.truncate(n);
+    b
+}
+
+/// The bulk of an OK RELAY or I2C_RAW response; any other body as it is.
+#[allow(dead_code)]
+fn bulk_of(cmd: u8, status: dagon_proto::Status, body: &[u8]) -> &[u8] {
+    match dagon_proto::Cmd::from_u8(cmd) {
+        Some(c @ (dagon_proto::Cmd::Relay | dagon_proto::Cmd::I2cRaw))
+            if status == dagon_proto::Status::Ok =>
+        {
+            dagon_proto::payload::parse_bulk_resp(c, body).unwrap()
+        }
+        _ => body,
+    }
 }

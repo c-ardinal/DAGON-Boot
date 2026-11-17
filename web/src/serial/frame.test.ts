@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, test } from 'vitest';
-import { CMD, FLAG_RESP, encodeFrame, newFrameStream, parseFrame } from './frame.ts';
+import { CMD, encodeFrame, newFrameStream, parseFrame, WIRE } from './frame.ts';
 import { decodeHelloResp, encodeHelloReq, versionText } from '../wasm/dagon.ts';
 import { encodeHelloResp, versionRaw } from './hello.ts';
 
@@ -19,7 +19,7 @@ const cut = (...chunks: Uint8Array[]): Uint8Array[][] => {
 describe('frame codec (dagon-wasm) against the Rust golden frames', () => {
   test('HELLO request is byte-identical', () => {
     const file = golden('frame_hello_req.bin');
-    const built = encodeFrame({ flags: 0, seq: 1, cmd: CMD.HELLO, payload: encodeHelloReq({ protoVer: 1, maxPayload: 1088 }) });
+    const built = encodeFrame({ flags: 0, seq: 1, cmd: CMD.HELLO, payload: encodeHelloReq({ protoVer: 2, maxPayload: 1088 }) });
     expect(built).toEqual(file);
   });
 
@@ -27,10 +27,10 @@ describe('frame codec (dagon-wasm) against the Rust golden frames', () => {
     const file = golden('frame_hello_resp.bin');
     const [[raw]] = cut(file);
     const f = parseFrame(raw);
-    expect(f.flags & FLAG_RESP).toBe(FLAG_RESP);
+    expect(f.flags & WIRE.FLAG_RESP).toBe(WIRE.FLAG_RESP);
     expect(f.payload[0]).toBe(0);
     const h = decodeHelloResp(f.payload.subarray(1));
-    expect(h).toMatchObject({ protoVer: 1, role: 1, portKind: 1, mcuId: 2, mode: 0, trial: true, maxPayload: 256 });
+    expect(h).toMatchObject({ protoVer: 2, role: 1, portKind: 1, mcuId: 2, mode: 0, trial: true, maxPayload: 256 });
     expect(versionText(h.activeVersion)).toBe('1.1.0');
     expect(Array.from(h.keyId)).toEqual([0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88]);
     const body = encodeHelloResp(h);

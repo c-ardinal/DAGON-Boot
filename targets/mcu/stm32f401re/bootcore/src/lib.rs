@@ -8,6 +8,16 @@
 //! jumps. With no startable slot it shows the board's halt pattern on its
 //! boot LED and stays here.
 //!
+//! Before the log decides, the boot core opens its I2C target link (the
+//! board's DAGON bus, `link.rs` from build.rs) and enters update mode when
+//! the app handed over (an UPDATE_STAY in the log, consumed now) or a STAY
+//! arrives within the listen window of the node's MCU definition. In
+//! update mode the shared session (`dagon_agent::Agent` as the boot core's
+//! writer, with the same ticking verifier) answers the host until REBOOT
+//! or 60 s without a request, then the node restarts; nothing outside
+//! update mode erases or writes an image. A node without the link opens
+//! no window.
+//!
 //! Images are verified with `dagon_mcu_stm32f401re::PUBKEY` (`DAGON_PUBKEY`
 //! at build time; the public test key only with `DAGON_ALLOW_TEST_KEY=1`).
 //!
@@ -31,20 +41,31 @@
 use core::panic::PanicInfo;
 
 use cortex_m::peripheral::{DWT, NVIC, SCB};
+use dagon_agent::update_mode::{listen, serve, Stay};
+use dagon_agent::writer::BootCore;
+use dagon_agent::{Agent, Config};
 use dagon_boot::BootRun;
 use dagon_core::boot::{BootConfig, Decision};
 use dagon_core::bootcore::{settle_log, Cell, MustReset, Settled, CLEARED};
+use dagon_core::log::Log;
 use dagon_ed25519::Ed25519Small;
-use dagon_events::{compose_boot, BootExtension, Clock, Extension};
+use dagon_events::{
+    compose, compose_boot, BootExtension, Bounds, Clock, Extension, Layer, Nop, Published, Watchdog,
+};
+use dagon_format::header::port_kind;
+use dagon_mcu_stm32f401re::boot_link::I2cPort;
 use dagon_mcu_stm32f401re::clock::Setup;
 use dagon_mcu_stm32f401re::flash::F401Flash;
 use dagon_mcu_stm32f401re::layout as board;
 use dagon_mcu_stm32f401re::tag::checked_tag;
-use dagon_mcu_stm32f401re::{iwdg, trial, LINKED_SLOT, TRIAL_ATTEMPTS};
+use dagon_mcu_stm32f401re::{iwdg, trial, KindSStore, ERASE_REGIONS, LINKED_SLOT, TRIAL_ATTEMPTS};
 use dagon_mcu_stm32f401re::{PUBKEY, TARGET_TAG};
 use dagon_port::BootSelectS;
+use dagon_proto::max_payload;
+use dagon_proto::payload::{mode, role};
 #[allow(unused_imports)]
 use embassy_stm32::gpio::{Level, Output, Speed};
+use static_cell::StaticCell;
 
 #[doc(hidden)]
 pub use cortex_m_rt::entry as __entry;
@@ -80,6 +101,12 @@ const _: () = assert!(
     SYSCLK_HZ >= 1_000_000,
     "the boot core counts microseconds in whole core cycles"
 );
+
+/// The link the boot core receives on and its listen window (build.rs).
+#[macro_use]
+mod link {
+    include!(concat!(env!("OUT_DIR"), "/link.rs"));
+}
 
 #[allow(dead_code, unused_macros)]
 #[macro_use]
@@ -140,12 +167,27 @@ pub fn run<E: Extension>(chain: E, limits: &'static [BootExtension]) -> ! {
     let mut cp = unsafe { cortex_m::Peripherals::steal() };
     cp.DCB.enable_trace();
     cp.DWT.enable_cycle_counter();
-    let clock = Cycles {
+    let mut clock = Cycles {
         last: DWT::cycle_count(),
         rem: 0,
         us: 0,
     };
     let mut flash = F401Flash::new(p.FLASH);
+    // The link first: the listen window counts from the start.
+    if let Some(mut port) = open_link!(p) {
+        let handed_over = Log::load(&mut flash, &board::LOG)
+            .and_then(|mut l| l.take_stay(&mut flash))
+            == Ok(true);
+        if handed_over {
+            update_mode(port, flash, &mut clock, None)
+        }
+        let window = link::LISTEN_WINDOW_MS;
+        if let Some(stay) = listen(&mut port, &mut clock, window, &mut iwdg::feed) {
+            update_mode(port, flash, &mut clock, Some(stay))
+        }
+        #[cfg(feature = "listen-time")]
+        listen_time::hold(clock.now_us());
+    }
     let mut chain = compose_boot(chain, clock, limits);
     let mut boot = BootRun::start(
         &mut chain,
@@ -203,6 +245,58 @@ pub fn run<E: Extension>(chain: E, limits: &'static [BootExtension]) -> ! {
     loop {
         cortex_m::asm::wfi();
     }
+}
+
+/// The measuring build (`listen-time`): what the link and its listen
+/// window add to a boot that takes no STAY.
+#[cfg(feature = "listen-time")]
+mod listen_time {
+    use core::sync::atomic::{AtomicU32, Ordering};
+
+    /// Microseconds from the boot core's start (clock, watchdog and cycle
+    /// counter set up) to the end of the listen window; 0 until then.
+    #[no_mangle]
+    static DAGON_LISTEN_US: AtomicU32 = AtomicU32::new(0);
+
+    pub fn hold(us: u64) -> ! {
+        DAGON_LISTEN_US.store(u32::try_from(us).unwrap_or(u32::MAX), Ordering::Relaxed);
+        loop {
+            super::iwdg::feed();
+        }
+    }
+}
+
+/// Update mode: the boot core's session answers the host over `port`
+/// (first the window's `stay`, if any) until REBOOT or 60 s without a
+/// request; then the node restarts. The store is opened only here, and
+/// the session checks images with [`VERIFIER`], which feeds the watchdog.
+fn update_mode(
+    mut port: I2cPort,
+    flash: F401Flash<'static>,
+    clock: &mut Cycles,
+    stay: Option<Stay>,
+) -> ! {
+    static EVENTS: StaticCell<Published<(), 4>> = StaticCell::new();
+    let events = EVENTS.uninit().write(Published::new());
+    if let Ok(store) = KindSStore::load(flash, &board::LOG, board::SLOTS, &ERASE_REGIONS) {
+        let store = store.with_cores(&board::CORE_SLOTS, trial::holds());
+        let now: fn() -> u64 = || 0;
+        let periods = Watchdog::new(board::TRIAL_WDT_MS, board::CONFIRMED_WDT_MS);
+        let chain = compose(Layer::App, events, Nop, Nop, Bounds::new(now, periods));
+        let cfg = Config {
+            mcu_id: board::MCU_ID,
+            port_kind: port_kind::SELF_BOOT,
+            target_tag: checked_tag(TARGET_TAG),
+            role: role::NODE,
+            mode: mode::UPDATE,
+            max_payload: max_payload::I2C as u16,
+            trial_attempts: TRIAL_ATTEMPTS,
+        };
+        let mut agent: Agent<_, _, _, BootCore> = Agent::for_writer(cfg, VERIFIER, store, chain);
+        let first = stay.as_ref().map(Stay::frame);
+        serve(&mut port, &mut agent, clock, &mut iwdg::feed, first);
+    }
+    SCB::sys_reset()
 }
 
 struct Jump;

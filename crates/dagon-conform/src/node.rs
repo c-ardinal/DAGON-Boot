@@ -24,8 +24,18 @@ use dagon_ed25519::Ed25519Compact;
 use dagon_format::header::{self, HEADER_SIZE};
 use dagon_format::{sha256, verify_signed, Sha256};
 use dagon_port::{Flash, FlashRegion};
-use dagon_proto::payload::{verdict, ConfRunReq, ConfRunResp, CONF_DETAIL_MAX};
+use dagon_proto::handler::{self, Handler};
+use dagon_proto::payload::{verdict, CmdSet, ConfRunReq, ConfRunResp, CONF_DETAIL_MAX};
 use dagon_proto::{flags, frame_len, Cmd, Frame, Status, HEADER_LEN};
+
+/// The command a conformance build answers in front of the agent. Its
+/// handler holds the board's flash and watchdog hook, so the row hands
+/// back the request it read and [`handle_frame`] runs the test.
+const TABLE: [Handler<(), ConfRunReq>; 1] = [Handler::new(Cmd::ConfRun, |_, p| ConfRunReq::of(p))];
+
+/// What [`handle_frame`] answers: the node's HELLO names it with its
+/// agent's commands (`dagon_agent::Agent::also_serves`).
+pub const CMDS: CmdSet = handler::cmds(&TABLE);
 
 /// Response frame size `handle_frame` may need.
 pub const RESPONSE_MAX: usize = frame_len(1 + 5 + CONF_DETAIL_MAX);
@@ -101,13 +111,14 @@ pub fn handle_frame<F: Flash>(
     feed: &mut dyn FnMut(),
 ) -> Option<usize> {
     let (frame, _) = Frame::decode(request, max_payload).ok()?;
-    if frame.cmd != Cmd::ConfRun as u8 || frame.flags & (flags::RESP | flags::EVENT) != 0 {
+    let row = handler::find(&TABLE, frame.cmd)?;
+    if frame.flags & (flags::RESP | flags::EVENT) != 0 {
         return None;
     }
     let body = &mut out[HEADER_LEN + 1..];
-    let (status, len) = match ConfRunReq::parse(frame.payload) {
+    let (status, len) = match row.read(frame.payload) {
         Err(s) => (s, 0),
-        Ok(req) => match run(flash, setup, req, feed) {
+        Ok((req, _)) => match run(flash, setup, req, feed) {
             None => (Status::Unsupported, 0),
             Some(o) => {
                 let resp = ConfRunResp {

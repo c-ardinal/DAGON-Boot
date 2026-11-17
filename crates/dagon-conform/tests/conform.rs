@@ -17,7 +17,7 @@ use dagon_format::{key_id, sha256, Version};
 use dagon_port::timeout::{link_limits, NodeTimings};
 use dagon_port::{Flash, FlashError, FlashRegion, LinkKind};
 use dagon_proto::payload::*;
-use dagon_proto::{split_status, Cmd, Frame, Status, MAX_FRAME};
+use dagon_proto::{plant, split_status, Cmd, Frame, Status, MAX_FRAME};
 use ed25519_compact::{KeyPair, Seed};
 
 /// RFC 8032 section 7.1 TEST 1 key (public test data).
@@ -93,6 +93,8 @@ fn image(slot: u8, version: Version, len: usize) -> Vec<u8> {
 // ---- node flash ---------------------------------------------------------
 
 struct MemFlash {
+    /// Reads, erases and writes asked of it.
+    calls: usize,
     regions: Vec<FlashRegion>,
     mem: Vec<u8>,
     erase_works: bool,
@@ -101,6 +103,7 @@ struct MemFlash {
 impl MemFlash {
     fn new() -> Self {
         MemFlash {
+            calls: 0,
             regions: REGIONS.to_vec(),
             mem: vec![0xFF; 0x10000],
             erase_works: true,
@@ -122,11 +125,13 @@ impl Flash for MemFlash {
         &self.regions
     }
     fn read(&mut self, addr: u32, buf: &mut [u8]) -> Result<(), FlashError> {
+        self.calls += 1;
         let r = self.range(addr, buf.len())?;
         buf.copy_from_slice(&self.mem[r]);
         Ok(())
     }
     fn erase(&mut self, addr: u32, len: u32) -> Result<(), FlashError> {
+        self.calls += 1;
         let reg = REGIONS
             .iter()
             .find(|r| r.start <= addr && addr < r.start + r.len)
@@ -142,6 +147,7 @@ impl Flash for MemFlash {
         Ok(())
     }
     fn write(&mut self, addr: u32, data: &[u8]) -> Result<(), FlashError> {
+        self.calls += 1;
         if !addr.is_multiple_of(4) || !data.len().is_multiple_of(4) {
             return Err(FlashError::Align);
         }
@@ -784,6 +790,48 @@ fn node_side_geometry_checks() {
     );
     assert!(node::run(&mut f, &ok, req(3), &mut || {}).unwrap().pass);
     assert_eq!(node::run(&mut f, &ok, req(4), &mut || {}), None);
+}
+
+/// A conformance build serves CONF_RUN in front of the agent and nothing
+/// else, and a CONF_RUN with an unknown must field, a field sent twice or
+/// a bad length is refused with the flash not touched and the watchdog
+/// hook not called.
+#[test]
+fn conf_run_is_read_before_a_test_runs() {
+    let mut f = MemFlash::new();
+    let setup = NodeSetup {
+        declared: &REGIONS,
+        scratch: SCRATCH,
+    };
+    let mut feeds = 0;
+    let ask = |cmd: u8, payload: &[u8], f: &mut MemFlash, feeds: &mut usize| {
+        let mut req = [0u8; 600];
+        let mut out = [0u8; RESPONSE_MAX];
+        req[8..8 + payload.len()].copy_from_slice(payload);
+        let n = dagon_proto::finish(&mut req, 0, 1, cmd, payload.len()).unwrap();
+        let len = node::handle_frame(&req[..n], 512, f, &setup, &mut out, &mut || *feeds += 1)?;
+        let (fr, _) = Frame::decode(&out[..len], 256).unwrap();
+        Some(split_status(fr.payload).unwrap().0)
+    };
+    assert_eq!(node::CMDS, CmdSet::EMPTY.with(Cmd::ConfRun as u8));
+    let mut served = CmdSet::EMPTY;
+    plant::each_probe(|n, p| match ask(n, p, &mut f, &mut feeds) {
+        Some(Status::Field) => served = served.with(n),
+        other => assert_eq!(other, None, "{n:#x} is left to the agent"),
+    });
+    assert_eq!(served, node::CMDS, "what answers is what it says");
+    let commands = plant::each(&node::CMDS, |n, plant, p| {
+        let st = ask(n, p, &mut f, &mut feeds);
+        assert_eq!(st, Some(plant.status()), "{plant:?}");
+        assert_eq!((f.calls, feeds), (0, 0), "{plant:?}");
+    });
+    assert_eq!(commands, 1);
+    // A well-formed request does run its test.
+    assert_eq!(
+        ask(Cmd::ConfRun as u8, &[2], &mut f, &mut feeds),
+        Some(Status::Ok)
+    );
+    assert!(f.calls > 0 && feeds > 0);
 }
 
 #[test]

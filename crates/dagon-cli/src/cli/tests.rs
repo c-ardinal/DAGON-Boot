@@ -669,3 +669,118 @@ fn the_markdown_reference_has_every_command() {
     }
     assert!(!md.contains("help-markdown"));
 }
+
+/// The `--long` option names written in `text`.
+fn flags_in(text: &str) -> Vec<String> {
+    let mut found = Vec::new();
+    let mut rest = text;
+    let mut prev = ' ';
+    while let Some(i) = rest.find("--") {
+        if let Some(c) = rest[..i].chars().last() {
+            prev = c;
+        }
+        let name: String = rest[i + 2..]
+            .chars()
+            .take_while(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || *c == '-')
+            .collect();
+        let standalone = !(prev.is_ascii_alphanumeric() || prev == '-');
+        if standalone && name.starts_with(|c: char| c.is_ascii_lowercase()) {
+            found.push(name.trim_end_matches('-').to_string());
+        }
+        rest = &rest[i + 2 + name.len()..];
+        prev = '-';
+    }
+    found
+}
+
+fn leaf<'a>(root: &'a clap::Command, path: &[String]) -> &'a clap::Command {
+    path.iter()
+        .fold(root, |c, n| c.find_subcommand(n).expect("subcommand"))
+}
+
+fn has_long(c: &clap::Command, flag: &str) -> bool {
+    flag == "help" || flag == "version" || c.get_arguments().any(|a| a.get_long() == Some(flag))
+}
+
+#[test]
+fn every_flag_a_help_text_names_is_one_the_command_has() {
+    let mut root = Cli::command();
+    root.build();
+    for path in leaf_paths(&root, &[]) {
+        let c = leaf(&root, &path);
+        let text = c.clone().render_long_help().to_string();
+        for f in flags_in(&text) {
+            assert!(
+                has_long(c, &f),
+                "dagon {}: help names --{f}, which the command lacks",
+                path.join(" ")
+            );
+        }
+    }
+}
+
+#[test]
+fn a_no_topology_error_names_only_flags_its_commands_have() {
+    let cfg = crate::config::Config::default();
+    let mut root = Cli::command();
+    root.build();
+    // `dagon gen` takes its topology from dagon.toml alone.
+    let err = cfg
+        .configured_topology()
+        .expect_err("no topology configured");
+    let gen = leaf(&root, &["gen".to_string()]);
+    for f in flags_in(&err) {
+        assert!(has_long(gen, &f), "{err:?} names --{f}, which gen lacks");
+    }
+    // Every command with --topology is told it.
+    let err = cfg.topology_path(None).expect_err("no topology given");
+    assert!(err.contains("--topology"), "{err:?}");
+    let with_flag: Vec<_> = leaf_paths(&root, &[])
+        .into_iter()
+        .filter(|p| has_long(leaf(&root, p), "topology"))
+        .collect();
+    assert!(!with_flag.is_empty());
+    for p in &with_flag {
+        for f in flags_in(&err) {
+            assert!(
+                has_long(leaf(&root, p), &f),
+                "dagon {}: {err:?} names --{f}",
+                p.join(" ")
+            );
+        }
+    }
+}
+
+#[test]
+fn conform_help_counts_the_tests_there_are() {
+    let mut root = Cli::command();
+    root.build();
+    let about = leaf(&root, &["conform".to_string()])
+        .get_about()
+        .unwrap()
+        .to_string();
+    assert!(
+        about.contains(&format!("{} conformance", dagon_conform::CTS.len())),
+        "{about}"
+    );
+}
+
+#[test]
+fn slot_and_kind_help_list_what_the_parser_takes() {
+    let mut root = Cli::command();
+    root.build();
+    let sign = leaf(&root, &["image".to_string(), "sign".to_string()]);
+    let help_of = |id: &str| {
+        sign.get_arguments()
+            .find(|a| a.get_long() == Some(id))
+            .and_then(|a| a.get_help())
+            .expect("help")
+            .to_string()
+    };
+    for l in crate::commands::slot_letters() {
+        assert!(help_of("slot").contains(l), "--slot help lacks {l}");
+    }
+    for (name, _) in dagon_sign::image::IMAGE_KIND_NAMES {
+        assert!(help_of("kind").contains(name), "--kind help lacks {name}");
+    }
+}

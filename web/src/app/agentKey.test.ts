@@ -32,13 +32,13 @@ const status = (key: boolean): AgentStatus => ({
 
 /** serve as the page sees it: the key goes in, only 登録済み / 未登録 comes back. */
 function serve(fail?: { status: number; body: unknown }) {
-  const sent: { method: string; path: string; body?: unknown }[] = [];
+  const sent: { route: string; params?: Record<string, string>; body?: unknown }[] = [];
   let stored = false;
-  const api: AgentApi = async (method, path, body) => {
-    sent.push({ method, path, body });
-    if (path === 'agent') return json(status(stored));
+  const api: AgentApi = async (route, o) => {
+    sent.push({ route, ...o });
+    if (route === 'GET /v1/agent') return json(status(stored));
     if (fail) return json(fail.body, fail.status);
-    stored = method === 'PUT';
+    stored = route === 'PUT /v1/agent/key/:agent/:way';
     return json(status(stored));
   };
   return { api, sent };
@@ -57,11 +57,11 @@ describe('the API key in the Console (site/src/content/docs/reference/agent-api.
     expect(d.value).toBe('');
     await saving;
     expect(d.problem).toBeNull();
-    expect(s.sent[s.sent.length - 1]).toEqual({ method: 'PUT', path: 'agent/key/claude/api', body: { key: KEY } });
+    expect(s.sent[s.sent.length - 1]).toEqual({ route: 'PUT /v1/agent/key/:agent/:way', params: { agent: 'claude', way: 'api' }, body: { key: KEY } });
     expect(a.status?.agents[0].ways[1].key).toBe(true);
     expect(JSON.stringify(a.status)).not.toContain(KEY);
     await d.remove();
-    expect(s.sent[s.sent.length - 1]).toMatchObject({ method: 'DELETE', path: 'agent/key/claude/api' });
+    expect(s.sent[s.sent.length - 1]).toMatchObject({ route: 'DELETE /v1/agent/key/:agent/:way', params: { agent: 'claude', way: 'api' } });
     expect(a.status?.agents[0].ways[1].key).toBe(false);
   });
 

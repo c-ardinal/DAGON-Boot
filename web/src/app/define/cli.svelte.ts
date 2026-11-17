@@ -7,6 +7,7 @@
 // GET /v1/fs list.
 
 import type { Kept } from '../kept.ts';
+import { request, type RequestOptions, type Route } from '../../request.ts';
 import pkg from '../../../package.json';
 
 export type CliState = 'none' | 'connecting' | 'ready' | 'stopped' | 'denied';
@@ -133,6 +134,9 @@ const MAX_LINES = 2000;
 const PASS_KEY = 'dagon-serve-pass';
 const PASS = /^[0-9a-f]{32}$/;
 
+/** What goes with a route: its `:name` values, its query, and a body sent as JSON. */
+export type Call = Pick<RequestOptions, 'params' | 'query'> & { body?: unknown };
+
 export interface CliDeps {
   fetch?: typeof fetch;
   socket?: (url: string) => WebSocket;
@@ -157,7 +161,7 @@ export class Cli {
 
   private pass: string | null = null;
   private ws: WebSocket | null = null;
-  private readonly d: Required<CliDeps>;
+  private readonly d: Required<Omit<CliDeps, 'fetch'>> & Pick<CliDeps, 'fetch'>;
   /**
    * The lock table's check, set by the page: true when the operation is stopped now
    * (the page has shown why). Every job asks it in `start`.
@@ -168,7 +172,7 @@ export class Cli {
 
   constructor(deps: CliDeps = {}) {
     this.d = {
-      fetch: deps.fetch ?? ((...a) => fetch(...a)),
+      fetch: deps.fetch,
       socket: deps.socket ?? ((u) => new WebSocket(u)),
       // Outside a browser (tests rendering the page) there is no serve to reach: an empty store keeps K0.
       storage: deps.storage ?? globalThis.sessionStorage ?? { getItem: () => null, setItem: () => undefined },
@@ -210,7 +214,7 @@ export class Cli {
     if (!this.pass) return void (this.state = 'none');
     this.state = 'connecting';
     try {
-      const r = await this.call('GET', 'hello');
+      const r = await this.call('GET /v1/hello');
       if (r.status === 401) return void (this.state = 'denied');
       this.hello = (await r.json()) as Hello;
     } catch {
@@ -221,18 +225,23 @@ export class Cli {
   }
 
   /** A /v1/ call with the passphrase (the DAGON agent routes: /v1/agent, /v1/agent/link, /v1/agent/ask). */
-  api(method: string, path: string, body?: unknown): Promise<Response> {
-    return this.call(method, path, body);
+  api(route: Route, o: Call = {}): Promise<Response> {
+    return this.call(route, o);
   }
 
-  private call(method: string, path: string, body?: unknown): Promise<Response> {
+  private call(route: Route, { body, ...where }: Call = {}): Promise<Response> {
+    return body === undefined ? this.send(route, where) : this.send(route, { ...where, body: JSON.stringify(body) }, 'application/json');
+  }
+
+  /** `route` with the passphrase; `type` says what a body is. */
+  private send(route: Route, o: RequestOptions, type?: string): Promise<Response> {
     const headers: Record<string, string> = { Authorization: `Bearer ${this.pass}` };
-    if (body !== undefined) headers['Content-Type'] = 'application/json';
-    return this.d.fetch(`/v1/${path}`, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
+    if (type !== undefined) headers['Content-Type'] = type;
+    return request(route, { ...o, headers, via: this.d.fetch });
   }
 
-  private async json<T>(method: string, path: string, body?: unknown): Promise<T> {
-    const r = await this.call(method, path, body);
+  private async json<T>(route: Route, o: Call = {}): Promise<T> {
+    const r = await this.call(route, o);
     if (!r.ok) throw new Error(String(r.status));
     return (await r.json()) as T;
   }
@@ -284,7 +293,7 @@ export class Cli {
         return;
       case 'device.need':
         this.holdsHub = true;
-        void Promise.resolve(this.onDevice(true)).then(() => this.call('POST', 'device', { state: 'released' }));
+        void Promise.resolve(this.onDevice(true)).then(() => this.call('POST /v1/device', { body: { state: 'released' } }));
         return;
       case 'device.returned':
         this.holdsHub = false;
@@ -293,10 +302,10 @@ export class Cli {
     }
   }
 
-  private async start(kind: JobKind, path: string, body: unknown, target: string): Promise<Job | null> {
+  private async start(kind: JobKind, route: Route, body: unknown, target: string): Promise<Job | null> {
     const lock = ({ gen: 'gen', build: 'build', sign: 'build', release: 'release', flash: 'flash' } as const)[kind as 'gen'];
     if (lock && this.guard(lock)) return null;
-    const r = await this.json<{ job: number }>('POST', path, body);
+    const r = await this.json<{ job: number }>(route, { body });
     const job: Job = { id: r.job, kind, state: 'queued', target, stage: '', percent: null, lines: [], result: null, question: null, started: this.d.now(), ended: null };
     this.jobs = [job, ...this.jobs];
     const said = this.early.filter((e) => e.job === r.job);
@@ -308,7 +317,7 @@ export class Cli {
   /** GET /v1/topology: the project's 構成 YAML, or null when it has none yet. */
   async loadTopology(): Promise<string | null> {
     if (this.state !== 'ready') return null;
-    const r = await this.call('GET', 'topology');
+    const r = await this.call('GET /v1/topology');
     // serve says 404 for a project with no 構成 yet; anything else is a file not read, not an empty one.
     if (r.status === 404) return null;
     if (!r.ok) throw new Error(`GET topology: ${r.status}`);
@@ -324,7 +333,7 @@ export class Cli {
   async saveTopology(yaml: string): Promise<SaveResult> {
     if (this.state !== 'ready') return 'failed';
     try {
-      const r = await this.d.fetch('/v1/topology', { method: 'PUT', headers: { Authorization: `Bearer ${this.pass}`, 'Content-Type': 'application/yaml' }, body: yaml });
+      const r = await this.send('PUT /v1/topology', { body: yaml }, 'application/yaml');
       if (r.ok) return 'saved';
       if (r.status === 422) return 'invalid';
       return r.status === 409 ? 'busy' : 'failed';
@@ -334,40 +343,40 @@ export class Cli {
   }
 
   gen(nodes: string[]): Promise<Job | null> {
-    return this.start('gen', 'gen', { nodes }, nodes.join(' · '));
+    return this.start('gen', 'POST /v1/gen', { nodes }, nodes.join(' · '));
   }
 
   build(nodes: string[]): Promise<Job | null> {
-    return this.start('build', 'build', { nodes }, nodes.join(' · '));
+    return this.start('build', 'POST /v1/build', { nodes }, nodes.join(' · '));
   }
 
   sign(nodes: string[]): Promise<Job | null> {
-    return this.start('sign', 'sign', { nodes }, nodes.join(' · '));
+    return this.start('sign', 'POST /v1/sign', { nodes }, nodes.join(' · '));
   }
 
   /** POST /v1/release: the signed images into a package; without a version each keeps its crate's, without a name serve names it by the newest. */
   release(version?: string, name?: string): Promise<Job | null> {
-    return this.start('release', 'release', { ...(version ? { version } : {}), ...(name ? { name } : {}) }, name ?? '');
+    return this.start('release', 'POST /v1/release', { ...(version ? { version } : {}), ...(name ? { name } : {}) }, name ?? '');
   }
 
   flash(node: string): Promise<Job | null> {
-    return this.start('flash', 'flash', { node }, node);
+    return this.start('flash', 'POST /v1/flash', { node }, node);
   }
 
   async answer(job: Job, text: string): Promise<void> {
     if (!job.question) return;
-    await this.json('POST', `jobs/${job.id}/answer`, { answer: text });
+    await this.json('POST /v1/jobs/:id/answer', { params: { id: job.id }, body: { answer: text } });
     job.question = null;
     job.state = 'running';
   }
 
   async cancel(job: Job): Promise<void> {
-    await this.call('POST', `jobs/${job.id}/cancel`);
+    await this.call('POST /v1/jobs/:id/cancel', { params: { id: job.id } });
   }
 
   /** GET /v1/release/{id}: the .dgb bytes. */
   async releaseBytes(id: string): Promise<Uint8Array> {
-    const r = await this.call('GET', `release/${encodeURIComponent(id)}`);
+    const r = await this.call('GET /v1/release/:id', { params: { id } });
     if (!r.ok) throw new Error(String(r.status));
     return new Uint8Array(await r.arrayBuffer());
   }
@@ -375,21 +384,21 @@ export class Cli {
   /** GET /v1/release/latest: the project's latest .dgb ("最新のリリースを使う"); null when there is none. */
   async latestRelease(): Promise<Uint8Array | null> {
     if (this.state !== 'ready') return null;
-    const r = await this.call('GET', 'release/latest');
+    const r = await this.call('GET /v1/release/latest');
     return r.ok ? new Uint8Array(await r.arrayBuffer()) : null;
   }
 
   /** GET /v1/kept (feature `kept`): the packages kept in the project, newest version first. */
   async keptList(): Promise<Kept[]> {
     if (!this.has('kept')) return [];
-    const r = await this.call('GET', 'kept');
+    const r = await this.call('GET /v1/kept');
     return r.ok ? (((await r.json()) as { kept?: Kept[] }).kept ?? []) : [];
   }
 
   /** GET /v1/kept/{id}: a kept package's bytes; null when it is not there. */
   async keptBytes(id: string): Promise<Uint8Array | null> {
     if (!this.has('kept')) return null;
-    const r = await this.call('GET', `kept/${encodeURIComponent(id)}`);
+    const r = await this.call('GET /v1/kept/:id', { params: { id } });
     return r.ok ? new Uint8Array(await r.arrayBuffer()) : null;
   }
 
@@ -397,7 +406,7 @@ export class Cli {
   async keep(bytes: Uint8Array): Promise<string | null> {
     if (!this.has('kept')) return null;
     try {
-      const r = await this.d.fetch('/v1/kept', { method: 'POST', headers: { Authorization: `Bearer ${this.pass}`, 'Content-Type': 'application/octet-stream' }, body: bytes as BodyInit });
+      const r = await this.send('POST /v1/kept', { body: bytes as BodyInit }, 'application/octet-stream');
       return r.ok ? (((await r.json()) as { id?: string }).id ?? null) : null;
     } catch {
       return null;
@@ -407,46 +416,46 @@ export class Cli {
   /** GET /v1/bootcore/{node}: the node's signed boot core for the ROM path (feature `bootcore`); null when there is none. */
   async bootcore(node: string): Promise<Uint8Array | null> {
     if (!this.has('bootcore')) return null;
-    const r = await this.call('GET', `bootcore/${encodeURIComponent(node)}`);
+    const r = await this.call('GET /v1/bootcore/:node', { params: { node } });
     return r.ok ? new Uint8Array(await r.arrayBuffer()) : null;
   }
 
   /** GET /v1/stage0/{node}: stage0's bytes for the ROM path's full rewrite of an MCU with a stage0 (feature `bootcore`); null when there are none. */
   async stage0(node: string): Promise<Uint8Array | null> {
     if (!this.has('bootcore')) return null;
-    const r = await this.call('GET', `stage0/${encodeURIComponent(node)}`);
+    const r = await this.call('GET /v1/stage0/:node', { params: { node } });
     return r.ok ? new Uint8Array(await r.arrayBuffer()) : null;
   }
 
   /** GET /v1/project (feature `project`): the open project, if any. */
   project(): Promise<ProjectInfo> {
-    return this.json<ProjectInfo>('GET', 'project');
+    return this.json<ProjectInfo>('GET /v1/project');
   }
 
   /** GET /v1/fs (feature `project`): the folders of `path` under the home folder; serve normalises and confines it. */
   fs(path?: string): Promise<FsList> {
-    return this.json<FsList>('GET', path === undefined ? 'fs' : `fs?path=${encodeURIComponent(path)}`);
+    return this.json<FsList>('GET /v1/fs', path === undefined ? {} : { query: { path } });
   }
 
   /** POST /v1/project/open {path}: a folder with dagon.toml; serve switches to its keys. */
   openProject(path: string): Promise<ProjectResult> {
-    return this.projectCall('project/open', { path }, false);
+    return this.projectCall('POST /v1/project/open', { path }, false);
   }
 
   /** POST /v1/project/new {path, from_sample}: `dagon new` in the new folder `path` (its name is the project's). */
   newProject(path: string, sample: boolean): Promise<ProjectResult> {
-    return this.projectCall('project/new', { path, from_sample: sample }, true);
+    return this.projectCall('POST /v1/project/new', { path, from_sample: sample }, true);
   }
 
   /** POST /v1/project/init {path}: dagon.toml for the folder's 構成 (after the page asked); serve switches to it. */
   initProject(path: string): Promise<ProjectResult> {
-    return this.projectCall('project/init', { path }, true);
+    return this.projectCall('POST /v1/project/init', { path }, true);
   }
 
   /** GET /v1/layout (feature `layout`): the project's 呼び名 and positions; null when there are none yet. */
   async loadLayout(): Promise<Layout | null> {
     if (!this.has('layout')) return null;
-    const r = await this.call('GET', 'layout');
+    const r = await this.call('GET /v1/layout');
     if (!r.ok) {
       this.layoutRefused = ((await r.json().catch(() => ({}))) as { error?: string }).error ?? String(r.status);
       return null;
@@ -463,14 +472,14 @@ export class Cli {
   /** PUT /v1/layout: the whole layout file; false when serve did not take it. */
   async saveLayout(layout: Layout): Promise<boolean> {
     if (!this.has('layout')) return false;
-    const r = await this.call('PUT', 'layout', layout).catch(() => null);
+    const r = await this.call('PUT /v1/layout', { body: layout }).catch(() => null);
     return r?.ok ?? false;
   }
 
-  private async projectCall(path: string, body: unknown, making: boolean): Promise<ProjectResult> {
+  private async projectCall(route: Route, body: unknown, making: boolean): Promise<ProjectResult> {
     let r: Response;
     try {
-      r = await this.call('POST', path, body);
+      r = await this.call(route, { body });
     } catch {
       return 'failed';
     }
@@ -491,14 +500,14 @@ export class Cli {
 
   /** GET /v1/definitions: the project's MCU and board definitions (JSON), or null without them. */
   async definitions(): Promise<string | null> {
-    const r = await this.call('GET', 'definitions').catch(() => null);
+    const r = await this.call('GET /v1/definitions').catch(() => null);
     this.defsFailed = r?.status === 500;
     return r?.ok ? await r.text() : null;
   }
 
   /** GET /v1/hello again (after switching projects). */
   async refreshHello(): Promise<void> {
-    const r = await this.call('GET', 'hello').catch(() => null);
+    const r = await this.call('GET /v1/hello').catch(() => null);
     if (r?.ok) this.hello = (await r.json()) as Hello;
   }
 

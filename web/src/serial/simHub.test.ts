@@ -116,8 +116,8 @@ describe('a write the simulator sends back, the watch crashing at boot', () => {
     expect(modal(op, false)).not.toContain(BUILD.askAgent);
 
     const sent: Record<string, unknown>[] = [];
-    const agent = new Agent(async (_m, path, body) => {
-      const reply = path === 'agent' ? { linked: true } : (sent.push(body as Record<string, unknown>), { answer: 'はい。' });
+    const agent = new Agent(async (route, { body } = {}) => {
+      const reply = route === 'GET /v1/agent' ? { linked: true } : (sent.push(body as Record<string, unknown>), { answer: 'はい。' });
       return new Response(JSON.stringify(reply), { status: 200 });
     });
     agent.record = () => op.settledRollbackRecord();

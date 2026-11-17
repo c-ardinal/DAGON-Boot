@@ -15,7 +15,7 @@ use crate::link::SimLink;
 use crate::node::SimNode;
 use dagon_port::{BusError, LinkKind, Nrst, RelayLinkDef};
 use dagon_proto::mailbox::{State, STATE_LEN};
-use dagon_proto::payload::{boot0, nrst, I2cRaw, Relay, SubCtl};
+use dagon_proto::payload::{self, boot0, nrst, I2cRaw, Relay, SubCtl};
 use dagon_proto::{find_sof, flags, frame_len, max_payload, Cmd, Frame, FrameError, Status};
 use dagon_topology::defs::{McuDef, PortDef};
 
@@ -45,6 +45,10 @@ impl FrameCutter {
             match Frame::decode(&self.buf, max_payload) {
                 Ok((_, n)) => frames.push(self.buf.drain(..n).collect()),
                 Err(FrameError::Incomplete) => break,
+                // Handed over as its start, for the answer that refuses it.
+                Err(FrameError::BadVersion) if dagon_proto::is_refused_start(&self.buf) => {
+                    frames.push(self.buf.drain(..dagon_proto::REFUSED_LEN).collect())
+                }
                 Err(_) => {
                     self.buf.drain(..1);
                 }
@@ -432,20 +436,37 @@ impl SimRelay {
     /// not a request, or the node's own agent is not answering).
     pub fn request(&mut self, frame: &[u8]) -> Option<Vec<u8>> {
         self.advance_ms(PC_ROUND_TRIP_MS);
-        let (f, _) = Frame::decode(frame, max_payload::USB).ok()?;
+        let f = match Frame::decode(frame, max_payload::USB) {
+            Ok((f, _)) => f,
+            Err(FrameError::BadVersion) => {
+                let mut out = vec![0u8; frame_len(4)];
+                let n = dagon_proto::version_refusal(frame, &mut out)?;
+                out.truncate(n);
+                return Some(out);
+            }
+            Err(_) => return None,
+        };
         if f.flags & (flags::RESP | flags::EVENT) != 0 {
             return None;
         }
-        let (status, body) = match Cmd::from_u8(f.cmd) {
+        let cmd = Cmd::from_u8(f.cmd);
+        let (status, bulk) = match cmd {
             Some(Cmd::Relay) => self.relay(f.payload),
             Some(Cmd::SubCtl) => self.subctl(f.payload),
             Some(Cmd::I2cRaw) => self.i2c_raw(f.payload),
             _ => return self.node.handle_frame(frame, self.bus.now_ms),
         };
-        let mut out = vec![0u8; frame_len(1 + body.len())];
-        out[8] = status as u8;
-        out[9..9 + body.len()].copy_from_slice(&body);
-        dagon_proto::finish(&mut out, flags::RESP, f.seq, f.cmd, 1 + body.len()).ok()?;
+        let mut out = vec![0u8; frame_len(2 + bulk.len()).max(frame_len(8))];
+        let body = &mut out[dagon_proto::HEADER_LEN..];
+        let len = match (status, cmd) {
+            (Status::Ok, Some(Cmd::Relay | Cmd::I2cRaw)) => {
+                body[0] = Status::Ok as u8;
+                1 + payload::encode_bulk_resp(&bulk, &mut body[1..]).ok()?
+            }
+            _ => payload::put_refusal(body, status, f.cmd, f.payload),
+        };
+        let n = dagon_proto::finish(&mut out, flags::RESP, f.seq, f.cmd, len).ok()?;
+        out.truncate(n);
         Some(out)
     }
 
@@ -457,7 +478,7 @@ impl SimRelay {
             Ok(r) => r,
             Err(s) => return (s, Vec::new()),
         };
-        let t = r.timeout_ms as u64;
+        let t = u64::from(r.timeout_ms.unwrap_or(dagon_port::timeout::RELAY_WAIT_MS));
         let Some(link) = self
             .links
             .iter()

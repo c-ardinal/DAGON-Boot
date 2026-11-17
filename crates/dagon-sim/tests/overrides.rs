@@ -118,6 +118,7 @@ fn ask(r: &mut SimRelay, req: &[u8]) -> (Status, Vec<u8>) {
     let resp = r.request(req).expect("answers");
     let (f, _) = Frame::decode(&resp, max_payload::USB).unwrap();
     let (s, body) = split_status(f.payload).unwrap();
+    let body = bulk_of(f.cmd, s, body);
     (s, body.to_vec())
 }
 
@@ -132,11 +133,11 @@ fn hello_over(r: &mut SimRelay, link: u8, addr: u8) -> (Status, Option<u16>) {
     .encode(&mut h)
     .unwrap();
     let inner = frame(Cmd::Hello, &h[..n]);
-    let mut p = vec![0u8; Relay::HEAD_LEN + inner.len()];
+    let mut p = vec![0u8; Relay::OVERHEAD_MAX + inner.len()];
     let n = Relay {
         link,
         addr,
-        timeout_ms: 300,
+        timeout_ms: Some(300),
         inner: &inner,
     }
     .encode(&mut p)
@@ -185,9 +186,21 @@ fn i2c_raw_reaches_the_wired_node_on_its_own_port() {
     let mut r = SimRelay::with_definition(relaying_node(), &overridden());
     r.add_i2c("i2c0", f401(2, 200), false);
     r.add_i2c("i2c2", f401(3, 100), true);
-    let (s, _) = ask(&mut r, &frame(Cmd::SubCtl, &[nrst::PULSE, boot0::HIGH]));
+    let (s, _) = ask(
+        &mut r,
+        &frame(
+            Cmd::SubCtl,
+            &wire(|b| {
+                dagon_proto::payload::SubCtl {
+                    nrst: nrst::PULSE,
+                    boot0: boot0::HIGH,
+                }
+                .encode(b)
+            }),
+        ),
+    );
     assert_eq!(s, Status::Ok);
-    let mut p = [0u8; 8];
+    let mut p = [0u8; 32];
     let n = I2cRaw {
         read_len: 1,
         data: &[cmd::GET, 0xFF],
@@ -217,7 +230,19 @@ fn i2c_raw_reaches_the_rom_loader_at_its_definitions_address() {
         r.rom_addr, at,
         "the relay's recovery takes the wired node's"
     );
-    let (s, _) = ask(&mut r, &frame(Cmd::SubCtl, &[nrst::PULSE, boot0::HIGH]));
+    let (s, _) = ask(
+        &mut r,
+        &frame(
+            Cmd::SubCtl,
+            &wire(|b| {
+                dagon_proto::payload::SubCtl {
+                    nrst: nrst::PULSE,
+                    boot0: boot0::HIGH,
+                }
+                .encode(b)
+            }),
+        ),
+    );
     assert_eq!(s, Status::Ok);
     let port = r.port(NODE_I2C_PORT, dagon_port::LinkKind::I2c);
     assert_eq!(
@@ -225,7 +250,7 @@ fn i2c_raw_reaches_the_rom_loader_at_its_definitions_address() {
         vec![0x3B],
         "the loader answers there only"
     );
-    let mut p = [0u8; 8];
+    let mut p = [0u8; 32];
     let n = I2cRaw {
         read_len: 1,
         data: &[cmd::GET, 0xFF],
@@ -244,9 +269,21 @@ fn i2c_raw_reaches_the_rom_loader_at_its_definitions_address() {
 fn i2c_raw_without_a_recovery_link_is_unsupported() {
     let mut r = SimRelay::new(relaying_node());
     r.add_i2c("i2c1", f401(3, 100), true);
-    let (s, _) = ask(&mut r, &frame(Cmd::SubCtl, &[nrst::PULSE, boot0::HIGH]));
+    let (s, _) = ask(
+        &mut r,
+        &frame(
+            Cmd::SubCtl,
+            &wire(|b| {
+                dagon_proto::payload::SubCtl {
+                    nrst: nrst::PULSE,
+                    boot0: boot0::HIGH,
+                }
+                .encode(b)
+            }),
+        ),
+    );
     assert_eq!(s, Status::Ok);
-    let mut p = [0u8; 8];
+    let mut p = [0u8; 32];
     let n = I2cRaw {
         read_len: 1,
         data: &[cmd::GET, 0xFF],
@@ -264,4 +301,26 @@ fn i2c_raw_without_a_recovery_link_is_unsupported() {
 fn a_definition_of_another_mcu_is_refused() {
     let other = Registry::builtin().mcu("stm32f401re").unwrap();
     SimRelay::with_definition(relaying_node(), other);
+}
+
+/// The request payload `enc` writes.
+#[allow(dead_code)]
+fn wire(enc: impl FnOnce(&mut [u8]) -> Result<usize, dagon_proto::FrameError>) -> Vec<u8> {
+    let mut b = vec![0u8; 1100];
+    let n = enc(&mut b).unwrap();
+    b.truncate(n);
+    b
+}
+
+/// The bulk of an OK RELAY or I2C_RAW response; any other body as it is.
+#[allow(dead_code)]
+fn bulk_of(cmd: u8, status: dagon_proto::Status, body: &[u8]) -> &[u8] {
+    match dagon_proto::Cmd::from_u8(cmd) {
+        Some(c @ (dagon_proto::Cmd::Relay | dagon_proto::Cmd::I2cRaw))
+            if status == dagon_proto::Status::Ok =>
+        {
+            dagon_proto::payload::parse_bulk_resp(c, body).unwrap()
+        }
+        _ => body,
+    }
 }

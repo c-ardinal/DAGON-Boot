@@ -31,6 +31,7 @@ impl Pc {
     fn body(resp: &[u8]) -> (Status, Vec<u8>) {
         let (f, _) = Frame::decode(resp, max_payload::USB).unwrap();
         let (s, b) = split_status(f.payload).unwrap();
+        let b = bulk_of(f.cmd, s, b);
         (s, b.to_vec())
     }
 
@@ -41,11 +42,11 @@ impl Pc {
         let req = match to {
             None => inner,
             Some((link, addr)) => {
-                let mut rp = vec![0u8; 4 + inner.len()];
+                let mut rp = vec![0u8; 9 + inner.len()];
                 let r = Relay {
                     link,
                     addr,
-                    timeout_ms: 500,
+                    timeout_ms: Some(500),
                     inner: &inner,
                 };
                 let n = r.encode(&mut rp).unwrap();
@@ -134,7 +135,7 @@ fn release_verifies_and_updates_the_watch() {
         relay: sample_hub(2),
         seq: 0,
     };
-    let mut b = [0u8; 8];
+    let mut b = [0u8; 32];
     let begin = XferBegin {
         target: target::APP,
         slot: 1,
@@ -146,7 +147,7 @@ fn release_verifies_and_updates_the_watch() {
     let (hdr, body) = watch_img.split_at(HEADER_SIZE);
     for (cmd, part) in [(Cmd::XferHdr, hdr), (Cmd::XferData, body)] {
         for (i, c) in part.chunks(1000).enumerate() {
-            let mut p = vec![0u8; 4 + c.len()];
+            let mut p = vec![0u8; 16 + c.len()];
             let n = XferChunk {
                 offset: (i * 1000) as u32,
                 data: c,
@@ -156,12 +157,55 @@ fn release_verifies_and_updates_the_watch() {
             pc.call(watch(), cmd, &p[..n]);
         }
     }
-    assert_eq!(pc.call(watch(), Cmd::XferEnd, &[]), sha256(body));
-    pc.call(watch(), Cmd::SetPending, &[target::APP, 1]);
-    pc.call(watch(), Cmd::Reboot, &[reboot_mode::NORMAL]);
+    assert_eq!(
+        dagon_proto::payload::parse_digest(&pc.call(watch(), Cmd::XferEnd, &[])),
+        Ok(sha256(body))
+    );
+    pc.call(
+        watch(),
+        Cmd::SetPending,
+        &wire(|b| {
+            dagon_proto::payload::SetPending {
+                target: target::APP,
+                slot: 1,
+            }
+            .encode(b)
+        }),
+    );
+    pc.call(
+        watch(),
+        Cmd::Reboot,
+        &wire(|b| dagon_proto::payload::encode_reboot(reboot_mode::NORMAL, b)),
+    );
     let h = HelloResp::parse(&pc.call(watch(), Cmd::Hello, &hello())).unwrap();
     assert_eq!((h.active_version, h.trial), (Version::new(1, 1, 0), true));
-    pc.call(watch(), Cmd::Confirm, &[target::APP]);
+    pc.call(
+        watch(),
+        Cmd::Confirm,
+        &wire(|b| dagon_proto::payload::encode_confirm(target::APP, b)),
+    );
     let st = StatusResp::parse(&pc.call(watch(), Cmd::Status, &[])).unwrap();
     assert_eq!((st.active, st.confirmed), (1, 1));
+}
+
+/// The request payload `enc` writes.
+#[allow(dead_code)]
+fn wire(enc: impl FnOnce(&mut [u8]) -> Result<usize, dagon_proto::FrameError>) -> Vec<u8> {
+    let mut b = vec![0u8; 1100];
+    let n = enc(&mut b).unwrap();
+    b.truncate(n);
+    b
+}
+
+/// The bulk of an OK RELAY or I2C_RAW response; any other body as it is.
+#[allow(dead_code)]
+fn bulk_of(cmd: u8, status: dagon_proto::Status, body: &[u8]) -> &[u8] {
+    match dagon_proto::Cmd::from_u8(cmd) {
+        Some(c @ (dagon_proto::Cmd::Relay | dagon_proto::Cmd::I2cRaw))
+            if status == dagon_proto::Status::Ok =>
+        {
+            dagon_proto::payload::parse_bulk_resp(c, body).unwrap()
+        }
+        _ => body,
+    }
 }

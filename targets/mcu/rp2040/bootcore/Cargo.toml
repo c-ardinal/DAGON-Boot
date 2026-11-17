@@ -30,7 +30,12 @@ no-confirm = []
 slot-b = ["dagon-mcu-rp2040/slot-b"]
 
 [dependencies]
-dagon-mcu-rp2040 = { path = "..", default-features = false, features = ["hal", "image-bootcore"] }
+# `usb`: update and recovery mode serve the session on the app's USB device.
+dagon-mcu-rp2040 = { path = "..", default-features = false, features = ["usb", "image-bootcore"] }
+# The update session (the boot core writer) and the loop that serves it.
+dagon-agent = { path = "../../../../crates/dagon-agent" }
+dagon-mcu-common = { path = "../../common" }
+dagon-proto = { path = "../../../../crates/dagon-proto" }
 # Byte-loop memory copy and fill keep the image small.
 dagon-boot = { path = "../../../../crates/dagon-boot", features = ["small-mem"] }
 dagon-core = { path = "../../../../crates/dagon-core" }
@@ -38,21 +43,22 @@ dagon-ed25519 = { path = "../../../../crates/dagon-ed25519" }
 dagon-events = { path = "../../../../crates/dagon-events" }
 dagon-format = { path = "../../../../crates/dagon-format" }
 dagon-port = { path = "../../../../crates/dagon-port" }
-embassy-rp = { version = "0.10.0", features = ["rp2040", "critical-section-impl", "boot2-none", "unstable-pac"] }
+embassy-rp = { version = "0.10.0", features = ["rp2040", "critical-section-impl", "boot2-none", "unstable-pac", "time-driver"] }
 embassy-time = "0.5"
+# Update and recovery mode: one serving task on a thread-mode executor
+# (it sleeps between events), its reads bounded by a timer.
+embassy-executor = { version = "0.10", features = ["platform-cortex-m", "executor-thread"] }
+embassy-futures = "0.1"
+static_cell = "2"
 cortex-m = "0.7"
 cortex-m-rt = "0.7"
 panic-halt = "1"
 
-[dev-dependencies]
-# examples/size.rs: the update session the boot core serves, measured with it.
-dagon-agent = { path = "../../../../crates/dagon-agent" }
-dagon-mcu-common = { path = "../../common" }
-dagon-proto = { path = "../../../../crates/dagon-proto" }
-
 [build-dependencies]
 # The board facts and the linked extensions' check from the node's boot folder.
 dagon-topology = { path = "../../../../crates/dagon-topology" }
+# The node's MCU definition in its boot folder (its listen window).
+toml = { version = "0.8", default-features = false, features = ["parse"] }
 
 [profile.release]
 opt-level = "z"

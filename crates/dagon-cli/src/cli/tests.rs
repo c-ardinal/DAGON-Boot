@@ -780,8 +780,7 @@ fn slot_and_kind_help_list_what_the_parser_takes() {
     for l in crate::commands::slot_letters() {
         assert!(help_of("slot").contains(l), "--slot help lacks {l}");
     }
-    for name in crate::cli::KIND_NAMES {
+    for (name, _) in dagon_sign::image::IMAGE_KIND_NAMES {
         assert!(help_of("kind").contains(name), "--kind help lacks {name}");
-        assert!(dagon_sign::image::image_kind_of(name).is_some(), "{name}");
     }
 }

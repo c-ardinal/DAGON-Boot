@@ -11,55 +11,87 @@
 //! section 4.3.4) the compiler calls; the linker takes them in place of
 //! `compiler_builtins`' weak ones. Each byte moves by a volatile access, so
 //! the optimizer cannot turn a loop back into a call to these routines.
+//!
+//! Every entry point runs one of the private loops below and none calls
+//! another entry point by name: the compiler knows `memcpy`, `memmove` and
+//! `memset` as library calls and, on ARM, lowers a call to one of them to
+//! its `__aeabi_mem*` helper, so a helper that called `memcpy` would call
+//! itself (scripts/codec_budget.py fails an image with such a function).
 #![allow(unsafe_code)]
 // The C and EABI signatures, kept as the standards spell them.
 #![allow(clippy::missing_safety_doc)]
 
 use core::ffi::c_int;
 
-#[cfg_attr(target_os = "none", no_mangle)]
+/// Copies `n` bytes from `src` to `dest`, lowest first.
+///
+/// # Safety
+/// `n` readable bytes at `src`, `n` writable bytes at `dest`; where they
+/// overlap, `dest` is not above `src`.
 #[inline(never)]
-pub unsafe extern "C" fn memcpy(dest: *mut u8, src: *const u8, n: usize) -> *mut u8 {
+unsafe fn forward(dest: *mut u8, src: *const u8, n: usize) {
     let mut i = 0;
     while i < n {
-        // SAFETY: the caller passes `n` readable bytes at `src` and `n`
-        // writable bytes at `dest` that do not overlap (C memcpy).
+        // SAFETY: the caller's contract; copying forward reads each source
+        // byte before an overlapping destination byte above it is written.
         unsafe { dest.add(i).write_volatile(src.add(i).read_volatile()) };
         i += 1;
     }
-    dest
 }
 
-#[cfg_attr(target_os = "none", no_mangle)]
+/// Copies `n` bytes from `src` to `dest` the way C memmove does: forward,
+/// or highest first when `dest` lies above `src`.
+///
+/// # Safety
+/// `n` readable bytes at `src` and `n` writable bytes at `dest`.
 #[inline(never)]
-pub unsafe extern "C" fn memmove(dest: *mut u8, src: *const u8, n: usize) -> *mut u8 {
+unsafe fn moved(dest: *mut u8, src: *const u8, n: usize) {
     if (dest as usize) <= (src as usize) {
-        // SAFETY: as `memcpy`; copying forward reads each source byte
-        // before an overlapping destination byte above it is written.
-        return unsafe { memcpy(dest, src, n) };
+        // SAFETY: the caller's contract, with `dest` not above `src`.
+        return unsafe { forward(dest, src, n) };
     }
     let mut i = n;
     while i > 0 {
         i -= 1;
-        // SAFETY: the caller passes `n` readable bytes at `src` and `n`
-        // writable bytes at `dest` (C memmove); copying backward reads each
-        // source byte before an overlapping destination byte below it is
-        // written.
+        // SAFETY: the caller's contract; copying backward reads each source
+        // byte before an overlapping destination byte below it is written.
         unsafe { dest.add(i).write_volatile(src.add(i).read_volatile()) };
     }
+}
+
+/// Writes `c` to `n` bytes at `dest`.
+///
+/// # Safety
+/// `n` writable bytes at `dest`.
+#[inline(never)]
+unsafe fn fill(dest: *mut u8, c: u8, n: usize) {
+    let mut i = 0;
+    while i < n {
+        // SAFETY: the caller's contract.
+        unsafe { dest.add(i).write_volatile(c) };
+        i += 1;
+    }
+}
+
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn memcpy(dest: *mut u8, src: *const u8, n: usize) -> *mut u8 {
+    // SAFETY: C memcpy's contract: `n` bytes each, not overlapping.
+    unsafe { forward(dest, src, n) };
     dest
 }
 
 #[cfg_attr(target_os = "none", no_mangle)]
-#[inline(never)]
+pub unsafe extern "C" fn memmove(dest: *mut u8, src: *const u8, n: usize) -> *mut u8 {
+    // SAFETY: C memmove's contract: `n` bytes each.
+    unsafe { moved(dest, src, n) };
+    dest
+}
+
+/// The fill is `c` converted to a byte, as C specifies.
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn memset(dest: *mut u8, c: c_int, n: usize) -> *mut u8 {
-    let mut i = 0;
-    while i < n {
-        // SAFETY: the caller passes `n` writable bytes at `dest` (C memset);
-        // the fill is `c` converted to a byte, as C specifies.
-        unsafe { dest.add(i).write_volatile(c as u8) };
-        i += 1;
-    }
+    // SAFETY: C memset's contract: `n` writable bytes.
+    unsafe { fill(dest, c as u8, n) };
     dest
 }
 
@@ -68,26 +100,26 @@ macro_rules! aeabi {
         #[cfg_attr(target_os = "none", no_mangle)]
         pub unsafe extern "C" fn $copy(dest: *mut u8, src: *const u8, n: usize) {
             // SAFETY: the EABI helper's contract is memcpy's.
-            unsafe { memcpy(dest, src, n) };
+            unsafe { forward(dest, src, n) };
         }
 
         #[cfg_attr(target_os = "none", no_mangle)]
         pub unsafe extern "C" fn $mv(dest: *mut u8, src: *const u8, n: usize) {
             // SAFETY: the EABI helper's contract is memmove's.
-            unsafe { memmove(dest, src, n) };
+            unsafe { moved(dest, src, n) };
         }
 
         /// The EABI fill takes the length before the value.
         #[cfg_attr(target_os = "none", no_mangle)]
         pub unsafe extern "C" fn $set(dest: *mut u8, n: usize, c: c_int) {
             // SAFETY: the EABI helper's contract is memset's.
-            unsafe { memset(dest, c, n) };
+            unsafe { fill(dest, c as u8, n) };
         }
 
         #[cfg_attr(target_os = "none", no_mangle)]
         pub unsafe extern "C" fn $clr(dest: *mut u8, n: usize) {
             // SAFETY: the EABI helper's contract is memset's with 0.
-            unsafe { memset(dest, 0, n) };
+            unsafe { fill(dest, 0, n) };
         }
     )+};
 }
@@ -134,6 +166,31 @@ mod tests {
                 // SAFETY: as above, in `down`.
                 unsafe { __aeabi_memmove(q, q.add(shift), n) };
                 assert_eq!((up, down), (want_up, want_down), "shift {shift}, {n} bytes");
+            }
+        }
+    }
+
+    /// The C entry points give the same bytes at any alignment and return
+    /// `dest`; a zero length touches nothing.
+    #[test]
+    fn the_c_routines_work_at_any_alignment() {
+        let src: [u8; 24] = core::array::from_fn(|i| i as u8 + 1);
+        for (at, from) in [(0, 0), (1, 0), (3, 1), (2, 3)] {
+            for n in [0, 1, 7, 16] {
+                let mut d = [0xEEu8; 24];
+                let p = d.as_mut_ptr();
+                // SAFETY: `n` bytes from `at` and from `from` lie in each array.
+                let back = unsafe { memcpy(p.add(at), src.as_ptr().add(from), n) };
+                assert_eq!(back, p.wrapping_add(at));
+                assert_eq!(d[at..at + n], src[from..from + n]);
+                assert!(d[..at].iter().chain(&d[at + n..]).all(|&b| b == 0xEE));
+                // SAFETY: as above.
+                let back = unsafe { memset(p.add(at), 0x2A, n) };
+                assert_eq!(back, p.wrapping_add(at));
+                assert!(d[at..at + n].iter().all(|&b| b == 0x2A));
+                // SAFETY: `n` bytes from `at` and from `from` lie in `d`.
+                unsafe { memmove(p.add(from), p.add(at), n) };
+                assert!(d[from..from + n].iter().all(|&b| b == 0x2A));
             }
         }
     }

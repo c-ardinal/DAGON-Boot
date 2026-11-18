@@ -36,7 +36,7 @@ const _: () = links::require_downlinks(DOWNLINKS);
 /// The bit rate of this node's UART link, from the 構成 (wiring.rs).
 const LINK_BAUD: u32 = match wiring::NODE.link {
     wiring::Link::Uart { baud } => baud,
-    _ => panic!("this start-up serves a UART link to the 親機"),
+    _ => panic!("this start-up serves a UART link to the upstream node"),
 };
 
 /// Every task of the application registers here; the watchdog is fed only

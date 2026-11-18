@@ -52,7 +52,7 @@ The kind names are exactly the 構成's: `usb-cdc`, `uart`, `i2c`, `ble`,
 - `{{uplink}}` renders to one Rust path naming the node's uplink kind:
   `dagon_mcu_esp32s3::links::Kind::<Variant>`;
 - `{{downlinks}}` renders to the downlink kinds, comma-separated (empty
-  for a 子機): `dagon_mcu_esp32s3::links::Kind::<Variant>, ...`.
+  for a node without downlinks): `dagon_mcu_esp32s3::links::Kind::<Variant>, ...`.
 
 Variants by name: `usb-cdc` `UsbCdc`, `uart` `Uart`, `i2c` `I2c`, `ble`
 `Ble`, `wifi-tcp` `WifiTcp`, `ethernet` `Ethernet`, `can` `Can`. The

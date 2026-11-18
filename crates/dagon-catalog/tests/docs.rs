@@ -144,35 +144,54 @@ fn the_limitations_gap_list_is_generated() {
     }
 }
 
-/// Every item the catalog says the tree has is declared in its crate (a
-/// trait, a type or a machine), so a rename or removal fails here.
+/// What the catalog says the tree has, named as code so the build checks
+/// it: a port's path as a trait bound (this file stops building when the
+/// trait is gone, private or no longer a trait), a part's path by `use`.
+/// Evaluates to the paths as written.
+macro_rules! named_in_code {
+    (ports: $($t:path),* ; parts: $($($p:ident)::+),* $(,)?) => {{
+        $({
+            fn _is_a_public_trait<T: ?Sized + $t>() {}
+        })*
+        $({
+            #[allow(unused_imports)]
+            use $($p)::+ as _;
+        })*
+        [$(stringify!($t)),*, $(stringify!($($p)::+)),*]
+    }};
+}
+
+/// The catalog's `Has` paths are exactly those the build checks above, so
+/// a path added to the catalog without its check, or one left here after
+/// the catalog drops it, fails.
 #[test]
-fn what_the_catalog_says_the_tree_has_is_there() {
+fn what_the_catalog_says_the_tree_has_is_checked_by_the_build() {
+    let checked: BTreeSet<String> = named_in_code!(
+        ports:
+            dagon_port::Link,
+            dagon_host::Transport,
+            dagon_format::SigVerifier,
+            dagon_port::Watchdog,
+            dagon_agent::SlotStore,
+            dagon_events::Extension,
+            dagon_events::BoardBringUp,
+            dagon_port::NodeLink;
+        parts:
+            dagon_agent::image,
+            dagon_agent::session,
+            dagon_events::Composed,
+    )
+    .iter()
+    .map(|s| s.replace(' ', ""))
+    .collect();
+    let mut catalog = BTreeSet::new();
     for p in PORTS {
-        let InTree::Has(paths) = p.in_tree else {
-            continue;
-        };
-        assert!(!paths.is_empty(), "{}", p.id);
-        for path in paths {
-            let (krate, item) = path.split_once("::").expect("crate::Item");
-            let src = root()
-                .join("crates")
-                .join(krate.replace('_', "-"))
-                .join("src");
-            let declared = rust_files(&src).iter().any(|f| {
-                let text = std::fs::read_to_string(f).unwrap_or_default();
-                ["trait", "struct", "machine"].iter().any(|k| {
-                    text.contains(&format!("{k} {item} ")) || text.contains(&format!("{k} {item}<"))
-                })
-            });
-            assert!(
-                declared,
-                "{}: {path} is not declared in {}",
-                p.id,
-                src.display()
-            );
+        if let InTree::Has(paths) = p.in_tree {
+            assert!(!paths.is_empty(), "{}", p.id);
+            catalog.extend(paths.iter().map(|s| s.to_string()));
         }
     }
+    assert_eq!(catalog, checked);
 }
 
 /// A new or changed description fails until it is translated, and the

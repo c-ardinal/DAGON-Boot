@@ -38,9 +38,9 @@ impl Support {
 /// Direction of a hop seen from this node.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Dir {
-    /// Towards the PC (the 親機's PC link, a 子機's link to its parent).
+    /// Towards the PC (a PC link, or a link to the upstream node).
     Up,
-    /// Towards a child node (only a 親機 has these).
+    /// Towards a child node (only the node linked to the PC has these).
     Down,
 }
 

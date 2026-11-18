@@ -98,7 +98,7 @@ curl -fsSL https://raw.githubusercontent.com/c-ardinal/DAGON-Boot/main/setup.sh 
 $env:DAGON_UNINSTALL = "1"; irm https://raw.githubusercontent.com/c-ardinal/DAGON-Boot/main/setup.ps1 | iex
 ```
 
-環境変数`DAGON_UNINSTALL=1`でも同様です。PowerShellのスクリプトは実行後にこの変数を削除します。
+両スクリプトとも、環境変数`DAGON_UNINSTALL=1`の設定でもアンインストールを実行します。PowerShellのスクリプトは実行後にこの変数を削除します。
 
 #### シミュレータでの体験
 
@@ -192,6 +192,6 @@ cargo install --path crates/dagon-cli
 - ベンダー部品: ESP-IDFの2nd stage、`rp2040-boot2`、STM32F401のROMブートローダ
 - テストデータ: Project WycheproofのEd25519のテストベクタ（Apache License 2.0、<https://github.com/C2SP/wycheproof>）とRFC 8032のテストベクタ。`crates/dagon-ed25519/tests/vectors/`に出典を付記して無改変で配置しています。
 - 書体とアイコン: Doto、DotGothic16、Zen Kaku Gothic New、JetBrains Mono（SIL OFL 1.1）、Lucide（ISC）
-- マイコンとボードの定義値: 各社のデータシートとボードの資料から引用しています。出典が未確認の値は定義内で`unverified`と明示します。
+- マイコンとボードの定義値: 各社のデータシートとボードの資料から引用しています。出典が未検証の値は定義内で`unverified`と明示します。
 
 一覧とライセンスは[ライセンス](https://c-ardinal.github.io/DAGON-Boot/doc/reference/licenses/)に記載しています。

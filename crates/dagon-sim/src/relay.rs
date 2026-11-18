@@ -16,7 +16,9 @@ use crate::node::SimNode;
 use dagon_port::{BusError, LinkKind, Nrst, RelayLinkDef};
 use dagon_proto::handler::{self, Handler};
 use dagon_proto::mailbox::{State, STATE_LEN};
-use dagon_proto::payload::{self, boot0, nrst, CmdSet, I2cRaw, Relay, SubCtl};
+use dagon_proto::payload::{
+    self, boot0, nrst, CapsReq, CapsResp, CmdSet, I2cRaw, Relay, Req, SubCtl,
+};
 use dagon_proto::{find_sof, flags, frame_len, max_payload, Cmd, Frame, FrameError, Status};
 use dagon_topology::defs::{McuDef, PortDef};
 
@@ -462,53 +464,100 @@ impl SimRelay {
             return None;
         }
         // As the relay on a node: RELAY always, SUBCTL and I2C_RAW with a
-        // node on the recovery lines; the rest is the node's own agent.
+        // node on the recovery lines, CAPS about RELAY; the rest is the
+        // node's own agent.
         let wired = self.bus.sub.is_some();
-        let row =
-            handler::find(&Self::TABLE, f.cmd).filter(|h| wired || matches!(h.cmd, Cmd::Relay));
+        let row = handler::find(&Self::TABLE, f.cmd)
+            .filter(|h| wired || matches!(h.cmd, Cmd::Relay))
+            .or((f.cmd == Cmd::Caps as u8).then_some(&Self::CAPS));
         let Some(row) = row else {
             return self.node.handle_frame(frame, self.bus.now_ms);
         };
-        let (status, bulk) = match row.call(self, f.payload) {
-            Ok(answer) => answer,
+        // What the requester takes: the ingress of a tunnel, and the most
+        // an answer may be.
+        let ceiling = self.node.ceiling().over(max_payload::USB);
+        let room = ceiling.bytes();
+        // The whole request is read, and its answer held against the
+        // ceiling, before any of it runs.
+        let (status, bytes) = match row.request(f.payload, ceiling) {
             Err(refused) => (refused, Vec::new()),
+            Ok(Req::Caps(c)) if c.cmd != Cmd::Relay as u8 => {
+                return self.node.handle_frame(frame, self.bus.now_ms)
+            }
+            Ok(Req::Caps(c)) => self.caps(c, room),
+            Ok(Req::Relay(r)) => self.relay(&r, room),
+            Ok(Req::SubCtl(s)) => self.subctl(s),
+            Ok(Req::I2cRaw(raw)) => self.i2c_raw(&raw),
+            Ok(_) => (Status::Unsupported, Vec::new()),
         };
-        let mut out = vec![0u8; frame_len(2 + bulk.len()).max(frame_len(8))];
+        let mut out = vec![0u8; frame_len(2 + bytes.len()).max(frame_len(8))];
         let body = &mut out[dagon_proto::HEADER_LEN..];
-        let len = if status == Status::Ok && row.spec.resp.bulk {
-            body[0] = Status::Ok as u8;
-            1 + payload::encode_bulk_resp(&bulk, &mut body[1..]).ok()?
-        } else {
+        let len = if status != Status::Ok {
             payload::put_refusal(body, status, f.cmd, f.payload)
+        } else {
+            body[0] = Status::Ok as u8;
+            if row.spec.resp.bulk {
+                1 + payload::encode_bulk_resp(&bytes, &mut body[1..]).ok()?
+            } else {
+                body.get_mut(1..1 + bytes.len())?.copy_from_slice(&bytes);
+                1 + bytes.len()
+            }
         };
         let n = dagon_proto::finish(&mut out, flags::RESP, f.seq, f.cmd, len).ok()?;
         out.truncate(n);
         Some(out)
     }
 
-    /// The commands the relay answers itself: each is read whole, then
-    /// handled.
-    const TABLE: [Handler<SimRelay, Answer>; 3] = [
-        Handler::new(Cmd::Relay, |r, p| Ok(r.relay(&Relay::of(p)?))),
-        Handler::new(Cmd::SubCtl, |r, p| Ok(r.subctl(SubCtl::of(p)?))),
-        Handler::new(Cmd::I2cRaw, |r, p| Ok(r.i2c_raw(&I2cRaw::of(p)?))),
+    /// The commands the relay answers itself; [`SimRelay::request`] takes
+    /// the typed request of a row and runs it, as the relay on a node.
+    const TABLE: [Handler<(), ()>; 3] = [
+        Handler::deferred(Cmd::Relay),
+        Handler::deferred(Cmd::SubCtl),
+        Handler::deferred(Cmd::I2cRaw),
     ];
+
+    /// CAPS, answered here about RELAY and by the agent about the rest.
+    const CAPS: Handler<(), ()> = Handler::deferred(Cmd::Caps);
+
+    /// CAPS about RELAY: its fields, and for the link asked about the
+    /// tunnel over it for a requester that takes `room` payload bytes;
+    /// `Arg` for a link the definition does not list. The answer's body.
+    fn caps(&mut self, asked: CapsReq, room: usize) -> Answer {
+        let tunnel = match asked.link.map(|id| self.links.iter().find(|l| l.id == id)) {
+            None => None,
+            Some(None) => return (Status::Arg, Vec::new()),
+            Some(Some(l)) => {
+                let mtu = Relay::tunnel_mtu(room, usize::from(l.max_payload));
+                Some(u16::try_from(mtu).unwrap_or(u16::MAX))
+            }
+        };
+        let answer = CapsResp {
+            tunnel_mtu: tunnel,
+            ..CapsResp::of(Cmd::Relay)
+        };
+        let mut body = vec![0u8; CapsResp::MAX_LEN];
+        match answer.encode(&mut body) {
+            Ok(n) => {
+                body.truncate(n);
+                (Status::Ok, body)
+            }
+            Err(_) => (Status::Arg, Vec::new()),
+        }
+    }
 
     /// RELAY over the link its id names: `Arg`, before anything is
     /// forwarded, for an id the table does not list, an address the link
-    /// does not take or an inner frame the tunnel from USB over that link
-    /// does not admit (`Relay::admits`); `Unsupported` for a link kind the
-    /// simulator has no medium for.
-    fn relay(&mut self, r: &Relay<'_>) -> Answer {
+    /// does not take or an inner frame the tunnel over that link does not
+    /// admit for a requester that takes `room` payload bytes
+    /// (`Relay::admits`); `Unsupported` for a link kind the simulator has
+    /// no medium for.
+    fn relay(&mut self, r: &Relay<'_>, room: usize) -> Answer {
         let t = u64::from(r.timeout_ms.unwrap_or(dagon_port::timeout::RELAY_WAIT_MS));
         let Some(link) = self
             .links
             .iter()
             .find(|l| l.id == r.link)
-            .filter(|l| {
-                l.addressing.accepts(r.addr)
-                    && r.admits(max_payload::USB, usize::from(l.max_payload))
-            })
+            .filter(|l| l.addressing.accepts(r.addr) && r.admits(room, usize::from(l.max_payload)))
             .copied()
         else {
             return (Status::Arg, Vec::new());

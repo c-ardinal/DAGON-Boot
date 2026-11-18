@@ -261,6 +261,91 @@ fn the_relaying_node_says_what_it_serves_and_reads_before_it_acts() {
     assert_eq!(commands, APP.len() + own.len(), "every command it serves");
     assert_eq!(relay.node.status(), slots);
 
+    // CAPS about RELAY is the relay's, with the tunnel of the link asked
+    // about for this requester (its HELLO named the payload of I2C);
+    // about another command it is the agent's.
+    let bus = link_on(NODE_I2C_PORT);
+    let caps = |cmd: Cmd, link: Option<u8>| {
+        wire(|b| {
+            CapsReq {
+                cmd: cmd as u8,
+                link,
+            }
+            .encode(b)
+        })
+    };
+    let (st, body) = pc.ask(&mut relay, Cmd::Caps, &caps(Cmd::Relay, Some(bus)));
+    let tunnel = Relay::tunnel_mtu(max_payload::I2C, max_payload::I2C);
+    assert_eq!(st, Status::Ok);
+    assert_eq!(
+        CapsResp::parse(&body).unwrap(),
+        CapsResp {
+            tunnel_mtu: Some(tunnel as u16),
+            ..CapsResp::of(Cmd::Relay)
+        }
+    );
+    let (st, body) = pc.ask(&mut relay, Cmd::Caps, &caps(Cmd::Status, None));
+    assert_eq!(st, Status::Ok);
+    assert_eq!(CapsResp::parse(&body), Ok(CapsResp::of(Cmd::Status)));
+    let none = (1..=u8::MAX).find(|id| relay.links().iter().all(|l| l.id != *id));
+    let (st, _) = pc.ask(&mut relay, Cmd::Caps, &caps(Cmd::Relay, none));
+    assert_eq!(st, Status::Arg, "not a link of the node");
+
+    // The requester's HELLO names the smallest payload a link offers: an
+    // answer that would not fit it is refused before a port is used,
+    // I2C_RAW by the bytes it asks to read, RELAY by the tunnel.
+    pc.subctl(&mut relay, nrst::PULSE, boot0::HIGH);
+    let floor = max_payload::SMALLEST;
+    let said = HelloReq {
+        proto_ver: 2,
+        max_payload: floor as u16,
+    };
+    let (st, _) = pc.ask(&mut relay, Cmd::Hello, &wire(|b| said.encode(b)));
+    assert_eq!(st, Status::Ok);
+    let (_, body) = pc.ask(&mut relay, Cmd::Caps, &caps(Cmd::Relay, Some(bus)));
+    let tunnel = Relay::tunnel_mtu(floor, max_payload::I2C);
+    assert_eq!(
+        CapsResp::parse(&body).unwrap().tunnel_mtu,
+        Some(tunnel as u16)
+    );
+    let ops = relay.bus.ops;
+    let raw = |read_len: u16| {
+        wire(|b| {
+            I2cRaw {
+                read_len,
+                data: &[],
+            }
+            .encode(b)
+        })
+    };
+    let most = (floor - 2) as u16;
+    let (st, _) = pc.ask(&mut relay, Cmd::I2cRaw, &raw(most + 1));
+    assert_eq!((st, relay.bus.ops), (Status::Arg, ops));
+    let inner = |len: usize| {
+        let mut f = vec![0u8; len];
+        dagon_proto::finish(&mut f, 0, 0x5A, 0x7F, len - 12).unwrap();
+        f
+    };
+    let over = |inner: &[u8]| {
+        wire(|b| {
+            Relay {
+                link: bus,
+                addr: NODE_I2C_ADDR,
+                timeout_ms: None,
+                inner,
+            }
+            .encode(b)
+        })
+    };
+    let (st, _) = pc.ask(&mut relay, Cmd::Relay, &over(&inner(tunnel + 1)));
+    assert_eq!((st, relay.bus.ops), (Status::Arg, ops), "over the tunnel");
+    // At the ceiling both use the port.
+    let (st, read) = pc.ask(&mut relay, Cmd::I2cRaw, &raw(most));
+    assert_eq!((st, read.len()), (Status::Ok, usize::from(most)));
+    let (st, _) = pc.ask(&mut relay, Cmd::Relay, &over(&inner(tunnel)));
+    assert_ne!(st, Status::Arg);
+    assert!(relay.bus.ops > ops);
+
     // A relaying node with no node on its recovery lines serves RELAY alone
     // of the relay's commands.
     let mut bare = SimRelay::new(SimNode::new(

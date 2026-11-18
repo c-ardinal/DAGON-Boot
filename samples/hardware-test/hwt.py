@@ -233,7 +233,7 @@ class Run:
         cmd = [*self.dagon, *args]
         if port:
             cmd += ["--port", self.port]
-        if config is not False:  # key gen, release build of a test key: no project config
+        if config is not False:  # key gen, release of a test key: no project config
             cmd += ["--config", str(config or self.project / "dagon.toml")]
         shown = " ".join(cmd)
         if args[0] in MUTATING:
@@ -482,16 +482,16 @@ class Run:
             for slot in "ab":
                 img = self.out / f"foreign-{node}-{slot}.img"
                 rc, _, _, _ = self.cli(
-                    ["image", "sign", str(build / f"app-{slot}.elf"), "--node", node,
+                    ["image", str(build / f"app-{slot}.elf"), "--node", node,
                      "--version", v, "--slot", slot, "--out", str(img), "--key", secret],
                     f"{name}-sign-{slot}", port=False)
-                expect(rc == 0, "image sign with the throwaway key failed")
+                expect(rc == 0, "image with the throwaway key failed")
                 imgs.append(str(img))
             dgb = self.out / "foreign.dgb"
-            rc, _, _, _ = self.cli(["release", "build", *imgs, "--name", "foreign",
+            rc, _, _, _ = self.cli(["release", *imgs, "--name", "foreign",
                                     "--out", str(dgb), "--key", secret],
                                    f"{name}-release", port=False)
-            expect(rc == 0, "release build with the throwaway key failed")
+            expect(rc == 0, "release with the throwaway key failed")
         return dgb, key_id
 
     # -- restore after a failure ---------------------------------------------

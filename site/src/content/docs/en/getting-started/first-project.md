@@ -224,7 +224,7 @@ Without node ids it takes every node in `[build.<id>]`.
 
 An ESP32-S3 node is built once, as its image runs from either OTA slot. `dagon deploy` turns the build into an ESP image (`espflash save-image`) and signs that, and the hub relays it like any other node's.
 
-The single steps are `dagon build`, `dagon image sign`, `dagon release build` and `dagon apply` (`dagon --help`).
+The single steps are `dagon build`, `dagon image`, `dagon release` and `dagon apply` (`dagon --help`).
 
 ### In DAGON Console
 

@@ -19,10 +19,10 @@ The demo reads and writes no files, connects to no device and holds no keys. Tho
 
 First [install](/en/getting-started/install/) the `dagon` command.
 
-### `dagon sim run`
+### `dagon sim`
 
 ```sh
-dagon sim run
+dagon sim
 ```
 
 It runs end-to-end scenarios in the simulator:

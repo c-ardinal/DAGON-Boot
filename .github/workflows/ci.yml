@@ -53,6 +53,9 @@ jobs:
         run: cargo test --workspace --locked
       - name: Generated catalogs up to date (the site's Events and Ports pages)
         run: cargo test -p dagon-catalog --test docs --locked
+      - name: Command-line page up to date (site reference/cli.md)
+        if: matrix.os == 'ubuntu-24.04'
+        run: python site/scripts/gen.py --check
       - name: Format
         if: matrix.os == 'ubuntu-24.04'
         run: cargo fmt --all --check

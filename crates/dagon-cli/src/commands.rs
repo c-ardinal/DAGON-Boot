@@ -1,4 +1,4 @@
-//! `image sign`, `release build`, `topo compile`, `provision`.
+//! `image`, `release`, `topo compile`, `provision`.
 
 use std::path::{Path, PathBuf};
 

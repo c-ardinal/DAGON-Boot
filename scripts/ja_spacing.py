@@ -1,8 +1,8 @@
 """Finds half-width spaces between Japanese and Latin letters, digits or code in Markdown.
 
 Japanese takes no space there: `DAGONとは`, `1か所`, `dagon new`と. Left alone: code fences, code
-spans, URLs, inline figures, the space after a heading's section number (`### 1.1 名前`), and a space that CommonMark
-needs for bold to render (`**名前。** DAGON`).
+spans, URLs, inline figures, the space after a heading's section number (`### 1.1 名称`), and a space that CommonMark
+needs for bold to render (`**名称。** DAGON`).
 """
 import re
 import unicodedata

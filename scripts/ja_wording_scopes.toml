@@ -28,7 +28,7 @@ enabled = false
 [[area]]
 name = "readme-crates-scripts"
 paths = ["README.md", "README.en.md", "CHANGELOG.md", "compat.toml", "crates/*", "scripts/*", "plugin/*"]
-enabled = false
+enabled = true
 
 [[area]]
 name = "targets-samples-assets"

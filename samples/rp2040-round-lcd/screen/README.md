@@ -18,9 +18,9 @@ what to show.
 |---|---|---|
 | `boot.watchdog_armed` | 1 of 4 | 起動しています |
 | `boot.log_read` | 2 of 4 | 起動しています |
-| `boot.before_decision` | 3 of 4 | ファームウェアを確かめています |
+| `boot.before_decision` | 3 of 4 | ファームウェアを確認しています |
 | `boot.slot_chosen`, confirmed image | 4 of 4 | 確定したバージョンで起動します |
-| `boot.slot_chosen`, image on trial | 4 of 4 | 新しいバージョンを試します |
+| `boot.slot_chosen`, image on trial | 4 of 4 | 新規バージョンを試行します |
 | `boot.no_image`, `boot.halt` | nothing drawn: the boot core's halt blink on the backlight | |
 
 The app's display replaces the screen when the app starts. Without the

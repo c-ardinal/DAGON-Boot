@@ -327,9 +327,10 @@ impl ServeHost<Store, NodeChain, Ed25519Compact> for Host {
     fn on_request(&mut self) {
         self.started = Instant::now();
     }
-    fn intercept(&mut self, _: &mut AppAgent, request: &[u8]) -> Option<&[u8]> {
+    fn intercept(&mut self, agent: &mut AppAgent, request: &[u8]) -> Option<&[u8]> {
         let n = conform::serve(
             &mut self.flash,
+            agent.ceiling(),
             request,
             &mut self.out,
             self.watch,
@@ -372,6 +373,7 @@ mod conform {
     /// Answers a CONF_RUN request into `out`; `None` for any other frame.
     pub fn serve(
         flash: &mut SharedFlash,
+        ceiling: dagon_proto::handler::Ceiling,
         request: &[u8],
         out: &mut [u8; OUT_MAX],
         watch: &dyn Watch,
@@ -381,10 +383,10 @@ mod conform {
             declared: &layout::FLASH_REGIONS,
             scratch: crate::conform_scratch(),
         };
-        let max = max_payload::I2C;
+        let ceiling = ceiling.within(max_payload::I2C);
         // Long tests feed through this hook and count as progress.
         let mut feed = || watch.progress(task);
-        handle_frame(request, max, flash, &setup, out, &mut feed)
+        handle_frame(request, ceiling, flash, &setup, out, &mut feed)
     }
 }
 
@@ -397,6 +399,7 @@ mod conform {
 
     pub fn serve(
         _: &mut SharedFlash,
+        _: dagon_proto::handler::Ceiling,
         _: &[u8],
         _: &mut [u8; OUT_MAX],
         _: &dyn Watch,

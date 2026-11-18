@@ -247,8 +247,8 @@ addressing = { fixed = 0xFF }
 max_payload = 1024
 
 # Static RAM (.bss + .data) of the relay firmware (examples/relay.rs, both
-# links wired; scripts/relay_ram.py): 18_784 bytes measured with the pinned
-# Rust, which leaves 672 bytes (1/28 of it) under this budget. The margin
+# links wired; scripts/relay_ram.py): 18_688 bytes measured with the pinned
+# Rust, which leaves 768 bytes (1/24 of it) under this budget. The margin
 # takes a toolchain's or a dependency's small changes; the I2C link's port
 # and worker grown back to the USB frame (1_664 bytes more) do not fit.
 [relay]

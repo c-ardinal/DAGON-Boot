@@ -267,23 +267,23 @@ fn failure_and_replay() {
     assert!(fake.0.borrow().clears.is_empty());
     assert_eq!(fake.0.borrow().peers.len(), 1);
     // A good request captured on the wire, then a new seed: the capture
-    // is a replay, and the new seed is still held.
+    // is a bad signature for the new seed, which it voids.
     let seed = n.seed().unwrap();
     let captured = sign(&keypair(), &seed, &scope);
     assert_eq!(n.clear(scope, Some(captured)), Status::Ok);
     let seed = n.seed().unwrap();
-    assert_eq!(n.clear(scope, Some(captured)), Status::State);
+    assert_eq!(n.clear(scope, Some(captured)), Status::Signature);
     let all = ClearScope::All;
     assert_eq!(
         n.clear(all, Some(sign(&keypair(), &seed, &all))),
-        Status::Ok
+        Status::State
     );
-    assert_eq!(fake.0.borrow().clears, [scope, all]);
+    assert_eq!(fake.0.borrow().clears, [scope]);
 }
 
 /// A seed asked for over one link ends what another link keeps of its
 /// accepted clear: its resend, the same seq and bytes, is checked again
-/// and refused as a replay.
+/// against the new seed, gets E_SIGNATURE and voids that seed.
 #[test]
 fn a_seed_on_one_link_ends_a_clear_kept_on_another() {
     let fake = Fake::default();
@@ -327,9 +327,16 @@ fn a_seed_on_one_link_ends_a_clear_kept_on_another() {
         send(&mut agent, 0, 2, retry, Cmd::LinkDiagClear, &req).0,
         Status::Ok
     );
-    assert_eq!(send(&mut agent, 1, 7, 0, Cmd::DiagSeed, &ask).0, Status::Ok);
+    let (st, body) = send(&mut agent, 1, 7, 0, Cmd::DiagSeed, &ask);
+    assert_eq!(st, Status::Ok);
+    let fresh = Seed::parse(&body).unwrap();
     assert_eq!(
         send(&mut agent, 0, 2, retry, Cmd::LinkDiagClear, &req).0,
+        Status::Signature
+    );
+    let good = clear_req(scope, Some(sign(&keypair(), &fresh, &scope)));
+    assert_eq!(
+        send(&mut agent, 1, 8, 0, Cmd::LinkDiagClear, &good).0,
         Status::State
     );
     assert_eq!(fake.0.borrow().clears, [scope]);
@@ -396,9 +403,11 @@ fn retry_answers_as_first() {
     );
     assert_eq!(n.call(Cmd::LinkDiagClear, &other).0, Status::State);
     // A new seed ends the answer kept for it: sent again, the request is
-    // a replay.
-    let _ = n.seed().unwrap();
-    assert_eq!(n.call(Cmd::LinkDiagClear, &req).0, Status::State);
+    // a bad signature for the new seed, which it voids.
+    let seed = n.seed().unwrap();
+    assert_eq!(n.call(Cmd::LinkDiagClear, &req).0, Status::Signature);
+    let good = clear_req(scope, Some(sign(&keypair(), &seed, &scope)));
+    assert_eq!(n.call(Cmd::LinkDiagClear, &good).0, Status::State);
     assert_eq!(fake.0.borrow().clears.len(), 1);
 }
 

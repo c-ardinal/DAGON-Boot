@@ -222,27 +222,52 @@ class Wording(unittest.TestCase):
             text = (llms.DOCS / rel).read_text(encoding="utf-8")
             self.assertEqual(re.findall(r"(?i)plug-in|\bboot\s+core\b", text), [], rel)
 
-    # Status of the code against the design is said once, on the limitations page.
-    STATUS = re.compile(r"未確認|まだ|現在|今は|実測|確かめていません|するまでは|測定で確かめ"
-                        r"|\byet\b|\bcurrently\b|\bfor now\b|\btoday\b|\bnot measured\b|\buntil then\b|\bto be confirmed\b|\bonce\b.*\bmeasured\b")
+    # Status of the code against the design is said once, in the limitations page's gap list.
+    # Planned with a capital is the status heading; planned in lower case is a word of the design (host.deploy.planned).
+    # scripts/test_markers.py already refuses its project-status words everywhere.
+    STATUS = re.compile(r"未確認|まだ|現在|今は|今後|予定|実測|確かめていません|するまでは|測定で確かめ"
+                        r"|\byet\b|\bcurrently\b|\bfor now\b|\btoday\b|\bPlanned\b|\bnot measured\b|\buntil then\b|\bto be confirmed\b|\bonce\b.*\bmeasured\b")
     # What the status words may still appear in, and why.
     STATUS_QUOTES = [
         *NOTICE_LINES,  # the alpha notice, word for word
+        "BeforeDecision → Planned → Committed",  # a state of the boot sequence
+        "自分の予定で",  # when DAGON does a thing, not the state of the code
     ]
+    # The limitations page's gap section, the one place a gap between the design and the code is said.
+    GAP_HEADINGS = ("## 設計とコードの差異", "## Where the code differs from the design")
 
-    def test_status_words_only_on_the_limitations_page(self):
+    def status_lines(self, p):
+        lines = p.read_text(encoding="utf-8").splitlines()
+        if p.name == "limitations.md":
+            heads = [n for n, line in enumerate(lines) if line in self.GAP_HEADINGS]
+            self.assertEqual(len(heads), 1, f"{p}: one gap section")
+            end = next((n for n in range(heads[0] + 1, len(lines)) if lines[n].startswith("## ")), len(lines))
+            lines = [*lines[: heads[0]], *[""] * (end - heads[0]), *lines[end:]]
+        for n, line in enumerate(lines, 1):
+            for quote in self.STATUS_QUOTES:
+                line = line.replace(quote, "")
+            if self.STATUS.search(line):
+                yield n
+
+    def test_status_words_only_in_the_limitations_gap_list(self):
         pages = [ROOT / "README.md", ROOT / "README.en.md", *llms.DOCS.rglob("*.md*")]
         found = []
         for p in pages:
             rel = p.relative_to(llms.DOCS).as_posix() if p.is_relative_to(llms.DOCS) else p.name
-            if p.name == "limitations.md":
-                continue
-            for n, line in enumerate(p.read_text(encoding="utf-8").splitlines(), 1):
-                for quote in self.STATUS_QUOTES:
-                    line = line.replace(quote, "")
-                if self.STATUS.search(line):
-                    found.append(f"{rel}:{n}")
+            found += [f"{rel}:{n}" for n in self.status_lines(p)]
         self.assertEqual(found, [])
+
+    def test_a_status_word_before_the_gap_list_is_found(self):
+        with tempfile.TemporaryDirectory() as d:
+            page = pathlib.Path(d) / "limitations.md"
+            page.write_text("## By design\n\n- 今後の予定\n\n## Where the code differs from the design\n\n- not yet\n", encoding="utf-8")
+            self.assertEqual(list(self.status_lines(page)), [3])
+
+    def test_a_status_word_in_a_section_after_the_gap_list_is_found(self):
+        with tempfile.TemporaryDirectory() as d:
+            page = pathlib.Path(d) / "limitations.md"
+            page.write_text("## Where the code differs from the design\n\n- not yet\n\n## Notes\n\n- Planned\n", encoding="utf-8")
+            self.assertEqual(list(self.status_lines(page)), [7])
 
     def test_no_page_says_the_case_is_never_opened(self):
         # One connection writes every node; whether the case opens depends on where that port is.

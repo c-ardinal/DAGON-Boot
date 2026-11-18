@@ -1,11 +1,12 @@
 ---
 title: "Limitations"
-description: "Where the code differs from the design and what DAGON does not do, as by-design limits and planned ones."
+description: "What DAGON does not do by design, what the user is responsible for, and where the code differs from the design."
 ---
+
+For application developers, extension authors and DAGON contributors. The last section of this page is the one place that says where the code differs from the design.
 
 ## By design
 
-- How to protect the signing key is the user's choice. DAGON does not decide it. Whether to use a hardware root of trust (secure boot fuses, key storage in hardware) is part of that choice.
 - An MCU definition gives each image kind one slot or two (`[[slot]]`), and one slot loads only when `[writers]` names another kind that writes it. A kind with one slot cannot do this:
 
 | Image kind | Previous version | A power cut during a write | What recovers it |
@@ -17,20 +18,28 @@ description: "Where the code differs from the design and what DAGON does not do,
 
 - The boot loader does not relay. A node reached only through a node whose boot loader holds it in update or recovery mode is reached again once that node runs an app: write that node first.
 
-## Planned
+- The ESP32-S3 boots through the official ESP-IDF 2nd stage (the port `vendor-stage2` in compat.toml). A broken 2nd stage is outside what DAGON recovers: it has to be rewritten over USB with the vendor tools.
+- On the RP2040 a boot takes about 15 s on a board without a crystal (the ring oscillator, nominally 6.5 MHz) and about 0.8 s with a 12 MHz crystal: stage0 and the boot loader each check one signature with `Ed25519Small` on every boot. The boot loader keeps its watchdog fed through its check. This is by design: the small verifier leaves the boot loader room for the update session.
+- On a board running on the ring oscillator, the RP2040's boot loader makes its UART bit rate from the nominal 6.5 MHz, so the rate may be off, and its I2C target follows a 400 kHz bus only with a crystal; on the ring oscillator use 100 kHz.
+
+## The user's responsibility
+
+- How to protect the signing key is the user's choice. DAGON does not decide it. Whether to use a hardware root of trust (secure boot fuses, key storage in hardware) is part of that choice.
+- A trusted extension (`trusted = true`) runs privileged, outside what the sandbox protects. Reviewing the extension, the registry crates it depends on and any source it takes in from outside its folder is the user's responsibility (section 4.7 of [Lifecycle events and extensions](/en/explanation/lifecycle-events/)).
+- An AI agent (a command agent connected through the serve API) runs with the user's rights. DAGON puts no sandbox around it; running it in an OS sandbox is the user's responsibility (see [Agent link: serve API](/en/reference/agent-api/)).
+- The USB VID:PID `c0de:cafe` is a test ID, fixed in the code. It is not an assigned one. Whether it may be used in a product is the user's decision.
+- Through some USB hubs, the PC does not see the hub again after it updates itself and restarts. Connect the hub directly to a USB port of the PC.
+
+## Where the code differs from the design
 
 The hub and the boot:
 
 - The relay (`dagon-relay`) does not depend on the MCU, and the `[coordinator]` section of an MCU definition decides whether that MCU may relay. A node relays over the links its MCU definition lists in `[[relay_link]]`, and the topology routes each node to one of them. The RP2040 is the only MCU with both that section and the code that runs the relay.
 - DAGON writes the hub and the children beyond it. Nothing beyond a child can be written.
 - Updating reaches the first 親機 and the 子機 linked to it over I2C or UART. It skips a second 親機 and the nodes beyond it, and nodes linked by any other kind of link. The 構成 check tells them as information (◇).
-- Through some USB hubs, the PC does not see the hub again after it updates itself and restarts. Connect the hub directly to a USB port of the PC.
 - The boot loader of the STM32F401 receives only on its board's DAGON I2C bus (`[[bus]]` with `dagon = true`). A node without a board, or on a board without such a bus, gets a boot loader that opens no listen window and has no update mode. It enters update mode by a STAY within the listen window or by an UPDATE_STAY, but it has no recovery mode: with no app to start it halts. Its app answers REBOOT mode 1 with `E_UNSUPPORTED`, so the hand-over to update mode goes through the listen window only. The ESP32-S3's recovery agent receives only when the 2nd stage starts it because no app slot starts: it opens no listen window and answers HELLO with mode 3, not 1 or 2.
-- On a board running on the ring oscillator, the RP2040's boot loader makes its UART bit rate from the nominal 6.5 MHz, so the rate may be off, and its I2C target follows a 400 kHz bus only with a crystal; on the ring oscillator use 100 kHz.
 - The measured worst-case verify time of stage0 on the built-in MCUs is not recorded. [Stage0's clock and its verify time](/en/explanation/lifecycle-events/) gives an emulator's estimate for the Cortex-M0+; there is no estimate for the STM32F401's Cortex-M4.
-- On the RP2040 a boot takes about 15 s on a board without a crystal (the ring oscillator, nominally 6.5 MHz) and about 0.8 s with a 12 MHz crystal: stage0 and the boot loader each check one signature with `Ed25519Small` on every boot. The boot loader keeps its watchdog fed through its check. This is by design: the small verifier leaves the boot loader room for the update session.
 - On the RP2040, stage0, the boot loader and the app take their clock from a crystal or from the ring oscillator; they do not take an external clock driven into XIN.
-- The ESP32-S3 uses the official ESP-IDF 2nd stage. If that 2nd stage itself is broken, DAGON cannot rescue the board; it has to be rewritten over USB with the vendor tools.
 
 Extension isolation:
 
@@ -48,9 +57,8 @@ Identity and VERSION:
 - The MCU identity is a hand-assigned 16-bit `wire_id`, carried in the image header, the identity reply, VERSION 0x06 and the topology node. It is not the 64-bit name hash of the design.
 - VERSION answers only ids 0x01, 0x06, 0x0A, 0x0B, 0x0C and 0x0D, and refuses a non-empty request.
 
-Values and IDs:
+Values:
 
-- The USB VID:PID `c0de:cafe` is a test ID, fixed in the code. It is not an assigned one.
 - DAGON's own MCU definitions hold values marked `unverified`.
 - The execution model's budgets ([section 12](/en/explanation/lifecycle-events/#12-execution-model)) are not set the way 12.3 says.
 

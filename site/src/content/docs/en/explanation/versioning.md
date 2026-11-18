@@ -3,6 +3,8 @@ title: "Versions and releases"
 description: "How DAGON's components and contracts are numbered, and how a change picks its version."
 ---
 
+For DAGON contributors; the section [Image versions](#image-versions) is for application developers as well.
+
 DAGON is made of several components that are released on their own. Each
 carries its own [SemVer](https://semver.org/) version, and every
 compatibility contract between them (a file format, a protocol, an API)
@@ -78,10 +80,12 @@ files always state it. Every other contract always carries its number.
 ## Image versions
 
 Image versions are not component versions. The version in a signed image
-header (given when the image is signed, or the default a first install
-uses) is the version of that image on the device, chosen by the project.
-It has no relation to the version of the boot loader component that built
-it.
+header is the `version` in the `Cargo.toml` of the node's crate. The first
+write (`dagon flash`), a build and a deploy (`dagon deploy`) all use that
+value, and there is no default: a crate without a `version` is refused.
+`dagon deploy --version` must equal the crate's `version`. A boot loader
+image's version is the `version` in the `Cargo.toml` of its boot crate.
+Neither is related to the version of the boot loader component.
 
 ## What kind of change is it
 

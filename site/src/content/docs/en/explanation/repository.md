@@ -3,6 +3,8 @@ title: "The repository"
 description: "What the repository holds, where, and how to work on DAGON itself."
 ---
 
+For DAGON contributors.
+
 ## Repository layout
 
 | Path | Contents |

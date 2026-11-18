@@ -233,7 +233,7 @@ class Wording(unittest.TestCase):
         "BeforeDecision → Planned → Committed",  # a state of the boot sequence
         "自分の予定で",  # when DAGON does a thing, not the state of the code
     ]
-    # The limitations page's last section, the one place a gap between the design and the code is said.
+    # The limitations page's gap section, the one place a gap between the design and the code is said.
     GAP_HEADINGS = ("## 設計とコードの差異", "## Where the code differs from the design")
 
     def status_lines(self, p):
@@ -241,7 +241,8 @@ class Wording(unittest.TestCase):
         if p.name == "limitations.md":
             heads = [n for n, line in enumerate(lines) if line in self.GAP_HEADINGS]
             self.assertEqual(len(heads), 1, f"{p}: one gap section")
-            lines = lines[: heads[0]]
+            end = next((n for n in range(heads[0] + 1, len(lines)) if lines[n].startswith("## ")), len(lines))
+            lines = [*lines[: heads[0]], *[""] * (end - heads[0]), *lines[end:]]
         for n, line in enumerate(lines, 1):
             for quote in self.STATUS_QUOTES:
                 line = line.replace(quote, "")
@@ -261,6 +262,12 @@ class Wording(unittest.TestCase):
             page = pathlib.Path(d) / "limitations.md"
             page.write_text("## By design\n\n- 今後の予定\n\n## Where the code differs from the design\n\n- not yet\n", encoding="utf-8")
             self.assertEqual(list(self.status_lines(page)), [3])
+
+    def test_a_status_word_in_a_section_after_the_gap_list_is_found(self):
+        with tempfile.TemporaryDirectory() as d:
+            page = pathlib.Path(d) / "limitations.md"
+            page.write_text("## Where the code differs from the design\n\n- not yet\n\n## Notes\n\n- Planned\n", encoding="utf-8")
+            self.assertEqual(list(self.status_lines(page)), [7])
 
     def test_no_page_says_the_case_is_never_opened(self):
         # One connection writes every node; whether the case opens depends on where that port is.

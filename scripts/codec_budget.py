@@ -296,6 +296,14 @@ def prologue_frame(f: Function) -> int | None:
     return total
 
 
+def reenters(f: Function, kind: str) -> bool:
+    """Whether a `kind` transfer to `f`'s own start calls `f` again: a call
+    always; a branch when `f` starts with a PUSH (it runs its prologue
+    again: a tail call to itself, not a loop)."""
+    h = f.halfwords()[0] if f.code else 0
+    return kind == "call" or h & 0xFE00 == 0xB400 or h == 0xE92D
+
+
 def is_codec(name: str) -> bool:
     return crate(name) == CRATE
 
@@ -342,7 +350,7 @@ def deepest(funcs: dict[int, Function], recorded: dict[int, int]) -> tuple[int, 
                 out |= rows or set()
             elif kind == "unknown":
                 why.append(f"{f.name}: a transfer at {at:#x} to no known target")
-            elif not f.start <= target < f.end or (kind == "call" and target == f.start):
+            elif not f.start <= target < f.end or (target == f.start and reenters(f, kind)):
                 if target in funcs:
                     out.add(target)
                 else:

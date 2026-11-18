@@ -163,6 +163,16 @@ class Stack(unittest.TestCase):
         # `b` calls itself.
         _, _, why = self.measure(chain(extra_b=bl(b_at + 6, b_at)))
         self.assertTrue(any(w.startswith("recursion at") for w in why), why)
+        # `b` branches back to its PUSH: a tail call to itself.
+        back = 0xE000 | (((b_at - (b_at + 6 + 4)) >> 1) & 0x7FF)
+        _, _, why = self.measure(chain(extra_b=[back, NOP]))
+        self.assertTrue(any(w.startswith("recursion at") for w in why), why)
+
+    def test_a_loop_to_the_start_of_a_leaf_without_a_prologue_is_a_loop(self):
+        # subs r0, #1; bne <start>; bx lr
+        leaf = [0x3801, 0xD000 | ((-3) & 0xFF), BX_LR]
+        used, _, why = self.measure(image([(codec("a"), leaf, 0)]))
+        self.assertEqual((used["stack_bytes"], why), (0, []))
 
     def test_a_call_into_the_middle_of_a_function_fails(self):
         _, _, why = self.measure(chain(extra_b=bl(TEXT + 14, TEXT + 2)))

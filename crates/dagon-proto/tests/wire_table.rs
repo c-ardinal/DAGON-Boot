@@ -4,7 +4,6 @@
 //! frozen byte for byte, and no input makes the reader panic.
 
 use dagon_format::Version;
-use dagon_proto::diag::*;
 use dagon_proto::field::{read, FieldSpec, FieldWriter, MsgSpec, Refusal, MAX_FIELDS, VARINT_MAX};
 use dagon_proto::payload::*;
 use dagon_proto::{table, Cmd, Status};
@@ -285,7 +284,6 @@ fn idempotent_column() {
         [
             Cmd::Reboot,
             Cmd::EnterRom,
-            Cmd::DiagSeed,
             Cmd::SubCtl,
             Cmd::I2cRaw,
             Cmd::ConfRun
@@ -482,88 +480,11 @@ fn typed(cmd: Cmd, resp: bool) -> Typed {
                 link: ANY_LINK,
                 addr: 0x42,
                 timeout_ms: Some(300),
-                inhibit: false,
                 inner: &[0xDA, 0x6F, 0, 9],
             };
             (
                 enc(|b| m.encode(b).unwrap()),
                 Box::new(|b| dbg(Relay::parse(b))),
-            )
-        }
-        (Cmd::LinkDiag, false) => {
-            let m = LinkDiagReq {
-                report: Report::Dtcs {
-                    mask: 0x09,
-                    dtc: Some(0x12_3456),
-                },
-                endpoint: Some(Endpoint {
-                    link: ANY_LINK,
-                    addr: 0x42,
-                }),
-                cursor: Key::new(&[0x12, 0x34, 0x56, ANY_LINK, 0x42]),
-                max_resp: 300,
-            };
-            (
-                enc(|b| m.encode(b).unwrap()),
-                Box::new(|b| dbg(LinkDiagReq::parse(b))),
-            )
-        }
-        (Cmd::LinkDiag, true) => {
-            let entry = Entry {
-                dtc: 0x12_3456,
-                link: ANY_LINK,
-                addr: 0x42,
-                status: 0x09,
-                fdc: -1,
-            };
-            let bytes = entry.to_bytes();
-            let m = LinkDiagResp {
-                format: table::link_diag::FORMAT,
-                info: DiagInfo {
-                    availability: 0x7F,
-                    store: table::link_diag::store::RETENTION_POWER_CUT,
-                    policy: PolicySet::EMPTY.with(1).with(2).with(3),
-                    params: Params {
-                        fdc_step: 10,
-                        confirmation: 3,
-                        aging: 5,
-                    },
-                },
-                elements: Elements::Entries(&bytes),
-                next: Some(entry.key()),
-            };
-            (
-                enc(|b| m.encode(b).unwrap()),
-                Box::new(|b| dbg(LinkDiagResp::parse(b).map(|r| format!("{r:?}")))),
-            )
-        }
-        (Cmd::LinkDiagClear, false) => {
-            let m = LinkDiagClear {
-                scope: ClearScope::EndpointAll(Endpoint {
-                    link: ANY_LINK,
-                    addr: 0x42,
-                }),
-                key: Some([0xAB; 64]),
-            };
-            (
-                enc(|b| m.encode(b).unwrap()),
-                Box::new(|b| dbg(LinkDiagClear::parse(b))),
-            )
-        }
-        (Cmd::DiagSeed, false) => {
-            let m = DiagSeedReq {
-                level: table::diag_seed::level::EVER_COMMUNICATED_CLEAR,
-            };
-            (
-                enc(|b| m.encode(b).unwrap()),
-                Box::new(|b| dbg(DiagSeedReq::parse(b))),
-            )
-        }
-        (Cmd::DiagSeed, true) => {
-            let m = Seed::counter(1, 2, &[0xAA]).unwrap();
-            (
-                enc(|b| m.encode(b).unwrap()),
-                Box::new(|b| dbg(Seed::parse(b))),
             )
         }
         (Cmd::Relay | Cmd::I2cRaw, true) => (
@@ -619,7 +540,6 @@ fn typed(cmd: Cmd, resp: bool) -> Typed {
             | Cmd::Reboot
             | Cmd::Confirm
             | Cmd::EnterRom
-            | Cmd::LinkDiagClear
             | Cmd::Show
             | Cmd::SubCtl,
             _,
@@ -711,12 +631,6 @@ fn golden_cores_and_samples() {
         (Cmd::Confirm, true, 0, ""),
         (Cmd::EnterRom, false, 1, "02"),
         (Cmd::EnterRom, true, 0, ""),
-        (Cmd::LinkDiag, false, 1, "01 030109 0503123456 070101 090142 0B051234560142 0D022C01"),
-        (Cmd::LinkDiag, true, 1, "01 02017F 040102 06010E 08030A0305 0A07123456014209FF 0E051234560142"),
-        (Cmd::LinkDiagClear, false, 1, "10 050101 070142 0940<key>"),
-        (Cmd::LinkDiagClear, true, 0, ""),
-        (Cmd::DiagSeed, false, 1, "01"),
-        (Cmd::DiagSeed, true, 0, "0207010000000200AA"),
         (Cmd::Show, false, 1, "01 020102 040128 060403000201 0803736567"),
         (Cmd::Show, true, 0, ""),
         (Cmd::Relay, false, 1, "01 030142 04022C01 00 DA6F0009"),
@@ -740,7 +654,6 @@ fn golden_cores_and_samples() {
         assert_eq!(spec.core, *core, "{cmd:?} {resp}: core length");
         let hex: String = hex
             .replace("<digest>", &"AB".repeat(32))
-            .replace("<key>", &"AB".repeat(64))
             .split_whitespace()
             .collect();
         let want: Vec<u8> = (0..hex.len() / 2)
@@ -795,70 +708,4 @@ fn reader_never_panics() {
         let _ = put_refusal(&mut out, Status::Field, cmd as u8, &p);
     }
     assert_eq!(VARINT_MAX, 0x0FFF_FFFF);
-}
-
-/// RELAY's INHIBIT: an optional field, so a relay that predates it
-/// forwards as before; one that knows it reads it and says so in CAPS.
-#[test]
-fn relay_takes_inhibit() {
-    let r = Relay {
-        link: ANY_LINK,
-        addr: 0x42,
-        timeout_ms: None,
-        inhibit: true,
-        inner: &[0xDA],
-    };
-    let b = enc(|b| r.encode(b).unwrap());
-    assert_eq!(
-        b,
-        [ANY_LINK, 0x03, 0x01, 0x42, 0x06, 0x01, 0x01, 0x00, 0xDA]
-    );
-    assert_eq!(Relay::parse(&b), Ok(r));
-    let mut two = b.clone();
-    two[6] = 2;
-    assert_eq!(Relay::parse(&two), Err(Status::Arg), "INHIBIT is 0 or 1");
-    let old = MsgSpec {
-        fields: &table::relay::REQ[..2],
-        ..Cmd::Relay.spec().req
-    };
-    let skipped = read(&b, &old).unwrap();
-    assert_eq!(skipped.bulk, &[0xDA], "skipped by an older relay");
-    let caps = CapsResp::of(Cmd::Relay);
-    assert!(caps.req_fields.has(table::relay::INHIBIT.num as u8));
-    const { assert!(!table::relay::INHIBIT.must) };
-}
-
-/// DTC numbers and policy numbers have one row each in the table: 0 and
-/// 0xFFFFFF are no fault, a number is given once, and every policy is
-/// listed once and fits the POLICY field.
-#[test]
-fn diag_numbers_registered() {
-    use table::{dtc, policy};
-    assert_eq!((dtc::RESERVED, dtc::ALL), (0, 0xFF_FFFF));
-    for (i, d) in dtc::ASSIGNED.iter().enumerate() {
-        assert!(
-            *d != dtc::RESERVED && *d != dtc::ALL && *d < 1 << 24,
-            "{d:#x}"
-        );
-        assert!(!dtc::ASSIGNED[i + 1..].contains(d), "{d:#x} twice");
-    }
-    assert_eq!(policy::ALL, [1, 2, 3]);
-    let set = policy::ALL.iter().fold(PolicySet::EMPTY, |s, p| s.with(*p));
-    assert_eq!(set.iter().collect::<Vec<_>>(), policy::ALL);
-    assert_eq!(set.as_bytes().len(), usize::from(policy::LEN));
-    assert_eq!(table::link_diag::POLICY.max, policy::LEN);
-}
-
-/// The minimum response of each report, from the table: status, FORMAT,
-/// the four fixed fields at their longest, one element and NEXT. Both fit
-/// the inner payload of a 64-byte link one hop deep.
-#[test]
-fn min_resp_from_the_table() {
-    use table::link_diag::report;
-    assert_eq!(min_resp(report::DTC_BY_STATUS_MASK), 32);
-    assert_eq!(min_resp(report::EVER_COMMUNICATED), 40);
-    let smallest = dagon_proto::max_payload::SMALLEST;
-    let inner = Relay::tunnel_mtu(smallest, smallest) - dagon_proto::frame_len(0);
-    assert_eq!(inner, 43);
-    assert!(min_resp(report::EVER_COMMUNICATED) <= inner);
 }

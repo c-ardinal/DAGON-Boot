@@ -94,7 +94,7 @@ mod tests {
     use dagon_proto::split_status;
 
     fn req(cmd: u8, payload: &[u8]) -> Vec<u8> {
-        let mut buf = vec![0u8; dagon_proto::frame_len(payload.len())];
+        let mut buf = vec![0u8; 64];
         let n = Frame {
             flags: 0,
             seq: 9,

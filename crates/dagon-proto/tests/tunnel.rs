@@ -30,7 +30,6 @@ fn relay(inner: &[u8]) -> Relay<'_> {
         link: FIRST_LINK,
         addr: 0x42,
         timeout_ms: Some(300),
-        inhibit: false,
         inner,
     }
 }

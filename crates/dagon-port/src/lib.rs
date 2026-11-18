@@ -19,7 +19,6 @@
 #![no_std]
 #![allow(async_fn_in_trait)]
 
-pub mod diag;
 mod relay_link;
 pub mod timeout;
 

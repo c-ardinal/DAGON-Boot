@@ -287,14 +287,9 @@ pub fn skipped_lines(cut: &dagon_topology::Cut) -> Vec<String> {
 /// Loads the signing key from `--key` or `DAGON_SIGNING_KEY`. Refuses key
 /// files inside a git work tree. Error messages carry the path only.
 pub fn load_key(arg: Option<&str>) -> Result<KeyPair, String> {
-    load_key_from(arg, std::env::var_os(KEY_ENV).map(PathBuf::from))
-}
-
-/// [`load_key`] with `env` for the value of `DAGON_SIGNING_KEY`.
-pub fn load_key_from(arg: Option<&str>, env: Option<PathBuf>) -> Result<KeyPair, String> {
     let path = arg
         .map(PathBuf::from)
-        .or(env)
+        .or_else(|| std::env::var_os(KEY_ENV).map(PathBuf::from))
         .ok_or_else(|| format!("no signing key: pass --key <file> or set {KEY_ENV}"))?;
     let inside = dagon_sign::inside_git_work_tree(&path)
         .map_err(|e| format!("cannot check key path {}: {e}", path.display()))?;

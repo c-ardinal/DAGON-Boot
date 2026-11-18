@@ -138,7 +138,6 @@ fn hello_over(r: &mut SimRelay, link: u8, addr: u8) -> (Status, Option<u16>) {
         link,
         addr,
         timeout_ms: Some(300),
-        inhibit: false,
         inner: &inner,
     }
     .encode(&mut p)

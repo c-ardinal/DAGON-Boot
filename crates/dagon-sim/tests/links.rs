@@ -120,7 +120,6 @@ fn relay_frame(link: u8, addr: u8, inner: &[u8]) -> Vec<u8> {
         link,
         addr,
         timeout_ms: Some(300),
-        inhibit: false,
         inner,
     }
     .encode(&mut p)

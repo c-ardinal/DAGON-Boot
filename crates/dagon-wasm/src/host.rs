@@ -141,7 +141,7 @@ fn bad_target() -> JsValue {
     JsError::new("unknown target").into()
 }
 
-/// The node the PC is connected to (the uplink node the reachable part starts
+/// The node the PC is connected to (the coordinator the reachable part starts
 /// from) with its MCU's relay table, and each node's target from it.
 fn connected(
     reg: &dagon_topology::defs::Registry,
@@ -205,7 +205,7 @@ impl WasmHost {
     /// definition in use (`dagon_host::node_timings`): the wait for the
     /// request it erases on, and its trial, which also weighs in its one
     /// progress number; and the host gets the node the PC is connected to
-    /// (the uplink node the reachable part starts from, `dagon_topology::reach_root`)
+    /// (the coordinator the reachable part starts from, `dagon_topology::reach_root`)
     /// with its MCU's relay table (`dagon_host::local_node`). Returns each
     /// node's `Target` by id (`dagon_host::node_targets`), the node itself
     /// as `local`; a node no target reaches is left out. Throws with the

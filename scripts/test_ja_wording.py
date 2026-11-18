@@ -13,8 +13,9 @@ from test_markers import NOTICE_FILES  # noqa: E402
 RULES = ja_wording.load_lexicon(ja_wording.LEXICON)
 DOC = "site/src/content/docs/how-to/a.md"
 CODE = "crates/x/src/lib.rs"
-# The audited seed (lex1-5 and the Console's lexicon) plus できる; a change here is a lexicon change.
-INVENTORY = {"retired": 3, "joint": 3, "native": 189}
+# The audited seed (lex1-5 and the Console's lexicon) plus できる, one entry per verb and
+# conjugation class; a change here is a lexicon change.
+INVENTORY = {"retired": 3, "joint": 3, "native": 211}
 PLANTED = {
     "更新できます": "できる",
     "使います": "使う",
@@ -75,6 +76,34 @@ class Rules(unittest.TestCase):
         self.assertEqual(kinds(DOC, "**遷移**: 前後の状態。"), [])
         self.assertEqual([k for k, _ in kinds(DOC, "- 設定は有効だ。")], ["plain"])
         self.assertEqual(kinds(DOC, "設定です（既定値。範囲は（1から8。）です）。"), [])
+
+    def test_every_conjugation_is_caught(self):
+        verbs = {
+            "使う": ["使って", "使った", "使わない", "使います", "使えば"],
+            "書く": ["書いて", "書いた", "書かない", "書きます", "書けば"],
+            "送る": ["送って", "送った", "送らない", "送ります", "送れば"],
+            "確かめる": ["確かめて", "確かめた", "確かめない", "確かめます", "確かめれば"],
+            "出る": ["出て", "出た", "出ない", "出ます", "出れば"],
+            "できる": ["更新できて", "更新できた", "更新できない", "更新できます", "更新できれば"]
+            + ["更新出来て", "更新出来た", "更新出来ない", "更新出来ます", "更新出来れば"],
+            "新しい": ["新しい", "新しく", "新しかった", "新しければ", "新しさ"],
+        }
+        for lemma, forms in verbs.items():
+            for form in forms:
+                self.assertIn(lemma, lemmas(CODE, "// " + form), form)
+        self.assertEqual(lemmas(CODE, "// 出力します"), [])
+
+    def test_a_parenthetical_spans_lines(self):
+        self.assertEqual(kinds(DOC, "説明です（\n補足だ。\n以上）。"), [])
+        self.assertEqual([k for k, _ in kinds(DOC, "説明（\n補足です。\n以上）だ。")], ["plain"])
+
+    def test_a_sentence_and_a_list_item_span_lines(self):
+        self.assertEqual([k for k, _ in kinds(DOC, "設定は\n有効だ。")], ["plain"])
+        self.assertEqual(kinds(DOC, "- 項目です。\n  補足の値。"), [])
+        self.assertEqual([k for k, _ in kinds(DOC, "- 項目です。\n\n本文の値。")], ["plain"])
+
+    def test_a_chain_of_no_spans_a_line_break(self):
+        self.assertIn("no-chain", [k for k, _ in kinds(DOC, "ノードの\n設定の一覧の項目")])
 
     def test_the_longest_match_wins(self):
         self.assertEqual(lemmas(CODE, "// やり直します"), ["やり直す"])

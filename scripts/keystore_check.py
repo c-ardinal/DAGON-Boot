@@ -79,9 +79,9 @@ def with_store(dagon):
     done = False
     try:
         code, out, _ = run(dagon, "set")
-        expect(code == 0 and f"{WAY}: 登録済み" in out, "set", out)
+        expect(code == 0 and f"{WAY}: 登録済" in out, "set", out)
         code, out, _ = run(dagon, "status")
-        expect(code == 0 and state(out) == "登録済み", "status after set", out)
+        expect(code == 0 and state(out) == "登録済", "status after set", out)
         code, out, _ = run(dagon, "delete")
         expect(code == 0 and f"{WAY}: 削除済み" in out, "delete", out)
         done = True

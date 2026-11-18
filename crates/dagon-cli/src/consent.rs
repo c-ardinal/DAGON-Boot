@@ -19,10 +19,10 @@ use crate::keystore::Keys;
 /// show these same words when asking for consent.
 pub const SENDS: [&str; 3] = [
     "構成と定義の事実（ノード・リンク・部品・設定値）",
-    "選んだノードやリンク",
-    "確認した結果（問題・◇ 制限・書き込みの記録）",
+    "選択したノードやリンク",
+    "確認の結果（問題・◇ 制限・書込の記録）",
 ];
-pub const NEVER_SENDS: [&str; 3] = ["鍵", "コマンドとその出力の全文", "ファイルのパス"];
+pub const NEVER_SENDS: [&str; 3] = ["キー", "コマンドとその出力の全文", "ファイルのパス"];
 
 /// Code of the refusal every AI route gives until DAGON is linked.
 pub const NOT_LINKED_CODE: &str = crate::agents::codes::NOT_LINKED;
@@ -693,10 +693,7 @@ mod tests {
 
     #[test]
     fn the_consent_lists_say_writing_and_the_consent_format_stays() {
-        assert!(
-            SENDS.iter().any(|s| s.contains("書き込みの記録")),
-            "{SENDS:?}"
-        );
+        assert!(SENDS.iter().any(|s| s.contains("書込の記録")), "{SENDS:?}");
         for s in SENDS.iter().chain(&NEVER_SENDS) {
             assert!(!s.contains("更新"), "{s}");
         }

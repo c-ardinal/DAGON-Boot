@@ -8,8 +8,7 @@
 polite = ["site/src/content/docs/*", "README.md", "*/README.md"]
 
 # Files that hold the rule's own examples of the words it looks for.
-# The explanation pages are left out until they are brought in line with the rule in a change of their own.
-exclude = ["scripts/ja_wording.toml", "scripts/ja_wording_allow.toml", "scripts/test_ja_wording.py", "site/src/content/docs/explanation/*"]
+exclude = ["scripts/ja_wording.toml", "scripts/ja_wording_allow.toml", "scripts/test_ja_wording.py"]
 
 [[area]]
 name = "ja-wording"

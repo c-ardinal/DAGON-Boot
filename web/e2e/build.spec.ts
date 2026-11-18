@@ -203,8 +203,8 @@ test('a layout read that failed and then recovered through a drag: a later renam
   await expect(page.locator('.node', { hasText: '保存したメイン' })).toHaveCount(1);
 
   await page.locator('.node', { hasText: '保存した7セグ' }).click();
-  await page.getByLabel('名称', { exact: true }).fill('新規の7セグ');
-  await page.getByLabel('名称', { exact: true }).press('Tab');
+  await page.getByLabel('表示名', { exact: true }).fill('新規の7セグ');
+  await page.getByLabel('表示名', { exact: true }).press('Tab');
   await expect.poll(() => s.puts.length).toBe(2);
   expect(JSON.parse(s.puts[1]).names).toEqual({ seg: '新規の7セグ', hub: '保存したメイン' });
 });

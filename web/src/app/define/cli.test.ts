@@ -249,7 +249,7 @@ describe('dagon serve link', () => {
     }
   });
 
-  test('the layout (名称, positions) is read and written whole through serve, only with the layout feature', async () => {
+  test('the layout (表示名, positions) is read and written whole through serve, only with the layout feature', async () => {
     const f = fake();
     const cli = new Cli(f.deps);
     await cli.connect();

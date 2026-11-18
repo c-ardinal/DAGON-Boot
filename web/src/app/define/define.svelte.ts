@@ -268,7 +268,7 @@ export class Define {
     return true;
   }
 
-  /** 名称 read only after the project opened: under the ones here, in the undo history too, so undoing cannot drop them. No edit. */
+  /** 表示名 read only after the project opened: under the ones here, in the undo history too, so undoing cannot drop them. No edit. */
   adoptNames(names: Record<string, string>): void {
     const under = (doc: Doc): Doc => ({ ...doc, names: { ...names, ...doc.names } });
     this.doc = under(this.doc);

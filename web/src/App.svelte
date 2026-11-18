@@ -180,7 +180,7 @@
   // The start screen is reached only through `leave` (menu, リスタート), so no unsaved edit is here when a project opens.
   async function openWork(want?: 'operate' | 'define') {
     const yaml = await cli.loadTopology().catch(() => undefined);
-    // 名称 and positions live beside the YAML (GET /v1/layout).
+    // 表示名 and positions live beside the YAML (GET /v1/layout).
     if (!(await layoutFile.open())) notice = { word: LAYOUT.refused, error: true, detail: `${LAYOUT.refusedDetail}（${cli.layoutRefused}）` };
     local = false;
     op.reset();
@@ -1632,7 +1632,7 @@
   {/if}
   {#if factory && factoryNode}
     <FactoryModal
-      node={{ label: `[${factoryNode.no}] ${factoryNode.name}`, target: `[${factoryNode.no}] ${factoryNode.name}（${factoryNode.role === 'hub' ? NODE.roleHub : NODE.roleNode}）· ${factoryNode.product}` }}
+      node={{ label: `[${factoryNode.no}] ${factoryNode.name}`, target: `[${factoryNode.no}] ${factoryNode.name}（${factoryNode.role === 'hub' ? NODE.roleHub : NODE.roleOther}）· ${factoryNode.product}` }}
       child={factoryNode.role !== 'hub'}
       how={mcuConnection(factoryMcu)}
       canWrite={cli.canFlash(factoryMcu)}

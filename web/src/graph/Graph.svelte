@@ -486,9 +486,10 @@
     config?.nodes.find((n) => n.role === 'hub' && config.reach.includes(n.id))?.id ?? config?.nodes.find((n) => n.role === 'hub')?.id,
   );
 
-  /** The role on the card: coordinator, 1段目, 2段目, and below that its row. */
+  /** The role on the card: coordinator; links from the nearest coordinator above; or ノード when no coordinator is above it. */
   function roleOf(n: Node): string {
     if (n.role === 'hub') return NODE.roleHub;
+    if (!underCoordinator(n.id)) return NODE.roleOther;
     const d = belowHub(n.id);
     return d <= 1 ? NODE.roleNode : d === 2 ? NODE.roleGrandchild : NODE.roleDeeper(d);
   }
@@ -500,6 +501,16 @@
     if (!p || p.role === 'hub' || seen.has(id)) return 1;
     seen.add(id);
     return belowHub(p.id, seen) + 1;
+  }
+
+  /** Whether the links above node `id` lead up to a coordinator (not to a node nobody links to, nor round a loop). */
+  function underCoordinator(id: string, seen = new Set<string>()): boolean {
+    const up = config?.links.find((l) => l.to === id)?.from;
+    const p = config?.nodes.find((x) => x.id === up);
+    if (!p || seen.has(id)) return false;
+    if (p.role === 'hub') return true;
+    seen.add(id);
+    return underCoordinator(p.id, seen);
   }
 
   function l0Of(n: Node): string {

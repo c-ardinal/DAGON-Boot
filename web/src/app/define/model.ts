@@ -244,7 +244,7 @@ export interface Topo {
 
 export interface Doc {
   topo: Topo;
-  /** 名称 by node id (page-side, optional). */
+  /** 表示名 by node id (page-side, optional). */
   names: Record<string, string>;
 }
 

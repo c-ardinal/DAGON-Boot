@@ -79,7 +79,7 @@ export type ProjectResult = 'opened' | 'missing' | 'key' | 'busy' | 'exists' | '
 export interface Layout {
   /** The file's format number. */
   format?: number;
-  /** 名称 by node id. */
+  /** 表示名 by node id. */
   names?: Record<string, string>;
   /** Editor positions by node id. */
   positions?: Record<string, { x: number; y: number }>;
@@ -452,7 +452,7 @@ export class Cli {
     return this.projectCall('POST /v1/project/init', { path }, true);
   }
 
-  /** GET /v1/layout (feature `layout`): the project's 名称 and positions; null when there are none yet. */
+  /** GET /v1/layout (feature `layout`): the project's 表示名 and positions; null when there are none yet. */
   async loadLayout(): Promise<Layout | null> {
     if (!this.has('layout')) return null;
     const r = await this.call('GET /v1/layout');

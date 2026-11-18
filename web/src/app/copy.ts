@@ -66,25 +66,25 @@ export interface BandCopy {
 /** Bottom band: the cause chip and the one sentence beside the buttons. */
 export const BAND = {
   choose: { sentence: '表示される一覧で「DAGON hub」を選択し、『接続』をクリックしてください。' },
-  notFound: { chip: '× 未検出', sentence: 'USBケーブルの再挿入後に、再度クリックしてください。' },
-  portBusy: { chip: '× 使用中', sentence: 'PC接続ノードを使用中のタブやアプリ（dagon CLIも対象）を終了後に、再度クリックしてください。' },
+  notFound: { chip: '× 未検出', sentence: 'USBケーブルの再挿入後に再度クリックしてください。' },
+  portBusy: { chip: '× 使用中', sentence: 'PC接続ノードを使用中のタブやアプリ（dagon CLIも対象）を終了後に再度クリックしてください。' },
   denied: { chip: '× 許可なし', sentence: 'ターミナルに表示されたアドレスへ再アクセスしてください。' },
   noResponse: { chip: '× 応答なし', sentence: '一覧で「DAGON hub」を再選択してください。' },
-  ready: { sentence: 'パッケージファイルをこの画面へドロップするか、選択してください。' },
+  ready: { sentence: 'パッケージファイルをこの画面へドロップするか選択してください。' },
   /** ready with a build to write: the main action writes it. */
   readyBuilt: { sentence: '書込対象のノードをチェックし、『書込』をクリックしてください。' },
   /** Label-value pair, no sentence. */
   estimate: { pair: ['推定', '約1分'] },
-  sourceRefused: { sentence: '書込は未実行のため、準備で再ビルドするか、適正なファイルを選択してください。' },
+  sourceRefused: { sentence: '書込は未実行のため、準備で再ビルドするか適正なファイルを選択してください。' },
   keyRefused: { sentence: '書込は未実行のため、別のファイルを選択してください。' },
   formatRefused: { sentence: '書込は未実行のため、別のファイルを選択してください。' },
   topologyRefused: { sentence: '書込は未実行のため、この構成向けのファイルを選択してください。' },
   writing: { sentence: '完了まで電源とUSBを維持し、このページの表示を継続してください。途中で停止しても、ノードは再書込が可能な状態で動作します。' },
-  recoverFailed: { sentence: '基板間の配線の欠落を確認後に、再試行してください。' },
-  lost: { sentence: 'USBケーブルの再挿入後に、再接続してください。' },
-  folderFailed: { chip: '× 作成失敗', sentence: 'そのフォルダへの保存が可能か確認後に、再選択してください。' },
+  recoverFailed: { sentence: '基板間の配線の欠落を確認後に再試行してください。' },
+  lost: { sentence: 'USBケーブルの再挿入後に再接続してください。' },
+  folderFailed: { chip: '× 作成失敗', sentence: 'そのフォルダへの保存が可能か確認後に再選択してください。' },
   /** "最新リリースの使用" found no release in the project. */
-  noRelease: { chip: '× ビルドなし', sentence: '準備でビルドするか、パッケージファイルを選択してください。' },
+  noRelease: { chip: '× ビルドなし', sentence: '準備でビルドするかパッケージファイルを選択してください。' },
   /** Part of the page (dagon-wasm) did not load. */
   pageLoadFailed: { chip: '× 読込失敗', sentence: 'このページの一部の読込に失敗しました。ページを再読込してください。' },
   /** reconnectNeeded (the dialog's sentence, and the band's once the dialog is closed). */
@@ -97,14 +97,14 @@ export const BAND = {
    */
   nodesSilent: { sentence: '応答なしのノードは電源と配線を確認し、応答するノードへ優先して書込を実行してください。' },
   /** nodesSilent when the answering nodes need nothing more (already updated, or after 「応答するnノードへの優先書込」). */
-  silentLeft: { pair: ['推定', '約1分'], sentence: 'マーク表示のノードは、書込後に正常に動作します。' },
+  silentLeft: { pair: ['推定', '約1分'], sentence: 'マーク表示のノードは書込後に正常に動作します。' },
   verifying: { sentence: '確認の完了まで待機してください。' },
-  hubRestarting: { sentence: 'PC接続ノードの再起動後に自動で再接続するため、待機してください。' },
-  stopped: { pair: ['推定', '約1分'], sentence: '停止したノードへの書込後に、新バージョンで動作します。' },
+  hubRestarting: { sentence: 'PC接続ノードの再起動後の自動再接続まで待機してください。' },
+  stopped: { pair: ['推定', '約1分'], sentence: '停止したノードは書込後に新バージョンで動作します。' },
   doneAll: { sentence: '全ノードへの書込が完了しました。' },
   doneChecked: { sentence: 'チェックしたノードへの書込が完了しました。' },
   doneNone: { sentence: 'チェックしたノードはこのパッケージと同一内容のため、書込を省略しました。' },
-  cliTurn: { sentence: 'CLIの作業完了後に、自動で再接続します。' },
+  cliTurn: { sentence: 'CLIの作業完了後に自動で再接続します。' },
 } as const satisfies Record<string, BandCopy>;
 
 /**
@@ -148,7 +148,7 @@ export const BAND_CHIP = {
 
 /** Beside the recover button when nodes after the stopped one are not written yet. */
 export const BAND_FOR = {
-  stoppedAt: (stuck: string) => ({ pair: ['推定', '約1分'] as const, sentence: `${stuck}の修正後に、未書込ノードへの書込が可能です。` }),
+  stoppedAt: (stuck: string) => ({ pair: ['推定', '約1分'] as const, sentence: `${stuck}の修正後に未書込ノードへの書込が可能です。` }),
   /** done when doneAll is not true: the nodes that did not answer were not updated. */
   doneSome: (n: number) => ({ sentence: `応答なしの${n}ノードは旧バージョンのままのため、電源と配線の確認後に書込を実行してください。` }),
   /** done after 「前のバージョンへの復元」. */
@@ -156,7 +156,7 @@ export const BAND_FOR = {
   donePart: (wrote: number, same: number) => ({ sentence: `${wrote}ノードへの書込が完了し、同一内容の${same}ノードは書込を省略しました。` }),
   doneBack: (name: string, version: string) => ({ sentence: `${name}は前のバージョン${version}で動作中です。` }),
   /** done after a recovery with nothing left to update. */
-  doneFixed: (name: string, version: string) => ({ sentence: `${name}は復旧し、${version}で動作中です。` }),
+  doneFixed: (name: string, version: string) => ({ sentence: `${name}は復旧して${version}で動作中です。` }),
 } as const;
 
 /** Browser without Web Serial. */
@@ -219,7 +219,7 @@ export const LOCK = {
         edit: '送信した構成と不一致になるため、書込中は構成の変更は不可です',
         gen: '書込の完了まで使用不可です',
         build: '書込の完了まで使用不可です',
-        flash: '書込でPC接続ノードを使用中のため、書込は不可です',
+        flash: '書込でPC接続ノードを使用中のため書込は不可です',
         release: '書込の完了まで使用不可です',
         update: '書込中です。完了まで待機してください',
         recover: '書込の完了後に使用可能です',
@@ -234,11 +234,11 @@ export const LOCK = {
       name: '書込中',
       why: {
         edit: '書込中は構成の変更は不可です',
-        flash: 'PC接続ノードを使用中のため、書込は不可です',
+        flash: 'PC接続ノードを使用中のため書込は不可です',
         update: '書込の完了後に使用可能です',
         recover: '書込中です',
         rollback: '書込の完了後に使用可能です',
-        connect: '書込中に切断すると、書込が停止します',
+        connect: '書込中に切断すると書込が停止します',
         project: '書込の完了まで使用不可です',
         apply: '書込中は構成の変更は不可です',
         file: '書込の完了まで使用不可です',
@@ -255,7 +255,7 @@ export const LOCK = {
         update: '書込の完了後に使用可能です',
         recover: '書込の完了後に使用可能です',
         rollback: '書込の完了後に使用可能です',
-        connect: '書込でUSBを使用中のため、切断は不可です',
+        connect: '書込でUSBを使用中のため切断は不可です',
         project: '書込の完了まで使用不可です',
         apply: '書込の完了まで使用不可です',
       },
@@ -350,20 +350,20 @@ export const AGENT = {
   menuUnlink: 'DAGONとの連携解除',
   link: {
     heading: 'DAGONとの連携',
-    intro: 'DAGONは連携したエージェントに構成について照会し、回答します。送信への同意は、この連携時に1回だけ取得します。連携後の質問は確認なしで送信します。',
+    intro: 'DAGONは連携したエージェントに構成について照会して回答します。送信への同意はこの連携時に1回だけ取得します。連携後の質問は確認なしで送信します。',
     agent: '送信先',
     agentNote: 'ローカルのdagon serve経由で送信します',
     way: '接続方法',
     /** What each kind of way needs on this machine (the provider is named only here, at linking). */
     ready: '準備',
     wayNote: {
-      command: 'このパソコンでログインしたエージェントのプログラムを使用します。ログイン情報は、このページと送信文のどちらにも格納しません',
+      command: 'このパソコンでログインしたエージェントのプログラムを使用します。ログイン情報はこのページと送信文のどちらにも格納しません',
       'messages-http': 'APIキーを「CLI連携」で登録するか、ターミナルでdagon ai key setを実行してください。キーはOSの資格情報ストアに格納し、このページと送信文のどちらにも格納しません',
     } as Record<string, string>,
-    wayMissing: 'この接続方法は、このパソコンでは使用不可です。連携の事前完了は可能です。',
+    wayMissing: 'この接続方法はこのパソコンでは使用不可です。連携の事前完了は可能です。',
     sends: '送信対象',
     neverSends: '送信対象外',
-    undo: '連携は、メニューの「DAGONとの連携解除」でいつでも解除が可能です。解除時に同意も取消します。',
+    undo: '連携はメニューの「DAGONとの連携解除」でいつでも解除が可能です。解除時に同意も取消します。',
     agree: '同意と連携',
     cancel: '連携の中止',
   },
@@ -396,7 +396,7 @@ export const AGENT = {
     AGENT_UNAVAILABLE: { text: '連携した方法がこのパソコンで使用不可です。連携手順に記載の準備（プログラムのインストール、APIキーの登録）を実施してください', failed: false },
     /** The OS credential store cannot be used: the text is serve's reason (what is missing and how to start one). */
     AGENT_KEY_STORE: { label: '× 保存不可', text: 'OSの資格情報ストアが使用不可のため、APIキーの保存は不可です', failed: true },
-    KEY_REFUSED: { label: '× 受付不可', text: 'APIキーは空白なしの英数字と記号で、最大1024文字です', failed: true },
+    KEY_REFUSED: { label: '× 受付不可', text: 'APIキーは空白なしの英数字と記号の最大1024文字です', failed: true },
     AGENT_BUSY: { text: 'DAGONは別の質問に回答中です。一定時間の待機後に再度質問してください', failed: false },
     AGENT_TIMEOUT: { text: '× 回答が時間内に未到達です。再度質問してください', failed: true },
     AGENT_FAILED: { text: '× 回答の受信に失敗しました。再度質問してください', failed: true },
@@ -420,7 +420,7 @@ export const AGENT = {
 export const TIMELINE = {
   label: '書込のタイムライン',
   time: '時間',
-  none: '書込の開始後に、ノードごとの段階をここに時系列で表示します。',
+  none: '書込の開始後にノードごとの段階をここに時系列で表示します。',
 } as const;
 
 /** The status row. */
@@ -498,12 +498,14 @@ export const CANVAS = {
 
 /** Node card. */
 export const NODE = {
-  /** The role on the card: the node a host drives, then the hops below it. */
+  /** The role on the card: the coordinator, then the links between a node and the nearest coordinator its links lead up to. */
   roleHub: 'コーディネータ',
-  roleNode: '1段目',
-  /** A node two hops below the host-side node, and the rows below that. */
-  roleGrandchild: '2段目',
-  roleDeeper: (d: number) => `${d}段目`,
+  roleNode: 'コーディネータから1段目',
+  /** Two links from the nearest coordinator, and the rows below that. */
+  roleGrandchild: 'コーディネータから2段目',
+  roleDeeper: (d: number) => `コーディネータから${d}段目`,
+  /** A node whose links lead up to no coordinator (none above it, or round a loop), and a node named without its place. */
+  roleOther: 'ノード',
   mcu: 'MCU',
   /** The coordinator's own connection line: its uplink kind and what drives it. */
   usb: 'USB（パソコン）',
@@ -558,8 +560,8 @@ export const NODE = {
   skipped: '◇ 書込不可',
   skippedWhy: {
     'second-hub': '2つ目のコーディネータの配下のため',
-    deep: '1段目のノードの下位にあるため',
-    'link-kind': 'この接続の種類では、書込が到達しないため',
+    deep: 'コーディネータとの間に複数のリンクがあるため',
+    'link-kind': 'この接続の種類では書込が到達しないため',
     unreachable: 'どのコーディネータからもリンクの経路がないため',
     'cut-invalid': '書込の到達範囲のみでは検証に不合格のため（dagon topo checkで理由を確認可能）',
   } as Record<string, string>,
@@ -589,7 +591,7 @@ export const LINK_WHY = {
 /** Right column. */
 export const DETAIL = {
   /** Nothing selected. */
-  nothingSelected: 'ノードの選択時に、ここに詳細を表示します。',
+  nothingSelected: 'ノードの選択時にここに詳細を表示します。',
   /** The first steps, before anything is selected. */
   introHeading: '最初の手順',
   /** The same three steps as the header. */
@@ -694,12 +696,12 @@ export const HELP = {
   /** Tool help, independent of any project: what the user sees, its real cause, and what to do. */
   rows: [
     ['「接続」のクリック後も機器の一覧が空白', 'パソコンがPC接続ノードをUSB機器として認識していません。充電専用ケーブルはデータ通信が不可のため、データ通信用のケーブルに交換し、別のUSB端子でも試行してください。'],
-    ['一覧にPC接続ノードが未表示', 'PC接続ノードにDAGONが未書込か、電源が未投入です。初回のPC接続ノードは、書込モードの「書込」でUSB経由の直接書込を実行します。'],
+    ['一覧にPC接続ノードが未表示', 'PC接続ノードにDAGONが未書込か、電源が未投入です。初回のPC接続ノードは書込モードの「書込」でUSB経由の直接書込を実行します。'],
     ['接続後も「応答なし」のノードが存在', 'PC側のノードからそのノードへの配線か電源が切断状態です。配線表（表の「配線」）との一致を確認してください。'],
     ['「ビルド」が使用不可', '構成に問題が残存しているか、dagon serveが停止中です。下部の「問題」を修正し、ターミナルでdagon serveを起動してください。'],
     ['「書込」が使用不可', 'ビルドが未実行か、PC接続ノードと未接続です。準備で「ビルド」、書込で「接続」の順序で実行してください。'],
     ['書込の停滞', '1ノードの書込に約1分を要します。カードの%が増加中であれば進行中です。途中で停止しても、ノードは再書込が可能な状態で動作します。'],
-    ['書込後にノードが前のバージョンへ復帰', '新バージョンでの起動継続に失敗し、DAGONが自動で前のバージョンへ復元しました。アプリを修正してバージョンアップ後に、再度書込を実行してください。'],
+    ['書込後にノードが前のバージョンへ復帰', '新バージョンでの起動継続に失敗し、DAGONが自動で前のバージョンへ復元しました。アプリを修正してバージョンアップ後に再度書込を実行してください。'],
   ],
   keysHeading: 'キー操作',
   keysClose: 'キー操作の非表示',
@@ -787,7 +789,7 @@ export const RULE_SHORT: Record<string, string> = {
   'V-27': 'リンクの接続口',
 };
 
-/** Names a fix sentence needs: the node (名称), its board, its id, and whether there are too many nodes. */
+/** Names a fix sentence needs: the node (表示名), its board, its id, and whether there are too many nodes. */
 export interface FixWords {
   to: string;
   board: string;
@@ -812,28 +814,28 @@ export const RULE_FIX: Record<string, (w: FixWords) => string> = {
   'V-05': (w) => `${w.to}をコーディネータとリンクで接続してください。`,
   'V-06': (w) => `『修正』で${w.board}に適合する起動の方式にしてください。`,
   'V-07': (w) => `そのノードの定義にあるピン（${w.pins ?? '定義のピン'}）のどれかに変更してください。`,
-  'V-08': () => '重複したピンのどちらか1か所を、未使用のピンに変更してください。',
+  'V-08': () => '重複したピンのどちらか1か所を未使用のピンに変更してください。',
   'V-09': () => '『修正』でコーディネータの別のUARTに交換してください。',
   'V-10': () => 'UARTのリンクを1本削減してください。',
   'V-11': (w) => `${w.to}の起動の切替方法を選択してください（最後の手段での修正時に使用します）。`,
-  'V-12': (w) => `${w.to}の修正方法の順序から、最後の手段を除外してください。`,
-  'V-13': (w) => `${w.to}を、そのボードのI2Cの組（${w.pairs ?? '定義の組'}）のどれかに接続してください。`,
+  'V-12': (w) => `${w.to}の修正方法の順序から最後の手段を除外してください。`,
+  'V-13': (w) => `${w.to}をそのボードのI2Cの組（${w.pairs ?? '定義の組'}）のどれかに接続してください。`,
   'V-14': () => '『修正』でコーディネータが最後になる順序にしてください。',
-  'V-15': () => '互換の規則から、不在のノードを除外してください。',
+  'V-15': () => '互換の規則から不在のノードを除外してください。',
   'V-16': () => '既定の配置に復元してください。',
   'V-17': (w) => `共有の2本線（I2C）をコーディネータの定義にあるピン（${w.pins ?? '定義のピン'}）にしてください。`,
-  'V-18': (w) => `${w.to}のアドレスを、未使用の番号に変更してください。`,
-  'V-20': (w) => `共有の2本線（I2C）の速度を、接続するノードの定義にある値（${w.hzs ?? '定義の速度'}）のどれかにしてください。`,
+  'V-18': (w) => `${w.to}のアドレスを未使用の番号に変更してください。`,
+  'V-20': (w) => `共有の2本線（I2C）の速度を接続するノードの定義にある値（${w.hzs ?? '定義の速度'}）のどれかにしてください。`,
   'V-21': (w) => `${w.to}はUARTで接続してください。`,
   'V-22': (w) => `最後の手段で復旧するには、『修正』で${w.to}のリセット・起動の配線を設定してください（現状のままでも書込は可能です）。`,
   'V-23': () => 'この構成のままで正常に使用が可能です。書込はこの部分に到達しないため、この部分をスキップします。',
   'V-24': (w) =>
     w.skipped
-      ? `${w.to}の接続は、使用不可の種類です。${w.to}は書込でスキップするため、現状のままで使用が可能です。`
-      : `${w.to ? `${w.to}の` : ''}接続は、使用不可の種類です。プロジェクトの作成には、使用可能な種類を選択してください（現状のままでも保存は可能です）。`,
+      ? `${w.to}の接続は使用不可の種類です。${w.to}は書込でスキップするため、現状のままで使用が可能です。`
+      : `${w.to ? `${w.to}の` : ''}接続は使用不可の種類です。プロジェクトの作成には、使用可能な種類を選択してください（現状のままでも保存は可能です）。`,
   'V-25': (w) => `${w.to}の代替として、コーディネータに適合するマイコンのノードをコーディネータにしてください。`,
-  'V-26': () => 'UARTの速度を、接続する両方のマイコンで誤差が2%以内になる値にしてください。',
-  'V-27': () => 'リンクの端の接続口を、そのマイコンの定義にある、リンクと同種のものにしてください。',
+  'V-26': () => 'UARTの速度は、接続する両方のマイコンで誤差が2%以内になる値にしてください。',
+  'V-27': () => 'リンクの端の接続口は、そのマイコンの定義にあるリンクと同種のものにしてください。',
 };
 
 /** Header: the two modes (準備｜書込). */
@@ -842,11 +844,11 @@ export const MODE = {
   define: '準備',
   label: 'モード',
   /** Why a mode cannot be chosen, on hover. */
-  offWhy: { locked: '書込の完了まで、モードの変更は不可です', operate: '構成を作成し、問題を修正すると、書込が使用可能です' },
+  offWhy: { locked: '書込の完了までモードの変更は不可です', operate: '構成を作成し問題を修正すると、書込が使用可能です' },
   /** 書込 pressed while the 構成 is not in the project's YAML. */
-  lockedUnsaved: { sentence: '構成を保存すると、書込が使用可能になります。' },
+  lockedUnsaved: { sentence: '構成を保存すると書込が使用可能になります。' },
   /** 書込 pressed with no 構成 or one with problems. */
-  lockedProblems: { sentence: '構成を作成し、問題を修正すると、書込が使用可能になります。' },
+  lockedProblems: { sentence: '構成を作成し問題を修正すると、書込が使用可能になります。' },
 } as const;
 
 /** Define mode. */
@@ -884,7 +886,7 @@ export const DEFINE = {
   dotSkipped: '◇ 書込不可',
   dotProblemsName: (p: number, n: number, l: number) => `問題${p}、ノード${n}、リンク${l}`,
   /** Nothing selected and nothing to fix. */
-  nothingSelected: 'ノードかリンクの選択時に、ここで修正が可能です。',
+  nothingSelected: 'ノードかリンクの選択時にここで修正が可能です。',
   /** The problem list. */
   problems: (n: number) => `! 問題${n}`,
   problemsNone: '問題0',
@@ -903,12 +905,12 @@ export const DEFINE = {
   /** Writes the 構成 back to the project's YAML through dagon serve. */
   save: '保存',
   fixSentence: '修正後にビルドが可能です。',
-  readySentence: 'ビルド後に、書込モードで書込を実行します。',
+  readySentence: 'ビルド後に書込モードで書込を実行します。',
   buildingSentence: 'ビルドの完了まで待機してください。',
-  builtSentence: '書込モードへの切替後に、ノードへの書込を実行します。',
-  skeletonFirst: 'テンプレートの事前生成で、ビルドが可能になります。',
+  builtSentence: '書込モードへの切替後にノードへの書込を実行します。',
+  skeletonFirst: 'テンプレートの事前生成でビルドが可能になります。',
   /** Nodes updating skips; the 構成 is valid as it is. */
-  skippedSentence: (k: number) => `書込不可のノードが${k}個あります。構成は現状のままで使用が可能で、書込ではそのノードをスキップします。`,
+  skippedSentence: (k: number) => `書込不可のノードが${k}個あります。構成は現状のままで使用が可能です。書込ではそのノードをスキップします。`,
   /** The 構成 of the release file chosen in 書込 replaces this one (undoable, saved to the YAML). */
   importFileTopology: 'ファイルの構成の取込',
   unreadableChip: '× 形式不一致',
@@ -920,7 +922,7 @@ export const DEFINE = {
 
 /** Inspector labels; 詳細設定 shows the schema names as they are. */
 export const INSPECT = {
-  name: '名称',
+  name: '表示名',
   id: 'ID（英数字）',
   role: '役割',
   roles: { coordinator: 'コーディネータ', node: 'ノード' } as Record<string, string>,
@@ -993,20 +995,20 @@ export const LINK_KIND_WORDS: Record<string, { label: string; choice: string }> 
 export const CONFIRM = {
   node: (name: string) => `${name}の削除`,
   link: (from: string, to: string) => `${from} → ${to}のリンクの削除`,
-  nodeSentence: 'このノードと、接続するリンクを構成から削除します。取消（Ctrl+Z）で復元が可能です。',
+  nodeSentence: 'このノードとその接続リンクを構成から削除します。取消（Ctrl+Z）で復元が可能です。',
   linkSentence: 'このリンクを構成から削除します。取消（Ctrl+Z）で復元が可能です。',
   remove: '削除',
   cancel: 'キャンセル',
   /** The other destructive actions: the same modal, their own words. */
-  unlink: { title: 'DAGONとの連携解除', sentence: 'AIのエージェントとの接続と、送信への同意を取消します。以後の質問は不可になります。', label: '連携解除' },
+  unlink: { title: 'DAGONとの連携解除', sentence: 'AIのエージェントとの接続と送信への同意を取消します。以後の質問は不可になります。', label: '連携解除' },
   key: { title: 'APIキーの削除', sentence: '登録したAPIキーをOSの資格情報ストアから削除します。再度の使用には再登録が必要です。', label: '削除' },
-  rollback: (name: string, version: string) => ({ title: `${name}の前のバージョンへの復元`, sentence: `${name}を前のバージョン${version}で再起動します。現在のバージョンは保持し、再度の書込が可能です。`, label: '復元' }),
+  rollback: (name: string, version: string) => ({ title: `${name}の前のバージョンへの復元`, sentence: `${name}を前のバージョン${version}で再起動します。現在のバージョンは保持するため再度の書込が可能です。`, label: '復元' }),
 } as const;
 
 /** The table view. */
 export const TABLE = {
   tabs: ['ノード', 'リンク', '配線'],
-  nodeCols: ['番号', '名称', '製品名・MCU', '役割', '接続方法', 'ピン'],
+  nodeCols: ['番号', '表示名', '製品名・MCU', '役割', '接続方法', 'ピン'],
   linkCols: ['接続元', '接続先', '種類', 'アドレス', 'ピン'],
   addNode: 'ノードの追加',
   addLink: 'リンクの追加',
@@ -1043,7 +1045,7 @@ export const CLI_LINK = {
   steps: ['ターミナルの起動', 'dagon serveの実行', '表示されたアドレスをこのブラウザで表示'],
   withoutCli: ['CLIなしで使用可能', 'グラフの編集・書込'] as const,
   deniedChip: '× パスフレーズ不一致',
-  deniedSentence: 'ターミナルに表示されたアドレスへ、変更なしで再アクセスしてください。',
+  deniedSentence: 'ターミナルに表示されたアドレスへ変更なしで再アクセスしてください。',
   stoppedSentence: 'ターミナルでdagon serveを再実行してください。',
   needCli: 'ターミナルでdagon serveを実行し、表示されたアドレスへアクセスしてください。',
   reconnect: 'CLIへの再接続',
@@ -1058,7 +1060,7 @@ export const CLI_LINK = {
     save: 'キーの保存',
     saveWhy: 'キーを入力してください',
     remove: 'キーの削除',
-    removeWhy: 'OSの資格情報ストアからこのキーを削除します。削除後は、この接続方法ではDAGONへの質問が不可になります',
+    removeWhy: 'OSの資格情報ストアからこのキーを削除します。削除後はこの接続方法でのDAGONへの質問が不可になります',
   },
   key: '署名キー',
   yes: 'あり',
@@ -1078,7 +1080,7 @@ export const JOBS = {
   started: '開始時刻',
   cancel: 'ジョブの中止',
   copyLog: 'ジョブのログのコピー',
-  failSentence: 'ログの赤色の行を確認後に、再度ビルドしてください。',
+  failSentence: 'ログの赤色の行を確認後に再度ビルドしてください。',
   answer: '接続済',
 } as const;
 
@@ -1090,9 +1092,9 @@ export const FLASH = {
   via: '接続方法',
   hubFirst: 'コーディネータがないと他のノードの確認が不可のため、コーディネータから順に書込を実行します。',
   /** the confirmation before serve writes the board (its job question). */
-  confirm: (name: string) => `${name}に書込を実行します。よろしいですか。`,
+  confirm: (name: string) => `${name}への書込を実行しますか。`,
   /** A family serve's flash does not write (ESP32-S3). */
-  otherTools: 'このマイコンは、ESPのツールで書込を実行してください。',
+  otherTools: 'このマイコンはESPのツールで書込を実行してください。',
   yes: 'はい',
   no: 'いいえ',
   done: '✓ 書込済',
@@ -1118,15 +1120,15 @@ export const DIFF = {
 export const SAVE = {
   unsaved: '● 未保存',
   /** 422: the CLI's own check refused the 構成. */
-  invalid: { chip: '× 保存失敗', sentence: '問題の修正後に、再度保存してください。' },
+  invalid: { chip: '× 保存失敗', sentence: '問題の修正後に再度保存してください。' },
   /** 409: a job holds the project. */
-  busy: { chip: '… 作業中', sentence: '作業の完了後に、再度保存してください。' },
-  failed: { chip: '× 保存失敗', sentence: 'ターミナルでdagon serveの動作を確認後に、再度保存してください。' },
+  busy: { chip: '… 作業中', sentence: '作業の完了後に再度保存してください。' },
+  failed: { chip: '× 保存失敗', sentence: 'ターミナルでdagon serveの動作を確認後に再度保存してください。' },
 } as const;
 
 /** leaving the project while its 構成 could not be saved (the dialog). */
 export const UNSAVED = {
-  heading: '未保存の変更があります',
+  heading: '未保存の変更',
   sentence: '再度保存するか、変更を破棄して続行するかを選択してください。',
   save: '構成の再保存',
   discard: '変更の破棄と続行',
@@ -1169,8 +1171,8 @@ export const START = {
    * Why serve did not open or make it: 404 / 422 / 409 / 403. A folder that cannot be written is BAND.folderFailed.
    */
   missing: { chip: '× フォルダ不一致', sentence: 'dagon.tomlのあるフォルダを選択してください。' },
-  key: { chip: '× キーエラー', sentence: 'dagon serveのターミナルでキーエラーの理由を確認後に、再度選択してください。' },
-  busy: { chip: '… 作業中', sentence: '作業の完了後に、再度選択してください。' },
+  key: { chip: '× キーエラー', sentence: 'dagon serveのターミナルでキーエラーの理由を確認後に再度選択してください。' },
+  busy: { chip: '… 作業中', sentence: '作業の完了後に再度選択してください。' },
   refused: { chip: '× 範囲外', sentence: 'ホームフォルダ内のフォルダを選択してください。' },
   exists: { chip: '× 名称の重複', sentence: '未使用のフォルダ名を入力してください。' },
   /** A folder with a 構成 but no dagon.toml. */
@@ -1184,7 +1186,7 @@ export const SIM = {
   /** Before connecting: no device list appears for the simulated PC-connected node. */
   connect: { sentence: '模擬のPC接続ノードに接続します。機器の選択一覧は表示しません。' },
   /** The demo page while watching: it reads no files, so its prepared package is what 書込 writes. */
-  siteWrite: '「書込」で、用意した新バージョンの書込が可能です。',
+  siteWrite: '「書込」で用意した新バージョンの書込が可能です。',
 } as const;
 
 /** The menu (メニュー) and its one confirmation. */
@@ -1208,25 +1210,25 @@ export const MENU = {
   /** What each item does, under its name (a first-time user reads it before pressing). */
   hint: {
     new: '構成の描画から開始します（現在のプロジェクトは保存します）',
-    open: 'パソコンのフォルダにある、dagon.tomlを格納したプロジェクトをオープンします',
+    open: 'パソコンのフォルダにあるdagon.tomlのプロジェクトをオープンします',
     save: '構成をプロジェクトのYAMLに即時保存します（通常は自動で保存します）',
     undo: '構成への最後の変更を取消します',
     redo: '取消した変更を再実行します',
     parts: '左側に部品のウィンドウを表示します（ドラッグでキャンバスに配置が可能です）',
-    arrange: '移動したカードを、コーディネータを起点とする配列に再整列します',
+    arrange: '移動したカードをコーディネータ起点の配列に再整列します',
     fit: '全ノードを表示するサイズと位置に調整します',
     viewTable: 'ノード・リンク・配線を表形式で表示します',
     viewGraph: 'ノードとリンクを図で表示します',
     connect: 'USBで接続したPC接続ノードと通信を開始します',
     disconnect: 'PC接続ノードとの通信を停止します（USBの抜去も問題ありません）',
     place: 'パソコンにある.dgbファイルを選択し、その内容のノードへの書込を実行します',
-    rollback: '選択したノードを、前のバージョンで再起動します',
+    rollback: '選択したノードを前のバージョンで再起動します',
     link: 'AIのエージェントと接続し、構成についての質問を可能にします',
     talk: 'DAGONの会話ウィンドウを表示します',
     apply: 'DAGONが提示した構成の変更案を構成に反映します',
-    cli: 'dagon serveとの接続と、登録したAPIキーを表示します',
+    cli: 'dagon serveとの接続と登録したAPIキーを表示します',
     unlink: 'AIのエージェントとの接続と同意を取消します',
-    help: 'よくある問題と、その原因と対処方法',
+    help: 'よくある問題の原因と対処方法',
     keys: 'キーボードでの操作の一覧',
     copyLog: '下部の「記録」の内容をクリップボードにコピーします',
     copyUrl: 'このページのアドレスをコピーします',
@@ -1269,12 +1271,12 @@ export const SKELETON = {
   },
   where: '生成先',
   next: {
-    '1': 'エディタで、各ノードのsrc/app.rsにアプリのコードを記述（main.rsとwiring.rsはDAGONが生成するため、変更は不要）',
+    '1': 'エディタで各ノードのsrc/app.rsにアプリのコードを記述（main.rsとwiring.rsはDAGONが生成するため変更は不要）',
     '2': '準備で「ビルド」の後に、書込で「書込」',
     heading: '後続の手順',
   },
   fail: {
-    fix: '理由の修正後に、「再生成」をクリックしてください。生成済のノードは保持します。',
+    fix: '理由の修正後に「再生成」をクリックしてください。生成済のノードは保持します。',
   },
   startFailed: 'dagon serveが受付を拒否しました',
   retry: '再生成',
@@ -1291,7 +1293,7 @@ export const NOTICE = {
 
 export const BUILD = {
   /** A node with no [build.*] in dagon.toml: nothing to build until the skeleton is made. */
-  noSkeleton: { reason: 'このノードのテンプレートは未生成です。', stale: 'DAGONのソースが変更されたため、テンプレートは最新ではありません。', fix: 'テンプレートの生成後に、ビルドが可能になります。' },
+  noSkeleton: { reason: 'このノードのテンプレートは未生成です。', stale: 'DAGONのソースが変更されたため、テンプレートは最新ではありません。', fix: 'テンプレートの生成後にビルドが可能になります。' },
   run: 'ビルド',
   runningWhy: 'ビルド中です',
   title: 'ビルド',
@@ -1303,19 +1305,19 @@ export const BUILD = {
     done: '{n}ノードのビルド完了',
   },
   fail: {
-    fix: 'エディタで{file}の{line}行目を修正後に、再度ビルドしてください。',
+    fix: 'エディタで{file}の{line}行目を修正後に再度ビルドしてください。',
     others: '他の{n}ノードはビルド済です。',
-    plain: '理由の修正後に、再度ビルドしてください。',
+    plain: '理由の修正後に再度ビルドしてください。',
   },
   startFailed: 'dagon serveが受付を拒否しました',
   retry: '再ビルド',
   askAgent: '失敗理由の質問',
 } as const;
 
-/** The project's layout file (名称 and card places). */
+/** The project's layout file (表示名 and card places). */
 export const LAYOUT = {
   refused: '× 配置の読込不可',
-  refusedDetail: '配置のファイルの読込に失敗したため、自動の配置で表示しました。ファイルは無変更で、配置と名称の変更は保存しません。',
+  refusedDetail: '配置のファイルの読込に失敗したため、自動の配置で表示しました。ファイルは変更しません。配置と表示名の変更も保存しません。',
 } as const;
 
 /** The project's 構成 could not be read as it opened: nothing replaces it. */
@@ -1326,15 +1328,15 @@ export const TOPOLOGY_READ = {
 
 export const WRITE = {
   noneChecked: { label: 'ノード未選択', detail: '書込対象のノードのカードをチェックしてください。' },
-  alreadyOn: (v: string, coreToo: boolean) => ({ label: `全ノード${v}`, detail: `チェックしたノードは${v}で動作中${coreToo ? 'で、ブートローダも同一のため' : 'のため'}、書込を省略しました。` }),
+  alreadyOn: (v: string, coreToo: boolean) => ({ label: `全ノード${v}`, detail: `チェックしたノードは${v}で動作中${coreToo ? 'でブートローダも同一のため' : 'のため'}、書込を省略しました。` }),
   pickVersion: 'バージョン選択と書込',
   run: '書込',
   /** Why 書込 cannot be pressed, on hover. */
-  offWhy: { notConnected: '接続後に書込が可能です', busy: '現在の書込の完了後に、再度書込が可能です' },
+  offWhy: { notConnected: '接続後に書込が可能です', busy: '現在の書込の完了後に再度書込が可能です' },
   /** Why the version list cannot be opened, on hover. */
   pickOffWhy: '接続後のバージョン判明時に選択が可能です',
   /** Why a card's check cannot be changed, on hover. */
-  checksLockedWhy: '書込の完了まで、チェックの変更は不可です',
+  checksLockedWhy: '書込の完了までチェックの変更は不可です',
   go: '{n}ノードへの書込',
   toast: {
     done: '{n}ノードの書込完了',
@@ -1359,38 +1361,38 @@ export const WRITE = {
   failed: '× 書込失敗',
   /** The real cause and the next step for a write that could not be made, by what the node or the link said. */
   why: {
-    silent: { reason: 'ノードがPC接続ノードからの要求に応答しませんでした。', fix: 'ノードの電源と、PC側のノードとの配線を確認後に、再度書込を実行してください。' },
-    E_SIGNATURE: { reason: 'ノードでパッケージの配布元の検証に失敗しました。別のキーで作成したパッケージです。', fix: 'このプロジェクトのキーで再ビルド後に、再度書込を実行してください。' },
-    E_KEY: { reason: 'ノードでパッケージの配布元の検証に失敗しました。別のキーで作成したパッケージです。', fix: 'このプロジェクトのキーで再ビルド後に、再度書込を実行してください。' },
-    E_DIGEST: { reason: '受信した内容が途中で破損していました。', fix: 'PC側のノードとの配線とケーブルを確認後に、再度書込を実行してください。' },
+    silent: { reason: 'ノードがPC接続ノードからの要求に応答しませんでした。', fix: 'ノードの電源とPC側のノードとの配線を確認後に再度書込を実行してください。' },
+    E_SIGNATURE: { reason: 'ノードでパッケージの配布元の検証に失敗しました。別のキーで作成したパッケージです。', fix: 'このプロジェクトのキーで再ビルド後に再度書込を実行してください。' },
+    E_KEY: { reason: 'ノードでパッケージの配布元の検証に失敗しました。別のキーで作成したパッケージです。', fix: 'このプロジェクトのキーで再ビルド後に再度書込を実行してください。' },
+    E_DIGEST: { reason: '受信した内容が途中で破損していました。', fix: 'PC側のノードとの配線とケーブルを確認後に再度書込を実行してください。' },
     E_COMPAT: { reason: 'パッケージがこのノードの機種に不適合です。', fix: '構成のマイコンとボードを確認し、再ビルド後に書込を実行してください。' },
-    E_FLASH: { reason: 'ノードが自身のメモリへの書込に失敗しました。', fix: 'ノードの電源の再投入後に、再度書込を実行してください。' },
+    E_FLASH: { reason: 'ノードが自身のメモリへの書込に失敗しました。', fix: 'ノードの電源の再投入後に再度書込を実行してください。' },
     refused: { reason: 'ノードがこのパッケージの受信を拒否しました。', fix: '下部の「記録」で理由を確認し、再ビルド後に書込を実行してください。' },
     cannotFix: { reason: '再送信も予備からの起動も失敗しました。', fix: 'このノードをUSBで直接接続し、カードの「書込」で書込を実行してください。' },
   } as Record<string, { reason: string; fix: string }>,
   /** The written package could not be kept in the project (a toast; writing went on). */
-  keepFailed: { label: '× 保存不可', detail: '書込済のパッケージの、プロジェクトのout/deployへの保存に失敗しました。' },
+  keepFailed: { label: '× 保存不可', detail: '書込済パッケージのout/deploy（プロジェクト内）への保存に失敗しました。' },
   rolled: {
     reason: '新バージョンでの起動継続に失敗し、前のバージョン{version}に復帰しました。ノードは動作中です。',
-    next: 'アプリを修正してバージョンアップし、ビルド後に、再度書込を実行してください。',
+    next: 'アプリを修正してバージョンアップし、ビルド後に再度書込を実行してください。',
   },
   /** The new boot core failed its check: the node runs its confirmed core, or with one boot core slot its confirmed app; the app was not written. */
   coreBack: {
     label: '↺ 新ブートローダは不使用',
     detail: '新ブートローダが自己検査に不合格のため、使用していません。ブートローダのスロットが2つのノードは前のブートローダで、1つのノードは現在のアプリで動作中です。アプリの書込は未実行です。',
-    next: 'ブートローダを修正してバージョンアップし、ビルド後に、再度書込を実行してください。',
+    next: 'ブートローダを修正してバージョンアップし、ビルド後に再度書込を実行してください。',
   },
   /** A silent node with a ROM entry: said once, before anything is touched. */
   rom: {
     silent: '× 応答なし',
-    body: '{node}が応答しません。書込を実行すると、全内容を上書きします。配線の欠落でも応答なしになるため、確認後に続行してください。',
+    body: '{node}が応答しません。書込の実行で全内容を上書きします。配線の欠落でも応答なしになるため、確認後に続行してください。',
   },
   factory: {
-    intro: '{node}のDAGONが応答しないため、USBで直接書込を実行します。最初の書込と、DAGONの消失時のみの手順です。',
+    intro: '{node}のDAGONが応答しないため、USBで直接書込を実行します。最初の書込とDAGONの消失時のみの手順です。',
     steps: '手順',
     drive: 'ドライブ',
     waiting: '… 待機中',
-    after: '書込の完了後にこの画面をクローズし、接続します。他のノードは「書込」でDAGON経由の書込を実行します。応答しないノードは、そのカードの「書込」で書込を実行します。',
+    after: '書込の完了後にこの画面をクローズして接続します。他のノードは「書込」でDAGON経由の書込を実行します。応答しないノードはそのカードの「書込」で書込を実行します。',
     cancel: '中止',
     childIntro: '{node}はPC接続ノードから到達不可のため、このノードを直接接続して書込を実行します。',
     howToConnect: '接続方法',

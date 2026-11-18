@@ -26,7 +26,7 @@ describe('direct writing modal of a node', () => {
   const child = (j: Job | null) =>
     render(FactoryModal, {
       props: {
-        node: { label: '[2] 7セグ', target: '[2] 7セグ（1段目）· NUCLEO-F401RE' },
+        node: { label: '[2] 7セグ', target: '[2] 7セグ（ノード）· NUCLEO-F401RE' },
         how: { label: 'USB', hint: 'ST-LINK側のUSBを接続' },
         canWrite: true,
         child: true,
@@ -40,7 +40,7 @@ describe('direct writing modal of a node', () => {
 
   test('says it is written directly because the node connected to the PC does not reach it, and how to connect it', () => {
     const b = child(null);
-    expect(b).toContain('[2] 7セグ（1段目）');
+    expect(b).toContain('[2] 7セグ（ノード）');
     expect(b).toContain(fill(WRITE.factory.childIntro, { node: '[2] 7セグ' }));
     expect(b).toContain(WRITE.factory.howToConnect);
     expect(b).toContain('ST-LINK側のUSBを接続');

@@ -11,6 +11,7 @@ use dagon_ed25519::Ed25519Compact;
 use dagon_events::{compose, Bounds, Composed, Layer, Nop, Published, Watchdog};
 use dagon_format::header::*;
 use dagon_format::{key_id, sha256, SigVerifier, Version};
+use dagon_proto::handler::Ceiling;
 use dagon_proto::payload::*;
 use dagon_proto::{flags, max_payload, plant, split_status, Cmd, Frame, Status};
 use ed25519_compact::{KeyPair, Seed};
@@ -683,14 +684,100 @@ fn capabilities_and_planted_requests<W: Writer>() {
     );
 
     for c in &want {
-        let (st, body, _) = b.exchange(Cmd::Caps, &wire(|p| encode_caps_req(*c as u8, p)));
+        let (st, body, _) = b.exchange(Cmd::Caps, &caps_req(*c as u8, None));
         assert_eq!(st, Status::Ok, "{c:?}");
         assert_eq!(CapsResp::parse(&body), Ok(CapsResp::of(*c)), "{c:?}");
     }
     for not in [Cmd::Relay as u8, 0xEE] {
-        let p = wire(|p| encode_caps_req(not, p));
-        assert_eq!(b.call(Cmd::Caps, &p), Status::Unsupported);
+        assert_eq!(b.call(Cmd::Caps, &caps_req(not, None)), Status::Unsupported);
     }
+    // A session forwards over no link: it has no tunnel to say.
+    let p = caps_req(Cmd::Hello as u8, Some(ANY_LINK));
+    assert_eq!(b.call(Cmd::Caps, &p), Status::Arg);
+}
+
+/// A link id for a CAPS that asks a session for a tunnel: it has none,
+/// whatever the id.
+const ANY_LINK: u8 = 9;
+
+fn caps_req(cmd: u8, link: Option<u8>) -> Vec<u8> {
+    wire(|p| CapsReq { cmd, link }.encode(p))
+}
+
+fn hello_of(max_payload: u16) -> Vec<u8> {
+    let req = HelloReq {
+        max_payload,
+        ..hello_req()
+    };
+    wire(|p| req.encode(p))
+}
+
+/// The requester's HELLO says the payload it takes, and from then on a
+/// request whose answer would not fit it is refused with E_ARG before
+/// its handler runs: the store is not called and a transfer under way
+/// goes on. A HELLO that brings less than its own answer needs is refused
+/// the same way and changes nothing.
+fn answers_fit_what_the_requester_takes<W: Writer>() {
+    let kp = keypair();
+    let mut b = Bench::<_, W>::new(ed25519(&kp), Mem::new(2, 2));
+    assert_eq!(b.agent.ceiling(), Ceiling::link(max_payload::I2C));
+    assert_eq!(b.call(Cmd::Status, &[]), Status::Ok, "the link carries it");
+    assert_eq!(
+        b.call(Cmd::XferBegin, &begin(target::APP, 1, HEADER_SIZE as u16)),
+        Status::Ok
+    );
+    let chunk = |offset: u32| {
+        wire(|p| {
+            XferChunk {
+                offset,
+                data: &[0; 100],
+            }
+            .encode(p)
+        })
+    };
+    assert_eq!(b.call(Cmd::XferHdr, &chunk(0)), Status::Ok);
+
+    let floor = max_payload::SMALLEST as u16;
+    let short = (HelloResp::MAX_LEN) as u16;
+    let before = b.mem.borrow().clone();
+    assert_eq!(b.call(Cmd::Hello, &hello_of(short)), Status::Arg);
+    assert_eq!(b.agent.ceiling().peer, None, "a refused HELLO says nothing");
+    assert_eq!(*b.mem.borrow(), before);
+
+    assert_eq!(b.call(Cmd::Hello, &hello_of(floor)), Status::Ok);
+    assert_eq!(b.agent.ceiling().bytes(), usize::from(floor));
+    let before = b.mem.borrow().clone();
+    // STATUS answers 84 bytes: more than this requester takes.
+    assert_eq!(b.call(Cmd::Status, &[]), Status::Arg);
+    assert_eq!(*b.mem.borrow(), before, "no call of the store");
+    // What fits is served as before.
+    assert_eq!(b.call(Cmd::Version, &[]), Status::Ok);
+    assert_eq!(
+        b.call(Cmd::Caps, &caps_req(Cmd::Status as u8, None)),
+        Status::Ok
+    );
+    assert_eq!(
+        b.exchange(Cmd::XferHdr, &chunk(100)).1,
+        wire(|p| encode_next_offset(200, p)),
+        "the transfer goes on"
+    );
+    // A later HELLO with room for it lifts the ceiling again.
+    assert_eq!(
+        b.call(Cmd::Hello, &hello_of(max_payload::USB as u16)),
+        Status::Ok
+    );
+    assert_eq!(b.agent.ceiling().bytes(), max_payload::I2C, "the link's");
+    assert_eq!(b.call(Cmd::Status, &[]), Status::Ok);
+}
+
+#[test]
+fn the_app_answers_within_what_the_requester_takes() {
+    answers_fit_what_the_requester_takes::<writer::App>();
+}
+
+#[test]
+fn the_boot_core_answers_within_what_the_requester_takes() {
+    answers_fit_what_the_requester_takes::<writer::BootCore>();
 }
 
 fn hello_req() -> HelloReq {
@@ -721,8 +808,7 @@ fn hello_names_what_the_node_serves_in_front_of_the_session() {
     let (_, body, _) = b.exchange(Cmd::Hello, &wire(|p| hello_req().encode(p)));
     let cmds = HelloResp::parse(&body).unwrap().cmds;
     assert_eq!(cmds, set_of(&served_by::<writer::App>()).union(front));
-    let p = wire(|p| encode_caps_req(Cmd::Relay as u8, p));
-    let (st, body, _) = b.exchange(Cmd::Caps, &p);
+    let (st, body, _) = b.exchange(Cmd::Caps, &caps_req(Cmd::Relay as u8, None));
     assert_eq!(st, Status::Ok);
     assert_eq!(CapsResp::parse(&body), Ok(CapsResp::of(Cmd::Relay)));
 }

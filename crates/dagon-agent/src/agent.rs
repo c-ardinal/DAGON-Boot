@@ -6,10 +6,11 @@ use dagon_events::{
 };
 use dagon_format::header::{self, image_kind, slot_binding, ImageHeader, HEADER_SIZE};
 use dagon_format::{FormatError, Sha256, SigVerifier};
-use dagon_proto::handler::{self, Handler};
+use dagon_proto::handler::{self, Ceiling, Handler};
 use dagon_proto::payload::{
-    self, mode, phase, reboot_mode, target, CapsResp, CmdSet, HelloReq, HelloResp, SetPending,
-    Show, SlotState, StatusResp, VersionResp, VersionSlots, XferBegin, XferChunk, IMAGE_HDR_LEN,
+    self, mode, phase, reboot_mode, target, CapsReq, CapsResp, CmdSet, HelloReq, HelloResp,
+    SetPending, Show, SlotState, StatusResp, VersionResp, VersionSlots, XferBegin, XferChunk,
+    IMAGE_HDR_LEN,
 };
 use dagon_proto::{
     flags, frame_len, max_payload, split_status, Cmd, Frame, FrameError, Status, HEADER_LEN,
@@ -29,8 +30,7 @@ const RESP_BUF: usize = frame_len(1 + StatusResp::MAX_LEN);
 // The largest reply body is STATUS's; VERSION's and HELLO's fit the same buffer.
 const _: () = assert!(VersionResp::MAX_LEN <= StatusResp::MAX_LEN);
 const _: () = assert!(HelloResp::MAX_LEN <= StatusResp::MAX_LEN);
-// CAPS from a session carries no tunnel entries.
-const _: () = assert!(CapsResp::FIELDS_LEN <= StatusResp::MAX_LEN);
+const _: () = assert!(CapsResp::MAX_LEN <= StatusResp::MAX_LEN);
 /// The answer to a frame of another wire version: a status and one field.
 const REFUSAL_BUF: usize = frame_len(4);
 const BODY_AT: usize = HEADER_LEN + 1;
@@ -97,6 +97,8 @@ pub struct Agent<S, X, V, W = writer::App> {
     refusal: [u8; REFUSAL_BUF],
     /// The commands the node serves in front of this session.
     front: CmdSet,
+    /// HELLO `max_payload` of the requester; none before its HELLO.
+    peer_max: Option<u16>,
 }
 
 /// A handled request: the length of the reply's body, and the delay of
@@ -142,6 +144,7 @@ impl<S: SlotStore, X: AppChain, V: SigVerifier, W: Writer> Agent<S, X, V, W> {
             resp_reboot: None,
             refusal: [0; REFUSAL_BUF],
             front: CmdSet::EMPTY,
+            peer_max: None,
         };
         agent.opened();
         agent
@@ -161,6 +164,7 @@ impl<S: SlotStore, X: AppChain, V: SigVerifier, W: Writer> Agent<S, X, V, W> {
         self.requests = requests::Machine::new();
         self.last = None;
         self.resp_reboot = None;
+        self.peer_max = None;
         self.opened();
     }
 
@@ -217,6 +221,8 @@ impl<S: SlotStore, X: AppChain, V: SigVerifier, W: Writer> Agent<S, X, V, W> {
 
     /// A DAGON link stopped carrying frames (`app.link_down`).
     pub fn link_down(&mut self, link: u8, addr: u8) {
+        // Whoever asks next says what it takes in its own HELLO.
+        self.peer_max = None;
         noted(self.node.link_down(&mut self.chain, link, addr));
     }
 
@@ -311,23 +317,22 @@ impl<S: SlotStore, X: AppChain, V: SigVerifier, W: Writer> Agent<S, X, V, W> {
 
     /// The commands every writer's session serves.
     const COMMON: [Handler<Self, Done>; 12] = [
-        Handler::new(Cmd::Hello, |a, p| a.hello(HelloReq::of(p)?)),
-        Handler::new(Cmd::Status, |a, p| a.status(payload::status_req_of(p)?)),
+        Handler::new(Cmd::Hello, |a, r| a.hello(r.hello()?)),
+        Handler::new(Cmd::Status, |a, r| a.status(r.status()?)),
         Handler::new(Cmd::Version, |a, _| a.version()),
-        Handler::new(Cmd::Caps, |a, p| a.caps(payload::caps_req_of(p)?)),
+        Handler::new(Cmd::Caps, |a, r| a.caps(r.caps()?)),
         Handler::new(Cmd::Stay, |a, _| a.stay()),
-        Handler::new(Cmd::XferBegin, |a, p| a.xfer_begin(XferBegin::of(p)?)),
-        Handler::new(Cmd::XferData, |a, p| a.xfer_data(XferChunk::of(p)?)),
+        Handler::new(Cmd::XferBegin, |a, r| a.xfer_begin(r.xfer_begin()?)),
+        Handler::new(Cmd::XferData, |a, r| a.xfer_data(r.xfer_data()?)),
         Handler::new(Cmd::XferEnd, |a, _| a.xfer_end()),
-        Handler::new(Cmd::XferHdr, |a, p| a.xfer_hdr(XferChunk::of(p)?)),
-        Handler::new(Cmd::SetPending, |a, p| a.set_pending(SetPending::of(p)?)),
-        Handler::new(Cmd::Reboot, |a, p| a.reboot(payload::reboot_of(p)?)),
-        Handler::new(Cmd::Confirm, |a, p| a.confirm(payload::confirm_of(p)?)),
+        Handler::new(Cmd::XferHdr, |a, r| a.xfer_hdr(r.xfer_hdr()?)),
+        Handler::new(Cmd::SetPending, |a, r| a.set_pending(r.set_pending()?)),
+        Handler::new(Cmd::Reboot, |a, r| a.reboot(r.reboot()?)),
+        Handler::new(Cmd::Confirm, |a, r| a.confirm(r.confirm()?)),
     ];
 
     /// The commands only the app's session serves.
-    const APP_ONLY: [Handler<Self, Done>; 1] =
-        [Handler::new(Cmd::Show, |a, p| a.show(Show::of(p)?))];
+    const APP_ONLY: [Handler<Self, Done>; 1] = [Handler::new(Cmd::Show, |a, r| a.show(r.show()?))];
 
     /// What this writer's session serves: HELLO's `cmds`, less what the
     /// node serves in front of it.
@@ -340,20 +345,35 @@ impl<S: SlotStore, X: AppChain, V: SigVerifier, W: Writer> Agent<S, X, V, W> {
         }
     };
 
-    /// The command's row reads the whole request, then runs its handler.
+    /// What an answer of this session may be at most: the payload its
+    /// link carries, and the one the requester said it takes in its HELLO.
+    pub fn ceiling(&self) -> Ceiling {
+        Ceiling {
+            link: self.cfg.max_payload,
+            peer: self.peer_max,
+        }
+    }
+
+    /// The command's row makes the typed request of the whole payload and
+    /// holds its answer against the ceiling; only then its action runs.
     fn dispatch(&mut self, cmd: u8, p: &[u8]) -> Handled {
         let app_only: &[Handler<Self, Done>] = if W::APP { &Self::APP_ONLY } else { &[] };
         let row = handler::find(&Self::COMMON, cmd).or_else(|| handler::find(app_only, cmd));
-        row.ok_or(Status::Unsupported)?.call(self, p)
+        let ceiling = self.ceiling();
+        row.ok_or(Status::Unsupported)?.call(self, p, ceiling)
     }
 
     /// CAPS: the fields of a command the node serves, as the command
-    /// table this session is built with has them.
-    fn caps(&mut self, cmd: u8) -> Handled {
+    /// table this session is built with has them. A session forwards over
+    /// no link, so a tunnel asked of it is E_ARG.
+    fn caps(&mut self, asked: CapsReq) -> Handled {
         let served = Self::CMDS.union(self.front);
-        let cmd = Cmd::from_u8(cmd)
+        let cmd = Cmd::from_u8(asked.cmd)
             .filter(|c| served.has(*c as u8))
             .ok_or(Status::Unsupported)?;
+        if asked.link.is_some() {
+            return Err(Status::Arg);
+        }
         Ok((CapsResp::of(cmd).encode(self.body()).expect("fits"), None))
     }
 
@@ -380,7 +400,8 @@ impl<S: SlotStore, X: AppChain, V: SigVerifier, W: Writer> Agent<S, X, V, W> {
         }
     }
 
-    fn hello(&mut self, _: HelloReq) -> Handled {
+    fn hello(&mut self, req: HelloReq) -> Handled {
+        self.peer_max = Some(req.max_payload);
         noted(self.requests.hello(&mut self.chain));
         let st = self.images.status();
         let active = st

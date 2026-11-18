@@ -2075,7 +2075,7 @@ listed, and a test asserts each pair.
 | Limit | Value | Source of truth | Must fit it |
 |---|---|---|---|
 | Link payload per kind | USB 1088, UART 1024, I2C 256 bytes | `dagon_proto::max_payload` | every request and reply; `RECORD_PAGE`; VERSION response; display text; conformance detail |
-| Smallest link payload | `max_payload::MIN` = the minimum over the kinds above (derived, not written) | `dagon-proto` | VERSION response as a whole (every TLV set the device may answer, asserted with the largest 0x08 set, 0x20 and a full 0x21 page) |
+| Smallest link payload | `max_payload::MIN` = the minimum over the kinds above (derived, not written) | `dagon-proto` | VERSION response as a whole (every TLV set the device may answer, asserted with the largest 0x08 set, 0x11 and a full 0x12 page) |
 | VERSION value | ≤ 255 bytes | VERSION encoding (`dagon-proto` command table) | every number in 5.4; 0x12 pages |
 | VERSION 0x12 fixed overhead | `VERSION_PAGE_OVERHEAD = 6` = status (1) + TLV count (1) + id (1) + len (1) + offset (2) | `dagon-proto` constant with a `const` assertion that it equals the sum of the field widths | `RECORD_PAGE` |
 | `RECORD_PAGE` per link | `RECORD_PAGE(link) = min(255 − 2, max_payload(link) − VERSION_PAGE_OVERHEAD)`: I2C 250, UART 253, USB 253; `RECORD_PAGE_MIN = 250` | `dagon-proto` `const fn` with one `const` assertion per link kind | VERSION 0x12; the host's paged reader asks at most `RECORD_PAGE_MIN` |

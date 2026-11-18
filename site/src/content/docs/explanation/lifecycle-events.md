@@ -1058,7 +1058,7 @@ impl Extension for Bench {
 | 上限 | 値 | 唯一の出所 | 収まるべきもの |
 |---|---|---|---|
 | 種類ごとのリンクのペイロード | USB 1088、UART 1024、I2C 256バイト | `dagon_proto::max_payload` | すべてのリクエストと返答、`RECORD_PAGE`、VERSIONのレスポンス、表示の文字列、適合試験の詳細 |
-| いちばん小さいリンクのペイロード | `max_payload::MIN` = 上の種類の最小（導いたもので、書いたものではありません） | `dagon-proto` | VERSIONのレスポンス全体（デバイスが答えるすべてのTLVの集合。いちばん大きい0x08の集合、0x20、0x21の全ページで確かめます） |
+| いちばん小さいリンクのペイロード | `max_payload::MIN` = 上の種類の最小（導いたもので、書いたものではありません） | `dagon-proto` | VERSIONのレスポンス全体（デバイスが答えるすべてのTLVの集合。いちばん大きい0x08の集合、0x11、0x12の全ページで確かめます） |
 | VERSIONの値 | ≤ 255バイト | VERSIONの符号化（`dagon-proto`のコマンドの表） | 5.4のすべての番号、0x12のページ |
 | VERSION 0x12の固定の費用 | `VERSION_PAGE_OVERHEAD = 6` = ステータス(1) + TLVの数(1) + id (1) + len (1) + offset (2) | 欄の幅の合計と同じことを`const`のアサーションで確かめる`dagon-proto`の定数 | `RECORD_PAGE` |
 | リンクごとの`RECORD_PAGE` | `RECORD_PAGE(link) = min(255 − 2, max_payload(link) − VERSION_PAGE_OVERHEAD)`: I2C 250、UART 253、USB 253。`RECORD_PAGE_MIN = 250` | リンクの種類ごとに`const`のアサーションを持つ`dagon-proto`の`const fn` | VERSION 0x12。ホストのページの読み手が求めるのは最大`RECORD_PAGE_MIN` |

@@ -512,6 +512,7 @@ impl<T: Transport, C: HostClock> Host<T, C> {
                         link,
                         addr,
                         timeout_ms: Some(timeout_ms.min(u16::MAX as u32) as u16),
+                        inhibit: false,
                         inner: &inner,
                     };
                     let p = request(|b| relay.encode(b));
@@ -635,6 +636,7 @@ mod tests {
         let never = [
             Cmd::Reboot,
             Cmd::EnterRom,
+            Cmd::DiagSeed,
             Cmd::ConfRun,
             Cmd::SubCtl,
             Cmd::I2cRaw,

@@ -4,6 +4,7 @@
 #![no_std]
 #![forbid(unsafe_code)]
 
+pub mod diag;
 pub mod field;
 pub mod handler;
 pub mod payload;
@@ -309,7 +310,7 @@ mod tests {
 
     #[test]
     fn command_and_status_tables() {
-        assert_eq!(Cmd::ALL.len(), 18);
+        assert_eq!(Cmd::ALL.len(), 21);
         assert_eq!(Cmd::from_u8(0x04), Some(Cmd::Caps));
         assert_eq!(Cmd::from_u8(0x03), Some(Cmd::Version));
         assert_eq!(Cmd::from_u8(0x24), Some(Cmd::EnterRom));

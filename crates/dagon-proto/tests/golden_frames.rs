@@ -167,7 +167,10 @@ fn capability_vectors() {
     assert_eq!(file[11], rp2040_relay_link("i2c0"));
     assert_crc(&file);
 
+    // A relay that reads RELAY's fields 1 and 2 (one that predates
+    // INHIBIT): its answer stays byte for byte what it was.
     let caps = CapsResp {
+        req_fields: FieldSet::EMPTY.with(1).with(2),
         tunnel_mtu: Some(268),
         ..CapsResp::of(Cmd::Relay)
     };
@@ -189,6 +192,105 @@ fn capability_vectors() {
         ],
     );
     assert_crc(&file);
+
+    // A relay of this table: it reads INHIBIT (field 3) too.
+    let caps = CapsResp {
+        tunnel_mtu: Some(268),
+        ..CapsResp::of(Cmd::Relay)
+    };
+    let file = golden(
+        "frame_caps_resp_inhibit.bin",
+        &frame(flags::RESP, 0x16, Cmd::Caps, |b| caps.encode(b).unwrap()),
+    );
+    let (_, body) = split_status(decode(&file).payload).unwrap();
+    assert_eq!(CapsResp::parse(body).unwrap(), caps);
+    expect_at(&file, &[(9, &[0x02, 1, 0x0E])]); // request fields 1, 2 and 3
+    assert_crc(&file);
+}
+
+/// One frame of each link diagnostics command and of its answer.
+#[test]
+fn link_diag_vectors() {
+    use dagon_proto::diag::*;
+    use dagon_proto::table::{diag_seed, link_diag};
+    let ask = LinkDiagReq {
+        report: Report::Peers,
+        endpoint: Some(Endpoint {
+            link: rp2040_relay_link("i2c0"),
+            addr: 0x42,
+        }),
+        cursor: None,
+        max_resp: 43,
+    };
+    let file = golden(
+        "frame_link_diag_req.bin",
+        &frame(0, 0x21, Cmd::LinkDiag, |b| ask.encode(b).unwrap()),
+    );
+    assert_eq!(LinkDiagReq::parse(decode(&file).payload), Ok(ask));
+    assert_crc(&file);
+
+    let peer = Peer {
+        link: rp2040_relay_link("i2c0"),
+        addr: 0x42,
+        instance: NO_INSTANCE,
+    };
+    let bytes = peer.to_bytes();
+    let answer = LinkDiagResp {
+        format: link_diag::FORMAT,
+        info: DiagInfo {
+            availability: 0x7F,
+            store: link_diag::store::RETENTION_POWER_CUT,
+            policy: PolicySet::EMPTY.with(1).with(2).with(3),
+            params: Params {
+                fdc_step: 32,
+                confirmation: 1,
+                aging: 40,
+            },
+        },
+        elements: Elements::Peers(&bytes),
+        next: None,
+    };
+    let file = golden(
+        "frame_link_diag_resp.bin",
+        &frame(flags::RESP, 0x21, Cmd::LinkDiag, |b| {
+            answer.encode(b).unwrap()
+        }),
+    );
+    let (_, body) = split_status(decode(&file).payload).unwrap();
+    assert_eq!(LinkDiagResp::parse(body), Ok(answer));
+    assert_crc(&file);
+
+    let seed = Seed::counter(7, 2, &[0x10; 8]).unwrap();
+    let file = golden(
+        "frame_diag_seed_resp.bin",
+        &frame(flags::RESP, 0x22, Cmd::DiagSeed, |b| {
+            seed.encode(b).unwrap()
+        }),
+    );
+    let (_, body) = split_status(decode(&file).payload).unwrap();
+    assert_eq!(Seed::parse(body), Ok(seed));
+    assert_eq!(body.len(), 2 + 6 + 8);
+    assert_crc(&file);
+
+    let ask = DiagSeedReq {
+        level: diag_seed::level::EVER_COMMUNICATED_CLEAR,
+    };
+    let clear = LinkDiagClear {
+        scope: ClearScope::EndpointAll(Endpoint {
+            link: rp2040_relay_link("i2c0"),
+            addr: 0x42,
+        }),
+        key: Some([0x5A; 64]),
+    };
+    let file = golden(
+        "frame_link_diag_clear_req.bin",
+        &frame(0, 0x23, Cmd::LinkDiagClear, |b| clear.encode(b).unwrap()),
+    );
+    assert_eq!(LinkDiagClear::parse(decode(&file).payload), Ok(clear));
+    // A signed clear of one endpoint: 73 payload bytes.
+    assert_eq!(file.len(), dagon_proto::frame_len(73));
+    assert_crc(&file);
+    assert_eq!(DiagSeedReq::parse(&[1]), Ok(ask));
 }
 
 fn expect_at(file: &[u8], table: &[(usize, &[u8])]) {
@@ -334,6 +436,7 @@ fn relay_vector() {
         link: rp2040_relay_link("i2c0"),
         addr: 0x42,
         timeout_ms: Some(300),
+        inhibit: false,
         inner: &inner,
     };
     let file = golden(

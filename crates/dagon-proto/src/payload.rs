@@ -5,6 +5,7 @@
 //! `Status::Field`) and `Status::Arg` for a value outside its range;
 //! `encode` returns the byte count written.
 
+use crate::diag::{DiagSeedReq, LinkDiagClear, LinkDiagReq, Seed};
 use crate::field::{
     read, shortest, shortest_value, FieldSpec, FieldWriter, MsgSpec, Parsed, Refusal,
 };
@@ -156,6 +157,10 @@ pub type CmdSet = Bits<{ crate::table::CMDS_LEN }>;
 /// Field numbers of one message (CAPS).
 pub type FieldSet = Bits<{ caps::FIELD_SET_LEN as usize }>;
 
+/// Policy numbers a node applies to its link diagnostics (LINK_DIAG's
+/// POLICY, `table::policy`).
+pub type PolicySet = Bits<{ crate::table::policy::LEN as usize }>;
+
 impl<const N: usize> Bits<N> {
     pub const EMPTY: Self = Bits([0; N]);
 
@@ -214,7 +219,7 @@ impl<const N: usize> Bits<N> {
     }
 
     /// The set a field carries; empty when it was left out.
-    fn of(p: &Parsed<'_>, f: &FieldSpec) -> Result<Self, Status> {
+    pub(crate) fn of(p: &Parsed<'_>, f: &FieldSpec) -> Result<Self, Status> {
         p.field(f).map_or(Ok(Self::EMPTY), Self::from_bytes)
     }
 }
@@ -232,12 +237,12 @@ impl FieldSet {
     }
 }
 
-fn rd<'a>(b: &'a [u8], spec: &'a MsgSpec) -> Result<Parsed<'a>, Status> {
+pub(crate) fn rd<'a>(b: &'a [u8], spec: &'a MsgSpec) -> Result<Parsed<'a>, Status> {
     read(b, spec).map_err(Status::from)
 }
 
 /// `N` bytes of `b` from `off`.
-fn at<const N: usize>(b: &[u8], off: usize) -> Result<[u8; N], Status> {
+pub(crate) fn at<const N: usize>(b: &[u8], off: usize) -> Result<[u8; N], Status> {
     b.get(off..)
         .and_then(|x| x.get(..N))
         .and_then(|x| x.try_into().ok())
@@ -245,16 +250,19 @@ fn at<const N: usize>(b: &[u8], off: usize) -> Result<[u8; N], Status> {
 }
 
 /// A field's value as `N` bytes, when it was sent.
-fn val<const N: usize>(p: &Parsed<'_>, f: &FieldSpec) -> Result<Option<[u8; N]>, Status> {
+pub(crate) fn val<const N: usize>(
+    p: &Parsed<'_>,
+    f: &FieldSpec,
+) -> Result<Option<[u8; N]>, Status> {
     p.field(f).map(|v| at(v, 0)).transpose()
 }
 
 /// A field this reader does not work without.
-fn need<const N: usize>(p: &Parsed<'_>, f: &FieldSpec) -> Result<[u8; N], Status> {
+pub(crate) fn need<const N: usize>(p: &Parsed<'_>, f: &FieldSpec) -> Result<[u8; N], Status> {
     val(p, f)?.ok_or(Status::Arg)
 }
 
-fn byte(p: &Parsed<'_>, f: &FieldSpec, absent: u8) -> Result<u8, Status> {
+pub(crate) fn byte(p: &Parsed<'_>, f: &FieldSpec, absent: u8) -> Result<u8, Status> {
     Ok(val::<1>(p, f)?.map_or(absent, |[v]| v))
 }
 
@@ -396,6 +404,12 @@ impl HelloResp {
         }
         Ok(w.len())
     }
+}
+
+/// The key id a HELLO response body names: `None` when it names none,
+/// whatever else it leaves out.
+pub fn hello_key_id(b: &[u8]) -> Result<Option<[u8; 8]>, Status> {
+    val(&rd(b, &Cmd::Hello.spec().resp)?, &hello::KEY_ID)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
@@ -962,6 +976,9 @@ pub struct Relay<'a> {
     pub addr: u8,
     /// `None`: the relay's own wait for that link.
     pub timeout_ms: Option<u16>,
+    /// A timeout of this exchange is no sample of the relay's link
+    /// diagnostics (`table::relay::INHIBIT`).
+    pub inhibit: bool,
     pub inner: &'a [u8],
 }
 
@@ -1017,6 +1034,11 @@ impl<'a> Relay<'a> {
             link,
             addr: byte(p, &relay::ADDR, link::UART_ADDR)?,
             timeout_ms: val(p, &relay::TIMEOUT_MS)?.map(u16::from_le_bytes),
+            inhibit: match byte(p, &relay::INHIBIT, 0)? {
+                0 => false,
+                1 => true,
+                _ => return Err(Status::Arg),
+            },
             inner: p.bulk,
         })
     }
@@ -1027,7 +1049,8 @@ impl<'a> Relay<'a> {
         if let Some(ms) = self.timeout_ms {
             w.field(&relay::TIMEOUT_MS, &ms.to_le_bytes())?;
         }
-        w.bulk(self.inner)?;
+        w.field_unless(&relay::INHIBIT, &[u8::from(self.inhibit)], &[0])?
+            .bulk(self.inner)?;
         Ok(w.len())
     }
 }
@@ -1267,6 +1290,9 @@ requests! {
     Reboot(u8) reboot = reboot_of;
     Confirm(u8) confirm = confirm_of;
     EnterRom(EnterRom) enter_rom = EnterRom::of;
+    LinkDiag(LinkDiagReq) link_diag = LinkDiagReq::of;
+    LinkDiagClear(LinkDiagClear) link_diag_clear = LinkDiagClear::of;
+    DiagSeed(DiagSeedReq) diag_seed = DiagSeedReq::of;
     Show(Show<'a>) show = Show::of;
     Relay(Relay<'a>) relay = Relay::of;
     SubCtl(SubCtl) sub_ctl = SubCtl::of;
@@ -1294,6 +1320,11 @@ impl Req<'_> {
             Req::XferEnd(()) => DIGEST_LEN,
             Req::I2cRaw(raw) => BULK_RESP_AT + usize::from(raw.read_len),
             Req::ConfRun(_) => ConfRunResp::MAX_LEN,
+            // The node fills its answer up to what the request names, and
+            // that is one element at least; a requester that takes less is
+            // refused.
+            Req::LinkDiag(q) => q.report.min_resp() - 1,
+            Req::DiagSeed(_) => Seed::FIELD_LEN,
             Req::Relay(_) => return None,
             Req::Stay(())
             | Req::XferBegin(_)
@@ -1301,6 +1332,7 @@ impl Req<'_> {
             | Req::Reboot(_)
             | Req::Confirm(_)
             | Req::EnterRom(_)
+            | Req::LinkDiagClear(_)
             | Req::Show(_)
             | Req::SubCtl(_) => 0,
         })
@@ -1383,7 +1415,7 @@ mod tests {
             assert_eq!(CapsReq::parse(&b[..n]), Ok(req));
         }
         let c = CapsResp::of(Cmd::Relay);
-        assert_eq!(c.req_fields, FieldSet::EMPTY.with(1).with(2));
+        assert_eq!(c.req_fields, FieldSet::EMPTY.with(1).with(2).with(3));
         assert_eq!((c.resp_fields, c.tunnel_mtu), (FieldSet::EMPTY, None));
         let full = CapsResp {
             req_fields: FieldSet::from_bytes(&[0xFF; 8]).unwrap(),
@@ -1436,6 +1468,7 @@ mod tests {
             link: 0,
             addr: 0,
             timeout_ms: None,
+            inhibit: false,
             inner: &[],
         });
         assert_eq!(relay.response_max(), None);

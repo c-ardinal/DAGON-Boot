@@ -47,6 +47,7 @@ impl Pc {
                     link,
                     addr,
                     timeout_ms: Some(500),
+                    inhibit: false,
                     inner: &inner,
                 };
                 let n = r.encode(&mut rp).unwrap();

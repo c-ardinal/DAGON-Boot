@@ -481,6 +481,7 @@ fn outcome_js(r: &NodeOutcome<JsValue>) -> JsValue {
         Outcome::Done(v) => ("done", JsValue::from(v.raw()), JsValue::NULL),
         Outcome::Failed(e) => ("failed", JsValue::NULL, failure_js(e)),
         Outcome::NotStarted => ("notStarted", JsValue::NULL, JsValue::NULL),
+        Outcome::NeedsFirstWrite => ("needsFirstWrite", JsValue::NULL, JsValue::NULL),
     };
     set(&o, "outcome", kind.into());
     set(&o, "version", version);

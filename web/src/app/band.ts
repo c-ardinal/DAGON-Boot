@@ -116,6 +116,7 @@ function words(s: L, c: Ctx, n: Names): BandCopy {
 function done(f: Finish | null | undefined): BandCopy {
   if (f?.kind === 'rolledBack') return BAND_FOR.M66back(f.name, f.version);
   if (f?.kind === 'recovered') return BAND_FOR.M66fixed(f.name, f.version);
+  if (f?.kind === 'updated' && f.firstWrite) return BAND_FOR.M66first(f.firstWrite);
   if (f?.kind === 'updated' && f.left > 0) return BAND_FOR.M66some(f.left);
   if (f?.kind === 'updated' && f.same && !f.wrote) return BAND.M66none;
   if (f?.kind === 'updated' && f.same) return BAND_FOR.M66part(f.wrote ?? 0, f.same);

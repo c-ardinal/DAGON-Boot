@@ -129,7 +129,7 @@ export interface NodeFailure {
 export interface NodeResult {
   node: number;
   target: Target;
-  outcome: 'done' | 'failed' | 'notStarted';
+  outcome: 'done' | 'failed' | 'notStarted' | 'needsFirstWrite';
   version: number | null;
   failure: NodeFailure | null;
 }

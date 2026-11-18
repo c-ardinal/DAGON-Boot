@@ -376,6 +376,7 @@ mod tests {
                     Outcome::Done(v) => format!("done {v}"),
                     Outcome::Failed(e) => format!("failed {e:?}"),
                     Outcome::NotStarted => "not started".into(),
+                    Outcome::NeedsFirstWrite => "needs its first write".into(),
                 };
                 (o.node, what)
             })

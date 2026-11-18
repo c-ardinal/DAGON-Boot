@@ -113,7 +113,7 @@ export function waterOf(progress: Record<string, Progress>): Record<string, numb
  * node rolled back to its previous version, or a node recovered.
  */
 export type Finish =
-  | { kind: 'updated'; left: number; leftOut?: number; wrote?: number; same?: number }
+  | { kind: 'updated'; left: number; leftOut?: number; wrote?: number; same?: number; firstWrite?: number }
   | { kind: 'rolledBack'; name: string; version: string }
   | { kind: 'recovered'; name: string; version: string };
 
@@ -325,6 +325,8 @@ export class Operate {
   private updated = new Set<string>();
   /** Nodes this run really wrote an image to; the others among `updated` were already on it. */
   private wrote = new Set<string>();
+  /** Nodes of the last update that answered nothing and were sent nothing (dagon-host's needsFirstWrite). */
+  private firstWrite = 0;
   /** The run hubRestarting / reconnectNeeded belong to, so done says what it did. */
   private running: 'update' | 'recover' | 'rollback' = 'update';
 
@@ -743,6 +745,7 @@ export class Operate {
     this.sentVersion = {};
     this.coreSent = {};
     this.wrote = new Set();
+    this.firstWrite = 0;
     this.progress = Object.fromEntries(this.targets.map((id) => [id, { stage: 'waiting', percent: 0 }]));
     this.track = Object.fromEntries(this.targets.map((id) => [id, { ...NO_TRACK }]));
     // topology node index = position in reach (true for the sample, which follows its YAML).
@@ -862,12 +865,18 @@ export class Operate {
     for (const r of results) {
       const id = reach[r.node]?.id;
       if (id && r.outcome === 'notStarted') this.progress[id] = { stage: 'unwritten', percent: 0 };
+      // The hub said the node answered nothing and dagon-host sent it nothing: its card takes the first write.
+      if (id && r.outcome === 'needsFirstWrite') {
+        this.progress[id] = { stage: 'silent', percent: 0 };
+        this.live[id] = { ...(this.live[id] ?? UNKNOWN), responding: false };
+      }
       // A confirmed node runs the new version now, also when a later node stops the run.
       const hello = id ? this.live[id]?.hello : null;
       if (id && hello && r.outcome === 'done' && r.version !== null) {
         this.live[id] = { ...this.live[id]!, hello: { ...hello, activeVersion: r.version, trial: false } };
       }
     }
+    this.firstWrite = results.filter((r) => r.outcome === 'needsFirstWrite').length;
     const stop = results.find((r) => r.outcome === 'failed');
     if (!stop) return this.done();
     const n = reach[stop.node];
@@ -913,6 +922,7 @@ export class Operate {
       wrote: this.wrote.size,
       same: this.reach.filter((n) => this.updated.has(n.id) && !this.wrote.has(n.id)).length,
       ...(this.skip.size ? { leftOut: this.skip.size } : {}),
+      ...(this.firstWrite ? { firstWrite: this.firstWrite } : {}),
     };
     this.go(this.state === 'hubRestarting' ? 'confirmed' : this.state === 'reconnectNeeded' ? 'reconnected' : 'doneNoHub');
     this.startWatching();

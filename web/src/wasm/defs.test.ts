@@ -27,9 +27,9 @@ const served = JSON.stringify({
 
 describe('definitions from dagon serve', () => {
   test('the write panel says how to connect each MCU, as it always has', () => {
-    expect(mcuConnection('rp2040')).toEqual({ label: 'USB（BOOT を押しながら）', hint: 'BOOT を押しながら USB をつないでから、書き込んでください。' });
-    expect(mcuConnection('stm32f401re')).toEqual({ label: 'ST-LINK', hint: 'ST-LINK を USB でつないでから、書き込んでください。' });
-    expect(mcuConnection('esp32s3')).toEqual({ label: 'USB-C', hint: 'USB-C でつないでから、書き込んでください（つながらないときは BOOT を押しながら）。' });
+    expect(mcuConnection('rp2040')).toEqual({ label: 'USB（BOOT押下）', hint: 'BOOT押下の状態でUSBを接続後、書込してください。' });
+    expect(mcuConnection('stm32f401re')).toEqual({ label: 'ST-LINK', hint: 'ST-LINKをUSBで接続後、書込してください。' });
+    expect(mcuConnection('esp32s3')).toEqual({ label: 'USB-C', hint: 'USB-Cで接続後、書込してください（接続不可の場合はBOOT押下）。' });
     expect(mcuConnection('nope')).toBeNull();
   });
 

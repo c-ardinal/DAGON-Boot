@@ -770,6 +770,150 @@ fn answers_fit_what_the_requester_takes<W: Writer>() {
     assert_eq!(b.call(Cmd::Status, &[]), Status::Ok);
 }
 
+/// A node served over two links (a UART and a USB port, say), as its
+/// links are numbered.
+const UART: usize = 0;
+const USB: usize = 1;
+
+/// The session of a node with two links, and the request frames sent to
+/// it by seq, so that both requesters can use the same seq and command.
+struct TwoLinks {
+    mem: &'static RefCell<Mem>,
+    agent: Agent<&'static RefCell<Mem>, Chain, Ed25519Compact, writer::App, 2>,
+}
+
+impl TwoLinks {
+    fn new() -> Self {
+        let kp = keypair();
+        let mem: &'static RefCell<Mem> = Box::leak(Box::new(RefCell::new(Mem::new(2, 2))));
+        TwoLinks {
+            mem,
+            agent: Agent::for_writer(config(), ed25519(&kp), mem, chain()),
+        }
+    }
+
+    /// The reply's status and body to (`seq`, `cmd`, `payload`) over link
+    /// `on`.
+    fn ask(&mut self, on: usize, seq: u8, cmd: Cmd, payload: &[u8]) -> (Status, Vec<u8>) {
+        let mut buf = vec![0u8; 300];
+        let n = Frame {
+            flags: 0,
+            seq,
+            cmd: cmd as u8,
+            payload,
+        }
+        .encode(&mut buf)
+        .unwrap();
+        let reply = self.agent.handle_on(on, &buf[..n]).expect("reply");
+        let (f, _) = Frame::decode(reply.frame, 300).unwrap();
+        assert_eq!((f.seq, f.cmd), (seq, cmd as u8));
+        let (st, body) = split_status(f.payload).unwrap();
+        (st, body.to_vec())
+    }
+}
+
+/// Two requesters on two links of one node, using the same seq and
+/// command: each has the ceiling its own HELLO named and gets its own
+/// reply, also when the other one's request is a repeat for the session;
+/// a link going down drops what was kept of its requester and leaves the
+/// other's.
+#[test]
+fn each_link_has_its_own_requester() {
+    let mut n = TwoLinks::new();
+    let floor = max_payload::SMALLEST as u16;
+    let link = max_payload::I2C;
+
+    // Same seq, same command, different payloads named.
+    assert_eq!(n.ask(UART, 1, Cmd::Hello, &hello_of(1024)).0, Status::Ok);
+    assert_eq!(n.ask(USB, 1, Cmd::Hello, &hello_of(floor)).0, Status::Ok);
+    assert_eq!(n.agent.ceiling_on(UART).bytes(), link, "the link's");
+    assert_eq!(n.agent.ceiling_on(USB).bytes(), usize::from(floor));
+
+    // STATUS, same seq on both: served to the one that takes it, refused
+    // to the one that does not, whichever asked first.
+    assert_eq!(n.ask(USB, 2, Cmd::Status, &[]).0, Status::Arg);
+    assert_eq!(n.ask(UART, 2, Cmd::Status, &[]).0, Status::Ok);
+    assert_eq!(
+        n.ask(USB, 2, Cmd::Status, &[]).0,
+        Status::Arg,
+        "its own repeat"
+    );
+    assert_eq!(n.ask(UART, 3, Cmd::Status, &[]).0, Status::Ok);
+    assert_eq!(n.ask(USB, 3, Cmd::Status, &[]).0, Status::Arg);
+
+    // A repeat is answered from the same link's reply: the store is not
+    // called again for it, and is for the other link's request.
+    let calls = n.mem.borrow().calls.get();
+    assert_eq!(n.ask(UART, 3, Cmd::Status, &[]).0, Status::Ok);
+    assert_eq!(n.mem.borrow().calls.get(), calls, "a repeat on its link");
+    assert_eq!(n.ask(USB, 3, Cmd::Version, &[]).0, Status::Ok);
+    assert!(
+        n.mem.borrow().calls.get() > calls,
+        "another requester's request"
+    );
+
+    // A HELLO over one link with the seq of the other's last HELLO is
+    // handled, not replayed: it sets its own ceiling.
+    assert_eq!(n.ask(UART, 9, Cmd::Hello, &hello_of(1024)).0, Status::Ok);
+    assert_eq!(n.ask(USB, 9, Cmd::Hello, &hello_of(200)).0, Status::Ok);
+    assert_eq!(n.agent.ceiling_on(USB).bytes(), 200);
+    assert_eq!(n.agent.ceiling_on(UART).bytes(), link);
+    assert_eq!(
+        n.ask(USB, 10, Cmd::Status, &[]).0,
+        Status::Ok,
+        "200 take it"
+    );
+
+    // A transfer belongs to the link it was begun over.
+    let begin = begin(target::APP, 1, HEADER_SIZE as u16);
+    assert_eq!(n.ask(UART, 20, Cmd::XferBegin, &begin).0, Status::Ok);
+    let chunk = |offset: u32| {
+        wire(|p| {
+            XferChunk {
+                offset,
+                data: &[0; 100],
+            }
+            .encode(p)
+        })
+    };
+    assert_eq!(n.ask(UART, 21, Cmd::XferHdr, &chunk(0)).0, Status::Ok);
+    let before = n.mem.borrow().clone();
+    assert_eq!(n.ask(USB, 21, Cmd::XferHdr, &chunk(100)).0, Status::State);
+    assert_eq!(n.ask(USB, 22, Cmd::XferEnd, &[]).0, Status::State);
+    assert_eq!(
+        *n.mem.borrow(),
+        before,
+        "the other requester changed nothing"
+    );
+    assert_eq!(
+        n.ask(UART, 22, Cmd::XferHdr, &chunk(100)).1,
+        wire(|p| encode_next_offset(200, p)),
+        "the transfer goes on for its requester"
+    );
+
+    // USB goes down: its requester is forgotten, UART's is not.
+    n.agent.link_down_on(USB, 0, 0);
+    assert_eq!(n.agent.ceiling_on(USB).peer, None);
+    assert_eq!(n.agent.ceiling_on(UART).peer, Some(1024));
+    // The next requester on USB may use a seq and command seen before.
+    assert_eq!(n.ask(USB, 10, Cmd::Status, &[]).0, Status::Ok);
+    n.agent.link_down_on(UART, 0, 0);
+    assert_eq!(n.agent.ceiling_on(UART).peer, None);
+    assert_eq!(n.agent.ceiling_on(USB).peer, None);
+
+    // A link the node does not have is answered nothing.
+    let mut buf = [0u8; 32];
+    let len = Frame {
+        flags: 0,
+        seq: 1,
+        cmd: Cmd::Status as u8,
+        payload: &[],
+    }
+    .encode(&mut buf)
+    .unwrap();
+    assert!(n.agent.handle_on(2, &buf[..len]).is_none());
+}
+
 #[test]
 fn the_app_answers_within_what_the_requester_takes() {
     answers_fit_what_the_requester_takes::<writer::App>();

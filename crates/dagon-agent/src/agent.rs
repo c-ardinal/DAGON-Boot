@@ -78,8 +78,33 @@ pub struct Reply<'a> {
     pub reboot_delay_ms: u32,
 }
 
-/// The update session of writer `W` (the app's by default).
-pub struct Agent<S, X, V, W = writer::App> {
+/// What the session keeps of one of the links its requests come over: a
+/// requester on one link shares none of it with a requester on another.
+struct Requester {
+    /// Seq and command of the last request answered, for a repeat.
+    last: Option<(u8, u8)>,
+    /// The reply to it.
+    resp: [u8; RESP_BUF],
+    resp_len: usize,
+    resp_reboot: Option<u32>,
+    /// HELLO `max_payload` of the requester; none before its HELLO.
+    peer_max: Option<u16>,
+}
+
+impl Requester {
+    const NEW: Self = Requester {
+        last: None,
+        resp: [0; RESP_BUF],
+        resp_len: 0,
+        resp_reboot: None,
+        peer_max: None,
+    };
+}
+
+/// The update session of writer `W` (the app's by default), for a node
+/// whose requests come over `L` links (one by default). The links are
+/// numbered from 0 by the node that serves them ([`Agent::handle_on`]).
+pub struct Agent<S, X, V, W = writer::App, const L: usize = 1> {
     cfg: Config,
     writer: PhantomData<W>,
     verifier: V,
@@ -89,16 +114,18 @@ pub struct Agent<S, X, V, W = writer::App> {
     requests: requests::Machine,
     node: node::Machine,
     hdr: [u8; HEADER_SIZE],
-    last: Option<(u8, u8)>,
-    resp: [u8; RESP_BUF],
-    resp_len: usize,
-    resp_reboot: Option<u32>,
-    /// Kept apart from `resp`, which a repeated request is answered from.
+    /// One per link.
+    links: [Requester; L],
+    /// The link of the request being handled.
+    on: usize,
+    /// The link the transfer in progress was begun over: its chunks and
+    /// its end are taken from that link only.
+    xfer_link: usize,
+    /// Kept apart from a link's reply, which a repeated request is
+    /// answered from.
     refusal: [u8; REFUSAL_BUF],
     /// The commands the node serves in front of this session.
     front: CmdSet,
-    /// HELLO `max_payload` of the requester; none before its HELLO.
-    peer_max: Option<u16>,
 }
 
 /// A handled request: the length of the reply's body, and the delay of
@@ -111,14 +138,14 @@ fn noted(r: Result<(), Refused>) {
     debug_assert!(r.is_ok(), "{r:?}");
 }
 
-impl<S: SlotStore, X: AppChain, V: SigVerifier> Agent<S, X, V, writer::App> {
+impl<S: SlotStore, X: AppChain, V: SigVerifier, const L: usize> Agent<S, X, V, writer::App, L> {
     /// The app's session ([`Agent::for_writer`] with the app's writer).
     pub fn new(cfg: Config, verifier: V, store: S, chain: X) -> Self {
         Self::for_writer(cfg, verifier, store, chain)
     }
 }
 
-impl<S: SlotStore, X: AppChain, V: SigVerifier, W: Writer> Agent<S, X, V, W> {
+impl<S: SlotStore, X: AppChain, V: SigVerifier, W: Writer, const L: usize> Agent<S, X, V, W, L> {
     /// DAGON's start: `app.starting`, then the slot store is opened
     /// (`app.store_opened`), and in the app's session the store makes its
     /// log room and the boot core's changes it shows are replayed
@@ -138,13 +165,11 @@ impl<S: SlotStore, X: AppChain, V: SigVerifier, W: Writer> Agent<S, X, V, W> {
             requests: requests::Machine::new(),
             node,
             hdr: [0; HEADER_SIZE],
-            last: None,
-            resp: [0; RESP_BUF],
-            resp_len: 0,
-            resp_reboot: None,
+            links: [Requester::NEW; L],
+            on: 0,
+            xfer_link: 0,
             refusal: [0; REFUSAL_BUF],
             front: CmdSet::EMPTY,
-            peer_max: None,
         };
         agent.opened();
         agent
@@ -162,9 +187,7 @@ impl<S: SlotStore, X: AppChain, V: SigVerifier, W: Writer> Agent<S, X, V, W> {
         self.images.reopen();
         self.session = session::Machine::new();
         self.requests = requests::Machine::new();
-        self.last = None;
-        self.resp_reboot = None;
-        self.peer_max = None;
+        self.links = [Requester::NEW; L];
         self.opened();
     }
 
@@ -219,10 +242,20 @@ impl<S: SlotStore, X: AppChain, V: SigVerifier, W: Writer> Agent<S, X, V, W> {
         noted(self.node.link_up(&mut self.chain, link, addr));
     }
 
-    /// A DAGON link stopped carrying frames (`app.link_down`).
+    /// The node's link 0, of kind `link`, stopped carrying frames
+    /// ([`Agent::link_down_on`]).
     pub fn link_down(&mut self, link: u8, addr: u8) {
-        // Whoever asks next says what it takes in its own HELLO.
-        self.peer_max = None;
+        self.link_down_on(0, link, addr);
+    }
+
+    /// The node's link `on`, of kind `link`, stopped carrying frames
+    /// (`app.link_down`). Whoever asks over it next is another requester:
+    /// what the session kept of this one (the payload its HELLO named, its
+    /// last reply) is dropped. The other links keep theirs.
+    pub fn link_down_on(&mut self, on: usize, link: u8, addr: u8) {
+        if let Some(requester) = self.links.get_mut(on) {
+            *requester = Requester::NEW;
+        }
         noted(self.node.link_down(&mut self.chain, link, addr));
     }
 
@@ -271,11 +304,25 @@ impl<S: SlotStore, X: AppChain, V: SigVerifier, W: Writer> Agent<S, X, V, W> {
         noted(self.requests.before_reboot(&mut self.chain));
     }
 
-    /// Handles one request frame. `None`: not a valid request (dropped
-    /// silently). A request frame of another wire version is refused with
-    /// an answer (`dagon_proto::version_refusal`). A repeat of the previous
-    /// seq and cmd returns the previous reply without executing again.
+    /// Handles one request frame that came over the node's link 0
+    /// ([`Agent::handle_on`]).
     pub fn handle(&mut self, request: &[u8]) -> Option<Reply<'_>> {
+        self.handle_on(0, request)
+    }
+
+    /// Handles one request frame that came over the node's link `on` (0
+    /// to `L - 1`, as the node numbers the links it serves). `None`: not a
+    /// valid request (dropped silently), or not one of the links. A
+    /// request frame of another wire version is refused with an answer
+    /// (`dagon_proto::version_refusal`). A repeat of the previous seq and
+    /// cmd over the same link returns that link's previous reply without
+    /// executing again; the same seq and cmd over another link is another
+    /// requester's request.
+    pub fn handle_on(&mut self, on: usize, request: &[u8]) -> Option<Reply<'_>> {
+        if on >= L {
+            return None;
+        }
+        self.on = on;
         let frame = match Frame::decode(request, self.cfg.max_payload as usize) {
             Ok((frame, _)) => frame,
             Err(FrameError::BadVersion) => {
@@ -291,27 +338,30 @@ impl<S: SlotStore, X: AppChain, V: SigVerifier, W: Writer> Agent<S, X, V, W> {
         if frame.flags & (flags::RESP | flags::EVENT) != 0 {
             return None;
         }
-        if self.last != Some((frame.seq, frame.cmd)) {
-            let (len, reboot) = match self.dispatch(frame.cmd, frame.payload) {
+        if self.links[on].last != Some((frame.seq, frame.cmd)) {
+            let handled = self.dispatch(frame.cmd, frame.payload);
+            let link = &mut self.links[on];
+            let (len, reboot) = match handled {
                 Ok((body, reboot)) => {
-                    self.resp[HEADER_LEN] = Status::Ok as u8;
+                    link.resp[HEADER_LEN] = Status::Ok as u8;
                     (1 + body, reboot)
                 }
                 Err(s) => {
-                    let out = &mut self.resp[HEADER_LEN..];
+                    let out = &mut link.resp[HEADER_LEN..];
                     (payload::put_refusal(out, s, frame.cmd, frame.payload), None)
                 }
             };
-            self.resp_len =
-                dagon_proto::finish(&mut self.resp, flags::RESP, frame.seq, frame.cmd, len)
+            link.resp_len =
+                dagon_proto::finish(&mut link.resp, flags::RESP, frame.seq, frame.cmd, len)
                     .expect("response fits RESP_BUF");
-            self.resp_reboot = reboot;
-            self.last = Some((frame.seq, frame.cmd));
+            link.resp_reboot = reboot;
+            link.last = Some((frame.seq, frame.cmd));
         }
+        let link = &self.links[on];
         Some(Reply {
-            frame: &self.resp[..self.resp_len],
-            reboot: self.resp_reboot.is_some(),
-            reboot_delay_ms: self.resp_reboot.unwrap_or(0),
+            frame: &link.resp[..link.resp_len],
+            reboot: link.resp_reboot.is_some(),
+            reboot_delay_ms: link.resp_reboot.unwrap_or(0),
         })
     }
 
@@ -345,12 +395,19 @@ impl<S: SlotStore, X: AppChain, V: SigVerifier, W: Writer> Agent<S, X, V, W> {
         }
     };
 
-    /// What an answer of this session may be at most: the payload its
-    /// link carries, and the one the requester said it takes in its HELLO.
+    /// What an answer to the requester on the node's link 0 may be at
+    /// most ([`Agent::ceiling_on`]).
     pub fn ceiling(&self) -> Ceiling {
+        self.ceiling_on(0)
+    }
+
+    /// What an answer to the requester on the node's link `on` may be at
+    /// most: the payload the session's links carry, and the one that
+    /// requester said it takes in its HELLO.
+    pub fn ceiling_on(&self, on: usize) -> Ceiling {
         Ceiling {
             link: self.cfg.max_payload,
-            peer: self.peer_max,
+            peer: self.links.get(on).and_then(|l| l.peer_max),
         }
     }
 
@@ -359,7 +416,7 @@ impl<S: SlotStore, X: AppChain, V: SigVerifier, W: Writer> Agent<S, X, V, W> {
     fn dispatch(&mut self, cmd: u8, p: &[u8]) -> Handled {
         let app_only: &[Handler<Self, Done>] = if W::APP { &Self::APP_ONLY } else { &[] };
         let row = handler::find(&Self::COMMON, cmd).or_else(|| handler::find(app_only, cmd));
-        let ceiling = self.ceiling();
+        let ceiling = self.ceiling_on(self.on);
         row.ok_or(Status::Unsupported)?.call(self, p, ceiling)
     }
 
@@ -388,8 +445,20 @@ impl<S: SlotStore, X: AppChain, V: SigVerifier, W: Writer> Agent<S, X, V, W> {
         Ok((0, None))
     }
 
+    /// Where the body of the reply to the request being handled goes.
     fn body(&mut self) -> &mut [u8] {
-        &mut self.resp[BODY_AT..]
+        &mut self.links[self.on].resp[BODY_AT..]
+    }
+
+    /// Whether the request being handled came over the link the transfer
+    /// in progress was begun over. Another link's requester has no part
+    /// in it: its chunks and its end are E_STATE.
+    fn owns_transfer(&self) -> Result<(), Status> {
+        if self.on == self.xfer_link {
+            Ok(())
+        } else {
+            Err(Status::State)
+        }
     }
 
     /// Ends a transfer in progress, if any.
@@ -401,7 +470,7 @@ impl<S: SlotStore, X: AppChain, V: SigVerifier, W: Writer> Agent<S, X, V, W> {
     }
 
     fn hello(&mut self, req: HelloReq) -> Handled {
-        self.peer_max = Some(req.max_payload);
+        self.links[self.on].peer_max = Some(req.max_payload);
         noted(self.requests.hello(&mut self.chain));
         let st = self.images.status();
         let active = st
@@ -469,6 +538,7 @@ impl<S: SlotStore, X: AppChain, V: SigVerifier, W: Writer> Agent<S, X, V, W> {
                 return Err(s);
             }
         };
+        self.xfer_link = self.on;
         let offered = self
             .session
             .update_offered(&mut self.chain, req.target, req.slot, body_len);
@@ -604,6 +674,7 @@ impl<S: SlotStore, X: AppChain, V: SigVerifier, W: Writer> Agent<S, X, V, W> {
     }
 
     fn xfer_hdr(&mut self, chunk: XferChunk<'_>) -> Handled {
+        self.owns_transfer()?;
         let session::State::Header {
             target,
             slot,
@@ -648,6 +719,7 @@ impl<S: SlotStore, X: AppChain, V: SigVerifier, W: Writer> Agent<S, X, V, W> {
     }
 
     fn xfer_data(&mut self, chunk: XferChunk<'_>) -> Handled {
+        self.owns_transfer()?;
         let session::State::Body {
             target,
             slot,
@@ -672,6 +744,7 @@ impl<S: SlotStore, X: AppChain, V: SigVerifier, W: Writer> Agent<S, X, V, W> {
     }
 
     fn xfer_end(&mut self) -> Handled {
+        self.owns_transfer()?;
         let session::State::Body {
             target,
             slot,

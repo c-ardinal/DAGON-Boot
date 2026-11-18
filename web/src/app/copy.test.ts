@@ -44,13 +44,52 @@ const filled = [
   ...Object.values(copy.RULE_FIX).map((f) => f({ to: '7セグ', board: 'NUCLEO-F401RE', id: 'seg', many: false, max: 32 })),
 ];
 
+/**
+ * Any argument a template reads: text, a number, a field of an object, a call. With the falsy
+ * values beside it, every branch of a template's ternaries shows its fixed words.
+ */
+const ANY: unknown = new Proxy(function any() {}, {
+  get: (_, k) => (k === Symbol.toPrimitive ? (hint: string) => (hint === 'number' ? 2 : 'x') : typeof k === 'symbol' ? undefined : ANY),
+  apply: () => ANY,
+});
+const SAMPLES: unknown[] = [ANY, 0, '', false, true, 1, 'x'];
+const ARGS = 4;
+
+/** Every template under `v` (by path), called with each sample value in every argument. */
+const templates = (v: unknown, path: string): { path: string; out: string[] }[] => {
+  if (typeof v === 'function') {
+    const out: string[] = [];
+    let called = false;
+    for (const s of SAMPLES) {
+      try {
+        out.push(...strings((v as (...a: unknown[]) => unknown)(...Array<unknown>(ARGS).fill(s))));
+        called = true;
+      } catch {
+        // A sample this template cannot take; another one fills it.
+      }
+    }
+    return called ? [{ path, out }] : [{ path, out: [] }, { path: `${path} (never called)`, out: [] }];
+  }
+  return v && typeof v === 'object' ? Object.entries(v).flatMap(([k, x]) => templates(x, `${path}.${k}`)) : [];
+};
+
 const shownExcept = (...skip: string[]) =>
   Object.entries(copy)
     .filter(([k]) => !['FORBIDDEN_WORDS', ...skip].includes(k))
-    .flatMap(([, v]) => strings(v))
+    .flatMap(([k, v]) => [...strings(v), ...templates(v, k).flatMap((t) => t.out)])
     .concat(filled);
 
 const shown = shownExcept();
+
+describe('the shown strings', () => {
+  // Every guard below reads `shown`: a template it never calls would hide its fixed words from all of them.
+  test('include every exported template, called', () => {
+    const all = templates(copy, 'copy');
+    expect(all.filter((t) => t.path.endsWith('(never called)')).map((t) => t.path)).toEqual([]);
+    expect(all.length).toBeGreaterThan(60);
+    expect(shown).toContain(copy.BAND_FOR.doneSome(1).sentence);
+  });
+});
 
 describe('copy', () => {
   // The list is for the operate mode's guidance and results; the define mode's CLI screens
@@ -60,13 +99,15 @@ describe('copy', () => {
     // 確定 is allowed only as a slot value in the slot section.
     // 確定 only as a slot value and in the trial choice; フラッシュ only in V-16's name.
     const operate = shownExcept(...DEFINE_CLI);
-    const texts = word === '確定' ? shownExcept('SLOT', 'TRIAL_CHOICE', ...DEFINE_CLI) : word === 'フラッシュ' ? operate.filter((s) => s !== copy.RULE_SHORT['V-16'] && s !== copy.INSPECT.flashSize) : operate;
+    // ポート only in the define-mode canvas port's hover tip (LINK.portOut), which names the drag handle.
+    const portTips = new Set(SAMPLES.map((s) => copy.LINK.portOut(s as string)));
+    const texts = word === '確定' ? shownExcept('SLOT', 'TRIAL_CHOICE', ...DEFINE_CLI) : word === 'フラッシュ' ? operate.filter((s) => s !== copy.RULE_SHORT['V-16'] && s !== copy.INSPECT.flashSize) : word === 'ポート' ? operate.filter((s) => !portTips.has(s)) : operate;
     expect(texts.filter((s) => s.includes(word))).toEqual([]);
   });
 
   test('no ASCII ellipsis, no colon in label-value pairs', () => {
     // The pin choice writes the in-use note of a pin choice as 「（使用中: …）」 itself.
-    const notes = new Set([copy.INSPECT.inUse('7セグのリセット')]);
+    const notes = new Set([copy.INSPECT.inUse('7セグのリセット'), ...SAMPLES.map((s) => copy.INSPECT.inUse(s as string))]);
     expect(shown.filter((s) => !notes.has(s) && (s.includes('...') || s.includes('：') || /\S:\s/.test(s)))).toEqual([]);
   });
 
@@ -171,7 +212,7 @@ describe('copy keys, screen words and source say what things are', () => {
     copy.HELP.rows[4][1],
   ]);
   test('no shown string states a pending status of DAGON', () => {
-    const texts = [...shown, copy.DEFINE.unsupported(2), copy.INSPECT.unavailableOption('BLE'), ...MOCK_TEXTS()];
+    const texts = [...shown, ...MOCK_TEXTS()];
     expect(texts.filter((s) => s.includes('未対応') || (s.includes('まだ') && !USER_STATE.has(s)))).toEqual([]);
   });
 

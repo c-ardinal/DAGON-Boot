@@ -1,40 +1,40 @@
 ---
 title: イベント
-description: DAGONが出すすべてのイベントです。
+description: DAGONが発行する全イベントです。
 editUrl: false
 ---
 
 :::note
 状態機械のカタログから生成しています。直接編集せず、
-`DAGON_BLESS=1 cargo test -p dagon-catalog --test docs`でもう一度生成してください。
+`DAGON_BLESS=1 cargo test -p dagon-catalog --test docs`で再生成してください。
 :::
 
-DAGONの状態の変化は、どれも状態機械の遷移で、遷移はどれもイベントを1つ出します。
-このページは状態機械の宣言から作っているので、すべてのイベントが載っています。
+DAGONの状態変化は全件が状態機械の遷移で、各遷移はイベントを1件発行します。
+このページは状態機械の宣言から生成しているため、全イベントを掲載しています。
 
-イベントの形式: 1（`dagon_events::EVENT_FORMAT`）。種類やペイロードのフィールドを足しても
-番号は変わりません。名前を変える、消す、意味を変えるときは番号が変わります。読む側は、
-知らない種類とフィールドを読み飛ばし、読めない形式の番号は受け付けません。
+イベントの形式: 1（`dagon_events::EVENT_FORMAT`）。種類やペイロードのフィールドを追加しても
+番号は不変です。名称の変更、削除、意味の変更の際は番号が変化します。読込側は、
+未知の種類とフィールドをスキップし、読込不可の形式番号は受理しません。
 
-## 表の見方
+## 凡例
 
-- **種類**: `layer.kind`。ペイロードの型名をsnake caseにしたものです。
-- **コード**: そのレイヤーの中での種類の番号です（`EventRecord.kind`）。
-- **遷移**: イベントを出すメソッドと、移る前後の状態です（`*`はどの状態でも）。
-- **ペイロード**: フィールドと、記録の中でのバイト数です（`EventRecord.payload`、順に並び、
-  合わせて16バイトまで）。
-- **受け取り**: *live*は同じイメージの拡張が起きたときに、*replay*は起動時にアプリのエージェントが
-  `replayed: true`を付けて出し直したものを、*host*はCLI、serveのイベント、`--events`、
-  アクションが受け取ります。
-- **備考**: *action*はブートのアクションプログラムを動かせます。*retired*はもう出さず、
-  次のイベントの形式まで残しています。
+- **種類**: `layer.kind`。ペイロードの型名をsnake caseに変換した名称です。
+- **コード**: そのレイヤー内での種類の番号です（`EventRecord.kind`）。
+- **遷移**: イベントを発行するメソッドと、遷移前後の状態です（`*`は任意の状態）。
+- **ペイロード**: フィールドと、記録内でのバイト数です（`EventRecord.payload`、順序どおりに配列し、
+  合計16バイト以内）。
+- **受信**: *live*は発生時に同一イメージの拡張が、*replay*はアプリのエージェントが起動時に
+  `replayed: true`を付与して再発行したイベントを、*host*はCLI、serveのイベント、`--events`、
+  アクションが受信します。
+- **備考**: *action*はブートのアクションプログラムを実行可能です。*retired*は現在は発行せず、
+  次回のイベント形式まで保持しています。
 
 ## 判断点
 
-ここに無いものは通知です。答えは、チェーンの順（公開元、ボードの定義、ライブラリ、利用者）で
-最初のものが使われます。どの拡張も答えなければ、既定の値を使います。
+ここに未記載のイベントは通知です。応答は、チェーンの順序（公開元、ボードの定義、ライブラリ、利用者）で
+最初の応答を採用します。応答する拡張がない場合、既定値を使用します。
 
-| 判断 | レイヤー | 問い | 答える側 | 時間の上限 | 既定 | してはいけないこと |
+| 判断 | レイヤー | 質問 | 応答側 | 時間の上限 | 既定 | 禁止事項 |
 |---|---|---|---|---|---|---|
 | `accept_update` | app | `UpdateOffer` -> `Accept` | ボードの定義、ライブラリ、利用者（最初の答えが勝つ） | 呼び出しごとに`DECISION_BOUND_MS`以内（遅れた答えは無視します）。DAGONのすべてのガードを通った後、消去の前に尋ねます | 受け入れる | DAGONが拒んだものを受け入れること（そのときは尋ねません） |
 | `allow_reboot_now` | app | `RebootRequest` -> `Delay` | ボードの定義、ライブラリ、利用者（最初の答えが勝つ） | 呼び出しごとに`DECISION_BOUND_MS`以内。`Now`か`After(ms)`、msの上限はマイコンの定義の短いほうのウォッチドッグの周期の半分。DAGONはまず返答し、待つあいだキックを続けます | すぐ | 再起動を拒むこと。上限を超える遅れ |
@@ -47,9 +47,9 @@ DAGONの状態の変化は、どれも状態機械の遷移で、遷移はどれ
 
 ブート段階の拡張の呼び出しとその時間の上限。
 
-状態: `Ready` (最初の状態)。
+状態: `Ready` (初期状態)。
 
-| 種類 | コード | 遷移 | ペイロード | 受け取り | 備考 | 説明 |
+| 種類 | コード | 遷移 | ペイロード | 受信 | 備考 | 説明 |
 |---|---|---|---|---|---|---|
 | `boot.extension_overran` | 0xf0 | `overran`: Ready → Ready | `id: ExtId` (8 B), `budget_us: u32` (4 B), `us: u32` (4 B) | live |  | 拡張のハンドラが`budget_us`（マニフェストの`max_run_us`）より長く動いた。ブートは同じ判断で進んだ。 |
 
@@ -57,9 +57,9 @@ DAGONの状態の変化は、どれも状態機械の遷移で、遷移はどれ
 
 有効にしたウォッチドッグからジャンプか停止までのブートローダの手順。そのイベントは起きたときにブートローダの拡張に届く。拡張が何をしても判断は変わらない。
 
-状態: `Started` (最初の状態), `WatchdogArmed`, `LogRead`, `BeforeDecision`, `Chosen`, `NoImage`, `Jumping`, `Halted`。
+状態: `Started` (初期状態), `WatchdogArmed`, `LogRead`, `BeforeDecision`, `Chosen`, `NoImage`, `Jumping`, `Halted`。
 
-| 種類 | コード | 遷移 | ペイロード | 受け取り | 備考 | 説明 |
+| 種類 | コード | 遷移 | ペイロード | 受信 | 備考 | 説明 |
 |---|---|---|---|---|---|---|
 | `boot.watchdog_armed` | 0x01 | `watchdog_armed`: Started → WatchdogArmed | `period_ms: u32` (4 B) | live |  | ウォッチドッグが試行の周期で動く。ここから拡張が動く。 |
 | `boot.log_read` | 0x02 | `log_read`: WatchdogArmed → LogRead | `ok: bool` (1 B), `pending: bool` (1 B), `confirmed: bool` (1 B), `attempts: u8` (1 B) | live |  | 状態ログを読んだ（`ok: false`: 有効な面が無い）。 |
@@ -75,9 +75,9 @@ DAGONの状態の変化は、どれも状態機械の遷移で、遷移はどれ
 
 拡張への判断の呼び出しとその上限。
 
-状態: `Ready` (最初の状態)。
+状態: `Ready` (初期状態)。
 
-| 種類 | コード | 遷移 | ペイロード | 受け取り | 備考 | 説明 |
+| 種類 | コード | 遷移 | ペイロード | 受信 | 備考 | 説明 |
 |---|---|---|---|---|---|---|
 | `app.extension_overran` | 0xf0 | `overran`: Ready → Ready | `id: ExtId` (8 B), `point: DecisionId` (1 B), `us: u32` (4 B) | live |  | 拡張が`DECISION_BOUND_MS`の後で判断点に答えた。その答えは無視した。 |
 
@@ -85,9 +85,9 @@ DAGONの状態の変化は、どれも状態機械の遷移で、遷移はどれ
 
 イメージのスロット1つのライフサイクル（マイコンの定義が与えるAPPのスロットそれぞれ）。スロットのストアの変更メソッドは、これらの遷移の中でだけ動く。`trial_started`と`rolled_back`はブートローダの変更で、起動時にスロットのストアからリプレイする。
 
-状態: `Empty` (最初の状態), `Written`, `Pending`, `Trial`, `Confirmed`, `Reverted`。
+状態: `Empty` (初期状態), `Written`, `Pending`, `Trial`, `Confirmed`, `Reverted`。
 
-| 種類 | コード | 遷移 | ペイロード | 受け取り | 備考 | 説明 |
+| 種類 | コード | 遷移 | ペイロード | 受信 | 備考 | 説明 |
 |---|---|---|---|---|---|---|
 | `app.transfer_started` | 0x20 | `erase`: Empty \| Written \| Pending \| Trial \| Confirmed \| Reverted → Empty | `target: u8` (1 B), `slot: u8` (1 B), `len: u32` (4 B) | live, host |  | 新しいイメージのためにスロットを消去した（書き込む側が動いているスロットは消さない。アプリは確定したスロットも消さない）。 |
 | `app.written` | 0x21 | `written`: Empty → Written | `target: u8` (1 B), `slot: u8` (1 B), `version: Version` (4 B) | live, host |  | 本体を検証し、ヘッダを書いて読み返した。スロットにイメージがある。 |
@@ -103,9 +103,9 @@ DAGONの状態の変化は、どれも状態機械の遷移で、遷移はどれ
 
 stage0のあるself-bootのマイコンの、ブートローダのスロット1つのライフサイクル（定義の`bootcore`のスロット）。状態ログのブートローダの記録に持つ。エージェントが新しいコアを空いているスロット（マイコンにスロットが1つだけのときはそのスロット）に書いて待機にし、stage0がそれを試し、コアが自分で試行を決着させる。新しいコアが自分の検査の後で`confirmed`、stage0が新しいコアをあきらめたときは古いコアが`rolled_back`。アプリは次の起動でそれらを見る。
 
-状態: `Empty` (最初の状態), `Written`, `Pending`, `Confirmed`, `Reverted`。
+状態: `Empty` (初期状態), `Written`, `Pending`, `Confirmed`, `Reverted`。
 
-| 種類 | コード | 遷移 | ペイロード | 受け取り | 備考 | 説明 |
+| 種類 | コード | 遷移 | ペイロード | 受信 | 備考 | 説明 |
 |---|---|---|---|---|---|---|
 | `app.core_transfer_started` | 0x40 | `erase`: Empty \| Written \| Pending \| Confirmed \| Reverted → Empty | `slot: u8` (1 B), `len: u32` (4 B) | live, host |  | 新しいコアのために空いているブートローダのスロットを消去した。動いているコアや確定したコアのスロットは、それがマイコンのただ1つのブートローダのスロットのときだけ消す。 |
 | `app.core_written` | 0x41 | `written`: Empty → Written | `slot: u8` (1 B), `version: Version` (4 B) | live, host |  | コアの本体を検証し、そのヘッダを書いて読み返した。 |
@@ -118,9 +118,9 @@ stage0のあるself-bootのマイコンの、ブートローダのスロット1�
 
 書き込みのセッション: 申し出、ヘッダ、本体、終わり。
 
-状態: `Idle` (最初の状態), `Header`, `Body`。
+状態: `Idle` (初期状態), `Header`, `Body`。
 
-| 種類 | コード | 遷移 | ペイロード | 受け取り | 備考 | 説明 |
+| 種類 | コード | 遷移 | ペイロード | 受信 | 備考 | 説明 |
 |---|---|---|---|---|---|---|
 | `app.update_offered` | 0x10 | `update_offered`: Idle → Header | `target: u8` (1 B), `slot: u8` (1 B), `body_len: u32` (4 B) | live, host |  | 書き込みの申し出がDAGONのすべてのガードを通った。次に`accept_update`に尋ねる。 |
 | `app.header_received` | 0x11 | `header_received`: Header → Header | `got: u16` (2 B) | live |  | これまでに受け取ったヘッダのバイト。 |
@@ -133,9 +133,9 @@ stage0のあるself-bootのマイコンの、ブートローダのスロット1�
 
 ノードの起動とそのDAGONのリンク: マイコンの定義のコードの起動と応答のループがエージェントを通して報告するもの。
 
-状態: `Off` (最初の状態), `Up`。
+状態: `Off` (初期状態), `Up`。
 
-| 種類 | コード | 遷移 | ペイロード | 受け取り | 備考 | 説明 |
+| 種類 | コード | 遷移 | ペイロード | 受信 | 備考 | 説明 |
 |---|---|---|---|---|---|---|
 | `app.starting` | 0x01 | `starting`: * → Up | `tag: NameDigest` (8 B), `role: u8` (1 B), `mode: u8` (1 B) | live |  | DAGONの起動が始まった（エージェントを作った、または再開した）。次にスロットのストアを読む。`tag`: ノードのイメージのターゲットのタグの名前のダイジェスト（`NameDigest`: 短い形の「ダイジェストの先頭」で、マイコンの識別と同じように作る）。ホストは構成のノードのタグから解決する。 |
 | `app.watchdog_taken` | 0x02 | `watchdog_taken`: Up → Up | `period_ms: u32` (4 B), `trial_policy: TrialPolicy` (5 B) | live |  | 起動がブートローダのウォッチドッグを引き継いだ: その周期と、イメージが試行のあいだガードがそれをどう扱うか。 |
@@ -149,9 +149,9 @@ stage0のあるself-bootのマイコンの、ブートローダのスロット1�
 
 答えたか拒んだリクエストと、尋ねた判断点。
 
-状態: `Ready` (最初の状態)。
+状態: `Ready` (初期状態)。
 
-| 種類 | コード | 遷移 | ペイロード | 受け取り | 備考 | 説明 |
+| 種類 | コード | 遷移 | ペイロード | 受信 | 備考 | 説明 |
 |---|---|---|---|---|---|---|
 | `app.store_opened` | 0x30 | `store_opened`: Ready → Ready | `active: u8` (1 B), `trial: bool` (1 B), `version: Version` (4 B), `attempts: u8` (1 B), `last_reason: u8` (1 B) | live |  | 起動時にスロットのストアを読んだ。 |
 | `app.hello` | 0x31 | `hello`: Ready → Ready | – | live, host |  | 識別に答えた。 |

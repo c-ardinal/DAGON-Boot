@@ -66,7 +66,7 @@ Every step can also be done with the `dagon` command.
 
 ### Without installing
 
-In the browser (Chrome or Edge 89 or later), try the [DAGON Console demo](https://c-ardinal.github.io/DAGON-Boot/demo/) with no install and no hardware. You write to a simulated hub and its children and go back to a previous version. Reading and writing files, connecting real devices and AI link operations are not available in the demo.
+In the browser (Chrome or Edge 89 or later), try the [DAGON Console demo](https://c-ardinal.github.io/DAGON-Boot/demo/) with no install and no hardware. You write to three simulated microcontrollers (the one on the PC and the two linked to it) and go back to a previous version. Reading and writing files, connecting real devices and AI link operations are not available in the demo.
 
 ### Install and try
 
@@ -123,19 +123,19 @@ You can also add DAGON to existing firmware ([steps](https://c-ardinal.github.io
 
 ## How writing works
 
-The microcontroller connected to your PC over USB is the hub. The microcontrollers beyond it are its children.
+Your PC connects to one microcontroller over USB. The others are written through it.
 
 The figure below is the sample setup.
 
 ```mermaid
 flowchart LR
-  PC["PC<br>dagon / DAGON Console"] -- USB --> HUB["Hub<br>RP2040"]
-  HUB -- I2C --> SEG["Child<br>STM32F401RE"]
-  HUB -- UART --> WATCH["Child<br>ESP32-S3"]
+  PC["PC<br>dagon / DAGON Console"] -- USB --> HUB["RP2040"]
+  HUB -- I2C --> SEG["STM32F401RE"]
+  HUB -- UART --> WATCH["ESP32-S3"]
 ```
 
 1. The PC checks the package's signatures and that the package fits this setup.
-2. Through the hub, the PC sends each microcontroller its new image. Children come first and the hub last.
+2. Through the microcontroller on USB, the PC sends each microcontroller its new image. The ones linked beyond it come first and it comes last.
 3. A microcontroller writes the new image to a slot other than the running one.
 4. The microcontroller starts the new image on trial.
 5. The PC sends CONFIRM, and the microcontroller confirms the new version when its self-check (`self_check`) answers healthy. An image that is not confirmed is reset and, with two slots, goes back to the previous version.

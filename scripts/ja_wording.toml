@@ -100,6 +100,8 @@ native = [
   { stem = '残', conj = "godan_sa", word = "残す", suggest = "残存/保持" },
   { stem = '残', conj = "godan_ra", word = "残る", suggest = "残存/保持" },
   { stem = '引き継', conj = "godan_ga", word = "引き継ぐ", suggest = "継承" },
+  # 違い ties with 違 + い; on equal length the earlier entry wins.
+  { pattern = '違い', word = "違い", suggest = "差異" },
   { stem = '違', conj = "godan_wa", word = "違う", suggest = "相違" },
   { stem = '直', conj = "godan_sa", word = "直す", suggest = "修正" },
   { stem = '始め', conj = "ichidan", word = "始める", suggest = "開始" },
@@ -163,6 +165,8 @@ native = [
   { stem = '抜', conj = "godan_ka", word = "抜く", suggest = "抜去" },
   { stem = '困', conj = "godan_ra", word = "困る", suggest = "障害/問題" },
   { stem = '聞', conj = "godan_ka", word = "聞く", suggest = "質問/照会" },
+  # 進み ties with 進 + み; on equal length the earlier entry wins.
+  { pattern = '進み具合|進み', word = "進み", suggest = "進捗" },
   { stem = '進', conj = "godan_ma", word = "進む", suggest = "進行" },
   { stem = '加え', conj = "ichidan", word = "加える", suggest = "追加" },
   { stem = '捨て', conj = "ichidan", word = "捨てる", suggest = "破棄" },
@@ -181,6 +185,8 @@ native = [
   # Adjectives.
   { stem = '新し', conj = "adjective", word = "新しい", suggest = "新規" },
   { stem = '無', conj = "adjective", word = "無い", suggest = "不在/なし（未〜）" },
+  # 大きさ ties with 大き + さ; on equal length the earlier entry wins.
+  { pattern = '大きさ', word = "大きさ", suggest = "サイズ" },
   { stem = '大き', conj = "adjective", word = "大きい", suggest = "大型/大規模/超過" },
   { stem = '小さ', conj = "adjective", word = "小さい", suggest = "小型/小規模" },
   { stem = '古', conj = "adjective", word = "古い", suggest = "旧/旧版" },
@@ -192,12 +198,9 @@ native = [
   { stem = '多', conj = "adjective", word = "多い", suggest = "多数" },
   { stem = '少な', conj = "adjective", word = "少ない", suggest = "最低/少数" },
   # Nouns and other words.
-  { pattern = '大きさ', word = "大きさ", suggest = "サイズ" },
   { pattern = '同じ', word = "同じ", suggest = "同一/共通" },
   { pattern = '置き場所', word = "置き場所", suggest = "格納場所/格納先" },
   { pattern = '丸ごと', word = "丸ごと", suggest = "全体/一括" },
-  { pattern = '違い', word = "違い", suggest = "差異" },
-  { pattern = '進み具合|進み', word = "進み", suggest = "進捗" },
   { pattern = '印(?![一-鿿])', word = "印", suggest = "マーク/記号" },
   { pattern = '生の', word = "生", suggest = "未加工/ロー" },
   { pattern = '一緒に', word = "一緒に", suggest = "同時に/一括で" },
@@ -263,7 +266,8 @@ godan_wa = "[わいうえおっ]"
 # A stem that ends in kana (確かめ) starts every form and its noun use (答え).
 ichidan = ""
 # A stem that ends in a kanji or can start a noun (出る, 見る, できる) needs one of its
-# endings after it, or 出力, 出来事 and できごと would match.
-ichidan_kanji = "(?=[るれよろたてなまずさそら])"
-kuru = "(?=[るれよいたてなまずさそら])"
+# endings after it, or a break (the continuative 設定でき、): 出力, 出来事 and できごと
+# do not match.
+ichidan_kanji = '(?=[るれよろたてなまずさそら、。・，．,.」』）)\]\s]|\Z)'
+kuru = '(?=[るれよいたてなまずさそら、。・，．,.」』）)\]\s]|\Z)'
 adjective = "[いくかけさそ]"

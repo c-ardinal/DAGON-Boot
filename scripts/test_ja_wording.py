@@ -47,6 +47,8 @@ FORMS_AT_0DA0FA07 = (
     "空 詳しい 速い 多い すでに このまま どうし まもなく わかる やり直す やめる できる ながら てから でから "
 )
 REMOVED_SINCE_0DA0FA07: dict[str, str] = {}
+# A form now reported under its dictionary form.
+RENAMED_SINCE_0DA0FA07 = {"長さ": "長い", "少なく": "少ない"}
 # A form found only after what it attaches to.
 PROBE = {"でから": "読込んでから"}
 
@@ -146,6 +148,22 @@ class Rules(unittest.TestCase):
         for cls, words in compounds.items():
             for word in words:
                 self.assertEqual(lemmas(CODE, "// " + word), [], f"{cls}: {word}")
+        for text in ["出来事、", "出来高。", "できごと。"]:
+            self.assertEqual(lemmas(CODE, "// " + text), [], text)
+
+    def test_the_continuative_form_is_caught_in_every_class(self):
+        continuative = {
+            "godan": ("設定を使い、次へ進みます", "使う"),
+            "ichidan, kana stem": ("値を確かめ、次へ進みます", "確かめる"),
+            "ichidan, kanji stem": ("画面を見、次へ進みます", "見る"),
+            "できる, kana": ("設定でき、次へ進みます", "できる"),
+            "できる, kanji": ("実行出来、結果を返します", "できる"),
+            "できる, line end": ("設定でき\n次へ", "できる"),
+            "kuru": ("外から来、次へ進みます", "来る"),
+            "adjective": ("値が新しく、次へ進みます", "新しい"),
+        }
+        for cls, (text, lemma) in continuative.items():
+            self.assertIn(lemma, lemmas(CODE, "// " + text), cls)
 
     def test_the_longest_match_wins(self):
         self.assertEqual(lemmas(CODE, "// やり直します"), ["やり直す"])
@@ -232,7 +250,9 @@ class Data(unittest.TestCase):
             text = "// " + probe + "の"
             at = len("// ") + probe.index(form)
             hits = ja_wording.hits_in(CODE, text, RULES, False)
-            self.assertTrue(any(h.start <= at < h.end for h in hits), form)
+            found = [h.lemma for h in hits if h.start == at and h.end >= at + len(form) - 1]
+            expected = RENAMED_SINCE_0DA0FA07.get(form, form)
+            self.assertTrue(any(expected in lemma.split("（")[0].split("/") for lemma in found), (form, found))
 
     def test_every_entry_wins_over_the_entries_inside_it(self):
         for rule in RULES:

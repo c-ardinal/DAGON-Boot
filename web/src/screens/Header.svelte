@@ -19,7 +19,7 @@
     onlocked?: () => void;
     menuOpen?: boolean;
     onmenu?: () => void;
-    /** The hub is simulated (模擬, always shown). */
+    /** The node connected to the PC is simulated (模擬, always shown). */
     sim?: boolean;
     /** The open project's name. */
     title?: string;
@@ -27,7 +27,7 @@
     actions?: Snippet<[Mode]>;
     /** The menu's popover, anchored to ☰. */
     menu?: Snippet;
-    /** 困ったとき is open (the menu opens it). */
+    /** トラブル対処 is open (the menu opens it). */
     helpOpen?: boolean;
     /** It opened on the keys: their own popover. */
     helpKeys?: boolean;
@@ -101,7 +101,7 @@
       </div>
     {/if}
     {#if hub}
-      <!-- Button/Text: the connection's state and its one action, next to what needs it (書き込む). -->
+      <!-- Button/Text: the connection's state and its one action, next to what needs it (書込). -->
       <button class="hub" class:on={hub.connected} data-control="connect" title={hub.locked ?? hub.hint} aria-disabled={hub.locked !== null} onclick={hub.onpress}>
         <Icon name={hub.connected ? 'plug' : 'unplug'} size="var(--i-s)" /><span>{hub.connected ? HUB_TOGGLE.disconnect : HUB_TOGGLE.connect}</span>
       </button>
@@ -119,7 +119,7 @@
 </header>
 
 {#if helpOpen}
-  <!-- 困ったとき and キー操作: two popovers under ☰ with their own content, so each menu item opens what it names. -->
+  <!-- トラブル対処 and キー操作: two popovers under ☰ with their own content, so each menu item opens what it names. -->
   <section id="help" transition:rise={{ dur: '--dur-quick' }} class="help" aria-label={helpKeys ? HELP.keysHeading : HELP.heading} use:dismiss={() => (helpOpen = false)}>
     <h2>{helpKeys ? HELP.keysHeading : HELP.heading}</h2>
     <button class="button-icon close" aria-label={helpKeys ? HELP.keysClose : HELP.close} title={helpKeys ? HELP.keysClose : HELP.close} onclick={() => (helpOpen = false)}><span class="layer"><Icon name="x" /></span></button>
@@ -327,7 +327,7 @@
     font: 700 var(--t-caption) / 1 var(--f-ja);
     letter-spacing: 0.08em;
   }
-  /* 困ったとき: a popover under ☰, over the page; nothing under it moves. */
+  /* トラブル対処: a popover under ☰, over the page; nothing under it moves. */
   .help {
     position: absolute;
     z-index: var(--z-announce);

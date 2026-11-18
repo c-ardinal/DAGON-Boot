@@ -17,7 +17,7 @@ export interface Band extends BandCopy {
 
 /** Names a button needs beyond its action: the node to recover, how many still answer. */
 export interface Names {
-  /** lost after the CLI gave back a device that is not this 親機: why. */
+  /** lost after the CLI gave back a device that is not this PC-connected node: why. */
   refused?: ReconnectNote['kind'] | null;
   stuck?: string;
   responding?: number;
@@ -29,7 +29,7 @@ export interface Names {
   rest?: boolean;
   /** There is a build to write: the main action writes it. */
   built?: boolean;
-  /** The 親機 is simulated, so no device list appears. */
+  /** The node connected to the PC is simulated, so no device list appears. */
   sim?: boolean;
   /** What the last run left (done): the band says only that. */
   finish?: Finish | null;
@@ -42,14 +42,14 @@ const REFUSED_CHIP: Partial<Record<ReconnectNote['kind'], string>> = {
   silent: BAND_CHIP.silent,
 };
 
-const REFUSAL_BAND = { source: BAND.M18, key: BAND.M18b, format: BAND.M19, topology: BAND.M20 } as const;
+const REFUSAL_BAND = { source: BAND.sourceRefused, key: BAND.keyRefused, format: BAND.formatRefused, topology: BAND.topologyRefused } as const;
 
 export const FAILURE_BAND = {
-  'not-found': BAND.M04,
-  busy: BAND.M05,
-  denied: BAND.M06,
-  'no-response': BAND.M08,
-  unavailable: BAND.M57,
+  'not-found': BAND.notFound,
+  busy: BAND.portBusy,
+  denied: BAND.denied,
+  'no-response': BAND.noResponse,
+  unavailable: BAND.pageLoadFailed,
 } as const;
 
 /**
@@ -67,46 +67,46 @@ function words(s: L, c: Ctx, n: Names): BandCopy {
   switch (s) {
     case 'idle':
     case 'choosing':
-      return n.sim ? SIM.connect : BAND.M03;
+      return n.sim ? SIM.connect : BAND.choose;
     case 'notChosen':
     case 'portFailed':
     case 'silentHub':
-      return c.failure ? FAILURE_BAND[c.failure] : n.sim ? SIM.connect : BAND.M03;
+      return c.failure ? FAILURE_BAND[c.failure] : n.sim ? SIM.connect : BAND.choose;
     case 'checking':
-      return BAND.M59;
+      return BAND.checking;
     case 'scanning':
-      return BAND.M60;
+      return BAND.scanning;
     case 'ready':
-      return n.built ? BAND.M13built : BAND.M13;
+      return n.built ? BAND.readyBuilt : BAND.ready;
     case 'nodesSilent':
       // Nothing left to update first: recovery is the main action.
-      return c.answering === false ? BAND.M62 : BAND.M62b;
+      return c.answering === false ? BAND.silentLeft : BAND.nodesSilent;
     case 'reading':
     case 'verifying':
-      return BAND.M63;
+      return BAND.verifying;
     case 'hubRestarting':
-      return BAND.M64;
+      return BAND.hubRestarting;
     case 'reconnectNeeded':
-      return BAND.M26;
+      return BAND.reconnectNeeded;
     case 'stopped':
       if (n.stopped === 'coreBack') return { sentence: WRITE.coreBack.next };
       if (n.stopped === 'previous') return { sentence: WRITE.rolled.next };
-      return n.unwritten && n.stuck ? BAND_FOR.M29(n.stuck) : BAND.M65;
+      return n.unwritten && n.stuck ? BAND_FOR.stoppedAt(n.stuck) : BAND.stopped;
     case 'done':
       return done(n.finish);
     case 'cliTurn':
-      return BAND.M67;
+      return BAND.cliTurn;
     case 'fileRefused':
     case 'otherTopology':
       return REFUSAL_BAND[c.refusal ?? 'source'];
     case 'fileReady':
     case 'writing':
     case 'recovering':
-      return BAND.M22;
+      return BAND.writing;
     case 'recoverFailed':
-      return BAND.M33;
+      return BAND.recoverFailed;
     case 'lost':
-      return n.refused ? { chip: REFUSED_CHIP[n.refused] ?? REFUSED_CHIP.otherHub, sentence: BAND.M34.sentence } : BAND.M34;
+      return n.refused ? { chip: REFUSED_CHIP[n.refused] ?? REFUSED_CHIP.otherHub, sentence: BAND.lost.sentence } : BAND.lost;
     default:
       return {};
   }
@@ -114,13 +114,13 @@ function words(s: L, c: Ctx, n: Names): BandCopy {
 
 /** done says only what is true: all updated, the checked ones updated, some not (they did not answer), some or all already on it, or one node rolled back or recovered. */
 function done(f: Finish | null | undefined): BandCopy {
-  if (f?.kind === 'rolledBack') return BAND_FOR.M66back(f.name, f.version);
-  if (f?.kind === 'recovered') return BAND_FOR.M66fixed(f.name, f.version);
-  if (f?.kind === 'updated' && f.left > 0) return BAND_FOR.M66some(f.left);
-  if (f?.kind === 'updated' && f.same && !f.wrote) return BAND.M66none;
-  if (f?.kind === 'updated' && f.same) return BAND_FOR.M66part(f.wrote ?? 0, f.same);
-  if (f?.kind === 'updated' && f.leftOut) return BAND.M66checked;
-  return BAND.M66;
+  if (f?.kind === 'rolledBack') return BAND_FOR.doneBack(f.name, f.version);
+  if (f?.kind === 'recovered') return BAND_FOR.doneFixed(f.name, f.version);
+  if (f?.kind === 'updated' && f.left > 0) return BAND_FOR.doneSome(f.left);
+  if (f?.kind === 'updated' && f.same && !f.wrote) return BAND.doneNone;
+  if (f?.kind === 'updated' && f.same) return BAND_FOR.donePart(f.wrote ?? 0, f.same);
+  if (f?.kind === 'updated' && f.leftOut) return BAND.doneChecked;
+  return BAND.doneAll;
 }
 
 function label(a: Action, n: Names): string {

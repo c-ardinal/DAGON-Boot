@@ -186,9 +186,9 @@ def main():
     for version, release in VERSIONS.items():
         vdir = images / version
         for (node, slot), elf in elves.items():
-            dagon("image", "sign", elf, "--node", node, "--version", version, "--slot", slot,
+            dagon("image", elf, "--node", node, "--version", version, "--slot", slot,
                   "--out", vdir / f"{node}-{slot}.img", "--topology", a.topology, "--key", key)
-        dagon("release", "build", vdir, "--name", release.removesuffix(".dgb"),
+        dagon("release", vdir, "--name", release.removesuffix(".dgb"),
               "--out", out / release, "--topology", a.topology, "--key", key)
 
     tamper(out / "release-1.1.dgb", out / "release-1.1-tampered.dgb", fix_crc=False)

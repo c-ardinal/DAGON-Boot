@@ -11,7 +11,7 @@ import { simulator } from './simHub.ts';
 import type { Transport } from './transport.ts';
 
 const repo = (rel: string) => new Uint8Array(readFileSync(new URL(`../../../${rel}`, import.meta.url)));
-// The apps at their real size (48 KiB on each 子機), as the demo page writes them.
+// The apps at their real size (48 KiB on each node), as the demo page writes them.
 const RELEASE = repo('crates/dagon-sim/fixtures/sample-full-1.1.0.dgb');
 /** The sample's MCUs: each node's self-check counts against its MCU definition's trial time, as on the page. */
 const MCU: Record<string, string> = { hub: 'rp2040', seg: 'stm32f401re', watch: 'esp32s3' };

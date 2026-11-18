@@ -37,7 +37,7 @@ pub use extension::{
     Accept, Chain, Ctx, DecisionId, DecisionPoint, Delay, ExtId, Extension, Health, Nop,
     RebootRequest, TrialInfo, UpdateOffer, DECISIONS, DECISION_BOUND_MS,
 };
-pub use ports::{Port, PortDefault, Service, Trust, PORTS};
+pub use ports::{InTree, Port, PortDefault, Service, Trust, PORTS};
 pub use published::{Latest, Published, Reader, Recent, Snapshot, WATCHERS};
 
 /// The `event` contract's number: the catalog kinds, their codes and the

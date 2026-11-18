@@ -5,12 +5,12 @@ editUrl: false
 ---
 
 :::note
-`crates/dagon-cli/src/cli.rs`から生成しています。直接編集せず、`python site/scripts/gen.py`でもう一度生成してください。
-コマンドの説明は元のソースのままで、英語です。
+`crates/dagon-cli/src/cli.rs`から生成しています。直接編集せず、`python site/scripts/gen.py`で再度生成してください。
+コマンドの説明はソースの原文のままで、英語です。
 :::
 
-`dagon`のすべてのコマンド、引数、オプションです。`dagon <command> --help`が表示するものと同じです。
-多くのコマンドは、既定の値を`./dagon.toml`（または`--config <file>`）から取ります。
+`dagon`の全コマンド、引数、オプションです。`dagon <command> --help`の表示内容と同一です。
+多数のコマンドは、既定の値を`./dagon.toml`（または`--config <file>`）から取得します。
 
 ## dagon
 
@@ -20,25 +20,35 @@ DAGON Boot command line tool
 Usage: dagon
        dagon <COMMAND>
 
-Commands:
-  key        Make or show the signing key pair
-  topo       Check or compile a topology
-  image      Sign firmware images
-  release    Build a signed release package (.dgb)
-  provision  Make the first-install files of a node from [provision.<node>] in dagon.toml
-  status     Show HELLO, STATUS and VERSION of the hub and each topology node
-  apply      Write a release package to the nodes
-  conform    Run the 12 conformance tests on a node
-  rollback   Go back to the node's previously confirmed version
+Set up a project:
   new        Make a project folder
   gen        Make one Rust crate per node in nodes/<id> on the board support packages
-  build      Build each node of [build.<id>] in dagon.toml
-  deploy     Build, sign, package and write the nodes in one go
-  flash      First write of a node, as its MCU definition says
+  key        Make or show the signing key pair
   doctor     Check the tools each MCU family of the topology needs
+
+Build a release:
+  topo       Check or compile a topology
+  build      Build each node of [build.<id>] in dagon.toml
+  image      Build and sign an image for a topology node
+  release    Check the images, sign the manifest and write the release package
+  provision  Make the first-install files of a node from [provision.<node>] in dagon.toml
+
+Write to a node:
+  flash      First write of a node, as its MCU definition says
+  deploy     Build, sign, package and write the nodes in one go
+  apply      Write a release package to the nodes
+  rollback   Go back to the node's previously confirmed version
+
+Check a node:
+  status     Show HELLO, STATUS and VERSION of the hub and each topology node
+  conform    Run the 12 conformance tests on a node
+
+Tools:
   serve      Start DAGON Console, the browser tool, and its API on 127.0.0.1
-  sim        Run the simulator
+  sim        Run the simulator scenarios (no hardware)
   ai         Work with an AI agent
+
+Help:
   help       Print this message or the help of the given subcommand(s)
 
 Options:
@@ -54,6 +64,63 @@ The secret key file is --key <file> or $DAGON_SIGNING_KEY and must lie outside a
 work tree.
 
 `dagon <command> --help` describes a command and each of its options.
+```
+
+## dagon new
+
+```text
+Make a project folder
+
+Writes dagon.toml and topology.yaml (the sample unless --from), and a signing key pair in --keys if none is there. The project takes DAGON from this CLI's release (git and tag cli-v<version>) unless --dagon-path or DAGON_HOME names a local clone.
+
+Usage: dagon new [OPTIONS] <DIR>
+
+Arguments:
+  <DIR>
+          Project folder to make; its name is the project's
+
+Options:
+      --from <YAML>
+          Topology YAML to start from [default: the sample topology]
+
+      --keys <DIR>
+          Folder of the signing key pair [default: ~/.dagon/keys/<name>]
+
+      --dagon-path <CLONE>
+          Local clone of DAGON to build with [default: $DAGON_HOME]
+
+      --dagon-git <URL>
+          Git URL of DAGON [default: this CLI's repository]
+
+      --dagon-tag <TAG>
+          Git tag of DAGON [default: cli-v<this CLI's version>]
+
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+## dagon gen
+
+```text
+Make one Rust crate per node in nodes/<id> on the board support packages
+
+Rewrites only wiring.rs and the package line, never app.rs (main.rs only with --force-main).
+
+Usage: dagon gen [OPTIONS] [ID]...
+
+Arguments:
+  [ID]...
+          Node ids [default: every node]
+
+Options:
+      --force-main
+          Also rewrite main.rs
+
+      --config <FILE>
+          Project file the defaults come from [default: ./dagon.toml]
+
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 ## dagon key
@@ -101,6 +168,32 @@ Options:
 
   -h, --help
           Print help
+```
+
+## dagon doctor
+
+```text
+Check the tools each MCU family of the topology needs
+
+Then shows each node's versions when a hub is connected.
+
+Usage: dagon doctor [OPTIONS]
+
+Options:
+      --fix
+          Install what needs no administrator rights
+
+      --port <NAME>
+          Serial port of the hub [default: the USB device c0de:cafe or named "DAGON hub"]
+
+      --topology <YAML>
+          Topology YAML [default: topology in dagon.toml, else every MCU family]
+
+      --config <FILE>
+          Project file the defaults come from [default: ./dagon.toml]
+
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 ## dagon topo
@@ -161,30 +254,35 @@ Options:
           Print help
 ```
 
-## dagon image
+## dagon build
 
 ```text
-Sign firmware images
+Build each node of [build.<id>] in dagon.toml
 
-Usage: dagon image <COMMAND>
+Writes out/build/<id>/app-a.elf, and app-b.elf when the node's MCU definition gives the app slot B.
 
-Commands:
-  sign  Build and sign an image for a topology node
-  help  Print this message or the help of the given subcommand(s)
+Usage: dagon build [OPTIONS] [ID]...
+
+Arguments:
+  [ID]...
+          Node ids [default: every [build.<id>] of dagon.toml]
 
 Options:
+      --config <FILE>
+          Project file the defaults come from [default: ./dagon.toml]
+
   -h, --help
-          Print help
+          Print help (see a summary with '-h')
 ```
 
-## dagon image sign
+## dagon image
 
 ```text
 Build and sign an image for a topology node
 
 An input that already is a signed image is verified and checked to belong to the node, kind and slot instead.
 
-Usage: dagon image sign [OPTIONS] --node <ID> --version <X.Y.Z> --out <IMG> <ELF|BIN>
+Usage: dagon image [OPTIONS] --node <ID> --version <X.Y.Z> --out <IMG> <ELF|BIN>
 
 Arguments:
   <ELF|BIN>
@@ -245,25 +343,9 @@ Options:
 ## dagon release
 
 ```text
-Build a signed release package (.dgb)
-
-Usage: dagon release <COMMAND>
-
-Commands:
-  build  Check the images, sign the manifest and write the release package
-  help   Print this message or the help of the given subcommand(s)
-
-Options:
-  -h, --help
-          Print help
-```
-
-## dagon release build
-
-```text
 Check the images, sign the manifest and write the release package
 
-Usage: dagon release build [OPTIONS] --name <NAME> <IMG|DIR>...
+Usage: dagon release [OPTIONS] --name <NAME> <IMG|DIR>...
 
 Arguments:
   <IMG|DIR>...
@@ -320,21 +402,82 @@ Options:
           Print help
 ```
 
-## dagon status
+## dagon flash
 
 ```text
-Show HELLO, STATUS and VERSION of the hub and each topology node
+First write of a node, as its MCU definition says
 
-Versions of stage0, boot core, app, wire format and MCU.
+Writes through a UF2 drive, probe-rs or espflash. Builds the parts (boot core, stage0, factory agent) with the key and prints the plan first. Writes to the one device the writer reports, or the one you choose or name.
 
-Usage: dagon status [OPTIONS]
+Usage: dagon flash [OPTIONS] <NODE>
+
+Arguments:
+  <NODE>
+          Node id in the topology
 
 Options:
+      --dry-run
+          Make the files and print the plan without writing
+
+      --yes
+          Write without asking
+
+      --probe <VID:PID[:SERIAL]>
+          Debug probe to write through (probe-rs writers)
+
+      --port <PORT>
+          Serial port to write through (espflash writers)
+
+      --drive <PATH>
+          UF2 drive to copy to (UF2 writers)
+
+      --out <DIR>
+          Folder for the files [default: <provision_dir>/<node>]
+
+      --topology <YAML>
+          Topology YAML [default: topology in dagon.toml]
+
+      --key <FILE>
+          Secret signing key file, outside any git work tree [default: $DAGON_SIGNING_KEY]
+
+      --config <FILE>
+          Project file the defaults come from [default: ./dagon.toml]
+
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+## dagon deploy
+
+```text
+Build, sign, package and write the nodes in one go
+
+Each node's version is its crate's Cargo.toml version. Lists node and version and asks first; keeps the package in out/deploy. Each node's boot core comes from its boot crate and is written (before its app) only when its version differs from the running boot core's.
+
+Usage: dagon deploy [OPTIONS] [ID]...
+
+Arguments:
+  [ID]...
+          Node ids [default: every [build.<id>] of dagon.toml]
+
+Options:
+      --version <X.Y.Z>
+          Version to deploy; must equal each node crate's version
+
+      --yes
+          Write without asking, the ROM question of a silent node included
+
+      --bootcore
+          Refuse a node with boot core slots that has no boot crate
+
       --port <NAME>
           Serial port of the hub [default: the USB device c0de:cafe or named "DAGON hub"]
 
       --topology <YAML>
           Topology YAML [default: topology in dagon.toml]
+
+      --key <FILE>
+          Secret signing key file, outside any git work tree [default: $DAGON_SIGNING_KEY]
 
       --config <FILE>
           Project file the defaults come from [default: ./dagon.toml]
@@ -382,6 +525,55 @@ Options:
           Print help (see a summary with '-h')
 ```
 
+## dagon rollback
+
+```text
+Go back to the node's previously confirmed version
+
+Boots the app slot that holds the previously confirmed version and confirms it there. A node whose MCU definition gives the app one slot has no previous version to go back to.
+
+Usage: dagon rollback [OPTIONS] --node <ID>
+
+Options:
+      --node <ID>
+          Node id in the topology
+
+      --port <NAME>
+          Serial port of the hub [default: the USB device c0de:cafe or named "DAGON hub"]
+
+      --topology <YAML>
+          Topology YAML [default: topology in dagon.toml]
+
+      --config <FILE>
+          Project file the defaults come from [default: ./dagon.toml]
+
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+## dagon status
+
+```text
+Show HELLO, STATUS and VERSION of the hub and each topology node
+
+Versions of stage0, boot core, app, wire format and MCU.
+
+Usage: dagon status [OPTIONS]
+
+Options:
+      --port <NAME>
+          Serial port of the hub [default: the USB device c0de:cafe or named "DAGON hub"]
+
+      --topology <YAML>
+          Topology YAML [default: topology in dagon.toml]
+
+      --config <FILE>
+          Project file the defaults come from [default: ./dagon.toml]
+
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
 ## dagon conform
 
 ```text
@@ -412,220 +604,6 @@ Options:
 
       --key <FILE>
           Secret signing key file, outside any git work tree [default: $DAGON_SIGNING_KEY]
-
-      --config <FILE>
-          Project file the defaults come from [default: ./dagon.toml]
-
-  -h, --help
-          Print help (see a summary with '-h')
-```
-
-## dagon rollback
-
-```text
-Go back to the node's previously confirmed version
-
-Boots the app slot that holds the previously confirmed version and confirms it there. A node whose MCU definition gives the app one slot has no previous version to go back to.
-
-Usage: dagon rollback [OPTIONS] --node <ID>
-
-Options:
-      --node <ID>
-          Node id in the topology
-
-      --port <NAME>
-          Serial port of the hub [default: the USB device c0de:cafe or named "DAGON hub"]
-
-      --topology <YAML>
-          Topology YAML [default: topology in dagon.toml]
-
-      --config <FILE>
-          Project file the defaults come from [default: ./dagon.toml]
-
-  -h, --help
-          Print help (see a summary with '-h')
-```
-
-## dagon new
-
-```text
-Make a project folder
-
-Writes dagon.toml and topology.yaml (the sample unless --from), and a signing key pair in --keys if none is there. The project takes DAGON from this CLI's release (git and tag cli-v<version>) unless --dagon-path or DAGON_HOME names a local clone.
-
-Usage: dagon new [OPTIONS] <DIR>
-
-Arguments:
-  <DIR>
-          Project folder to make; its name is the project's
-
-Options:
-      --from <YAML>
-          Topology YAML to start from [default: the sample topology]
-
-      --keys <DIR>
-          Folder of the signing key pair [default: ~/.dagon/keys/<name>]
-
-      --dagon-path <CLONE>
-          Local clone of DAGON to build with [default: $DAGON_HOME]
-
-      --dagon-git <URL>
-          Git URL of DAGON [default: this CLI's repository]
-
-      --dagon-tag <TAG>
-          Git tag of DAGON [default: cli-v<this CLI's version>]
-
-  -h, --help
-          Print help (see a summary with '-h')
-```
-
-## dagon gen
-
-```text
-Make one Rust crate per node in nodes/<id> on the board support packages
-
-Rewrites only wiring.rs and the package line, never app.rs (main.rs only with --force-main).
-
-Usage: dagon gen [OPTIONS] [ID]...
-
-Arguments:
-  [ID]...
-          Node ids [default: every node]
-
-Options:
-      --force-main
-          Also rewrite main.rs
-
-      --config <FILE>
-          Project file the defaults come from [default: ./dagon.toml]
-
-  -h, --help
-          Print help (see a summary with '-h')
-```
-
-## dagon build
-
-```text
-Build each node of [build.<id>] in dagon.toml
-
-Writes out/build/<id>/app-a.elf, and app-b.elf when the node's MCU definition gives the app slot B.
-
-Usage: dagon build [OPTIONS] [ID]...
-
-Arguments:
-  [ID]...
-          Node ids [default: every [build.<id>] of dagon.toml]
-
-Options:
-      --config <FILE>
-          Project file the defaults come from [default: ./dagon.toml]
-
-  -h, --help
-          Print help (see a summary with '-h')
-```
-
-## dagon deploy
-
-```text
-Build, sign, package and write the nodes in one go
-
-Each node's version is its crate's Cargo.toml version. Lists node and version and asks first; keeps the package in out/deploy. Each node's boot core comes from its boot crate and is written (before its app) only when its version differs from the running boot core's.
-
-Usage: dagon deploy [OPTIONS] [ID]...
-
-Arguments:
-  [ID]...
-          Node ids [default: every [build.<id>] of dagon.toml]
-
-Options:
-      --version <X.Y.Z>
-          Version to deploy; must equal each node crate's version
-
-      --yes
-          Write without asking, the ROM question of a silent node included
-
-      --bootcore
-          Refuse a node with boot core slots that has no boot crate
-
-      --port <NAME>
-          Serial port of the hub [default: the USB device c0de:cafe or named "DAGON hub"]
-
-      --topology <YAML>
-          Topology YAML [default: topology in dagon.toml]
-
-      --key <FILE>
-          Secret signing key file, outside any git work tree [default: $DAGON_SIGNING_KEY]
-
-      --config <FILE>
-          Project file the defaults come from [default: ./dagon.toml]
-
-  -h, --help
-          Print help (see a summary with '-h')
-```
-
-## dagon flash
-
-```text
-First write of a node, as its MCU definition says
-
-Writes through a UF2 drive, probe-rs or espflash. Builds the parts (boot core, stage0, factory agent) with the key and prints the plan first. Writes to the one device the writer reports, or the one you choose or name.
-
-Usage: dagon flash [OPTIONS] <NODE>
-
-Arguments:
-  <NODE>
-          Node id in the topology
-
-Options:
-      --dry-run
-          Make the files and print the plan without writing
-
-      --yes
-          Write without asking
-
-      --probe <VID:PID[:SERIAL]>
-          Debug probe to write through (probe-rs writers)
-
-      --port <PORT>
-          Serial port to write through (espflash writers)
-
-      --drive <PATH>
-          UF2 drive to copy to (UF2 writers)
-
-      --out <DIR>
-          Folder for the files [default: <provision_dir>/<node>]
-
-      --topology <YAML>
-          Topology YAML [default: topology in dagon.toml]
-
-      --key <FILE>
-          Secret signing key file, outside any git work tree [default: $DAGON_SIGNING_KEY]
-
-      --config <FILE>
-          Project file the defaults come from [default: ./dagon.toml]
-
-  -h, --help
-          Print help (see a summary with '-h')
-```
-
-## dagon doctor
-
-```text
-Check the tools each MCU family of the topology needs
-
-Then shows each node's versions when a hub is connected.
-
-Usage: dagon doctor [OPTIONS]
-
-Options:
-      --fix
-          Install what needs no administrator rights
-
-      --port <NAME>
-          Serial port of the hub [default: the USB device c0de:cafe or named "DAGON hub"]
-
-      --topology <YAML>
-          Topology YAML [default: topology in dagon.toml, else every MCU family]
 
       --config <FILE>
           Project file the defaults come from [default: ./dagon.toml]
@@ -669,29 +647,23 @@ Options:
 ## dagon sim
 
 ```text
-Run the simulator
-
-Usage: dagon sim <COMMAND>
-
-Commands:
-  run   Run the simulator scenarios (no hardware)
-  help  Print this message or the help of the given subcommand(s)
-
-Options:
-  -h, --help
-          Print help
-```
-
-## dagon sim run
-
-```text
 Run the simulator scenarios (no hardware)
 
-Usage: dagon sim run
+Usage: dagon sim [SCENARIO]
+
+Arguments:
+  [SCENARIO]
+          Scenario to run [default: every scenario]
+
+          Possible values:
+          - S1: update with a power cut
+          - S2: trial app never confirms
+          - S3: tampered release
+          - S4: erased F401 via ROM loader
 
 Options:
   -h, --help
-          Print help
+          Print help (see a summary with '-h')
 ```
 
 ## dagon ai

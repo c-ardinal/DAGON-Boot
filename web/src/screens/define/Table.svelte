@@ -5,7 +5,7 @@
 
   interface Props {
     d: Define;
-    /** "ノードを加える": the node list places nodes. */
+    /** "ノードの追加": the node list places nodes. */
     onaddnode: () => void;
     /** The open tab (the menu opens 配線). */
     tab?: number;

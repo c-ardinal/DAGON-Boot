@@ -159,8 +159,8 @@ pub fn node_chain(
 /// one runs nothing and emits nothing. Then, with [`Confirm::Own`] and the
 /// image on trial, the trial is confirmed. Returns whether the image is
 /// still on trial (for the watchdog guard).
-pub fn finish_start<S: SlotStore, X: AppChain, V: SigVerifier>(
-    agent: &mut Agent<S, X, V>,
+pub fn finish_start<S: SlotStore, X: AppChain, V: SigVerifier, const L: usize>(
+    agent: &mut Agent<S, X, V, dagon_agent::writer::App, L>,
     board: Option<(&str, &mut dyn BoardBringUp)>,
     confirm: Confirm,
 ) -> bool {

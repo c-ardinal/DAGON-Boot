@@ -32,15 +32,15 @@ describe('the reconnect wait', () => {
   });
 });
 
-// dagon-host (through dagon-wasm) against the in-memory hub.
-describe('operating mode against the in-memory hub', () => {
+// dagon-host (through dagon-wasm) against the in-memory PC-connected node.
+describe('operating mode against the in-memory PC-connected node', () => {
   test('find automatically → found → watching, with every node answering', async () => {
     const { op } = session();
     await op.connect();
     expect(op.state).toBe('ready');
     expect(op.config).toBe(SAMPLE_CONFIG);
     expect(op.found).toBe(3);
-    expect(op.status).toBe(ANNOUNCE.A06(3));
+    expect(op.status).toBe(ANNOUNCE.found(3));
     await settle();
     await op.round();
     expect(op.responding).toBe(3);
@@ -55,8 +55,8 @@ describe('operating mode against the in-memory hub', () => {
     expect([op.state, op.live.watch.responding]).toEqual(['ready', true]);
     await op.round();
     expect([op.state, op.live.watch.responding, op.stuck?.id]).toEqual(['nodesSilent', false, 'watch']);
-    expect(op.alert).toBe(ANNOUNCE.A21silent('ウォッチ'));
-    expect(op.status).toBe(ANNOUNCE.A08(2, 3));
+    expect(op.alert).toBe(ANNOUNCE.nodeSilent('ウォッチ'));
+    expect(op.status).toBe(ANNOUNCE.responding(2, 3));
     expect(op.live.watch.hello).not.toBeNull();
 
     t.setQuiet('uart', false);
@@ -94,7 +94,7 @@ describe('operating mode against the in-memory hub', () => {
     expect(op.live.watch.rttMs).not.toBeNull();
   }, 20_000);
 
-  test('the page’s ?mock hub answers inside dagon-host’s request time', async () => {
+  test('the page’s ?mock PC-connected node answers inside dagon-host’s request time', async () => {
     const op = new Operate({
       open: async () => {
         const t = devHub(new URLSearchParams('mock'))!.transport;
@@ -115,7 +115,7 @@ describe('operating mode against the in-memory hub', () => {
     expect(op.state).toBe('ready');
   }, 20_000);
 
-  test('"最初からやり直す" drops the connection and the records and waits at idle', async () => {
+  test('"リスタート" drops the connection and the records and waits at idle', async () => {
     const { op } = session();
     await op.connect();
     op.reset();
@@ -125,7 +125,7 @@ describe('operating mode against the in-memory hub', () => {
   test('a device that does not answer: choose again', async () => {
     const { op } = session({ silent: true });
     await op.connect();
-    expect([op.state, op.failure, op.status]).toEqual(['silentHub', 'no-response', BAND.M08.chip]);
+    expect([op.state, op.failure, op.status]).toEqual(['silentHub', 'no-response', BAND.noResponse.chip]);
   }, 20_000);
 
   test('closing the chooser and a busy port end in their own states', async () => {
@@ -146,6 +146,6 @@ describe('operating mode against the in-memory hub', () => {
     const { op } = session();
     await op.connect();
     op.lose();
-    expect([op.state, op.alert]).toEqual(['lost', ANNOUNCE.A21lost]);
+    expect([op.state, op.alert]).toEqual(['lost', ANNOUNCE.hubLost]);
   }, 20_000);
 });

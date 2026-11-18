@@ -119,6 +119,8 @@ pub fn refuse_set_pending_on_trial(
     if f.cmd != Cmd::SetPending as u8 || f.flags & (flags::RESP | flags::EVENT) != 0 {
         return None;
     }
+    // A request that does not read is the agent's to refuse.
+    dagon_proto::payload::SetPending::parse(f.payload).ok()?;
     if st.slots.get(st.active as usize)?.state != dagon_proto::payload::SlotState::Trying {
         return None;
     }

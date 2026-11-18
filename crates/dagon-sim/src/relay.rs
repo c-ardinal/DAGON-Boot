@@ -14,8 +14,11 @@ use std::collections::BTreeMap;
 use crate::link::SimLink;
 use crate::node::SimNode;
 use dagon_port::{BusError, LinkKind, Nrst, RelayLinkDef};
+use dagon_proto::handler::{self, Handler};
 use dagon_proto::mailbox::{State, STATE_LEN};
-use dagon_proto::payload::{self, boot0, nrst, I2cRaw, Relay, SubCtl};
+use dagon_proto::payload::{
+    self, boot0, nrst, CapsReq, CapsResp, CmdSet, I2cRaw, Relay, Req, SubCtl,
+};
 use dagon_proto::{find_sof, flags, frame_len, max_payload, Cmd, Frame, FrameError, Status};
 use dagon_topology::defs::{McuDef, PortDef};
 
@@ -99,6 +102,9 @@ pub struct SimBus {
     pub uart: BTreeMap<u8, SimStream>,
     /// The node wired to NRST and BOOT0: its I2C port and its place there.
     pub sub: Option<(u8, usize)>,
+    /// Times a port or the recovery lines were used: every write, read
+    /// and exchange, and every setting of the lines.
+    pub ops: u64,
 }
 
 impl SimBus {
@@ -108,6 +114,7 @@ impl SimBus {
             i2c: BTreeMap::new(),
             uart: BTreeMap::new(),
             sub: None,
+            ops: 0,
         }
     }
 
@@ -139,6 +146,7 @@ impl SimBus {
     }
 
     pub fn i2c_write(&mut self, port: u8, addr: u8, data: &[u8]) -> Result<(), BusError> {
+        self.ops += 1;
         let mut now = self.now_ms;
         let r = match self.target(port, addr) {
             Some(n) => n.i2c_write(addr, data, &mut now),
@@ -151,6 +159,7 @@ impl SimBus {
     }
 
     pub fn i2c_read(&mut self, port: u8, addr: u8, buf: &mut [u8]) -> Result<(), BusError> {
+        self.ops += 1;
         let now = self.now_ms;
         match self.target(port, addr) {
             Some(n) => n.i2c_read(addr, buf, now),
@@ -174,6 +183,7 @@ impl SimBus {
         frame: &[u8],
         timeout_ms: u64,
     ) -> Option<Vec<u8>> {
+        self.ops += 1;
         let deadline = self.now_ms + timeout_ms;
         while self.i2c_write(port, addr, frame).is_err() {
             if self.now_ms >= deadline {
@@ -201,6 +211,7 @@ impl SimBus {
     /// RELAY over UART: through the port's link both ways; delays count
     /// against `timeout_ms`.
     pub fn uart_exchange(&mut self, port: u8, frame: &[u8], timeout_ms: u64) -> Option<Vec<u8>> {
+        self.ops += 1;
         match self.uart_carry(port, frame) {
             (Some(r), delay) if delay < timeout_ms => {
                 self.advance_ms(delay);
@@ -273,6 +284,7 @@ impl SimBus {
     /// SUBCTL semantics: BOOT0 first, then the NRST action (a pulse holds
     /// NRST low for [`NRST_PULSE_MS`]). `Io` if no node is wired.
     pub fn set_lines(&mut self, nrst: Nrst, boot0_high: bool) -> Result<(), BusError> {
+        self.ops += 1;
         if self.sub.is_none() {
             return Err(BusError::Io);
         }
@@ -340,6 +352,7 @@ impl SimRelay {
             "the definition of {} given to a node of {mcu}",
             def.id
         );
+        node.also_serves(CmdSet::EMPTY.with(Cmd::Relay as u8));
         SimRelay {
             node,
             bus: SimBus::new(),
@@ -390,6 +403,7 @@ impl SimRelay {
         let p = self.port(port, LinkKind::I2c);
         if wired {
             self.rom_addr = node.rom_addr;
+            self.node.also_serves(handler::cmds(&Self::TABLE));
         }
         let nodes = self.bus.i2c.entry(p).or_default();
         nodes.push(node);
@@ -449,46 +463,101 @@ impl SimRelay {
         if f.flags & (flags::RESP | flags::EVENT) != 0 {
             return None;
         }
-        let cmd = Cmd::from_u8(f.cmd);
-        let (status, bulk) = match cmd {
-            Some(Cmd::Relay) => self.relay(f.payload),
-            Some(Cmd::SubCtl) => self.subctl(f.payload),
-            Some(Cmd::I2cRaw) => self.i2c_raw(f.payload),
-            _ => return self.node.handle_frame(frame, self.bus.now_ms),
+        // As the relay on a node: RELAY always, SUBCTL and I2C_RAW with a
+        // node on the recovery lines, CAPS about RELAY; the rest is the
+        // node's own agent.
+        let wired = self.bus.sub.is_some();
+        let row = handler::find(&Self::TABLE, f.cmd)
+            .filter(|h| wired || matches!(h.cmd, Cmd::Relay))
+            .or((f.cmd == Cmd::Caps as u8).then_some(&Self::CAPS));
+        let Some(row) = row else {
+            return self.node.handle_frame(frame, self.bus.now_ms);
         };
-        let mut out = vec![0u8; frame_len(2 + bulk.len()).max(frame_len(8))];
-        let body = &mut out[dagon_proto::HEADER_LEN..];
-        let len = match (status, cmd) {
-            (Status::Ok, Some(Cmd::Relay | Cmd::I2cRaw)) => {
-                body[0] = Status::Ok as u8;
-                1 + payload::encode_bulk_resp(&bulk, &mut body[1..]).ok()?
+        // What the requester takes: the ingress of a tunnel, and the most
+        // an answer may be.
+        let ceiling = self.node.ceiling().over(max_payload::USB);
+        let room = ceiling.bytes();
+        // The whole request is read, and its answer held against the
+        // ceiling, before any of it runs.
+        let (status, bytes) = match row.request(f.payload, ceiling) {
+            Err(refused) => (refused, Vec::new()),
+            Ok(Req::Caps(c)) if c.cmd != Cmd::Relay as u8 => {
+                return self.node.handle_frame(frame, self.bus.now_ms)
             }
-            _ => payload::put_refusal(body, status, f.cmd, f.payload),
+            Ok(Req::Caps(c)) => self.caps(c, room),
+            Ok(Req::Relay(r)) => self.relay(&r, room),
+            Ok(Req::SubCtl(s)) => self.subctl(s),
+            Ok(Req::I2cRaw(raw)) => self.i2c_raw(&raw),
+            Ok(_) => (Status::Unsupported, Vec::new()),
+        };
+        let mut out = vec![0u8; frame_len(2 + bytes.len()).max(frame_len(8))];
+        let body = &mut out[dagon_proto::HEADER_LEN..];
+        let len = if status != Status::Ok {
+            payload::put_refusal(body, status, f.cmd, f.payload)
+        } else {
+            body[0] = Status::Ok as u8;
+            if row.spec.resp.bulk {
+                1 + payload::encode_bulk_resp(&bytes, &mut body[1..]).ok()?
+            } else {
+                body.get_mut(1..1 + bytes.len())?.copy_from_slice(&bytes);
+                1 + bytes.len()
+            }
         };
         let n = dagon_proto::finish(&mut out, flags::RESP, f.seq, f.cmd, len).ok()?;
         out.truncate(n);
         Some(out)
     }
 
+    /// The commands the relay answers itself; [`SimRelay::request`] takes
+    /// the typed request of a row and runs it, as the relay on a node.
+    const TABLE: [Handler<(), ()>; 3] = [
+        Handler::deferred(Cmd::Relay),
+        Handler::deferred(Cmd::SubCtl),
+        Handler::deferred(Cmd::I2cRaw),
+    ];
+
+    /// CAPS, answered here about RELAY and by the agent about the rest.
+    const CAPS: Handler<(), ()> = Handler::deferred(Cmd::Caps);
+
+    /// CAPS about RELAY: its fields, and for the link asked about the
+    /// tunnel over it for a requester that takes `room` payload bytes;
+    /// `Arg` for a link the definition does not list. The answer's body.
+    fn caps(&mut self, asked: CapsReq, room: usize) -> Answer {
+        let tunnel = match asked.link.map(|id| self.links.iter().find(|l| l.id == id)) {
+            None => None,
+            Some(None) => return (Status::Arg, Vec::new()),
+            Some(Some(l)) => {
+                let mtu = Relay::tunnel_mtu(room, usize::from(l.max_payload));
+                Some(u16::try_from(mtu).unwrap_or(u16::MAX))
+            }
+        };
+        let answer = CapsResp {
+            tunnel_mtu: tunnel,
+            ..CapsResp::of(Cmd::Relay)
+        };
+        let mut body = vec![0u8; CapsResp::MAX_LEN];
+        match answer.encode(&mut body) {
+            Ok(n) => {
+                body.truncate(n);
+                (Status::Ok, body)
+            }
+            Err(_) => (Status::Arg, Vec::new()),
+        }
+    }
+
     /// RELAY over the link its id names: `Arg`, before anything is
     /// forwarded, for an id the table does not list, an address the link
-    /// does not take or an inner frame the tunnel from USB over that link
-    /// does not admit (`Relay::admits`); `Unsupported` for a link kind the
-    /// simulator has no medium for.
-    fn relay(&mut self, p: &[u8]) -> Answer {
-        let r = match Relay::parse(p) {
-            Ok(r) => r,
-            Err(s) => return (s, Vec::new()),
-        };
+    /// does not take or an inner frame the tunnel over that link does not
+    /// admit for a requester that takes `room` payload bytes
+    /// (`Relay::admits`); `Unsupported` for a link kind the simulator has
+    /// no medium for.
+    fn relay(&mut self, r: &Relay<'_>, room: usize) -> Answer {
         let t = u64::from(r.timeout_ms.unwrap_or(dagon_port::timeout::RELAY_WAIT_MS));
         let Some(link) = self
             .links
             .iter()
             .find(|l| l.id == r.link)
-            .filter(|l| {
-                l.addressing.accepts(r.addr)
-                    && r.admits(max_payload::USB, usize::from(l.max_payload))
-            })
+            .filter(|l| l.addressing.accepts(r.addr) && r.admits(room, usize::from(l.max_payload)))
             .copied()
         else {
             return (Status::Arg, Vec::new());
@@ -504,11 +573,7 @@ impl SimRelay {
         }
     }
 
-    fn subctl(&mut self, p: &[u8]) -> Answer {
-        let s = match SubCtl::parse(p) {
-            Ok(s) => s,
-            Err(e) => return (e, Vec::new()),
-        };
+    fn subctl(&mut self, s: SubCtl) -> Answer {
         let line = match s.nrst {
             nrst::LOW => Nrst::Low,
             nrst::RELEASE => Nrst::Release,
@@ -524,11 +589,7 @@ impl SimRelay {
     /// accepted only while BOOT0 is high, each within the buffer of that
     /// port's relay link (`RelayLinkDef::buffer_len`, the relay's limit
     /// too): E_ARG for longer data or reads.
-    fn i2c_raw(&mut self, p: &[u8]) -> Answer {
-        let raw = match I2cRaw::parse(p) {
-            Ok(r) => r,
-            Err(e) => return (e, Vec::new()),
-        };
+    fn i2c_raw(&mut self, raw: &I2cRaw<'_>) -> Answer {
         if !self.bus.sub_mut().is_some_and(|n| n.boot0()) {
             return (Status::State, Vec::new());
         }

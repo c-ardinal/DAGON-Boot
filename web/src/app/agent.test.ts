@@ -23,7 +23,7 @@ describe('DAGON and its agent (site/src/content/docs/reference/agent-api.md)', (
   test('a question goes out at once, with the selection and the last turns, and no confirmation', async () => {
     const sent: unknown[] = [];
     const api: AgentApi = async (route, { body } = {}) =>
-      route === 'GET /v1/agent' ? json({ linked: true }) : (sent.push({ route, body }), json({ answer: '一文目です。\n\n続きです。', proposal: null }));
+      route === 'GET /v1/agent' ? json({ linked: true }) : (sent.push({ route, body }), json({ answer: '一文目です。\n\n後続の文です。', proposal: null }));
     const a = new Agent(api);
     await a.refresh();
     await a.ask('これは何が問題？', 'problem', { node: 'seg' });
@@ -31,9 +31,9 @@ describe('DAGON and its agent (site/src/content/docs/reference/agent-api.md)', (
     expect(sent[0]).toEqual({ route: 'POST /v1/agent/ask', body: { question: 'これは何が問題？', kind: 'problem', selection: { node: 'seg' }, history: [] } });
     expect((sent[1] as { body: { history: unknown[] } }).body.history).toEqual([
       { role: 'user', text: 'これは何が問題？' },
-      { role: 'dagon', text: '一文目です。\n\n続きです。' },
+      { role: 'dagon', text: '一文目です。\n\n後続の文です。' },
     ]);
-    expect(a.messages[1]).toMatchObject({ text: '一文目です。', more: '続きです。' });
+    expect(a.messages[1]).toMatchObject({ text: '一文目です。', more: '後続の文です。' });
     expect(a.thinking).toBe(false);
   });
 
@@ -45,7 +45,7 @@ describe('DAGON and its agent (site/src/content/docs/reference/agent-api.md)', (
     const rollback = { node: 'watch', failed_version: '1.1.0', returned_version: '1.0.0', reason: 'ROLLED BACK', node_state: { trial: false, last_reason: 3 } };
     let record: typeof rollback | null = rollback;
     a.record = async () => record;
-    await a.ask('失敗の理由を聞く', 'failure');
+    await a.ask('失敗理由の質問', 'failure');
     record = null;
     await a.ask('次は？', 'next');
     expect(sent.map((s) => 'rollback' in s.body)).toEqual([false, true, false]);
@@ -58,7 +58,7 @@ describe('DAGON and its agent (site/src/content/docs/reference/agent-api.md)', (
     await a.refresh();
     let read = (_: null) => undefined as void;
     a.record = () => new Promise((r) => (read = r));
-    const asked = a.ask('失敗の理由を聞く', 'failure');
+    const asked = a.ask('失敗理由の質問', 'failure');
     await now();
     expect([sent.length, a.thinking]).toEqual([0, true]);
     read(null);
@@ -139,11 +139,11 @@ describe('DAGON and its agent (site/src/content/docs/reference/agent-api.md)', (
   });
 
   test('the bubble holds the first part of an answer, at most 110 characters', () => {
-    expect(splitAnswer('短い答えです。')).toEqual({ text: '短い答えです。' });
+    expect(splitAnswer('短文の回答です。')).toEqual({ text: '短文の回答です。' });
     const long = 'あ'.repeat(130);
-    const s = splitAnswer(`${long}\n\n残り`);
+    const s = splitAnswer(`${long}\n\n後続`);
     expect(s.text).toHaveLength(110);
-    expect(s.more).toBe(`${long}\n\n残り`);
+    expect(s.more).toBe(`${long}\n\n後続`);
   });
 
   test('no UI text of DAGON names the provider: it comes from serve, in the linking step only', () => {
@@ -154,7 +154,7 @@ describe('DAGON and its agent (site/src/content/docs/reference/agent-api.md)', (
 
 describe('AI link refusals use the agreed words', () => {
   test('too long and terms of use: short label, plain detail', () => {
-    expect(AGENT.errors.AGENT_CONTEXT_TOO_LARGE).toMatchObject({ label: '× 長すぎる', text: '文字数が多すぎて送れません' });
+    expect(AGENT.errors.AGENT_CONTEXT_TOO_LARGE).toMatchObject({ label: '× 文字数超過', text: '文字数の超過で送信は不可です' });
     expect(AGENT.errors.AGENT_CONSENT_VERSION).toMatchObject({ label: '× 利用規約の確認', text: '利用規約が更新されています。連携のために確認してください。' });
   });
 });

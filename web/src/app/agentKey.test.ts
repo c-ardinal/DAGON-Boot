@@ -16,7 +16,7 @@ const status = (key: boolean): AgentStatus => ({
       provider: 'Anthropic',
       ways: [
         { id: 'claude-code', name: 'Claude Code', kind: 'command', available: true, key: null },
-        { id: 'api', name: 'API キー', kind: 'messages-http', available: key, key },
+        { id: 'api', name: 'APIキー', kind: 'messages-http', available: key, key },
       ],
     },
   ],
@@ -30,7 +30,7 @@ const status = (key: boolean): AgentStatus => ({
   never_sends: [],
 });
 
-/** serve as the page sees it: the key goes in, only 登録済み / 未登録 comes back. */
+/** serve as the page sees it: the key goes in, only 登録済 / 未登録 comes back. */
 function serve(fail?: { status: number; body: unknown }) {
   const sent: { route: string; params?: Record<string, string>; body?: unknown }[] = [];
   let stored = false;
@@ -47,7 +47,7 @@ function serve(fail?: { status: number; body: unknown }) {
 afterEach(() => vi.unstubAllGlobals());
 
 describe('the API key in the Console (site/src/content/docs/reference/agent-api.md, PUT/DELETE /v1/agent/key)', () => {
-  test('saving sends the key to serve once and clears the field; the status says 登録済み', async () => {
+  test('saving sends the key to serve once and clears the field; the status says 登録済', async () => {
     const s = serve();
     const a = new Agent(s.api);
     await a.refresh();
@@ -101,7 +101,7 @@ describe('the API key in the Console (site/src/content/docs/reference/agent-api.
     }
   });
 
-  test('the panel: a masked field, 登録済み / 未登録, and a red delete that says why on hover', async () => {
+  test('the panel: a masked field, 登録済 / 未登録, and a red delete that says why on hover', async () => {
     const a = new Agent(serve().api);
     a.status = status(true);
     const cli = { state: 'ready', hello: { workspace: 'w', key: false, key_id: null, features: [] }, has: () => false, jobs: [] };

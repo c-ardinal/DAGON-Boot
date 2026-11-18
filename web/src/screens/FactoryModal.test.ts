@@ -9,8 +9,8 @@ const job = (p: Partial<Job>): Job => ({ id: 7, kind: 'flash', state: 'queued', 
 const html = (j: Job | null, canWrite = true) =>
   render(FactoryModal, {
     props: {
-      node: { label: '[1] メイン', target: '[1] メイン（親機）· Waveshare RP2040-Touch-LCD' },
-      how: { label: 'USB', hint: 'BOOTSEL を押したまま USB をつなぐ' },
+      node: { label: '[1] メイン', target: '[1] メイン（コーディネータ）· Waveshare RP2040-Touch-LCD' },
+      how: { label: 'USB', hint: 'BOOTSELを押下した状態でUSBを接続' },
       canWrite,
       job: j,
       onwrite: () => undefined,
@@ -22,12 +22,12 @@ const html = (j: Job | null, canWrite = true) =>
 /** The footer button with this label: its attributes. */
 const button = (body: string, label: string) => new RegExp(`<button[^>]*>${label}</button>`).exec(body)?.[0] ?? '';
 
-describe('direct writing modal of a 子機', () => {
+describe('direct writing modal of a node', () => {
   const child = (j: Job | null) =>
     render(FactoryModal, {
       props: {
-        node: { label: '[2] 7セグ', target: '[2] 7セグ（子機）· NUCLEO-F401RE' },
-        how: { label: 'USB', hint: 'ST-LINK 側の USB をつなぐ' },
+        node: { label: '[2] 7セグ', target: '[2] 7セグ（ノード）· NUCLEO-F401RE' },
+        how: { label: 'USB', hint: 'ST-LINK側のUSBを接続' },
         canWrite: true,
         child: true,
         job: j,
@@ -38,12 +38,12 @@ describe('direct writing modal of a 子機', () => {
       },
     }).body;
 
-  test('says it is written directly because the 親機 does not reach it, and how to connect it', () => {
+  test('says it is written directly because the node connected to the PC does not reach it, and how to connect it', () => {
     const b = child(null);
-    expect(b).toContain('[2] 7セグ（子機）');
+    expect(b).toContain('[2] 7セグ（ノード）');
     expect(b).toContain(fill(WRITE.factory.childIntro, { node: '[2] 7セグ' }));
     expect(b).toContain(WRITE.factory.howToConnect);
-    expect(b).toContain('ST-LINK 側の USB をつなぐ');
+    expect(b).toContain('ST-LINK側のUSBを接続');
     expect(button(b, WRITE.run)).toContain('aria-disabled="false"');
   });
 
@@ -55,17 +55,17 @@ describe('direct writing modal of a 子機', () => {
 });
 
 describe('direct writing modal', () => {
-  test('before writing: why and how, 中止 and 書き込む, closable', () => {
+  test('before writing: why and how, 中止 and 書込, closable', () => {
     const b = html(null);
     expect(b).not.toContain('初回');
     expect(b).toContain(fill(WRITE.factory.intro, { node: '[1] メイン' }));
-    expect(b).toContain('BOOTSEL を押したまま USB をつなぐ');
+    expect(b).toContain('BOOTSELを押下した状態でUSBを接続');
     expect(button(b, WRITE.factory.cancel)).toContain('aria-disabled="false"');
     expect(button(b, WRITE.run)).toContain('aria-disabled="false"');
     expect(b).toContain(`aria-label="${NOTICE.close}"`);
   });
 
-  test('waiting for serve: 待機中, 中止 still possible, 書き込む held', () => {
+  test('waiting for serve: 待機中, 中止 still possible, 書込 held', () => {
     const b = html(job({ state: 'question', question: { id: 'q1', text: 'write?' } }));
     expect(b).toContain(WRITE.factory.waiting);
     expect(button(b, WRITE.factory.cancel)).toContain('aria-disabled="false"');
@@ -80,13 +80,13 @@ describe('direct writing modal', () => {
     expect(b).not.toContain(`aria-label="${NOTICE.close}"`);
   });
 
-  test('done: 書き込み済み, no actions left', () => {
+  test('done: 書込済, no actions left', () => {
     const b = html(job({ state: 'succeeded' }));
     expect(b).toContain(WRITE.state.done);
     expect(button(b, WRITE.run)).toBe('');
   });
 
-  test("failed: serve's reason and もう一度書き込む", () => {
+  test("failed: serve's reason and 再書込", () => {
     const b = html(job({ state: 'failed', result: { error: 'no RPI-RP2 drive' } }));
     expect(b).toContain(NOTICE.reason);
     expect(b).toContain('no RPI-RP2 drive');
@@ -119,7 +119,7 @@ describe('the modal press is the consent serve asks for', () => {
     expect(answerConsent(job({ kind: 'build', state: 'question', question: { id: 'q', text: '?' } }), answer, seen)).toBe(false);
     expect(answer).not.toHaveBeenCalled();
   });
-  test('このあと is for the 親機: a 子機 goes on from its own card', () => {
+  test('以降の手順 is for the node connected to the PC: a node goes on from its own card', () => {
     const props = { node: { label: '[2] seg', target: '[2] seg' }, how: [], canWrite: true, job: null, onwrite: () => undefined, oncancel: () => undefined, onclose: () => undefined, onmore: () => undefined } as never;
     expect(render(FactoryModal, { props }).body).toContain(WRITE.factory.after);
     expect(render(FactoryModal, { props: { ...(props as object), child: true } as never }).body).not.toContain(WRITE.factory.after);

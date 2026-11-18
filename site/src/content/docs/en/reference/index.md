@@ -8,7 +8,7 @@ sidebar:
 Every page in this part is generated from the source DAGON itself reads,
 and the repository's checks fail when a page and its source differ.
 
-- [Command line](/en/reference/cli/): every `dagon` command, from its clap definitions.
+- [Command line (dagon)](/en/reference/cli/): every `dagon` command, from its clap definitions.
 - [Serve HTTP API](/en/reference/serve-api/): every route of `dagon serve`.
 - [Events](/en/reference/events/) and [Ports](/en/reference/ports/): every
   event and port extensions use.

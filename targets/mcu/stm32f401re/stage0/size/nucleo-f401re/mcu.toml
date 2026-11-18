@@ -61,6 +61,11 @@ n = 336
 p = 4
 q = 7
 
+[codec.bootcore]
+flash_bytes = 2657
+ram_bytes = 0
+stack_bytes = 272
+
 [conformance.scratch]
 at = 134266880
 size = 16384

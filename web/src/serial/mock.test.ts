@@ -1,6 +1,6 @@
-// The in-memory hub reads every request with dagon-proto's reader before it
+// The in-memory PC-connected node reads every request with dagon-proto's reader before it
 // acts: an unknown must field and a malformed payload are refused on the wire,
-// for every command it serves, and nothing in the hub changes.
+// for every command it serves, and nothing in the node connected to the PC changes.
 import { describe, expect, test } from 'vitest';
 import sampleYaml from '../../../topology/sample.yaml?raw';
 import { encodeHelloReq, topo_targets, wireVersion } from '../wasm/dagon.ts';
@@ -48,12 +48,12 @@ async function ask(t: MockTransport, cmd: number, payload: number[]): Promise<Ui
   return f.payload;
 }
 
-/** What the hub shows of itself: its STATUS and HELLO, and the reboots it took. */
+/** What the node connected to the PC shows of itself: its STATUS and HELLO, and the reboots it took. */
 async function state(t: MockTransport): Promise<unknown> {
   return { status: [...(await ask(t, CMD.STATUS, []))], hello: t.helloOf('hub'), reboots: [...t.reboots] };
 }
 
-describe('the in-memory hub refuses what the reader refuses', () => {
+describe('the in-memory PC-connected node refuses what the reader refuses', () => {
   for (const c of CASES) {
     test(`${c.name}: an unknown must field and a malformed payload change nothing`, async () => {
       const t = new MockTransport();

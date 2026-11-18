@@ -1,7 +1,7 @@
 // The link to `dagon serve`: the passphrase from
 // the URL fragment kept in sessionStorage, API calls with it as a Bearer
 // token, and the event WebSocket for job progress, logs, results, questions
-// and the hub hand-over. Keys never come here: hello reports only whether
+// and the coordinator hand-over. Keys never come here: hello reports only whether
 // a key exists and its id. Paths are never sent (serve takes them from
 // dagon.toml) except where to open or make a project, chosen from serve's own
 // GET /v1/fs list.
@@ -79,7 +79,7 @@ export type ProjectResult = 'opened' | 'missing' | 'key' | 'busy' | 'exists' | '
 export interface Layout {
   /** The file's format number. */
   format?: number;
-  /** 呼び名 by node id. */
+  /** 表示名 by node id. */
   names?: Record<string, string>;
   /** Editor positions by node id. */
   positions?: Record<string, { x: number; y: number }>;
@@ -156,7 +156,7 @@ export class Cli {
   /** The open project's definitions did not load (GET /v1/definitions 500): the builtin set is not used in their place. */
   defsFailed = $state(false);
   jobs = $state<Job[]>([]);
-  /** CLI asked for the hub's port (device.need) and has not returned it yet. */
+  /** CLI asked for the coordinator's port (device.need) and has not returned it yet. */
   holdsHub = $state(false);
 
   private pass: string | null = null;
@@ -167,14 +167,14 @@ export class Cli {
    * (the page has shown why). Every job asks it in `start`.
    */
   guard: (kind: 'gen' | 'build' | 'release' | 'flash') => boolean = () => false;
-  /** Called when the CLI needs the hub (the page closes Web Serial first) and when it returns it. */
+  /** Called when the CLI needs the coordinator (the page closes Web Serial first) and when it returns it. */
   onDevice: (need: boolean) => void | Promise<void> = () => undefined;
 
   constructor(deps: CliDeps = {}) {
     this.d = {
       fetch: deps.fetch,
       socket: deps.socket ?? ((u) => new WebSocket(u)),
-      // Outside a browser (tests rendering the page) there is no serve to reach: an empty store keeps K0.
+      // Outside a browser (tests rendering the page) there is no serve to reach: an empty store keeps the state `none`.
       storage: deps.storage ?? globalThis.sessionStorage ?? { getItem: () => null, setItem: () => undefined },
       location: deps.location ?? globalThis.location,
       history: deps.history ?? globalThis.history,
@@ -200,7 +200,7 @@ export class Cli {
   /**
    * Takes the passphrase from the URL fragment into sessionStorage (and out
    * of the URL), then asks /v1/hello and opens the event stream. A page not
-   * served by `dagon serve` (no passphrase) stays K0.
+   * served by `dagon serve` (no passphrase) stays `none`.
    */
   async connect(): Promise<void> {
     const loc = this.d.location;
@@ -328,7 +328,7 @@ export class Cli {
    * PUT /v1/topology: the 構成 YAML into the project's topology.yaml. The CLI
    * checks it too: `invalid` when it refuses the 構成 (422), `busy` while a
    * job holds the project (409), `failed` for anything else or no answer.
-   * Parts not updatable yet (V-23, information only) are saved.
+   * Parts updating skips (V-23, information only) are saved.
    */
   async saveTopology(yaml: string): Promise<SaveResult> {
     if (this.state !== 'ready') return 'failed';
@@ -381,7 +381,7 @@ export class Cli {
     return new Uint8Array(await r.arrayBuffer());
   }
 
-  /** GET /v1/release/latest: the project's latest .dgb ("最新のリリースを使う"); null when there is none. */
+  /** GET /v1/release/latest: the project's latest .dgb ("最新リリースの使用"); null when there is none. */
   async latestRelease(): Promise<Uint8Array | null> {
     if (this.state !== 'ready') return null;
     const r = await this.call('GET /v1/release/latest');
@@ -452,7 +452,7 @@ export class Cli {
     return this.projectCall('POST /v1/project/init', { path }, true);
   }
 
-  /** GET /v1/layout (feature `layout`): the project's 呼び名 and positions; null when there are none yet. */
+  /** GET /v1/layout (feature `layout`): the project's 表示名 and positions; null when there are none yet. */
   async loadLayout(): Promise<Layout | null> {
     if (!this.has('layout')) return null;
     const r = await this.call('GET /v1/layout');
@@ -511,7 +511,7 @@ export class Cli {
     if (r?.ok) this.hello = (await r.json()) as Hello;
   }
 
-  /** "最初からやり直す": the jobs this page shows are its records too (serve's files stay). */
+  /** "リスタート": the jobs this page shows are its records too (serve's files stay). */
   clearJobs(): void {
     this.jobs = [];
   }

@@ -80,8 +80,11 @@ class Generated(unittest.TestCase):
 
     def test_every_command_has_its_section(self):
         text = gen.cli_markdown()
-        top = re.search(r"Commands:\n(.*?)\n\n", text, re.S).group(1)
-        for name in re.findall(r"^  (\w[\w-]*) ", top, re.M):
+        # The top help lists the commands under task headings, before "Options:".
+        top = re.search(r"^## dagon\n\n```text\n(.*?)\nOptions:\n", text, re.S | re.M).group(1)
+        names = re.findall(r"^  (\w[\w-]*) ", top, re.M)
+        self.assertGreater(len(names), 10)
+        for name in names:
             if name != "help":
                 self.assertIn(f"## dagon {name}\n", text, name)
 
@@ -185,14 +188,14 @@ class Wording(unittest.TestCase):
         for p in pages:
             rel = p.relative_to(ROOT).as_posix()
             for n, line in enumerate(p.read_text(encoding="utf-8").splitlines(), 1):
-                # The README's opening calls what is written after the first time 更新用イメージ: a kind of image, not the act.
-                if "更新" in (line.replace("更新用イメージ", "") if p.name == "README.md" else line):
+                # The README's opening, and the landing page that repeats it, call what is written after the first time 更新用イメージ: a kind of image, not the act.
+                if "更新" in (line.replace("更新用イメージ", "") if p.name in ("README.md", "index.mdx") else line):
                     found.append(f"{rel}:{n}")
         self.assertEqual(found, [])
 
     # Words the Japanese pages do not use for DAGON's own things.
     NOT_SAID = ["ブートコア", "給餌", "見守り", "武装", "運び手", "開始者", "トライアル", "将来の", "マイコンのパッケージ", "ボードのパッケージ", "MCUのパッケージ", "ルールます", "破損していないの記録",
-                # パッケージ is the .dgb file and nothing else; the verb is 書き込む, in full.
+                # パッケージ is the .dgb file and nothing else; the verb is 書込する, in full.
                 "npmパッケージ", "Cargoパッケージ", "書込み", "初回書", "書く前",
                 # One word for one thing.
                 "クレート",
@@ -219,29 +222,52 @@ class Wording(unittest.TestCase):
             text = (llms.DOCS / rel).read_text(encoding="utf-8")
             self.assertEqual(re.findall(r"(?i)plug-in|\bboot\s+core\b", text), [], rel)
 
-    # Status of the code against the design is said once, on the limitations page.
-    STATUS = re.compile(r"未確認|まだ|現在|今は|実測|確かめていません|するまでは|測定で確かめ"
-                        r"|\byet\b|\bcurrently\b|\bfor now\b|\btoday\b|\bnot measured\b|\buntil then\b|\bto be confirmed\b|\bonce\b.*\bmeasured\b")
+    # Status of the code against the design is said once, in the limitations page's gap list.
+    # Planned with a capital is the status heading; planned in lower case is a word of the design (host.deploy.planned).
+    # scripts/test_markers.py already refuses its project-status words everywhere.
+    STATUS = re.compile(r"未確認|まだ|現在|今は|今後|予定|実測|確かめていません|するまでは|測定で確かめ"
+                        r"|\byet\b|\bcurrently\b|\bfor now\b|\btoday\b|\bPlanned\b|\bnot measured\b|\buntil then\b|\bto be confirmed\b|\bonce\b.*\bmeasured\b")
     # What the status words may still appear in, and why.
     STATUS_QUOTES = [
         *NOTICE_LINES,  # the alpha notice, word for word
-        "まだ使えない",  # how-to/swap-link quotes the Console's label and problem name
-        "not available yet on rp2040",  # how-to/swap-link quotes dagon gen's refusal
+        "BeforeDecision → Planned → Committed",  # a state of the boot sequence
+        "自分の予定で",  # when DAGON does a thing, not the state of the code
     ]
+    # The limitations page's gap section, the one place a gap between the design and the code is said.
+    GAP_HEADINGS = ("## 設計とコードの差異", "## Where the code differs from the design")
 
-    def test_status_words_only_on_the_limitations_page(self):
+    def status_lines(self, p):
+        lines = p.read_text(encoding="utf-8").splitlines()
+        if p.name == "limitations.md":
+            heads = [n for n, line in enumerate(lines) if line in self.GAP_HEADINGS]
+            self.assertEqual(len(heads), 1, f"{p}: one gap section")
+            end = next((n for n in range(heads[0] + 1, len(lines)) if lines[n].startswith("## ")), len(lines))
+            lines = [*lines[: heads[0]], *[""] * (end - heads[0]), *lines[end:]]
+        for n, line in enumerate(lines, 1):
+            for quote in self.STATUS_QUOTES:
+                line = line.replace(quote, "")
+            if self.STATUS.search(line):
+                yield n
+
+    def test_status_words_only_in_the_limitations_gap_list(self):
         pages = [ROOT / "README.md", ROOT / "README.en.md", *llms.DOCS.rglob("*.md*")]
         found = []
         for p in pages:
             rel = p.relative_to(llms.DOCS).as_posix() if p.is_relative_to(llms.DOCS) else p.name
-            if p.name == "limitations.md":
-                continue
-            for n, line in enumerate(p.read_text(encoding="utf-8").splitlines(), 1):
-                for quote in self.STATUS_QUOTES:
-                    line = line.replace(quote, "")
-                if self.STATUS.search(line):
-                    found.append(f"{rel}:{n}")
+            found += [f"{rel}:{n}" for n in self.status_lines(p)]
         self.assertEqual(found, [])
+
+    def test_a_status_word_before_the_gap_list_is_found(self):
+        with tempfile.TemporaryDirectory() as d:
+            page = pathlib.Path(d) / "limitations.md"
+            page.write_text("## By design\n\n- 今後の予定\n\n## Where the code differs from the design\n\n- not yet\n", encoding="utf-8")
+            self.assertEqual(list(self.status_lines(page)), [3])
+
+    def test_a_status_word_in_a_section_after_the_gap_list_is_found(self):
+        with tempfile.TemporaryDirectory() as d:
+            page = pathlib.Path(d) / "limitations.md"
+            page.write_text("## Where the code differs from the design\n\n- not yet\n\n## Notes\n\n- Planned\n", encoding="utf-8")
+            self.assertEqual(list(self.status_lines(page)), [7])
 
     def test_no_page_says_the_case_is_never_opened(self):
         # One connection writes every node; whether the case opens depends on where that port is.
@@ -341,6 +367,23 @@ class Architecture(unittest.TestCase):
         named += [n for _, cells in a.DEVICE_COLS for c in cells.values() for n in c] + [n for c in a.MCU.values() for n in c]
         self.assertEqual(sorted(named), sorted(a.COMPONENTS))
 
+    def test_each_component_the_tree_lacks_has_one_gap_source(self):
+        a = gen.architecture
+        # The catalogs' pages are checked against dagon_events::PORTS by dagon-catalog's tests.
+        ports = set(re.findall(r"^\| `(\w+)` \|", (llms.DOCS / "en/reference/ports.md").read_text(encoding="utf-8"), re.M))
+        gaps = (llms.DOCS / "en/explanation/limitations.md").read_text(encoding="utf-8")
+        listed = set(re.findall(r"^- `(\w+)`:", gaps.split(self.CATALOG_GAPS, 1)[1].split("<!--", 1)[0], re.M))
+        for name, gap in a.NOT_IN_TREE.items():
+            with self.subTest(name=name):
+                self.assertIn(name, a.COMPONENTS)
+                self.assertNotIn(name, ports, "a port's gap is its PORTS record's")
+                if isinstance(gap, str):
+                    self.assertIn(gap, listed, "the record this component is part of lists its gap")
+                else:
+                    self.assertEqual(len(gap), 2)
+
+    CATALOG_GAPS = "<!-- generated from dagon_events::PORTS: DAGON_BLESS=1 cargo test -p dagon-catalog --test docs -->"
+
     def test_the_colours_are_the_consoles_tokens(self):
         tokens = (ROOT / "web/src/styles/tokens.css").read_text(encoding="utf-8")
         for colour in gen.architecture.COLOURS:
@@ -368,13 +411,14 @@ class JapaneseSpacing(unittest.TestCase):
 
     def test_the_japanese_sources_have_no_such_space(self):
         values = [*gen.i18n().values(), *tomllib.loads((ROOT / "site/i18n/catalog-ja.toml").read_text(encoding="utf-8")).values(),
-                  *(ja for ja, _ in architecture.COMPONENTS.values())]
+                  *(ja for ja, _ in architecture.COMPONENTS.values()),
+                  *(gap[0] for gap in architecture.NOT_IN_TREE.values() if isinstance(gap, tuple))]
         self.assertEqual([v for v in values if spaces(v)], [])
 
     def test_what_the_rule_finds_and_leaves(self):
         for text in ("DAGON とは", "1 か所", "`dagon new` と", "は `x`", "[Rust](https://rustup.rs) だけ", "**DAGON** は", "---\ntitle: DAGON を試す\n---\n"):
             self.assertTrue(spaces(text), text)
-        for text in ("DAGON Console", "`a の b`", "```\nDAGON を\n```\n", "### 1.1 名前", "| 親機 |", "- 名前", "**名前。** DAGON", "**`x`** の", "50 ms"):
+        for text in ("DAGON Console", "`a の b`", "```\nDAGON を\n```\n", "### 1.1 名前", "| ノード |", "- 名前", "**名前。** DAGON", "**`x`** の", "50 ms"):
             self.assertEqual(spaces(text), [], text)
 
 
@@ -438,7 +482,7 @@ class GeneratedJapanese(unittest.TestCase):
 
     def test_the_japanese_pages_say_what_stays_english(self):
         for rel, words in (("reference/cli.md", "コマンドの説明"), ("reference/rust-api.md", "rustdocの本文")):
-            self.assertIn(f"{words}は元のソースのままで、英語です。", (llms.DOCS / rel).read_text(encoding="utf-8"))
+            self.assertIn(f"{words}はソースの原文のままで、英語です。", (llms.DOCS / rel).read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":

@@ -381,10 +381,10 @@ fn kind_variant(k: LinkKind) -> &'static str {
     k.variant()
 }
 
-/// `{{uplink}}` and `{{downlinks}}` of node `n`: its uplink kind (a 親機's
-/// declared one, else USB CDC; a 子機's link from its 親機) and its
+/// `{{uplink}}` and `{{downlinks}}` of node `n`: its uplink kind (a coordinator's
+/// declared one, else USB CDC; for `role: node`, its link from the node nearer the PC) and its
 /// downlink kinds, as Rust paths into its MCU package. A hop its firmware
-/// does not implement yet is refused here, by name.
+/// does not run is refused here, by name.
 pub fn hop_placeholders(
     reg: &Registry,
     t: &Topology,
@@ -395,7 +395,7 @@ pub fn hop_placeholders(
     let path = |k: LinkKind| format!("{krate}::links::Kind::{}", kind_variant(k));
     let refuse = |hop: String, k: LinkKind| {
         format!(
-            "{hop} over {}: not available yet on {} (choose another kind in the 構成)",
+            "{hop} over {}: the firmware of {} does not run this link kind (choose another kind in the 構成)",
             k.name(),
             n.mcu
         )
@@ -441,13 +441,13 @@ pub fn hop_placeholders(
 ///   (`defs::dma::assign`), empty when the MCU lists none for it;
 /// - `{{down_i2c}}`, `{{down_i2c_sda}}`, `{{down_i2c_scl}}`,
 ///   `{{down_i2c_hz}}` and `{{down_uart_tx}}`, `{{down_uart_rx}}`,
-///   `{{down_uart_baud}}`: a 親機's I2C bus and UART link to its 子機
+///   `{{down_uart_baud}}`: a coordinator's I2C bus and UART link to the nodes at their other ends
 ///   (GPIO numbers; speeds default as in wiring.rs), with `{{if_down_i2c}}`
 ///   / `{{if_down_uart}}` `all()` when it has one, `any()` (the code is
 ///   left out; its names then render as placeholders that still parse)
 ///   when not.
 ///
-/// The template serves one I2C bus and one UART link: a 親機 with more, or
+/// The template serves one I2C bus and one UART link: a coordinator with more, or
 /// an I2C node whose link names no pins the MCU knows, is refused, naming
 /// the links, rather than wiring one of them.
 pub fn wiring_placeholders(
@@ -840,7 +840,7 @@ fn node_files(
     let f = find_for(&root, &want).ok_or_else(|| {
         format!(
             "no board support package for {want:?} in {} (looked for {} or a \
-             package declaring it); it may not exist yet",
+             package declaring it)",
             root.display(),
             conventional_name(&want)
         )
@@ -848,8 +848,7 @@ fn node_files(
     let name = f.name;
     let hops = hop_placeholders(reg, t, n)?;
     let wiring = wiring_placeholders(reg, t, n);
-    let files =
-        template_for(&f.dir).ok_or_else(|| format!("{name} has no project template yet"))?;
+    let files = template_for(&f.dir).ok_or_else(|| format!("{name} has no project template"))?;
     files
         .into_iter()
         .map(|(rel, text)| Ok((rel, render(&text, n, &hops, &wiring, src, base)?)))
@@ -879,7 +878,7 @@ pub fn gen(
         if !only.is_empty() && !only.contains(&n.id) {
             continue;
         }
-        // A hop its firmware cannot do yet stops gen, by name.
+        // A hop its firmware does not run stops gen, by name.
         hop_placeholders(reg, t, n)?;
         // A node folder reached through a link is the user's: refused, as
         // for the generated protection files (the node is reported skipped).
@@ -1140,6 +1139,38 @@ const CLAUDE_FILES: [(&str, &str); 4] = [
     ),
 ];
 
+/// The documentation's words page: the one list of DAGON's words, which
+/// the project's CLAUDE.md carries in place of `WORDS_AT`.
+const WORDS_PAGE: &str = include_str!("../../../site/src/content/docs/explanation/words.md");
+const WORDS_AT: &str = "<!-- words -->";
+
+/// The bullet items of the words page (continuation lines included).
+fn word_list() -> String {
+    let mut fences = 0;
+    let mut in_item = false;
+    let mut out = Vec::new();
+    for line in WORDS_PAGE.lines() {
+        if fences < 2 {
+            fences += usize::from(line.trim_end() == "---");
+            continue;
+        }
+        in_item = line.starts_with("- ") || (in_item && line.starts_with("  "));
+        if in_item {
+            out.push(line);
+        }
+    }
+    out.join("\n")
+}
+
+/// A file's text as `dagon new` writes it: CLAUDE.md with the word list.
+fn project_text(file: &str, text: &str) -> String {
+    if file == "CLAUDE.md" {
+        text.replace(WORDS_AT, &word_list())
+    } else {
+        text.to_string()
+    }
+}
+
 /// `path` as its folder and its last name, for the genfs calls.
 fn split(path: &Path) -> Result<(&Path, String), String> {
     let name = path
@@ -1175,7 +1206,9 @@ pub fn new_project(
     let written = files
         .into_iter()
         .chain(CLAUDE_FILES)
-        .try_for_each(|(f, text)| genfs::write(dir, &genfs::Rel::new(f)?, text.as_bytes()));
+        .try_for_each(|(f, text)| {
+            genfs::write(dir, &genfs::Rel::new(f)?, project_text(f, text).as_bytes())
+        });
     let made = written.and_then(|_| init_project(dir, name, "topology.yaml", keys, src));
     let mut made = match made {
         Ok(m) => m,

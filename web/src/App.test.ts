@@ -26,7 +26,7 @@ function stubBrowser(search: string, serial: unknown) {
 
 afterEach(() => vi.unstubAllGlobals());
 
-describe('失敗の理由を聞く', () => {
+describe('失敗理由の質問', () => {
   test('every modal offering it goes through the one path that closes the modal', () => {
     const app = new TextDecoder().decode(readFileSync(new URL('./App.svelte', import.meta.url)));
     expect(app).not.toContain('askDagon(BUILD.askAgent');
@@ -43,7 +43,7 @@ describe('first paint without dagon-wasm', () => {
     expect(body).not.toContain(DEFINE.listHeading);
   });
 
-  test('not served by dagon serve: the choices are unavailable and the band says how to start it (C11)', () => {
+  test('not served by dagon serve: the choices are unavailable and the band says how to start it', () => {
     stubBrowser('', { addEventListener: () => undefined });
     const { body } = render(App);
     expect(body).toContain(CLI_LINK.needCli);

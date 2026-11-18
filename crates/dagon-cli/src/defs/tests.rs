@@ -1,5 +1,5 @@
 //! A project-defined MCU and board go through every project command with
-//! no code change: topology check, compile, image sign, release build and
+//! no code change: topology check, compile, image, release and
 //! the first-write files.
 
 use std::path::{Path, PathBuf};
@@ -192,7 +192,7 @@ fn a_project_defined_mcu_and_board_go_through_every_command() {
     .unwrap();
     assert!(!std::fs::read(&bin).unwrap().is_empty());
 
-    // image sign, both app slots of the fake node
+    // image (sign), both app slots of the fake node
     let imgs = dir.join("imgs");
     for (slot, want_at) in [("a", 0x0011_0200), ("b", 0x0015_0200)] {
         let out = imgs.join(format!("seg-{slot}.img"));
@@ -217,7 +217,7 @@ fn a_project_defined_mcu_and_board_go_through_every_command() {
         assert_eq!((h.mcu_id, h.load_addr), (0x7F01, want_at), "slot {slot}");
     }
 
-    // release build
+    // release (build)
     let dgb = dir.join("r.dgb");
     crate::commands::release_build(&crate::cli::args(&[
         &s(&imgs),

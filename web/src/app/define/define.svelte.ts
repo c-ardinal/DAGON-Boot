@@ -33,8 +33,8 @@ const HISTORY = 100;
 
 /**
  * Whether 運用 can be entered: a 構成 with no problems. Parts
- * updating does not reach yet are valid and do not stop it; they
- * are skipped there. `empty` and `problems` say M69.
+ * updating does not reach are valid and do not stop it; they
+ * are skipped there. `empty` and `problems` say MODE.lockedProblems.
  */
 export type Operable = 'ok' | 'empty' | 'problems';
 
@@ -70,8 +70,8 @@ export class Define {
   readonly errors = $derived(this.problems.filter((p) => p.severity === 'error').length);
   readonly warnings = $derived(this.problems.filter((p) => p.severity === 'warning').length);
   readonly config: Config = $derived(toConfig(this.doc, supportedBoards()));
-  /** Nodes updating skips: shown as 書き込めない, never a problem. */
-  readonly notYet = $derived(this.config.nodes.filter((n) => n.notYet).length);
+  /** Nodes updating skips: shown as 書込不可, never a problem. */
+  readonly skipped = $derived(this.config.nodes.filter((n) => n.skip).length);
   readonly operable: Operable = $derived(
     this.doc.topo.nodes.length === 0
       ? 'empty'
@@ -140,23 +140,23 @@ export class Define {
     this.revision++;
   }
 
-  /** "見本を置く": the sample with its names (undoable). */
+  /** The sample with its names (undoable). */
   placeSample(): void {
     if (!this.apply(fromYaml(SAMPLE_YAML, Object.fromEntries(SAMPLE_CONFIG.nodes.map((n) => [n.id, n.name]))))) return;
     this.selected = null;
   }
 
-  /** "置く" from the node list (A01). */
+  /** "配置" from the node list (announced as placed). */
   place(board: string, product: string): void {
     const r = place(this.doc, board);
     if (!r.id || !this.apply(r.doc)) return;
     this.selected = `node:${r.id}`;
-    this.status = ANNOUNCE.A01(product, r.doc.topo.nodes.find((n) => n.id === r.id)!.role === 'coordinator');
+    this.status = ANNOUNCE.placed(product, r.doc.topo.nodes.find((n) => n.id === r.id)!.role === 'coordinator');
   }
 
   /**
-   * A part dropped on the canvas: placed as "置く" places it (DEFS: the board decides
-   * 親機 or 子機), then, when dropped just under a card, linked under it in the same one edit.
+   * A part dropped on the canvas: placed as "配置" places it (DEFS: the board decides
+   * coordinator or node), then, when dropped just under a card, linked under it in the same one edit.
    */
   placeAt(part: { board: string } | { mcu: string }, name: string, parent: string | null): void {
     const r = 'board' in part ? place(this.doc, part.board) : placeMcu(this.doc, part.mcu);
@@ -164,10 +164,10 @@ export class Define {
     const next = parent ? connect(r.doc, r.id, parent) : r.doc;
     if (!this.apply(next)) return;
     this.selected = `node:${r.id}`;
-    this.status = ANNOUNCE.A01(name, next.topo.nodes.find((n) => n.id === r.id)!.role === 'coordinator');
+    this.status = ANNOUNCE.placed(name, next.topo.nodes.find((n) => n.id === r.id)!.role === 'coordinator');
   }
 
-  /** A port drag: node `id` under `parent`, with the link "つなぐ先" would make. */
+  /** A port drag: node `id` under `parent`, with the link "PC側のノード" would make. */
   link(id: string, parent: string): void {
     this.apply(connect(this.doc, id, parent));
   }
@@ -193,18 +193,18 @@ export class Define {
     return null;
   }
 
-  /** "置く" by MCU: a node without a board; nothing is asked for it. */
+  /** "配置" by MCU: a node without a board; nothing is asked for it. */
   placeMcu(mcu: string, name: string): void {
     const r = placeMcu(this.doc, mcu);
     if (!r.id || !this.apply(r.doc)) return;
     this.selected = `node:${r.id}`;
-    this.status = ANNOUNCE.A01(name, r.doc.topo.nodes.find((n) => n.id === r.id)!.role === 'coordinator');
+    this.status = ANNOUNCE.placed(name, r.doc.topo.nodes.find((n) => n.id === r.id)!.role === 'coordinator');
   }
 
   /** What the user asked to delete (`node:id` / `link:to`): a modal confirms before anything goes. */
   askRemove = $state<string | null>(null);
 
-  /** The trash button, Delete key or the table's 消す: nothing is deleted until confirmed. */
+  /** The trash button, Delete key or the table's 削除: nothing is deleted until confirmed. */
   requestRemove(key: string | null = this.selected): void {
     if (!key || this.guard('edit')) return;
     this.askRemove = key;
@@ -218,7 +218,7 @@ export class Define {
     this.removeSelected(key);
   }
 
-  /** Deletes the node or link at `key` (A03). */
+  /** Deletes the node or link at `key` (announced as removed). */
   removeSelected(key: string | null = this.selected): void {
     const s = key;
     if (!s) return;
@@ -226,7 +226,7 @@ export class Define {
       const id = s.slice(5);
       const name = this.doc.names[id] ?? id;
       if (!this.apply(removeNode(this.doc, id))) return;
-      this.status = ANNOUNCE.A03(name);
+      this.status = ANNOUNCE.removed(name);
     } else if (s.startsWith('link:')) {
       const t = this.doc.topo;
       const i = (t.links ?? []).findIndex((l) => linkKey(t, l) === s);
@@ -235,14 +235,14 @@ export class Define {
     if (this.selected === s) this.selected = null;
   }
 
-  /** "直す" on a problem: select its item and focus its field. */
+  /** "修正" on a problem: select its item and focus its field. */
   fix(p: Problem): void {
     this.selected = p.select;
     this.focusField = p.field;
     this.focusRequest++;
   }
 
-  /** "書き出す": the YAML text and a file name. */
+  /** "YAML出力": the YAML text and a file name. */
   exportYaml(): { name: string; text: string } {
     const text = toYaml(this.doc.topo);
     const s = this.source;
@@ -251,7 +251,7 @@ export class Define {
     return { name: `${this.doc.topo.name || 'topology'}.yaml`, text: kept };
   }
 
-  /** "読み込む": a YAML file; C09 when it does not parse. */
+  /** "YAML取込": a YAML file; DEFINE.unreadableChip when it does not parse. */
   importYaml(text: string): boolean {
     try {
       const doc = fromYaml(text);
@@ -268,7 +268,7 @@ export class Define {
     return true;
   }
 
-  /** 呼び名 read only after the project opened: under the ones here, in the undo history too, so undoing cannot drop them. No edit. */
+  /** 表示名 read only after the project opened: under the ones here, in the undo history too, so undoing cannot drop them. No edit. */
   adoptNames(names: Record<string, string>): void {
     const under = (doc: Doc): Doc => ({ ...doc, names: { ...names, ...doc.names } });
     this.doc = under(this.doc);
@@ -290,7 +290,7 @@ export class Define {
     this.saveFailure = null;
   }
 
-  /** "最初からやり直す": nothing placed and no history (the project's files stay). */
+  /** "リスタート": nothing placed and no history (the project's files stay). */
   reset(): void {
     this.load(emptyDoc());
     this.status = '';
@@ -299,7 +299,7 @@ export class Define {
   }
 
   /**
-   * "ファイルの構成を取り込む": the 構成 a release was made for
+   * "ファイルの構成の取込": the 構成 a release was made for
    * replaces this one, keeping the names and names of the nodes it
    * shares; undoable.
    */

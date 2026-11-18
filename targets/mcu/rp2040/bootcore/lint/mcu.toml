@@ -82,6 +82,16 @@ usb_postdiv1 = 6
 usb_postdiv2 = 5
 usb_refdiv = 1
 
+[codec.bootcore]
+flash_bytes = 2912
+ram_bytes = 0
+stack_bytes = 277
+
+[codec.relay]
+flash_bytes = 9990
+ram_bytes = 0
+stack_bytes = 561
+
 [connection]
 hint = "BOOT押下の状態でUSBを接続後、書込してください。"
 label = "USB（BOOT押下）"

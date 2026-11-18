@@ -1,5 +1,5 @@
 //! The 構成 a release was made for, read back from its topology item as a
-//! topology the page can edit ("ファイルの構成を取り込む").
+//! topology the page can edit (the page's import of a file's 構成).
 //! The canonical binary carries no ids, names, boards or node pins, so those
 //! come from the 構成 on the page wherever a node's tag matches; the rest is
 //! the binary's, each link end's port named from its MCU definition. Compiling

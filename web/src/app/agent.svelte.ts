@@ -201,7 +201,7 @@ export class Agent {
     }
   }
 
-  /** A modal's 失敗の理由を聞く: the modal closes first, because its scrim would cover the answer; a stopped question leaves it open. */
+  /** A modal's 失敗理由の質問: the modal closes first, because its scrim would cover the answer; a stopped question leaves it open. */
   async askWhy(isStopped: () => boolean, close: () => void, selection?: Selection): Promise<void> {
     if (isStopped()) return;
     close();

@@ -320,6 +320,18 @@ impl SimNode {
         }
     }
 
+    /// The node answers the commands of `front` before its agent does (a
+    /// relay's): its agent's HELLO and CAPS name them too.
+    pub fn also_serves(&mut self, front: dagon_proto::payload::CmdSet) {
+        self.agent.also_serves(front);
+    }
+
+    /// The most payload bytes an answer to this node's requester may
+    /// have (`Agent::ceiling`).
+    pub fn ceiling(&self) -> dagon_proto::handler::Ceiling {
+        self.agent.ceiling()
+    }
+
     /// Whether the application answers on its link right now.
     pub fn responsive(&self) -> bool {
         matches!(self.run, Run::App(_)) && !(self.on_trial && self.trial_app == TrialApp::Silent)

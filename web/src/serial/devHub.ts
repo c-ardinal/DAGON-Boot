@@ -7,7 +7,7 @@ import type { Transport } from './transport.ts';
 /** Simulated ms per wall ms for the stand-in simulator: real time. */
 const REAL_PACE = 1;
 
-/** A stand-in hub, the clock dagon-host runs on with it, and the project files dagon serve would hand out. */
+/** A stand-in PC-connected node, the clock dagon-host runs on with it, and the project files dagon serve would hand out. */
 export interface DevHub {
   transport: Transport;
   clock?: LinkClock;
@@ -36,11 +36,11 @@ const FIXTURES = {
 };
 
 /**
- * Stand-in hub picked by the page URL instead of Web Serial, or null for the
+ * Stand-in PC-connected node picked by the page URL instead of Web Serial, or null for the
  * real device (development builds only).
- * - `?mock`: the in-memory hub (`?mock=silent`: a device that never
+ * - `?mock`: the in-memory PC-connected node (`?mock=silent`: a device that never
  *   answers; `&quiet=uart,i2c:66`: nodes that do not answer; `&away`: after
- *   its REBOOT the hub stays away until chosen again; `&factory=uart`: nodes
+ *   its REBOOT the node connected to the PC stays away until chosen again; `&factory=uart`: nodes
  *   answering as their factory agent).
  * - `?sim`: the simulator (dagon-sim through dagon-wasm, ROM loader
  *   included) on its own clock; `&wipe` erases the F401 first, `&fail` makes

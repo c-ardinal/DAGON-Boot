@@ -51,8 +51,8 @@ MARKERS = [
 ]
 COMPILED = [(what, re.compile(p)) for what, p in MARKERS]
 
-# The one notice naming the event, word for word, in the four files that carry it; no pattern is loosened for it.
-# Its two sentences sit on two lines in the READMEs and on one line on the site.
+# The one notice naming the event, word for word, in the READMEs only (the site carries no dated notice);
+# no pattern is loosened for it. Its two sentences sit on two lines.
 NOTICE_JA_LINES = (
     '2026/11/8現在、"Built with Claude: Japan 2026"向けに3種類のマイコンだけがサポートされているα版の状態です。',
     "正式リリースまでに破壊的変更が行われるリスクが有ることをご理解下さい。",
@@ -66,8 +66,6 @@ NOTICE_EN = " ".join(NOTICE_EN_LINES)
 NOTICE_FILES = {
     "README.md": NOTICE_JA_LINES,
     "README.en.md": NOTICE_EN_LINES,
-    "site/src/content/docs/index.mdx": (NOTICE_JA,),
-    "site/src/content/docs/en/index.mdx": (NOTICE_EN,),
 }
 
 # Values that look like a marker but are fixed by someone else.

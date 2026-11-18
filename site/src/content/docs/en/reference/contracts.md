@@ -13,6 +13,10 @@ every component with its version and the format numbers it reads and
 writes, as `compat.toml` holds them. The rules for changing them are in
 [Versions and releases](/en/explanation/versioning/).
 
+A component's version is its last release (0.1.0 before its first); the
+format numbers are this tree's. Changes since the tag
+`<component>-v<version>` are unreleased until its next version.
+
 ## Contracts
 
 | Contract | Format | Where the number is written |
@@ -34,7 +38,7 @@ writes, as `compat.toml` holds them. The rules for changing them are in
 
 ## Components
 
-| Component | Version | Packages | Formats |
+| Component | Version (last release) | Packages | Formats (this tree) |
 |---|---|---|---|
 | `cli` | 0.1.0 | `dagon-cli` | `wire` 2, `image-header` 1, `state-log` 1, `manifest` 1, `bundle` 1, `topology-bin` 2, `topology-yaml` 2, `definitions` 3, `serve-api` 1, `layout` 1, `event` 1, `extension-manifest` 1, `boot-program` 1, `project` 1 |
 | `boot-rp2040` | 0.1.0 | `dagon-rp2040-stage0`, `dagon-rp2040-bootcore` | `image-header` 1, `state-log` 1, `event` 1 |

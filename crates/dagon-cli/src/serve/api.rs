@@ -216,7 +216,7 @@ pub fn handle(server: &Arc<Server>, req: &Request) -> Response {
         ("POST", ["conform"]) => start(server, req, "conform", job_conform),
         ("GET", ["conform", node]) => conform_get(server, node),
         ("POST", ["ai", "topology"]) => ai_topology_start(server, req),
-        // Porting DAGON to a board: answers 501, this dagon has no porting job.
+        // Porting DAGON to a board: answers 501.
         ("POST", ["ai", "port"]) => Ok(Response::error(501, "porting is not available here")),
         ("GET", ["jobs", id]) => job_get(server, id),
         ("POST", ["jobs", id, "answer"]) => answer(server, id, req),
@@ -253,7 +253,7 @@ const FEATURES: [&str; 13] = [
     "doctor",
 ];
 
-/// Largest layout file (呼び名 and editor positions) accepted.
+/// Largest layout file (表示名 and editor positions) accepted.
 const MAX_LAYOUT: usize = 256 * 1024;
 
 type Res = Result<Response, Response>;
@@ -1289,7 +1289,7 @@ fn layout_path(server: &Server) -> Result<PathBuf, Response> {
     inside(&cfg, &p.with_file_name(name)).map_err(|e| Response::error(403, &e))
 }
 
-/// GET /v1/layout: 呼び名 and editor positions (an empty layout before the first save).
+/// GET /v1/layout: 表示名 and editor positions (an empty layout before the first save).
 fn layout_get(server: &Server) -> Res {
     let p = layout_path(server)?;
     if !p.exists() {
@@ -1663,7 +1663,7 @@ mod tests {
         assert_eq!(listed, ["seg-a.img", "seg-b.img", "bootcore-seg-a.img"]);
     }
 
-    /// 中止 of 雛形を生成: the node being made finishes, the next is not started.
+    /// 中止 of テンプレート生成: the node being made finishes, the next is not started.
     #[test]
     fn gen_stops_between_nodes_when_cancelled() {
         let d = std::env::temp_dir().join(format!("dagon-gen-cancel-{}", std::process::id()));

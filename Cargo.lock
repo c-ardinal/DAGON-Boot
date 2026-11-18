@@ -519,6 +519,9 @@ dependencies = [
  "dagon-agent",
  "dagon-boot",
  "dagon-events",
+ "dagon-format",
+ "dagon-host",
+ "dagon-port",
  "dagon-sim",
  "serde_json",
  "toml",
@@ -691,6 +694,7 @@ version = "0.0.0"
 dependencies = [
  "dagon-core",
  "dagon-format",
+ "dagon-port",
  "dagon-proto",
 ]
 

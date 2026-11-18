@@ -345,11 +345,11 @@ fn set_pending_back_to_the_previously_confirmed_slot() {
 
 fn set_pending_frame(slot: u8) -> Vec<u8> {
     use dagon_proto::payload::SetPending;
-    let mut f = vec![0u8; dagon_proto::frame_len(2)];
-    SetPending { target: APP, slot }
+    let mut f = vec![0u8; dagon_proto::frame_len(8)];
+    let len = SetPending { target: APP, slot }
         .encode(&mut f[dagon_proto::HEADER_LEN..])
         .unwrap();
-    let n = dagon_proto::finish(&mut f, 0, 7, dagon_proto::Cmd::SetPending as u8, 2).unwrap();
+    let n = dagon_proto::finish(&mut f, 0, 7, dagon_proto::Cmd::SetPending as u8, len).unwrap();
     f.truncate(n);
     f
 }
@@ -380,6 +380,13 @@ fn set_pending_is_refused_while_on_trial() {
     assert_eq!(split_status(f.payload).unwrap().0, Status::State);
     assert_eq!(s.ota.entries, before);
     assert_eq!(s.status().slots[1].state, SlotState::Trying);
+    // A SET_PENDING that does not read is the agent's to refuse.
+    let mut cut = set_pending_frame(0);
+    dagon_proto::finish(&mut cut, 0, 7, dagon_proto::Cmd::SetPending as u8, 2).unwrap();
+    assert_eq!(
+        refuse_set_pending_on_trial(&s.status(), &cut, &mut out),
+        None
+    );
     // Other commands are not touched.
     let mut hello = set_pending_frame(0);
     dagon_proto::finish(&mut hello, 0, 7, dagon_proto::Cmd::Hello as u8, 2).unwrap();

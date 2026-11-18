@@ -22,7 +22,9 @@ use dagon_agent::Agent;
 use dagon_events::{compose, Bounds, Composed, Layer, Nop, Published, Watchdog as Periods};
 use dagon_mcu_common::guard::Watch;
 use dagon_mcu_common::shared::{driver, FlashDriver, SharedFlash};
-use dagon_mcu_rp2040::boot_receive::{self, Entry, Links, Mailbox, PumpPort, Sleep};
+use dagon_mcu_rp2040::boot_receive::{
+    self, Entry, Links, Mailbox, PumpPort, Sleep, BOOT_LINKS,
+};
 use dagon_mcu_rp2040::flash::{RpFlash, REGIONS};
 use dagon_mcu_rp2040::layout::watchdog_ms;
 use dagon_mcu_rp2040::node;
@@ -45,7 +47,8 @@ pub const FEED_EVERY_MS: u32 = watchdog_ms(true) / 4;
 pub type BootLinks = Links<CdcLink, I2cLink, UartLink>;
 
 type Chain = Composed<&'static Published<(), 4>, Nop, Nop, fn() -> u64>;
-type Session = Agent<AppStore, Chain, Verifier, BootCore>;
+/// The session: one requester per boot core link.
+type Session = Agent<AppStore, Chain, Verifier, BootCore, BOOT_LINKS>;
 
 /// Microseconds since HAL init.
 pub fn now_us() -> u64 {
@@ -150,7 +153,7 @@ pub fn serve(
         max_payload: links.max_payload() as u16,
         ..node::config(TARGET_TAG, role::NODE)
     };
-    let mut agent: Session = Agent::for_writer(cfg, VERIFIER, store, chain);
+    let mut agent: Session = Agent::with_links(cfg, VERIFIER, store, chain);
     let mb = if stay.is_some() {
         Mailbox::taken()
     } else {
@@ -168,7 +171,7 @@ pub fn serve(
     let run = pin!(run);
     let mut port = PumpPort::new(run, &mb, Wfe::new());
     let mut clock = now_us;
-    let first = stay.as_ref().map(Stay::frame);
+    let first = stay.as_ref();
     boot_receive::serve(
         &mut port,
         &mut agent,

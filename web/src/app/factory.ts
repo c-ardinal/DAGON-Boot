@@ -3,7 +3,7 @@ import type { Job } from './define/cli.svelte.ts';
 
 /**
  * Direct writing over USB: serve's write job asks before it writes. The user has
- * already pressed 書き込む in the modal that says what will be written and how,
+ * already pressed 書込 in the modal that says what will be written and how,
  * so that press is the answer: yes, once, and only to a question of this job.
  * Returns whether it answered.
  */

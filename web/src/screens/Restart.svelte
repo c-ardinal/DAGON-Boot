@@ -4,7 +4,7 @@
 
   interface Props {
     onconfirm: () => void;
-    /** "やめる" or Escape: back to the menu's "最初からやり直す". */
+    /** "キャンセル" or Escape: back to the menu's "リスタート". */
     oncancel: () => void;
   }
 
@@ -19,7 +19,7 @@
   });
 </script>
 
-<!-- M53: the one confirmation of the page. -->
+<!-- The one confirmation of the page. -->
 <dialog bind:this={dialog} transition:modal|global aria-labelledby="restart-h" aria-describedby="restart-s" onclose={oncancel}>
   <h2 id="restart-h">{MENU.restartHeading}</h2>
   <p id="restart-s">{MENU.restartSentence}</p>

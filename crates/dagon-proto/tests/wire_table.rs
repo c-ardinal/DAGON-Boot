@@ -344,6 +344,7 @@ fn typed(cmd: Cmd, resp: bool) -> Typed {
                 trial: true,
                 key_id: [7; 8],
                 max_payload: 256,
+                cmds: CmdSet::EMPTY,
             };
             (
                 enc(|b| m.encode(b).unwrap()),
@@ -381,6 +382,27 @@ fn typed(cmd: Cmd, resp: bool) -> Typed {
             (
                 enc(|b| m.encode(b).unwrap()),
                 Box::new(|b| dbg(VersionResp::parse(b))),
+            )
+        }
+        (Cmd::Caps, false) => {
+            let m = CapsReq {
+                cmd: Cmd::Relay as u8,
+                link: Some(ANY_LINK),
+            };
+            (
+                enc(|b| m.encode(b).unwrap()),
+                Box::new(|b| dbg(CapsReq::parse(b))),
+            )
+        }
+        (Cmd::Caps, true) => {
+            let m = CapsResp {
+                req_fields: FieldSet::EMPTY.with(1).with(2),
+                resp_fields: FieldSet::EMPTY.with(1),
+                tunnel_mtu: Some(268),
+            };
+            (
+                enc(|b| m.encode(b).unwrap()),
+                Box::new(|b| dbg(CapsResp::parse(b))),
             )
         }
         (Cmd::XferBegin, false) => {
@@ -589,6 +611,8 @@ fn golden_cores_and_samples() {
             " 040101 060100 080102 0A0103 0C0409000000")),
         (Cmd::Version, false, 0, ""),
         (Cmd::Version, true, 0, "020403000201 0C020300 140403000201 160B0000000000000000000000 181000000000000000000000000000000000 1A0102"),
+        (Cmd::Caps, false, 1, "50 030101"),
+        (Cmd::Caps, true, 0, "020106 040102 06020C01"),
         (Cmd::Stay, false, 0, ""),
         (Cmd::Stay, true, 0, ""),
         (Cmd::XferBegin, false, 5, "00 00100000 030101 05020002"),

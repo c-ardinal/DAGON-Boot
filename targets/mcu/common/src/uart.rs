@@ -233,6 +233,7 @@ mod tests {
             trial: false,
             key_id: [0; 8],
             max_payload: 1024,
+            cmds: dagon_proto::payload::CmdSet::EMPTY,
         };
         let mut b = [0u8; 64];
         b[8] = 0;

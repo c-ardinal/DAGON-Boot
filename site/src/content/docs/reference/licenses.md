@@ -1,28 +1,28 @@
 ---
 title: "ライセンス"
-description: "DAGONのライセンス、依存ライブラリのライセンス、改変せずに使うコンポーネントです。"
+description: "DAGONのライセンス、依存ライブラリのライセンス、無改変で使用するコンポーネントです。"
 ---
 
-このリポジトリでDAGON Bootのために書いたものは、[MITライセンス](https://github.com/c-ardinal/DAGON-Boot/blob/main/LICENSE-MIT)と[Apache License, Version 2.0](https://github.com/c-ardinal/DAGON-Boot/blob/main/LICENSE-APACHE)のどちらかを選んで利用できます。
+このリポジトリでDAGON Boot用に記述したものは、[MITライセンス](https://github.com/c-ardinal/DAGON-Boot/blob/main/LICENSE-MIT)と[Apache License, Version 2.0](https://github.com/c-ardinal/DAGON-Boot/blob/main/LICENSE-APACHE)のいずれかを選択して利用可能です。
 
 
 ## 依存ライブラリとそのライセンス
 
 
-リポジトリ内のすべての`Cargo.lock`と`web/package-lock.json`から`python scripts/licences.py`で生成しています（表は英語のままです）。
+リポジトリ内の全`Cargo.lock`と`web/package-lock.json`から`python scripts/licences.py`で生成しています（表は英語のままです）。
 
 注意点:
 
-- `serialport`（MPL-2.0）は`dagon` CLIが改変せずに使っています。`dagon`の実行ファイルを配布する場合、MPL-2.0により`serialport`のソースを入手できるようにする必要があります。公開されているcrate<https://crates.io/crates/serialport>（リポジトリ<https://github.com/serialport/serialport-rs>）がそのソースです。
-- `unescaper`はMIT OR GPL-3.0-onlyで提供されており、MITで使っています。
-- `ring`はApache-2.0 AND ISC（両方が適用されます）。
-- `webpki-roots`はCDLA-Permissive-2.0です（`dagon ai topology`のTLSクライアントが使う外部データ、Mozillaのルート証明書のデータを含みます）。
+- `serialport`（MPL-2.0）は`dagon` CLIが無改変で使用しています。`dagon`の実行ファイルを配布する場合は、MPL-2.0に従い`serialport`のソースを入手可能な状態にする必要があります。公開済のcrate<https://crates.io/crates/serialport>（リポジトリ<https://github.com/serialport/serialport-rs>）がそのソースです。
+- `unescaper`はMIT OR GPL-3.0-onlyで提供されており、MITで使用しています。
+- `ring`はApache-2.0 AND ISCです（両方を適用します）。
+- `webpki-roots`はCDLA-Permissive-2.0です（`dagon ai topology`のTLSクライアントが使用する外部データとして、Mozillaのルート証明書のデータを収録しています）。
 - `subtle`、`rp-pac`、`rp2040-boot2`、`source-map-js`、`curve25519-dalek`、`ed25519-dalek`はBSD-3-Clauseです。
-- `ed25519-dalek`、`curve25519-dalek`とその依存（`fiat-crypto`、`curve25519-dalek-derive`、`ed25519`、`signature`ほか）は、`dagon-ed25519`のテストだけが使う開発時の依存で、DAGONのプログラムには含まれません。
-- `lightningcss`（MPL-2.0）はwebのビルドツールのビルド時の依存だけで、DAGON Consoleには何も含まれません。
-- DAGON Consoleに含まれるnpmのコードは、Svelteのクライアント用ランタイムと、それが読み込む`clsx`と`esm-env`（いずれもMIT）だけです。他のnpmのライブラリはビルドとテストの道具です（表の"Ships in"列）。
-- `web/public/fonts/`の書体はSIL Open Font License 1.1です: Doto、DotGothic16、Zen Kaku Gothic New、JetBrains Mono（ライセンス文はファイルの隣にあります。`web/README.md`を参照）。
-- サンプル`samples/rp2040-round-lcd`の画面の日本語の状態語は、Noto Sans JP（SIL Open Font License 1.1）から作ったビットマップです（ライセンス文は`samples/rp2040-round-lcd/screen/fonts/`）。
+- `ed25519-dalek`、`curve25519-dalek`とその依存（`fiat-crypto`、`curve25519-dalek-derive`、`ed25519`、`signature`等）は、`dagon-ed25519`のテストだけが使用する開発時の依存で、DAGONのプログラムには同梱しません。
+- `lightningcss`（MPL-2.0）はwebのビルドツールがビルド時だけに使用する依存で、DAGON Consoleには一切同梱しません。
+- DAGON Consoleに同梱するnpmのコードは、Svelteのクライアント用ランタイムと、そのランタイムが読込する`clsx`と`esm-env`（いずれもMIT）だけです。他のnpmのライブラリはビルドとテスト用のツールです（表の"Ships in"列）。
+- `web/public/fonts/`の書体はSIL Open Font License 1.1です: Doto、DotGothic16、Zen Kaku Gothic New、JetBrains Mono（ライセンス文はフォントファイルと同一のフォルダにあります。`web/README.md`を参照）。
+- サンプル`samples/rp2040-round-lcd`の画面に表示する日本語の状態語は、Noto Sans JP（SIL Open Font License 1.1）から作成したビットマップです（ライセンス文は`samples/rp2040-round-lcd/screen/fonts/`）。
 
 Rust crates: 408 packages, 449 name/version pairs. "Used by": `crates/` is the host workspace, `samples/...` the sample apps, other names are firmware packages under `targets/`.
 
@@ -534,24 +534,24 @@ npm packages (`web/package-lock.json`): 89. Only those marked "page" ship in the
 ## 自作コードの範囲
 
 
-- DAGON Bootのために書いたもの: `crates/`（下のテストデータを除く）、`targets/`（下の無改変のベンダーコンポーネントを除く）、`web/src/`、`site/`、`samples/`、`web/scripts/`、`plugin/`、`topology/`、`scripts/`のすべて。
-- Cargoとnpmを通して改変せずに使う依存: 上の表のcrateとパッケージ（例: embassy、esp-hal、ed25519-compact、sha2、serde、Svelte、Vite）。
-- 無改変のベンダーコンポーネント: 下を参照。
+- DAGON Boot用に記述したもの: `crates/`（後述のテストデータを除外）、`targets/`（後述の無改変のベンダーコンポーネントを除外）、`web/src/`、`site/`、`samples/`、`web/scripts/`、`plugin/`、`topology/`、`scripts/`の全体。
+- Cargoとnpm経由で無改変で使用する依存: 前述の表のcrateとパッケージ（例: embassy、esp-hal、ed25519-compact、sha2、serde、Svelte、Vite）。
+- 無改変のベンダーコンポーネント: 後述の節を参照。
 
 
 ## 使用していないコンポーネント(公開されているブートローダ実装は使用していません)
 
 
-公開されているブートローダ実装（例: embassy-boot、MCUboot、wolfBoot）のコードもロジックも使っていません。起動の判断、イメージとリリースの形式、状態ログ、書き込みのプロトコル、受け手はこのプロジェクトのために書いたものです。
+公開済のブートローダ実装（例: embassy-boot、MCUboot、wolfBoot）のコードとロジックは、いずれも使用していません。起動の判断、イメージとリリースの形式、状態ログ、書込のプロトコル、受信側の処理は、このプロジェクト用に記述したものです。
 
 
 ## 無改変のベンダーコンポーネント
 
 
-- ESP32-S3の2nd stageブートローダ: 公式のESP-IDF v6.1のブートローダを、アプリのロールバックを有効にして公式のソースからビルドしたもの（`targets/esp32s3-2ndstage`で自作したのはプロジェクトのファイルと`vendor/sdkconfig.defaults`のsdkconfigオプションだけ）。無改変のまま`targets/mcu/esp32s3/vendor/bootloader.bin`として、出どころとライセンスを添えて同梱している（`vendor/PROVENANCE.md`、`vendor/LICENSE-ESP-IDF`）。
-- `esp-bootloader-esp-idf`（crate、MIT OR Apache-2.0）: ESP32-S3のポートがotadataの読み書きに改変せずに使っています。この2nd stageでのスロットの選択はotadataで行います。
-- RP2040のboot2: `rp2040-boot2` crate（BSD-3-Clause）のgeneric 03hのsecond stageを、`targets/mcu/rp2040/stage0`がフラッシュの先頭に改変せずに置いています。
-- STM32F401のROMにあるシステムメモリのブートローダ（文書化されたI2Cの手順で復旧に使います）。
-- Ed25519のテストデータ（`crates/dagon-ed25519/tests/vectors/`、テストだけが読み、プログラムには含まれません）:
-  - Project Wycheproofの`testvectors_v1/ed25519_test.json`（<https://github.com/C2SP/wycheproof>のコミット`65ca494727a52944c204441c860b039e6786b99b`）。Apache License 2.0で、無改変のまま同梱し、ライセンス文（`LICENSE-WYCHEPROOF`）と出どころ（`PROVENANCE.md`）を添えています。
-  - RFC 8032の7.1節のEd25519のテストベクタ（`rfc8032.txt`、RFCの値を改行だけ除いて写したもの。IETF Trustの著作権表示とTrust Legal Provisionsに従います）。
+- ESP32-S3の2nd stageブートローダ: 公式のESP-IDF v6.1のブートローダを、アプリのロールバックを有効にして公式のソースからビルドしたものです（`targets/esp32s3-2ndstage`で自作したのはプロジェクトのファイルと`vendor/sdkconfig.defaults`のsdkconfigオプションだけです）。無改変のまま`targets/mcu/esp32s3/vendor/bootloader.bin`として、出典とライセンスを添付して同梱しています（`vendor/PROVENANCE.md`、`vendor/LICENSE-ESP-IDF`）。
+- `esp-bootloader-esp-idf`（crate、MIT OR Apache-2.0）: ESP32-S3のポートがotadataの読込と書込に無改変で使用しています。この2nd stageでのスロットの選択はotadataで決定します。
+- RP2040のboot2: `rp2040-boot2` crate（BSD-3-Clause）のgeneric 03hのsecond stageを、`targets/mcu/rp2040/stage0`がフラッシュの先頭に無改変で配置しています。
+- STM32F401のROMにあるシステムメモリのブートローダ（文書化済のI2Cの手順で復旧に使用します）。
+- Ed25519のテストデータ（`crates/dagon-ed25519/tests/vectors/`。テストだけが読込し、プログラムには同梱しません）:
+  - Project Wycheproofの`testvectors_v1/ed25519_test.json`（<https://github.com/C2SP/wycheproof>のコミット`65ca494727a52944c204441c860b039e6786b99b`）。Apache License 2.0で、無改変のまま同梱し、ライセンス文（`LICENSE-WYCHEPROOF`）と出典（`PROVENANCE.md`）を添付しています。
+  - RFC 8032の7.1節のEd25519のテストベクタ（`rfc8032.txt`。RFCの値から改行だけを除去した複製です。IETF Trustの著作権表示とTrust Legal Provisionsに従います）。

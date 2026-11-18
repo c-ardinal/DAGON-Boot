@@ -26,7 +26,7 @@
         <li class:warn={c.kind !== 'error'} aria-label={DEFINE.problemName(p.short, p.rule, p.sentence)}>
           <p class="head"><span>{c.mark} {p.short}</span><span class="rule" translate="no">{p.rule}</span></p>
           <p class="fix-s">{p.sentence}</p>
-          <!-- A part not updatable yet (info) is valid: nothing to fix. -->
+          <!-- A part updating skips (info) is valid: nothing to fix. -->
           {#if p.select && p.severity !== 'info'}<button class="secondary" onclick={() => d.fix(p)}>{DEFINE.fix}</button>{/if}
         </li>
       {/each}

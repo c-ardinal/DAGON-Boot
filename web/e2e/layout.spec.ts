@@ -11,7 +11,7 @@ const SIZES = [...WIDTHS.flatMap((w) => [[w, 700], [w, 1080]]), ...HEIGHTS.map((
 /** The view toggle: in the header, or at a narrow bar in the menu's 構成 group. */
 async function view(p: Page, radio: string, item: string) {
   if (await p.locator('header .seg').count()) return p.getByRole('radio', { name: radio, exact: true }).click();
-  await p.getByRole('button', { name: 'メニューを開く' }).click();
+  await p.getByRole('button', { name: 'メニューの表示' }).click();
   await p.locator('.panel').first().getByRole('button', { name: '構成', exact: true }).click();
   await p.locator('.panel').last().locator(`button:has(span:text-is("${item}"))`).click();
 }
@@ -20,15 +20,15 @@ async function view(p: Page, radio: string, item: string) {
 const STATES: [string, (p: Page) => Promise<void>, (p: Page) => Promise<void>][] = [
   ['準備', async () => undefined, async () => undefined],
   ['シート', (p) => p.locator('.node').first().dispatchEvent('click'), (p) => p.locator('.node').first().dispatchEvent('click')],
-  ['引き出し', (p) => p.getByRole('tab', { name: '記録' }).click(), (p) => p.getByRole('tab', { name: '記録' }).click()],
-  ['シートと引き出し', async (p) => { await p.locator('.node').first().dispatchEvent('click'); await p.getByRole('tab', { name: '記録' }).click(); }, async (p) => { await p.locator('.node').first().dispatchEvent('click'); await p.getByRole('tab', { name: '記録' }).click(); }],
-  ['メニュー', async (p) => { await p.getByRole('button', { name: 'メニューを開く' }).click(); await p.getByRole('button', { name: 'つなぐ' }).click(); }, (p) => p.keyboard.press('Escape')],
-  ['困ったとき', async (p) => { await p.getByRole('button', { name: 'メニューを開く' }).click(); await p.getByRole('button', { name: '困ったとき' }).click(); await p.getByRole('button', { name: 'キー操作' }).click(); }, (p) => p.keyboard.press('Escape')],
-  ['表', (p) => view(p, '表', '表で見る'), (p) => view(p, 'グラフ', 'グラフで見る')],
-  ['トースト', async (p) => { await p.getByRole('button', { name: 'メニューを開く' }).click(); await p.getByRole('button', { name: '困ったとき', exact: true }).click(); await p.locator('.panel').last().locator('button:has(span:text-is("この URL をコピーする"))').click(); await p.locator('.toast').waitFor(); }, async () => undefined],
+  ['ドロワー', (p) => p.getByRole('tab', { name: '記録' }).click(), (p) => p.getByRole('tab', { name: '記録' }).click()],
+  ['シートとドロワー', async (p) => { await p.locator('.node').first().dispatchEvent('click'); await p.getByRole('tab', { name: '記録' }).click(); }, async (p) => { await p.locator('.node').first().dispatchEvent('click'); await p.getByRole('tab', { name: '記録' }).click(); }],
+  ['メニュー', async (p) => { await p.getByRole('button', { name: 'メニューの表示' }).click(); await p.getByRole('button', { name: '接続操作' }).click(); }, (p) => p.keyboard.press('Escape')],
+  ['トラブル対処', async (p) => { await p.getByRole('button', { name: 'メニューの表示' }).click(); await p.getByRole('button', { name: 'トラブル対処' }).click(); await p.getByRole('button', { name: 'キー操作' }).click(); }, (p) => p.keyboard.press('Escape')],
+  ['表', (p) => view(p, '表', '表形式の表示'), (p) => view(p, 'グラフ', 'グラフ形式の表示')],
+  ['トースト', async (p) => { await p.getByRole('button', { name: 'メニューの表示' }).click(); await p.getByRole('button', { name: 'トラブル対処', exact: true }).click(); await p.locator('.panel').last().locator('button:has(span:text-is("このURLのコピー"))').click(); await p.locator('.toast').waitFor(); }, async () => undefined],
   ['バブル', (p) => p.locator('.dagon .mark').click(), (p) => p.locator('.dagon .mark').click()],
   ['バブルとシート', async (p) => { await p.locator('.node').first().dispatchEvent('click'); await p.locator('.dagon .mark').click(); }, async (p) => { await p.locator('.dagon .mark').click(); await p.locator('.node').first().dispatchEvent('click'); }],
-  ['モーダル', async (p) => { await p.getByRole('button', { name: 'メニューを開く' }).click(); await p.locator('.panel').first().getByRole('button', { name: 'プロジェクト', exact: true }).click(); await p.locator('.panel').last().locator('button:has(span:text-is("最初からやり直す"))').click(); await p.locator('dialog[open]').waitFor(); }, async (p) => { await p.keyboard.press('Escape'); await p.locator('dialog[open]').waitFor({ state: 'detached' }); }],
+  ['モーダル', async (p) => { await p.getByRole('button', { name: 'メニューの表示' }).click(); await p.locator('.panel').first().getByRole('button', { name: 'プロジェクト', exact: true }).click(); await p.locator('.panel').last().locator('button:has(span:text-is("リスタート"))').click(); await p.locator('dialog[open]').waitFor(); }, async (p) => { await p.keyboard.press('Escape'); await p.locator('dialog[open]').waitFor({ state: 'detached' }); }],
 ];
 
 test('sweep: no overflow, overlap, clipped text or clipped focus ring at any window, in 準備 (sheet, drawer, menu, help, table, toast, modal) and 書込 (versions)', async ({ page, context }) => {
@@ -61,7 +61,7 @@ test('sweep: no overflow, overlap, clipped text or clipped focus ring at any win
       // A sheet, menu, help or toast opening moves none of the standing parts (the DAGON mark, the zoom, the focal number, the header). The open drawer is the one thing they give way to, by structure, so it never covers them.
       // The open drawer is what the zoom and the focal number give way to, by structure; everything else moves for nothing.
       // The mark stands by the zoom and rises with it.
-      const still = name.includes('引き出し') ? ['.frame > header', 'header .modes', 'header .actions'] : Object.keys(rest);
+      const still = name.includes('ドロワー') ? ['.frame > header', 'header .modes', 'header .actions'] : Object.keys(rest);
       for (const k of still) if (a[k] !== undefined && rest[k] !== undefined && a[k] !== rest[k]) faults.push(`${w}x${h} ${name}: ${k} moved for it ${rest[k]} -> ${a[k]}`);
       await out(page);
     }
@@ -85,16 +85,16 @@ test('sweep: no overflow, overlap, clipped text or clipped focus ring at any win
   await page.setViewportSize({ width: 1920, height: 1080 });
   await page.getByRole('radio', { name: '書込' }).click();
   await settled(page);
-  await page.locator('header').getByRole('button', { name: '接続する' }).click();
+  await page.locator('header').getByRole('button', { name: '接続' }).click();
   await page.locator('.st-alive').first().waitFor({ timeout: 30_000 });
-  await page.getByRole('button', { name: 'バージョンを選んで書き込む' }).waitFor();
+  await page.getByRole('button', { name: 'バージョン選択と書込' }).waitFor();
   await expect(page.locator('.split .caret')).toHaveAttribute('aria-disabled', 'false', { timeout: 15_000 });
   for (const [w, h] of SIZES) {
     await page.setViewportSize({ width: w, height: h });
     await page.waitForTimeout(120);
     for (const f of await layoutFaults(page)) faults.push(`${w}x${h} 書込: ${f}`);
     for (const f of await focusFaults(page)) faults.push(`${w}x${h} 書込: ${f}`);
-    await page.getByRole('button', { name: 'バージョンを選んで書き込む' }).click();
+    await page.getByRole('button', { name: 'バージョン選択と書込' }).click();
     await page.waitForTimeout(200);
     for (const f of await layoutFaults(page)) faults.push(`${w}x${h} 書込 バージョン: ${f}`);
     await page.keyboard.press('Escape');
@@ -120,9 +120,9 @@ test('the mark: just left of the zoom in every view and mode, moved only by a dr
   await page.locator('.drawer [role="tab"]').first().click();
   await page.waitForTimeout(400);
   expect(await box(page, '.dagon .mark')).toEqual(mark);
-  await view(page, '表', '表で見る');
+  await view(page, '表', '表形式の表示');
   expect(await box(page, '.dagon .mark')).toEqual(mark);
-  await view(page, 'グラフ', 'グラフで見る');
+  await view(page, 'グラフ', 'グラフ形式の表示');
   await page.getByRole('radio', { name: '書込' }).click();
   expect(await box(page, '.dagon .mark')).toEqual(mark);
   await page.getByRole('radio', { name: '準備' }).click();
@@ -157,14 +157,14 @@ test('the mark floats, and stands still under reduced motion', async ({ page }) 
   expect(await name()).toBe('none');
 });
 
-test('the menu: 最初からやり直す is the プロジェクト submenu\'s last item', async ({ page }) => {
+test('the menu: リスタート is the プロジェクト submenu\'s last item', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await openSample(page, 'sim');
-  await page.getByRole('button', { name: 'メニューを開く' }).click();
-  await expect(page.locator('.panel').first().locator('button:has(span:text-is("最初からやり直す"))')).toHaveCount(0);
+  await page.getByRole('button', { name: 'メニューの表示' }).click();
+  await expect(page.locator('.panel').first().locator('button:has(span:text-is("リスタート"))')).toHaveCount(0);
   await page.locator('.panel').first().getByRole('button', { name: 'プロジェクト', exact: true }).click();
   const words = await page.locator('.panel').last().locator('.words > span').allInnerTexts();
-  expect(words).toEqual(['プロジェクトを作る', 'プロジェクトを開く', '保存する', '最初からやり直す']);
+  expect(words).toEqual(['プロジェクト作成', 'プロジェクトのオープン', '保存', 'リスタート']);
 });
 
 test('every segmented toggle slides one thumb to the choice, keeping its box; under reduced motion it does not slide', async ({ page }) => {
@@ -211,7 +211,7 @@ test('Escape closes the open bubble wherever focus is, before anything under it'
   await expect(page.locator('.float.sheet')).toHaveCount(0);
 });
 
-test('つながる親 なし asks first; cancelling shows the true parent, and picking it again keeps the link as it is', async ({ page }) => {
+test('PC側のノード なし asks first; cancelling shows the true node nearer the PC, and picking it again keeps the link as it is', async ({ page }) => {
   await page.setViewportSize({ width: 1920, height: 1080 });
   await openSample(page);
   await page.locator('.node').nth(1).dispatchEvent('click');
@@ -220,7 +220,7 @@ test('つながる親 なし asks first; cancelling shows the true parent, and p
   const chips = await page.locator('.link-chip').allInnerTexts();
   await parent.selectOption('');
   await expect(page.locator('dialog[open]')).toBeVisible();
-  await page.locator('dialog[open]').getByRole('button', { name: 'やめる' }).click();
+  await page.locator('dialog[open]').getByRole('button', { name: 'キャンセル' }).click();
   await expect(page.locator('dialog[open]')).toHaveCount(0);
   await expect(parent).toHaveValue('hub');
   await parent.selectOption('hub');
@@ -246,7 +246,7 @@ test('closing the parts window and changing mode leave the view alone; the view 
   await page.setViewportSize({ width: 1920, height: 1080 });
   await openSample(page);
   const before = await canvasState(page);
-  await page.getByRole('button', { name: '部品を閉じる' }).click();
+  await page.getByRole('button', { name: '部品の非表示' }).click();
   await settled(page);
   expect(await canvasState(page)).toEqual(before);
   await page.getByRole('radio', { name: '書込' }).click();
@@ -289,7 +289,7 @@ test('pan, wheel zoom and the explicit fit are what move the view', async ({ pag
   expect(panned.transform).toMatch(/scale\(/);
   await page.mouse.wheel(0, 40);
   expect((await canvasState(page)).transform).not.toBe(panned.transform);
-  await page.getByRole('button', { name: 'キャンバス全体を表示する' }).click();
+  await page.getByRole('button', { name: 'キャンバス全体の表示' }).click();
   await settled(page);
   expect((await canvasState(page)).transform).toBe(start.transform);
 });
@@ -310,35 +310,35 @@ test('undo, redo, the view toggle and the connection are in the header; the edit
   await openSample(page);
   const bar = (await page.locator('.frame > header').boundingBox())!;
   const inBar = (b: { y: number; height: number }) => b.y >= bar.y && b.y + b.height <= bar.y + bar.height;
-  const undo = (await page.getByRole('button', { name: '元に戻す' }).boundingBox())!;
-  const redo = (await page.getByRole('button', { name: 'やり直す' }).boundingBox())!;
+  const undo = (await page.getByRole('button', { name: '取消' }).boundingBox())!;
+  const redo = (await page.getByRole('button', { name: '再実行' }).boundingBox())!;
   const seg = (await page.getByRole('radio', { name: '表', exact: true }).boundingBox())!;
   const hub = (await page.locator('header .hub').boundingBox())!;
   for (const b of [undo, redo, seg, hub]) expect(inBar(b)).toBe(true);
   expect(redo.x).toBeGreaterThan(undo.x);
   expect(seg.x).toBeGreaterThan(redo.x);
-  for (const name of ['元に戻す', 'やり直す']) expect((await page.getByRole('button', { name }).innerText()).trim()).toBe('');
+  for (const name of ['取消', '再実行']) expect((await page.getByRole('button', { name }).innerText()).trim()).toBe('');
   await page.getByRole('radio', { name: '書込' }).click();
   await settled(page);
   // The edit tools keep their room in 書込 but are neither seen nor reachable.
-  expect(await page.getByRole('button', { name: '元に戻す' }).count()).toBe(0);
+  expect(await page.getByRole('button', { name: '取消' }).count()).toBe(0);
   await expect(page.locator('header .seg')).toBeHidden();
-  await expect(page.locator('header').getByRole('button', { name: '接続する' })).toBeVisible();
+  await expect(page.locator('header').getByRole('button', { name: '接続' })).toBeVisible();
   // At a narrow bar the edit tools give way to ☰, where they always are.
   await page.setViewportSize({ width: 1024, height: 768 });
   await page.getByRole('radio', { name: '準備' }).click();
   await settled(page);
   expect(await page.locator('header .edit').count()).toBe(0);
-  await page.getByRole('button', { name: 'メニューを開く' }).click();
+  await page.getByRole('button', { name: 'メニューの表示' }).click();
   await page.getByRole('button', { name: '構成', exact: true }).click();
-  await expect(page.locator('.panel').last().locator('button:has(span:text-is("元に戻す"))')).toBeVisible();
-  await expect(page.locator('.panel').last().locator('button:has(span:text-is("表で見る"))')).toBeVisible();
+  await expect(page.locator('.panel').last().locator('button:has(span:text-is("取消"))')).toBeVisible();
+  await expect(page.locator('.panel').last().locator('button:has(span:text-is("表形式の表示"))')).toBeVisible();
   await page.keyboard.press('Escape');
   await page.setViewportSize({ width: 1920, height: 1080 });
   await settled(page);
-  await page.getByRole('button', { name: 'メニューを開く' }).click();
+  await page.getByRole('button', { name: 'メニューの表示' }).click();
   await page.getByRole('button', { name: '構成', exact: true }).click();
-  await expect(page.locator('.panel').last().locator('button:has(span:text-is("表で見る"))')).toHaveCount(0);
+  await expect(page.locator('.panel').last().locator('button:has(span:text-is("表形式の表示"))')).toHaveCount(0);
 });
 
 test('a sheet closes by its ×, by Escape and by the canvas background; deleting asks first', async ({ page }) => {
@@ -346,7 +346,7 @@ test('a sheet closes by its ×, by Escape and by the canvas background; deleting
   await openSample(page);
   await page.locator('.node').first().dispatchEvent('click');
   await expect(page.locator('.sheet')).toBeVisible();
-  await page.getByRole('button', { name: 'シートを閉じる' }).click();
+  await page.getByRole('button', { name: 'シートの非表示' }).click();
   await expect(page.locator('.sheet')).toHaveCount(0);
   await page.locator('.node').first().dispatchEvent('click');
   await page.keyboard.press('Escape');
@@ -357,13 +357,13 @@ test('a sheet closes by its ×, by Escape and by the canvas background; deleting
   await expect(page.locator('.sheet')).toHaveCount(0);
   const nodes = await page.locator('.node').count();
   await page.locator('.node').nth(1).dispatchEvent('click');
-  await page.getByRole('button', { name: 'このノードを消す' }).click();
+  await page.getByRole('button', { name: 'このノードの削除' }).click();
   await expect(page.locator('dialog[open]')).toBeVisible();
   expect(await page.locator('.node').count()).toBe(nodes);
-  await page.locator('dialog[open]').getByRole('button', { name: 'やめる' }).click();
+  await page.locator('dialog[open]').getByRole('button', { name: 'キャンセル' }).click();
   expect(await page.locator('.node').count()).toBe(nodes);
-  await page.getByRole('button', { name: 'このノードを消す' }).click();
-  await page.locator('dialog[open]').getByRole('button', { name: '消す' }).click();
+  await page.getByRole('button', { name: 'このノードの削除' }).click();
+  await page.locator('dialog[open]').getByRole('button', { name: '削除' }).click();
   await expect(page.locator('.node')).toHaveCount(nodes - 1);
 });
 
@@ -392,16 +392,16 @@ test('the menu is a popover at ☰ that moves nothing; groups, then their items'
   await page.setViewportSize({ width: 1920, height: 1080 });
   await openSample(page);
   const stage = await page.locator('.stage').boundingBox();
-  const button = (await page.getByRole('button', { name: 'メニューを開く' }).boundingBox())!;
-  await page.getByRole('button', { name: 'メニューを開く' }).click();
+  const button = (await page.getByRole('button', { name: 'メニューの表示' }).boundingBox())!;
+  await page.getByRole('button', { name: 'メニューの表示' }).click();
   await page.waitForTimeout(300);
   expect(await page.locator('.stage').boundingBox()).toEqual(stage);
   const panel = (await page.locator('.panel').first().boundingBox())!;
   expect(panel.y).toBeGreaterThanOrEqual(button.y + button.height - 1);
   expect(panel.x + panel.width).toBeCloseTo(button.x + button.width, 0);
-  for (const g of ['プロジェクト', '構成', 'つなぐ', 'DAGON', '困ったとき']) await expect(page.getByRole('button', { name: g, exact: true })).toBeVisible();
+  for (const g of ['プロジェクト', '構成', '接続操作', 'DAGON', 'トラブル対処']) await expect(page.getByRole('button', { name: g, exact: true })).toBeVisible();
   await page.getByRole('button', { name: '構成', exact: true }).click();
-  await expect(page.getByRole('button', { name: 'キャンバス全体を表示する' }).last()).toBeVisible();
+  await expect(page.getByRole('button', { name: 'キャンバス全体の表示' }).last()).toBeVisible();
   await page.mouse.click(600, 600);
   await expect(page.locator('#menu')).toHaveCount(0);
 });
@@ -431,7 +431,7 @@ test('the longest sentence wraps and the band grows over the canvas, moving noth
     await openSample(page);
     const before = await canvasState(page);
     await page.locator('#band .sentence').evaluate((e) => {
-      e.textContent = '終わるまで電源と USB を抜かず、このページを開いたままにしてください。途中で止まっても、ノードはもう一度書き込める状態で動きます。'.repeat(3);
+      e.textContent = '完了まで電源とUSBを維持し、このページの表示を継続してください。途中で停止しても、ノードは再書込が可能な状態で動作します。'.repeat(3);
     });
     await page.waitForTimeout(120);
     expect(await canvasState(page)).toEqual(before);
@@ -519,10 +519,10 @@ test('the mode toggle and zoom are pills, the header keeps its clearance', async
 test('a toast stands left of the zoom pill, inside the canvas', async ({ page }) => {
   await page.setViewportSize({ width: 1920, height: 1080 });
   await openSample(page);
-  await page.getByRole('button', { name: 'メニューを開く' }).click();
-  await page.getByRole('button', { name: '困ったとき', exact: true }).click();
+  await page.getByRole('button', { name: 'メニューの表示' }).click();
+  await page.getByRole('button', { name: 'トラブル対処', exact: true }).click();
   await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
-  await page.getByRole('button', { name: 'この URL をコピーする' }).click();
+  await page.getByRole('button', { name: 'このURLのコピー' }).click();
   const toast = (await page.locator('.toast').boundingBox())!;
   const pill = (await page.locator('.pill').boundingBox())!;
   expect(toast.x + toast.width).toBeLessThanOrEqual(pill.x);

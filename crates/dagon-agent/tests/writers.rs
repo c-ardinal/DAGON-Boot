@@ -2,7 +2,7 @@
 //! run the same engine with their drivers injected, give the same verdict
 //! on every image, and differ only in the slot each one runs from.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::BTreeMap;
 
 use dagon_agent::writer::{self, Writer};
@@ -11,8 +11,9 @@ use dagon_ed25519::Ed25519Compact;
 use dagon_events::{compose, Bounds, Composed, Layer, Nop, Published, Watchdog};
 use dagon_format::header::*;
 use dagon_format::{key_id, sha256, SigVerifier, Version};
+use dagon_proto::handler::Ceiling;
 use dagon_proto::payload::*;
-use dagon_proto::{flags, max_payload, split_status, Cmd, Frame, Status};
+use dagon_proto::{flags, max_payload, plant, split_status, Cmd, Frame, Status};
 use ed25519_compact::{KeyPair, Seed};
 
 /// A node of an MCU that only this file knows: its id, tag and slot size.
@@ -57,7 +58,10 @@ fn config() -> Config {
 
 /// The flash of the fake MCU: image slots of APP and BOOTCORE, each with
 /// an inline header, and the STATUS its boot stage would fold.
+#[derive(Clone, Debug, PartialEq)]
 struct Mem {
+    /// Times the session called the store, whatever for.
+    calls: Cell<usize>,
     /// Slots each target has (APP, BOOTCORE).
     count: [u8; 2],
     status: [StatusResp; 2],
@@ -86,6 +90,7 @@ impl Mem {
             st.slots[0].version = Version::new(1, 0, 0);
         }
         Mem {
+            calls: Cell::new(0),
             count: [apps, cores],
             status,
             bodies: BTreeMap::new(),
@@ -107,9 +112,11 @@ impl Mem {
 
 impl SlotStore for Mem {
     fn status(&mut self) -> StatusResp {
+        self.calls.set(self.calls.get() + 1);
         self.status[0]
     }
     fn capacity(&self, t: u8, slot: u8) -> u32 {
+        self.calls.set(self.calls.get() + 1);
         let has = self.count.get(usize::from(t)).is_some_and(|&n| slot < n)
             || (self.reserved_room && (t, slot) == (RESERVED_TARGET, 0));
         if has {
@@ -119,6 +126,7 @@ impl SlotStore for Mem {
         }
     }
     fn erase(&mut self, t: u8, slot: u8, _len: u32, _: &Transition) -> Result<(), StoreError> {
+        self.calls.set(self.calls.get() + 1);
         self.bodies.insert((t, slot), vec![0xFF; CAP as usize]);
         self.headers.remove(&(t, slot));
         self.st(t)?.slots[usize::from(slot)].state = SlotState::Empty;
@@ -132,11 +140,13 @@ impl SlotStore for Mem {
         data: &[u8],
         _: &Transition,
     ) -> Result<(), StoreError> {
+        self.calls.set(self.calls.get() + 1);
         let body = self.bodies.get_mut(&(t, slot)).ok_or(StoreError::Flash)?;
         body[off as usize..][..data.len()].copy_from_slice(data);
         Ok(())
     }
     fn read(&mut self, t: u8, slot: u8, off: u32, buf: &mut [u8]) -> Result<(), StoreError> {
+        self.calls.set(self.calls.get() + 1);
         let body = self.bodies.get(&(t, slot)).ok_or(StoreError::Flash)?;
         buf.copy_from_slice(&body[off as usize..][..buf.len()]);
         Ok(())
@@ -147,9 +157,11 @@ impl SlotStore for Mem {
         h: &[u8; HEADER_SIZE],
         t: &Transition,
     ) -> Result<(), StoreError> {
+        self.calls.set(self.calls.get() + 1);
         self.write_target_header(target::APP, slot, h, t)
     }
     fn read_header(&mut self, slot: u8, out: &mut [u8; HEADER_SIZE]) -> Result<(), StoreError> {
+        self.calls.set(self.calls.get() + 1);
         self.read_target_header(target::APP, slot, out)
     }
     fn set_pending(
@@ -158,6 +170,7 @@ impl SlotStore for Mem {
         h: &[u8; HEADER_SIZE],
         t: &Transition,
     ) -> Result<(), StoreError> {
+        self.calls.set(self.calls.get() + 1);
         self.set_target_pending(target::APP, slot, h, t)
     }
     fn confirm(
@@ -166,12 +179,14 @@ impl SlotStore for Mem {
         _: &[u8; HEADER_SIZE],
         _: &Transition,
     ) -> Result<(), StoreError> {
+        self.calls.set(self.calls.get() + 1);
         let st = self.st(target::APP)?;
         st.slots[usize::from(slot)].state = SlotState::Confirmed;
         st.confirmed = slot;
         Ok(())
     }
     fn keep_room(&mut self) -> Result<(), StoreError> {
+        self.calls.set(self.calls.get() + 1);
         if self.room_fails {
             return Err(StoreError::Flash);
         }
@@ -179,6 +194,7 @@ impl SlotStore for Mem {
         Ok(())
     }
     fn request_update_mode(&mut self) -> Result<(), StoreError> {
+        self.calls.set(self.calls.get() + 1);
         if !self.update_mode {
             return Err(StoreError::Unsupported);
         }
@@ -186,6 +202,7 @@ impl SlotStore for Mem {
         Ok(())
     }
     fn target_status(&mut self, t: u8) -> Option<StatusResp> {
+        self.calls.set(self.calls.get() + 1);
         let n = *self.count.get(usize::from(t))?;
         (n > 0).then(|| self.status[usize::from(t)])
     }
@@ -196,6 +213,7 @@ impl SlotStore for Mem {
         h: &[u8; HEADER_SIZE],
         _: &Transition,
     ) -> Result<(), StoreError> {
+        self.calls.set(self.calls.get() + 1);
         self.headers.insert((t, slot), *h);
         let info = &mut self.st(t)?.slots[usize::from(slot)];
         info.state = SlotState::Written;
@@ -208,6 +226,7 @@ impl SlotStore for Mem {
         slot: u8,
         out: &mut [u8; HEADER_SIZE],
     ) -> Result<(), StoreError> {
+        self.calls.set(self.calls.get() + 1);
         *out = self
             .headers
             .get(&(t, slot))
@@ -222,6 +241,7 @@ impl SlotStore for Mem {
         _: &[u8; HEADER_SIZE],
         _: &Transition,
     ) -> Result<(), StoreError> {
+        self.calls.set(self.calls.get() + 1);
         self.st(t)?.slots[usize::from(slot)].state = SlotState::Pending;
         Ok(())
     }
@@ -332,12 +352,17 @@ impl<V: SigVerifier, W: Writer> Bench<V, W> {
 
     /// The reply's status, body and whether the node resets after it.
     fn exchange(&mut self, cmd: Cmd, payload: &[u8]) -> (Status, Vec<u8>, bool) {
+        self.raw(cmd as u8, payload)
+    }
+
+    /// The same for any command number.
+    fn raw(&mut self, cmd: u8, payload: &[u8]) -> (Status, Vec<u8>, bool) {
         self.seq = self.seq.wrapping_add(1);
         let mut buf = vec![0u8; 300];
         let n = Frame {
             flags: 0,
             seq: self.seq,
-            cmd: cmd as u8,
+            cmd,
             payload,
         }
         .encode(&mut buf)
@@ -582,6 +607,426 @@ fn the_boot_core_serves_none_of_the_app_only_requests() {
     assert_eq!(app.call(Cmd::XferBegin, &p), Status::Unsupported);
     // No MCU's [writers] lists the boot core for the recovery agent.
     assert_eq!(core.call(Cmd::XferBegin, &p), Status::Unsupported);
+}
+
+/// The commands each writer's session serves, in the command table's order.
+fn served_by<W: Writer>() -> Vec<Cmd> {
+    use Cmd::*;
+    let mut cmds = vec![
+        Hello, Status, Version, Caps, Stay, XferBegin, XferData, XferEnd, XferHdr, SetPending,
+        Reboot, Confirm,
+    ];
+    if W::APP {
+        cmds.push(Show);
+    }
+    cmds
+}
+
+fn set_of(cmds: &[Cmd]) -> CmdSet {
+    cmds.iter().fold(CmdSet::EMPTY, |s, c| s.with(*c as u8))
+}
+
+/// HELLO's `cmds` is what the session serves, CAPS names the fields of
+/// each of those commands, and a request with an unknown must field, a
+/// field sent twice or a bad length is refused in every one of them with
+/// the store not called once and a transfer in progress left where it was.
+fn capabilities_and_planted_requests<W: Writer>() {
+    let kp = keypair();
+    let mut b = Bench::<_, W>::new(ed25519(&kp), Mem::new(2, 2));
+    let want = served_by::<W>();
+    let (st, body, _) = b.exchange(Cmd::Hello, &wire(|p| hello_req().encode(p)));
+    assert_eq!(st, Status::Ok);
+    let hello = HelloResp::parse(&body).unwrap();
+    assert_eq!(hello.cmds, set_of(&want), "HELLO cmds");
+
+    // A transfer under way: its header half received.
+    assert_eq!(
+        b.call(Cmd::XferBegin, &begin(target::APP, 1, HEADER_SIZE as u16)),
+        Status::Ok
+    );
+    let chunk = |offset: u32| {
+        wire(|p| {
+            XferChunk {
+                offset,
+                data: &[0; 100],
+            }
+            .encode(p)
+        })
+    };
+    assert_eq!(b.call(Cmd::XferHdr, &chunk(0)), Status::Ok);
+
+    let before = b.mem.borrow().clone();
+    let mut served = CmdSet::EMPTY;
+    plant::each_probe(|n, p| {
+        let (st, _, reboot) = b.raw(n, p);
+        assert!(
+            matches!(st, Status::Field | Status::Unsupported),
+            "{n:#x}: {st:?}"
+        );
+        assert!(!reboot);
+        if st == Status::Field {
+            served = served.with(n);
+        }
+    });
+    assert_eq!(served, hello.cmds, "what answers is what HELLO says");
+    let commands = plant::each(&hello.cmds, |n, plant, p| {
+        let (st, _, reboot) = b.raw(n, p);
+        assert_eq!(st, plant.status(), "{n:#x} {plant:?}");
+        assert!(!reboot, "{n:#x} {plant:?}");
+        assert_eq!(*b.mem.borrow(), before, "{n:#x} {plant:?}: the store");
+    });
+    assert_eq!(commands, want.len(), "every command it serves");
+    assert_eq!(*b.mem.borrow(), before, "no call, nothing changed");
+    assert_eq!(
+        b.exchange(Cmd::XferHdr, &chunk(100)).1,
+        wire(|p| encode_next_offset(200, p)),
+        "the transfer goes on"
+    );
+
+    for c in &want {
+        let (st, body, _) = b.exchange(Cmd::Caps, &caps_req(*c as u8, None));
+        assert_eq!(st, Status::Ok, "{c:?}");
+        assert_eq!(CapsResp::parse(&body), Ok(CapsResp::of(*c)), "{c:?}");
+    }
+    for not in [Cmd::Relay as u8, 0xEE] {
+        assert_eq!(b.call(Cmd::Caps, &caps_req(not, None)), Status::Unsupported);
+    }
+    // A session forwards over no link: it has no tunnel to say.
+    let p = caps_req(Cmd::Hello as u8, Some(ANY_LINK));
+    assert_eq!(b.call(Cmd::Caps, &p), Status::Arg);
+}
+
+/// A link id for a CAPS that asks a session for a tunnel: it has none,
+/// whatever the id.
+const ANY_LINK: u8 = 9;
+
+fn caps_req(cmd: u8, link: Option<u8>) -> Vec<u8> {
+    wire(|p| CapsReq { cmd, link }.encode(p))
+}
+
+fn hello_of(max_payload: u16) -> Vec<u8> {
+    let req = HelloReq {
+        max_payload,
+        ..hello_req()
+    };
+    wire(|p| req.encode(p))
+}
+
+/// The requester's HELLO says the payload it takes, and from then on a
+/// request whose answer would not fit it is refused with E_ARG before
+/// its handler runs: the store is not called and a transfer under way
+/// goes on. A HELLO that brings less than its own answer needs is refused
+/// the same way and changes nothing.
+fn answers_fit_what_the_requester_takes<W: Writer>() {
+    let kp = keypair();
+    let mut b = Bench::<_, W>::new(ed25519(&kp), Mem::new(2, 2));
+    assert_eq!(b.agent.ceiling(), Ceiling::link(max_payload::I2C));
+    assert_eq!(b.call(Cmd::Status, &[]), Status::Ok, "the link carries it");
+    assert_eq!(
+        b.call(Cmd::XferBegin, &begin(target::APP, 1, HEADER_SIZE as u16)),
+        Status::Ok
+    );
+    let chunk = |offset: u32| {
+        wire(|p| {
+            XferChunk {
+                offset,
+                data: &[0; 100],
+            }
+            .encode(p)
+        })
+    };
+    assert_eq!(b.call(Cmd::XferHdr, &chunk(0)), Status::Ok);
+
+    let floor = max_payload::SMALLEST as u16;
+    let short = (HelloResp::MAX_LEN) as u16;
+    let before = b.mem.borrow().clone();
+    assert_eq!(b.call(Cmd::Hello, &hello_of(short)), Status::Arg);
+    assert_eq!(b.agent.ceiling().peer, None, "a refused HELLO says nothing");
+    assert_eq!(*b.mem.borrow(), before);
+
+    assert_eq!(b.call(Cmd::Hello, &hello_of(floor)), Status::Ok);
+    assert_eq!(b.agent.ceiling().bytes(), usize::from(floor));
+    let before = b.mem.borrow().clone();
+    // STATUS answers 84 bytes: more than this requester takes.
+    assert_eq!(b.call(Cmd::Status, &[]), Status::Arg);
+    assert_eq!(*b.mem.borrow(), before, "no call of the store");
+    // What fits is served as before.
+    assert_eq!(b.call(Cmd::Version, &[]), Status::Ok);
+    assert_eq!(
+        b.call(Cmd::Caps, &caps_req(Cmd::Status as u8, None)),
+        Status::Ok
+    );
+    assert_eq!(
+        b.exchange(Cmd::XferHdr, &chunk(100)).1,
+        wire(|p| encode_next_offset(200, p)),
+        "the transfer goes on"
+    );
+    // A later HELLO with room for it lifts the ceiling again.
+    assert_eq!(
+        b.call(Cmd::Hello, &hello_of(max_payload::USB as u16)),
+        Status::Ok
+    );
+    assert_eq!(b.agent.ceiling().bytes(), max_payload::I2C, "the link's");
+    assert_eq!(b.call(Cmd::Status, &[]), Status::Ok);
+}
+
+/// A node served over two links (a UART and a USB port, say), as its
+/// links are numbered.
+const UART: usize = 0;
+const USB: usize = 1;
+
+/// The session of a node with two links, and the request frames sent to
+/// it by seq, so that both requesters can use the same seq and command.
+struct TwoLinks {
+    mem: &'static RefCell<Mem>,
+    agent: Agent<&'static RefCell<Mem>, Chain, Ed25519Compact, writer::App, 2>,
+}
+
+impl TwoLinks {
+    fn new() -> Self {
+        let kp = keypair();
+        let mem: &'static RefCell<Mem> = Box::leak(Box::new(RefCell::new(Mem::new(2, 2))));
+        TwoLinks {
+            mem,
+            agent: Agent::with_links(config(), ed25519(&kp), mem, chain()),
+        }
+    }
+
+    /// The reply's status and body to (`seq`, `cmd`, `payload`) over link
+    /// `on`.
+    fn ask(&mut self, on: usize, seq: u8, cmd: Cmd, payload: &[u8]) -> (Status, Vec<u8>) {
+        let mut buf = vec![0u8; 300];
+        let n = Frame {
+            flags: 0,
+            seq,
+            cmd: cmd as u8,
+            payload,
+        }
+        .encode(&mut buf)
+        .unwrap();
+        let reply = self.agent.handle_on(on, &buf[..n]).expect("reply");
+        let (f, _) = Frame::decode(reply.frame, 300).unwrap();
+        assert_eq!((f.seq, f.cmd), (seq, cmd as u8));
+        let (st, body) = split_status(f.payload).unwrap();
+        (st, body.to_vec())
+    }
+}
+
+/// Two requesters on two links of one node, using the same seq and
+/// command: each has the ceiling its own HELLO named and gets its own
+/// reply, also when the other one's request is a repeat for the session;
+/// a link going down drops what was kept of its requester and leaves the
+/// other's.
+#[test]
+fn each_link_has_its_own_requester() {
+    let mut n = TwoLinks::new();
+    let floor = max_payload::SMALLEST as u16;
+    let link = max_payload::I2C;
+
+    // Same seq, same command, different payloads named.
+    assert_eq!(n.ask(UART, 1, Cmd::Hello, &hello_of(1024)).0, Status::Ok);
+    assert_eq!(n.ask(USB, 1, Cmd::Hello, &hello_of(floor)).0, Status::Ok);
+    assert_eq!(n.agent.ceiling_on(UART).bytes(), link, "the link's");
+    assert_eq!(n.agent.ceiling_on(USB).bytes(), usize::from(floor));
+
+    // STATUS, same seq on both: served to the one that takes it, refused
+    // to the one that does not, whichever asked first.
+    assert_eq!(n.ask(USB, 2, Cmd::Status, &[]).0, Status::Arg);
+    assert_eq!(n.ask(UART, 2, Cmd::Status, &[]).0, Status::Ok);
+    assert_eq!(
+        n.ask(USB, 2, Cmd::Status, &[]).0,
+        Status::Arg,
+        "its own repeat"
+    );
+    assert_eq!(n.ask(UART, 3, Cmd::Status, &[]).0, Status::Ok);
+    assert_eq!(n.ask(USB, 3, Cmd::Status, &[]).0, Status::Arg);
+
+    // A repeat is answered from the same link's reply: the store is not
+    // called again for it, and is for the other link's request.
+    let calls = n.mem.borrow().calls.get();
+    assert_eq!(n.ask(UART, 3, Cmd::Status, &[]).0, Status::Ok);
+    assert_eq!(n.mem.borrow().calls.get(), calls, "a repeat on its link");
+    assert_eq!(n.ask(USB, 3, Cmd::Version, &[]).0, Status::Ok);
+    assert!(
+        n.mem.borrow().calls.get() > calls,
+        "another requester's request"
+    );
+
+    // A HELLO over one link with the seq of the other's last HELLO is
+    // handled, not replayed: it sets its own ceiling.
+    assert_eq!(n.ask(UART, 9, Cmd::Hello, &hello_of(1024)).0, Status::Ok);
+    assert_eq!(n.ask(USB, 9, Cmd::Hello, &hello_of(200)).0, Status::Ok);
+    assert_eq!(n.agent.ceiling_on(USB).bytes(), 200);
+    assert_eq!(n.agent.ceiling_on(UART).bytes(), link);
+    assert_eq!(
+        n.ask(USB, 10, Cmd::Status, &[]).0,
+        Status::Ok,
+        "200 take it"
+    );
+
+    // A transfer belongs to the link it was begun over.
+    let begin = begin(target::APP, 1, HEADER_SIZE as u16);
+    assert_eq!(n.ask(UART, 20, Cmd::XferBegin, &begin).0, Status::Ok);
+    let chunk = |offset: u32| {
+        wire(|p| {
+            XferChunk {
+                offset,
+                data: &[0; 100],
+            }
+            .encode(p)
+        })
+    };
+    assert_eq!(n.ask(UART, 21, Cmd::XferHdr, &chunk(0)).0, Status::Ok);
+    let before = n.mem.borrow().clone();
+    assert_eq!(n.ask(USB, 21, Cmd::XferHdr, &chunk(100)).0, Status::State);
+    assert_eq!(n.ask(USB, 22, Cmd::XferEnd, &[]).0, Status::State);
+    assert_eq!(
+        *n.mem.borrow(),
+        before,
+        "the other requester changed nothing"
+    );
+    assert_eq!(
+        n.ask(UART, 22, Cmd::XferHdr, &chunk(100)).1,
+        wire(|p| encode_next_offset(200, p)),
+        "the transfer goes on for its requester"
+    );
+
+    // USB goes down: its requester is forgotten, UART's is not.
+    n.agent.link_down_on(USB, 0, 0);
+    assert_eq!(n.agent.ceiling_on(USB).peer, None);
+    assert_eq!(n.agent.ceiling_on(UART).peer, Some(1024));
+    // The next requester on USB may use a seq and command seen before.
+    assert_eq!(n.ask(USB, 10, Cmd::Status, &[]).0, Status::Ok);
+    n.agent.link_down_on(UART, 0, 0);
+    assert_eq!(n.agent.ceiling_on(UART).peer, None);
+    assert_eq!(n.agent.ceiling_on(USB).peer, None);
+
+    // A link the node does not have is answered nothing.
+    let mut buf = [0u8; 32];
+    let len = Frame {
+        flags: 0,
+        seq: 1,
+        cmd: Cmd::Status as u8,
+        payload: &[],
+    }
+    .encode(&mut buf)
+    .unwrap();
+    assert!(n.agent.handle_on(2, &buf[..len]).is_none());
+}
+
+/// A transfer's idle deadline belongs to the link it was begun over:
+/// another link's requests never extend it, and its own link going down
+/// ends it. The node's clock is what `tick` is given (in microseconds).
+#[test]
+fn a_transfer_times_out_on_its_own_link_only() {
+    let idle = u64::from(dagon_agent::IDLE_TIMEOUT_MS);
+    let begin = begin(target::APP, 1, HEADER_SIZE as u16);
+    let chunk = |offset: u32| {
+        wire(|p| {
+            XferChunk {
+                offset,
+                data: &[0; 100],
+            }
+            .encode(p)
+        })
+    };
+    let at = |n: &mut TwoLinks, ms: u64, on: usize, seq: u8, cmd: Cmd, p: &[u8]| {
+        n.agent.tick(ms * 1_000);
+        n.ask(on, seq, cmd, p).0
+    };
+
+    // UART begins; USB keeps asking past UART's deadline: UART's next
+    // chunk finds the transfer gone.
+    let mut n = TwoLinks::new();
+    assert_eq!(at(&mut n, 0, UART, 1, Cmd::XferBegin, &begin), Status::Ok);
+    for (i, ms) in (1..=4).map(|i| (i, i * idle / 3)) {
+        assert_eq!(at(&mut n, ms, USB, i as u8, Cmd::Status, &[]), Status::Ok);
+    }
+    let late = at(&mut n, 4 * idle / 3, UART, 2, Cmd::XferHdr, &chunk(0));
+    assert_eq!(late, Status::State, "USB traffic kept UART's transfer");
+
+    // UART's own requests keep it, however long the whole takes.
+    let mut n = TwoLinks::new();
+    assert_eq!(at(&mut n, 0, UART, 1, Cmd::XferBegin, &begin), Status::Ok);
+    let t = idle - 1;
+    assert_eq!(at(&mut n, t, UART, 2, Cmd::XferHdr, &chunk(0)), Status::Ok);
+    assert_eq!(
+        at(&mut n, 2 * t, UART, 3, Cmd::XferHdr, &chunk(100)),
+        Status::Ok
+    );
+    // A tick alone, at the deadline, ends it.
+    n.agent.tick((3 * t + 1) * 1_000);
+    assert_eq!(n.ask(UART, 4, Cmd::XferHdr, &chunk(200)).0, Status::State);
+
+    // The other link going down leaves it; its own link going down ends it.
+    let mut n = TwoLinks::new();
+    assert_eq!(at(&mut n, 0, UART, 1, Cmd::XferBegin, &begin), Status::Ok);
+    n.agent.link_down_on(USB, 0, 0);
+    assert_eq!(at(&mut n, 1, UART, 2, Cmd::XferHdr, &chunk(0)), Status::Ok);
+    n.agent.link_down_on(UART, 0, 0);
+    assert_eq!(
+        at(&mut n, 2, UART, 3, Cmd::XferHdr, &chunk(100)),
+        Status::State
+    );
+
+    // Refused requests on its own link, and their repeats, do not keep it.
+    let mut n = TwoLinks::new();
+    assert_eq!(at(&mut n, 0, UART, 1, Cmd::XferBegin, &begin), Status::Ok);
+    let tunnel = caps_req(Cmd::Status as u8, Some(0));
+    let refused: [(u8, Cmd, &[u8], Status); 3] = [
+        (2, Cmd::Relay, &[], Status::Unsupported),
+        (3, Cmd::Caps, &tunnel, Status::Arg),
+        (3, Cmd::Caps, &tunnel, Status::Arg),
+    ];
+    for (i, (seq, cmd, p, st)) in refused.into_iter().enumerate() {
+        let ms = (i as u64 + 1) * idle / 3;
+        assert_eq!(at(&mut n, ms, UART, seq, cmd, p), st, "{cmd:?}");
+    }
+    let late = at(&mut n, 4 * idle / 3, UART, 5, Cmd::XferHdr, &chunk(0));
+    assert_eq!(late, Status::State, "refused requests kept the transfer");
+}
+
+#[test]
+fn the_app_answers_within_what_the_requester_takes() {
+    answers_fit_what_the_requester_takes::<writer::App>();
+}
+
+#[test]
+fn the_boot_core_answers_within_what_the_requester_takes() {
+    answers_fit_what_the_requester_takes::<writer::BootCore>();
+}
+
+fn hello_req() -> HelloReq {
+    HelloReq {
+        proto_ver: dagon_proto::PROTO_VERSION.into(),
+        max_payload: max_payload::I2C as u16,
+    }
+}
+
+#[test]
+fn the_app_says_what_it_serves_and_reads_before_it_acts() {
+    capabilities_and_planted_requests::<writer::App>();
+}
+
+#[test]
+fn the_boot_core_says_what_it_serves_and_reads_before_it_acts() {
+    capabilities_and_planted_requests::<writer::BootCore>();
+}
+
+/// What a node serves in front of its session (a relay's commands, a ROM
+/// entry) is in the session's HELLO and CAPS too.
+#[test]
+fn hello_names_what_the_node_serves_in_front_of_the_session() {
+    let kp = keypair();
+    let mut b = Bench::<_, writer::App>::new(ed25519(&kp), Mem::new(2, 2));
+    let front = set_of(&[Cmd::Relay, Cmd::SubCtl]);
+    b.agent.also_serves(front);
+    let (_, body, _) = b.exchange(Cmd::Hello, &wire(|p| hello_req().encode(p)));
+    let cmds = HelloResp::parse(&body).unwrap().cmds;
+    assert_eq!(cmds, set_of(&served_by::<writer::App>()).union(front));
+    let (st, body, _) = b.exchange(Cmd::Caps, &caps_req(Cmd::Relay as u8, None));
+    assert_eq!(st, Status::Ok);
+    assert_eq!(CapsResp::parse(&body), Ok(CapsResp::of(Cmd::Relay)));
 }
 
 /// XFER_BEGIN of 600 bytes into `slot` of `t` with `hdr` header bytes.

@@ -3,6 +3,8 @@ title: "Retained and persistent formats"
 description: "The boot record, the lockup fuse, the MCU identity and the compiled topology's layout."
 ---
 
+For DAGON contributors. This page is the design's norm; where the code differs from it is in [Limitations](/en/explanation/limitations/).
+
 This document is the normative specification of the formats that
 [lifecycle-events.md section 5.5](/en/explanation/lifecycle-events/#55-boot-record-mcu-identity-and-compiled-topology-requirements-and-the-executable-model)
 leaves to an executable model: the boot record, the lockup fuse, the MCU
@@ -11,9 +13,9 @@ shape here is the one `crates/dagon-retained-model` proves; a change to a
 shape is a change to the model first, and the model's tests decide.
 
 The model is host-only and not released. Each format's codec is a trait in
-the model (`RecordCodec`, `FuseCodec`, `BodyCodec`); a production codec
-implements the same trait and runs under the same harness, so the shipped
-codec and the proof cannot drift apart.
+the model (`RecordCodec`, `FuseCodec`, `BodyCodec`), proven on the host. By design,
+a firmware codec implements the same trait and is tested under the same
+harness.
 
 ```
 cargo test -p dagon-retained-model                       # 10^4 scenarios per world, fixed cases

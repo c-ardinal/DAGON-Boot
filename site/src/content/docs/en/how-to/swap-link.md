@@ -27,9 +27,9 @@ In 準備 (define), the inspector offers each kind for a link and, on the 親機
 
 ## Which kinds work
 
-A kind the firmware of either end does not implement is marked ◇ まだ使えない.
+A kind the firmware of either end does not implement is marked （使用不可）.
 
-- The 構成 may still name it (problem まだ使えないつながり).
-- `dagon gen` refuses it and names the link (`uplink of hub over ble: not available yet on rp2040`).
+- The 構成 may still name it (problem 使えないつながり).
+- `dagon gen` refuses it and names the link (`uplink of hub over ble: the firmware of rp2040 does not run this link kind`).
 
 The kinds the firmware offers are in the Up links and Down links columns of [Boards and MCUs](/en/reference/boards/). Up is towards the PC or the 親機, and down is to 子機. The data comes from each MCU definition's `[links]`.

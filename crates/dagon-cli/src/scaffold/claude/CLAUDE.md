@@ -1,18 +1,36 @@
 # DAGON project
 
-This folder is a DAGON Boot project: firmware for a small group of
-microcontrollers that one hub updates with signed A/B images, rolling a
-node back by itself when a new version never gets confirmed.
+This folder is a DAGON Boot project: firmware for a group of
+microcontrollers that one connection to the PC updates with signed
+images. A node starts a new version on trial; a version that is not
+confirmed resets and, where its image has two slots, goes back to the
+previous one.
 
 ## Words
 
-- ノード (node): one microcontroller in the 構成.
-- 親機 (hub): the node on the PC's USB; it relays updates to the others.
-- 子機 (child): a node the hub reaches over I2C or UART.
-- 構成 (topology): `topology.yaml`, the nodes, their links and the update
-  order.
+The words of DAGON's documentation (Explanation, What the words mean):
 
-Use these words with the developer, and count in ノード ("3 ノード").
+<!-- words -->
+
+Use these words with the developer, and count in ノード ("3ノード").
+
+## Application rules
+
+- The app is tasks, not one loop: `start` in `app.rs` spawns each piece of
+  work as its own task. Never run the app's work in one loop in `main`.
+- One owner per peripheral: each pin or peripheral the start hands the app
+  (what DAGON does not use) moves into the one task that drives it. Never
+  touch the peripherals DAGON uses.
+- Extensions, not edits: change what DAGON does only through extensions
+  (`exts` in `dagon()`), which observe events and answer the decision
+  points (`accept_update`, `allow_reboot_now`, `self_check`).
+- `self_check` returns `true` only when the app works on this hardware; a
+  version on trial whose self-check fails is never confirmed. The host
+  confirms by default (`Confirm::ByHost`); `confirm: Confirm::Own` is for
+  a node used without a host.
+- The watchdog is fed only on liveness: each task holds a lease, marks it
+  busy before a piece of work and idle when it waits. Never feed the
+  watchdog directly; a stuck task stops the feeding and the chip resets.
 
 ## Layout
 

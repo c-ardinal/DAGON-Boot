@@ -538,6 +538,26 @@ fn new_makes_the_project_and_a_key_outside_it() {
 }
 
 #[test]
+fn claude_md_takes_its_words_from_the_words_page() {
+    let template = CLAUDE_FILES[0].1;
+    assert_eq!(template.matches(WORDS_AT).count(), 1);
+    let d = tmp("claude-words");
+    let proj = d.join("fleet");
+    new_project(&proj, "fleet", SAMPLE, &d.join("keys"), &dev()).unwrap();
+    let text = read(&proj, "CLAUDE.md");
+    assert!(!text.contains(WORDS_AT));
+    let words: Vec<&str> = WORDS_PAGE
+        .lines()
+        .filter(|l| l.starts_with("- **"))
+        .collect();
+    assert!(!words.is_empty());
+    for line in words {
+        assert!(text.contains(line), "{line} missing");
+        assert_eq!(template.matches(line).count(), 0, "{line} copied");
+    }
+}
+
+#[test]
 fn new_writes_claude_files_with_no_paths_or_secrets() {
     let d = tmp("claude");
     let proj = d.join("fleet");

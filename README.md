@@ -98,7 +98,7 @@ curl -fsSL https://raw.githubusercontent.com/c-ardinal/DAGON-Boot/main/setup.sh 
 $env:DAGON_UNINSTALL = "1"; irm https://raw.githubusercontent.com/c-ardinal/DAGON-Boot/main/setup.ps1 | iex
 ```
 
-両スクリプトとも、環境変数`DAGON_UNINSTALL=1`の設定でもアンインストールを実行します。PowerShellのスクリプトは実行後にこの変数を削除します。
+両スクリプトとも環境変数`DAGON_UNINSTALL=1`の設定でもアンインストールを実行します。PowerShellのスクリプトは実行後にこの変数を削除します。
 
 #### シミュレータでの体験
 

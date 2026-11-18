@@ -58,8 +58,24 @@ impl Link for NoLink {
     }
 }
 
-/// The links of a boot core as one: a request is read from whichever
-/// link brings one first, and its reply goes back on that link.
+/// The links a boot core's session is served over: USB, I2C, UART, numbered
+/// in that order ([`link_index`]).
+pub const BOOT_LINKS: usize = 3;
+
+/// The number of a boot core link of kind `kind` among [`BOOT_LINKS`]: the
+/// link its session ([`dagon_agent::Agent::handle_on`]) keeps a requester
+/// for.
+pub const fn link_index(kind: Kind) -> usize {
+    match kind {
+        Kind::I2c => 1,
+        Kind::Uart => 2,
+        _ => 0,
+    }
+}
+
+/// The links of a boot core read as one stream: a request is read from
+/// whichever link brings one first, its link told by `kind` ([`link_index`]),
+/// and its reply goes back on that link.
 pub struct Links<U, I, T> {
     pub usb: Option<U>,
     pub i2c: Option<I>,
@@ -180,6 +196,8 @@ pub struct Mailbox {
     turn: Cell<Turn>,
     req: RefCell<[u8; MAX_FRAME]>,
     req_len: Cell<usize>,
+    /// The link the request came over ([`link_index`]).
+    req_on: Cell<usize>,
     reply: RefCell<[u8; MAX_FRAME]>,
     reply_len: Cell<Option<usize>>,
     reboot: Cell<bool>,
@@ -192,6 +210,7 @@ impl Mailbox {
             turn: Cell::new(Turn::Reading),
             req: RefCell::new([0; MAX_FRAME]),
             req_len: Cell::new(0),
+            req_on: Cell::new(0),
             reply: RefCell::new([0; MAX_FRAME]),
             reply_len: Cell::new(None),
             reboot: Cell::new(false),
@@ -230,6 +249,7 @@ pub async fn pump<L: Link>(link: &mut L, mb: &Mailbox) {
             let n = f.len().min(MAX_FRAME);
             mb.req.borrow_mut()[..n].copy_from_slice(&f[..n]);
             mb.req_len.set(n);
+            mb.req_on.set(link_index(link.kind()));
             mb.turn.set(Turn::Arrived);
         }
         core::future::poll_fn(|_| match mb.turn.get() {
@@ -294,7 +314,7 @@ impl<'a, F: Future<Output = ()>, S: Sleep> PumpPort<'a, F, S> {
 }
 
 impl<F: Future<Output = ()>, S: Sleep> Port for PumpPort<'_, F, S> {
-    fn poll(&mut self) -> Option<&[u8]> {
+    fn poll(&mut self) -> Option<(usize, &[u8])> {
         self.turn();
         if self.mb.turn.get() != Turn::Arrived {
             return None;
@@ -302,7 +322,7 @@ impl<F: Future<Output = ()>, S: Sleep> Port for PumpPort<'_, F, S> {
         self.mb.turn.set(Turn::Taken);
         let n = self.mb.req_len.get();
         self.req[..n].copy_from_slice(&self.mb.req.borrow()[..n]);
-        Some(&self.req[..n])
+        Some((self.mb.req_on.get(), &self.req[..n]))
     }
     fn reply(&mut self, frame: Option<&[u8]>, reboot: bool) {
         let n = frame.map(|f| {
@@ -358,17 +378,18 @@ pub fn receive_step<F: Flash, P: Port, C: Clock>(
 }
 
 /// Update or recovery mode (`entry`) on `port`, the shared session loop:
-/// `agent` answers `first` (the window's STAY), then every request, until
-/// the reply to REBOOT has been read or, in update mode, no request came
-/// for `update_mode::EXIT_IDLE_MS`. Either way the boot core restarts.
+/// `agent` answers `first` (the window's STAY), then every request as the
+/// request of the link it came over, until the reply to REBOOT has been
+/// read or, in update mode, no request came for
+/// `update_mode::EXIT_IDLE_MS`. Either way the boot core restarts.
 pub fn serve<P, S, X, V, C>(
     port: &mut P,
-    agent: &mut Agent<S, X, V, BootCore>,
+    agent: &mut Agent<S, X, V, BootCore, BOOT_LINKS>,
     clock: &mut C,
     feed_every_ms: u32,
     feed: &mut impl FnMut(),
     entry: Entry,
-    first: Option<&[u8]>,
+    first: Option<&Stay>,
 ) -> Exit
 where
     P: Port,

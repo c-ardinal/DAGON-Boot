@@ -98,8 +98,9 @@ impl Drop for I2cPort {
     }
 }
 
+/// The boot core's one link: link 0 of its session.
 impl Port for I2cPort {
-    fn poll(&mut self) -> Option<&[u8]> {
+    fn poll(&mut self) -> Option<(usize, &[u8])> {
         if !self.regs.sr1().read().addr() {
             return None;
         }
@@ -113,7 +114,7 @@ impl Port for I2cPort {
                 }
                 self.mailbox.request();
                 self.acknowledge(false);
-                Some(&self.rx[..n])
+                Some((0, &self.rx[..n]))
             }
             SlaveCommandKind::Read => {
                 let sent = self

@@ -11,7 +11,7 @@ use dagon_proto::diag::{
     LinkDiagResp, Peer, Report, Seed,
 };
 use dagon_proto::table::link_diag::FORMAT;
-use dagon_proto::{flags, frame_len, payload, Frame, Status, HEADER_LEN};
+use dagon_proto::{flags, frame_len, payload, Cmd, Frame, Status, HEADER_LEN};
 
 use super::{Agent, AppChain, Handled};
 use crate::{SlotStore, Writer};
@@ -32,6 +32,10 @@ pub(super) struct Auth {
     /// bytes came: a resend answers as the first only when it is the same
     /// bytes, which its typed request does not keep.
     received: [u8; 32],
+    /// The SHA-256 of the last signed clear accepted, kept past the next
+    /// DIAG_SEED: that request sent again under a later seed is a replay
+    /// (E_STATE), not a bad signature.
+    spent: Option<[u8; 32]>,
 }
 
 impl Auth {
@@ -39,6 +43,7 @@ impl Auth {
         seed: None,
         used: None,
         received: [0; 32],
+        spent: None,
     };
 
     /// The LINK_DIAG_CLEAR request `payload` is being handled.
@@ -194,6 +199,9 @@ where
             }
             return outcome.map(|()| (0, None));
         }
+        if self.auth.spent == Some(request) {
+            return Err(Status::State);
+        }
         let seed = self.auth.seed.take().ok_or(Status::State)?;
         let msg = ClearMessage::new(&seed, &c.scope);
         if !self
@@ -204,13 +212,25 @@ where
         }
         let outcome = self.diag.clear(c.scope);
         self.auth.used = Some((request, outcome));
+        self.auth.spent = Some(request);
         outcome.map(|()| (0, None))
     }
 
     /// DIAG_SEED: voids what the last seed held, then issues a new one;
-    /// after a refusal the node holds none.
+    /// after a refusal the node holds none. The answers to LINK_DIAG_CLEAR
+    /// a link keeps for a resend end with it, on every link: a resend is
+    /// then checked against the new seed.
     pub(super) fn diag_seed(&mut self, _: DiagSeedReq) -> Handled {
-        self.auth = Auth::NONE;
+        self.auth = Auth {
+            spent: self.auth.spent,
+            ..Auth::NONE
+        };
+        let clear = Cmd::LinkDiagClear as u8;
+        for link in self.links.iter_mut() {
+            if link.last.is_some_and(|(_, cmd)| cmd == clear) {
+                link.last = None;
+            }
+        }
         let seed = self.seeds.seed(&mut self.diag)?;
         self.auth.seed = Some(seed);
         let len = seed.encode(self.body()).map_err(|_| Status::Range)?;

@@ -413,7 +413,10 @@ impl<
     /// (`dagon_proto::version_refusal`). A repeat of the previous seq and
     /// cmd over the same link returns that link's previous reply without
     /// executing again; the same seq and cmd over another link is another
-    /// requester's request.
+    /// requester's request. The link diagnostics are the exceptions:
+    /// LINK_DIAG, a read, is read again; a LINK_DIAG_CLEAR answer is kept
+    /// only until the next DIAG_SEED over any link, which ends the seed it
+    /// was checked against.
     pub fn handle_on(&mut self, on: usize, request: &[u8]) -> Option<Reply<'_>> {
         if on >= L {
             return None;

@@ -252,20 +252,98 @@ fn failure_and_replay() {
         n.clear(scope, Some(sign(&keypair(), &seed, &scope))),
         Status::State
     );
-    // A good request captured, then a new seed: the capture is refused.
+    // A request signed under a seed since replaced, never sent: a bad
+    // signature for the seed held.
     let seed = n.seed().unwrap();
-    let captured = sign(&keypair(), &seed, &scope);
+    let stale = sign(&keypair(), &seed, &scope);
     let _ = n.seed().unwrap();
-    assert_eq!(n.clear(scope, Some(captured)), Status::Signature);
+    assert_eq!(n.clear(scope, Some(stale)), Status::Signature);
     // A KEY with no seed held.
-    assert_eq!(n.clear(scope, Some(captured)), Status::State);
+    assert_eq!(n.clear(scope, Some(stale)), Status::State);
     // A signature for another scope under the right seed.
     let seed = n.seed().unwrap();
     let other = sign(&keypair(), &seed, &ClearScope::All);
     assert_eq!(n.clear(scope, Some(other)), Status::Signature);
     assert!(fake.0.borrow().clears.is_empty());
     assert_eq!(fake.0.borrow().peers.len(), 1);
+    // A good request captured on the wire, then a new seed: the capture
+    // is a replay, and the new seed is still held.
+    let seed = n.seed().unwrap();
+    let captured = sign(&keypair(), &seed, &scope);
+    assert_eq!(n.clear(scope, Some(captured)), Status::Ok);
+    let seed = n.seed().unwrap();
+    assert_eq!(n.clear(scope, Some(captured)), Status::State);
+    let all = ClearScope::All;
+    assert_eq!(
+        n.clear(all, Some(sign(&keypair(), &seed, &all))),
+        Status::Ok
+    );
+    assert_eq!(fake.0.borrow().clears, [scope, all]);
 }
+
+/// A seed asked for over one link ends what another link keeps of its
+/// accepted clear: its resend, the same seq and bytes, is checked again
+/// and refused as a replay.
+#[test]
+fn a_seed_on_one_link_ends_a_clear_kept_on_another() {
+    let fake = Fake::default();
+    fake.0.borrow_mut().add_peer(EP.link, EP.addr);
+    let seeds = dagon_port::diag::CounterSeed {
+        mcu_id: MCU,
+        id: Id(std::rc::Rc::new(std::cell::RefCell::new(Some([
+            1, 2, 3, 4,
+        ])))),
+    };
+    let mut agent: TwoLinks = dagon_agent::Agent::with_links(config(), verifier(), Slots, chain())
+        .with_diag(seeds, fake.clone());
+    let send = |agent: &mut TwoLinks, on: usize, seq: u8, fl: u8, cmd: Cmd, p: &[u8]| {
+        let mut buf = vec![0u8; dagon_proto::frame_len(p.len())];
+        let n = dagon_proto::Frame {
+            flags: fl,
+            seq,
+            cmd: cmd as u8,
+            payload: p,
+        }
+        .encode(&mut buf)
+        .unwrap();
+        let reply = agent.handle_on(on, &buf[..n]).unwrap();
+        let (f, _) = dagon_proto::Frame::decode(reply.frame, 1088).unwrap();
+        let (st, body) = dagon_proto::split_status(f.payload).unwrap();
+        (st, body.to_vec())
+    };
+    let ask = enc(|b| DiagSeedReq { level: 1 }.encode(b));
+    let (st, body) = send(&mut agent, 0, 1, 0, Cmd::DiagSeed, &ask);
+    assert_eq!(st, Status::Ok);
+    let seed = Seed::parse(&body).unwrap();
+    let scope = ClearScope::EndpointAll(EP);
+    let req = clear_req(scope, Some(sign(&keypair(), &seed, &scope)));
+    assert_eq!(
+        send(&mut agent, 0, 2, 0, Cmd::LinkDiagClear, &req).0,
+        Status::Ok
+    );
+    // Kept for a resend on link 0 until a seed is asked for anywhere.
+    let retry = dagon_proto::flags::RETRY;
+    assert_eq!(
+        send(&mut agent, 0, 2, retry, Cmd::LinkDiagClear, &req).0,
+        Status::Ok
+    );
+    assert_eq!(send(&mut agent, 1, 7, 0, Cmd::DiagSeed, &ask).0, Status::Ok);
+    assert_eq!(
+        send(&mut agent, 0, 2, retry, Cmd::LinkDiagClear, &req).0,
+        Status::State
+    );
+    assert_eq!(fake.0.borrow().clears, [scope]);
+}
+
+type TwoLinks = dagon_agent::Agent<
+    Slots,
+    Chain,
+    dagon_ed25519::Ed25519Compact,
+    dagon_agent::writer::App,
+    2,
+    dagon_port::diag::CounterSeed<Id>,
+    Fake,
+>;
 
 /// Only the same bytes again are the accepted request: the same clear
 /// with one more field, even one the node skips, is another request under
@@ -317,9 +395,10 @@ fn retry_answers_as_first() {
         Some(sign(&keypair(), &seed, &ClearScope::All)),
     );
     assert_eq!(n.call(Cmd::LinkDiagClear, &other).0, Status::State);
-    // A new seed ends the memory of the used one.
+    // A new seed ends the answer kept for it: sent again, the request is
+    // a replay.
     let _ = n.seed().unwrap();
-    assert_eq!(n.call(Cmd::LinkDiagClear, &req).0, Status::Signature);
+    assert_eq!(n.call(Cmd::LinkDiagClear, &req).0, Status::State);
     assert_eq!(fake.0.borrow().clears.len(), 1);
 }
 

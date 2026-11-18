@@ -73,7 +73,7 @@ COMPONENTS = {
     "Event Stream": ("ホストのイベントの配信", "Delivers host events"),
     "Catalog": ("すべてのイベントとポートの一覧", "Lists every event and port"),
     "BuildRunner": ("ビルドを実行するポート", "Port that runs builds"),
-    "Transport": ("ノードへのバイト列のポート", "Port for the byte stream to the hub"),
+    "Transport": ("コーディネータへのバイト列のポート", "Port for the byte stream to the coordinator"),
     "confirm_plan": ("書き込みの前の確認の判断点", "Decision point before a write"),
     "Signer": ("署名のポート", "Port that signs"),
     "KeyStore": ("利用者が選んだ置き場所（環境変数、OSのキーストア、1Passwordなど）から署名の鍵を受け取るポート", "Port that receives the signing key from where the user chose to keep it (an environment variable, the OS key store, 1Password and so on)"),
@@ -85,7 +85,7 @@ COMPONENTS = {
     "Simulator Link": ("dagon-simの模擬リンク", "dagon-sim's simulated link"),
     "ROM Writers": ("PCのdagon-romlinkによるROMの手順", "ROM procedures on the PC through dagon-romlink"),
     "File Key Pair": ("ファイルの鍵の組", "Key pair in files"),
-    "DAGON Link": ("ホストとノードのあいだのフレームとコマンド", "Frames and commands between host, hub and nodes"),
+    "DAGON Link": ("ホスト、コーディネータ、ノードのあいだのフレームとコマンド", "Frames and commands between host, coordinator and nodes"),
     "Release Bundle": ("パッケージファイル（.dgb）の形式", "Format of the package file (.dgb)"),
     "Image Header": ("署名付きのイメージのヘッダ", "Header of a signed image"),
     "Topology Binary": ("コンパイル済みの構成の形式", "Format of the compiled topology"),
@@ -149,9 +149,9 @@ COMPONENTS = {
     "LogSink": ("ログの行き先のポート", "Port for where logs go"),
     "BootSelect": ("kind Sはジャンプ、kind Vはベンダーの選択情報の操作", "Kind S: the jump; kind V: the vendor's selection data"),
     "Flash": ("フラッシュの消去、書き込み、読み出し", "Flash erase, write and read"),
-    "I2cBus": ("ノードのI2Cバス", "The hub's I2C bus"),
-    "StreamPort": ("ノードのバイト列", "The hub's byte stream"),
-    "SubControl": ("配下ノードの制御線", "A child's control lines"),
+    "I2cBus": ("コーディネータのI2Cバス", "The coordinator's I2C bus"),
+    "StreamPort": ("コーディネータのバイト列", "The coordinator's byte stream"),
+    "SubControl": ("接続先ノードの制御線", "Control lines of the node at the other end"),
     "Reset": ("システムのリセット", "System reset"),
     "SandboxArch": ("1つのアーキテクチャの特権の入口とアンワインドのレジスタ", "Privilege entry and unwind registers for one architecture"),
     "Board Definition": ("ボードのデータ", "The board's data"),
@@ -185,8 +185,8 @@ COMPONENTS = {
 }
 
 WORDS = {
-    "ja": {"title": "DAGONのソフトウェアアーキテクチャ", "component": "コンポーネント", "port": "ポートとプロトコル", "contract": "ノードとPCの共通形式", "hub": "Hub列はHubイメージのみ", "vendor": "シリコンとベンダー"},
-    "en": {"title": "DAGON's software architecture", "component": "Component", "port": "Port or contract", "contract": "Format shared by PC and node", "hub": "The Hub column is hub images only", "vendor": "Silicon and vendor"},
+    "ja": {"title": "DAGONのソフトウェアアーキテクチャ", "component": "コンポーネント", "port": "ポートとプロトコル", "contract": "ノードとPCの共通形式", "hub": "Hub列はコーディネータのイメージのみ", "vendor": "シリコンとベンダー"},
+    "en": {"title": "DAGON's software architecture", "component": "Component", "port": "Port or contract", "contract": "Format shared by PC and node", "hub": "The Hub column is coordinator images only", "vendor": "Silicon and vendor"},
 }
 
 BOX, BOX2 = 21, 33  # one line, two lines

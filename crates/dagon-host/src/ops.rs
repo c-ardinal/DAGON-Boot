@@ -99,6 +99,12 @@ pub enum Outcome<E> {
     /// Stopped here; later nodes are `NotStarted`.
     Failed(Error<E>),
     NotStarted,
+    /// A linked node that answered nothing in this session, not even HELLO
+    /// (the hub said so): no DAGON runs on it, as on a node added to the
+    /// configuration and never written. Nothing was sent to it and the run went on with the other nodes; it
+    /// takes its first write directly (the factory write, or the ROM path
+    /// where its MCU and link have one: [`Host::write_path`]).
+    NeedsFirstWrite,
 }
 
 #[derive(Debug)]
@@ -183,7 +189,8 @@ impl<T: Transport, C: HostClock> Host<T, C> {
     /// for `topology`, the caller's current canonical binary), then updates
     /// the nodes: the others in update order, the node the PC is connected
     /// to last. `nodes` limits the run to these topology node indices. Stops
-    /// at the first node that fails.
+    /// at the first node that fails; a linked node that has answered nothing
+    /// in this session is [`Outcome::NeedsFirstWrite`] and the run goes on.
     pub async fn apply(
         &mut self,
         bundle: &[u8],
@@ -239,10 +246,7 @@ impl<T: Transport, C: HostClock> Host<T, C> {
             let outcome = if failed {
                 Outcome::NotStarted
             } else {
-                match self.update_node(&b, node, target, false, on_event).await {
-                    Ok(v) => Outcome::Done(v),
-                    Err(e) => Outcome::Failed(e),
-                }
+                self.apply_node(&b, node, target, on_event).await
             };
             failed |= matches!(outcome, Outcome::Failed(_));
             out.push(NodeOutcome {
@@ -254,6 +258,30 @@ impl<T: Transport, C: HostClock> Host<T, C> {
         Ok(out)
     }
 
+    /// One planned node of an apply: [`Outcome::NeedsFirstWrite`] when the
+    /// hub says it answers nothing and it has answered nothing in this
+    /// session, else its update. A node that answered earlier in the session
+    /// and is silent now ran DAGON: it fails and stops the run.
+    async fn apply_node(
+        &mut self,
+        b: &BundleView<'_>,
+        node: u8,
+        to: Target,
+        on_event: &mut dyn FnMut(Event),
+    ) -> Outcome<T::Error> {
+        let st = match self.status(to).await {
+            Ok(st) => st,
+            Err(e) if is_silent(&e) && !self.opened.contains(&to) => {
+                return Outcome::NeedsFirstWrite
+            }
+            Err(e) => return Outcome::Failed(e),
+        };
+        match self.update_with(b, node, to, &st, false, on_event).await {
+            Ok(v) => Outcome::Done(v),
+            Err(e) => Outcome::Failed(e),
+        }
+    }
+
     async fn update_node(
         &mut self,
         b: &BundleView<'_>,
@@ -262,9 +290,22 @@ impl<T: Transport, C: HostClock> Host<T, C> {
         rewrite: bool,
         on_event: &mut dyn FnMut(Event),
     ) -> Result<Version, T::Error> {
-        self.write = Default::default();
         let st = self.status(to).await?;
-        let r = self.update_inner(b, node, to, &st, rewrite, on_event).await;
+        self.update_with(b, node, to, &st, rewrite, on_event).await
+    }
+
+    /// [`Host::update_node`] from the STATUS `st` just read.
+    async fn update_with(
+        &mut self,
+        b: &BundleView<'_>,
+        node: u8,
+        to: Target,
+        st: &NodeState,
+        rewrite: bool,
+        on_event: &mut dyn FnMut(Event),
+    ) -> Result<Version, T::Error> {
+        self.write = Default::default();
+        let r = self.update_inner(b, node, to, st, rewrite, on_event).await;
         if let Err(e) = &r {
             let ph = match e {
                 Error::Rejected {
@@ -944,6 +985,13 @@ impl<T: Transport, C: HostClock> Host<T, C> {
             Err(_) => {}
         }
     }
+}
+
+/// No DAGON answers at the node: the hub relayed its first request (HELLO)
+/// and answered that the node did not, after every resend, so nothing else
+/// was sent to it. A hub that does not answer is no such evidence.
+fn is_silent<E>(e: &Error<E>) -> bool {
+    matches!(e, Error::Relay(Status::Timeout))
 }
 
 fn reboot_request() -> Vec<u8> {

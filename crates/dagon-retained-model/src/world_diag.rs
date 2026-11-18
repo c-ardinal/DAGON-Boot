@@ -16,7 +16,8 @@
 //!   ever-communicated clear, with the identifier read;
 //! - L2: a completed ever-communicated record is still read;
 //! - L3: what a completed clear removed is not read until a new sample;
-//! - L4: the records appended in a cycle stay within the bound;
+//! - L4: the records appended in a cycle stay within 3 x `diag_peers` +
+//!   clears + seeds + 3 x the peers those clears covered;
 //! - L5: no byte outside the faces is written;
 //! - L6: the fold of the image slots is the one `dagon_core::log::Log`
 //!   gives on the same bytes, and an operation on them leaves what `Log`
@@ -26,9 +27,12 @@
 //!   the cycles' outcomes;
 //! - L9: no seed counter is returned twice.
 //!
-//! Foreign bytes can take the log back to an earlier state, so after them
-//! the oracle starts again from what is read; what still holds then is
-//! that no peer is read that never had a pass sample.
+//! L1 to L9 are claims under power cuts. Foreign bytes can take an
+//! append-only log back to an earlier state, so under them only weaker
+//! claims hold, and those are what is checked there: a peer with no pass
+//! sample is never read as ever communicated, L5 holds, and L1 to L9 hold
+//! again from the next completed record on (the oracle starts again from
+//! what is read).
 
 use crate::diag::{
     evaluate, on_fail, on_pass, status, DiagRecord, DtcScope, EverScope, Id, Params, Peer,

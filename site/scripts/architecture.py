@@ -191,7 +191,8 @@ ABSENT = ("コードに存在しません。", "Not in the code.")
 # is part of such a record names it here instead, and a port is not listed here at all.
 NOT_IN_TREE = {
     "Host Extension Chain": ABSENT,
-    "Action Definitions": ABSENT,
+    "Action Definitions": ("コードに存在しません。アクションのファイルの形式番号（`action-defs`）も`compat.toml`に存在しません。",
+                           "Not in the code; nor is the action file's format number (`action-defs`) in `compat.toml`."),
     "Host Machines": ABSENT,
     "AI Agent Link": ("`dagon serve`にボード移植の作業は存在しません。`POST /v1/ai/port`の応答は501です。",
                       "`dagon serve` has no job that ports DAGON to a board: `POST /v1/ai/port` answers 501."),
@@ -213,9 +214,11 @@ NOT_IN_TREE = {
     "Recovery Policy": ("復旧段階の自動選択は存在しません。", "No recovery tier is chosen automatically."),
     "SandboxArch": "Sandbox",
     "Retained Codecs": ("ファームウェアに保持形式のコーデックは存在しません。ロックアップヒューズの形式の存在箇所は実行可能モデルのみです。"
+                        "ブート記録とロックアップヒューズの形式番号（`boot-record`）は`compat.toml`に存在しません。"
                         "構成本体の形式は`dagon-format`の形式（先頭32バイト、ノード32バイト）で、[保持と永続の形式](/explanation/retained-formats/)"
                         "の形式ではありません。親機の保存先は単一の領域で、2バンクの置換は存在しません。",
                         "The firmware has none of the retained codecs: the lockup fuse's format exists only in the executable model, "
+                        "`compat.toml` has no format number (`boot-record`) for the boot record and the fuse, "
                         "and the topology body is `dagon-format`'s (a 32-byte head, 32-byte nodes), not the one in "
                         "[Retained and persistent formats](/en/explanation/retained-formats/). The hub stores it in one region, "
                         "with no two-bank replacement."),

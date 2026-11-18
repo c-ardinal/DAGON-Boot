@@ -1376,8 +1376,7 @@ The one authentication rule, applied by every verifier in the chain
   that build, so an image without spare room becomes a first write that
   cannot be built. Both stage0s use the compact SHA-256 rounds, since
   the unrolled ones do not fit the RP2040's region. A stage0 that needs more
-  takes a larger region before the first public release; formats before
-  that release carry no compatibility promise (6).
+  takes a larger region before the first public release.
 - **Stage0's clock and its verify time.** Stage0 runs its checks on the
   clock the definitions choose for the node: the MCU definition's
   `[[stage0.clock]]` setup that matches the board's `[clock] source`
@@ -1847,17 +1846,14 @@ Numbers and components follow [Versions and releases](/en/explanation/versioning
 | `event` (`EVENT_FORMAT`) | a variant is renamed or removed, or a payload's meaning changes; adding a variant or a payload field keeps it | a reader ignores kinds and fields it does not know; refuses a number it does not read |
 | `extension-manifest` | a manifest key's meaning changes or a key the reader refuses is added | `dagon gen` refuses a manifest with a number it does not read, naming both numbers |
 | `boot-program` | an op is added, removed or its fields change | a boot loader that meets an op it does not know treats the whole program as invalid and emits `boot.program_skipped`; `dagon gen` refuses to generate a program for a boot loader whose number does not read it |
-| `boot-record` (and the lockup fuse beside it) | the retained layout changes in a way an older reader would misread (the model's compatibility tests decide, 5.5); a writer's event encoding moves with its `event` number, independently per writer | a reader that does not read the number reports the record as unreadable and still serves raw pages on VERSION 0x21; a reader that does not read one writer's `event` format counts that writer's events and skips their content |
 | `image-header`, `topology-bin` | the MCU identity field or the node layout changes (5.5) | a boot loader and an agent accept the `image-header` numbers `compat.toml` lists for them, and the host the `topology-bin` numbers; each refuses others by number. No node reads `topology-bin` |
-| `action-defs` | the action file's keys change incompatibly | an action file with a number the CLI does not read is reported as not loaded, like an agent definition |
 | `definitions` | a key is added that the reader refuses (the reader rejects unknown keys), or a key's meaning changes | a definition states the number it needs; the CLI reads every number it supports and names both numbers when it refuses one |
-| `wire` | a command's request or reply changes meaning; adding a command keeps it (the unknown-command rule answers `E_UNSUPPORTED`), and no device sends unsolicited frames (the wire is request/response through the relay) | a node that does not implement a command answers `E_UNSUPPORTED`, which the host shows as unknown |
+| `wire` | a command's request or response changes meaning; adding a field or a command keeps it, and no device sends unsolicited frames (the wire is request/response through the relay) | a receiver answers an unknown must field with `E_FIELD` naming it and skips an unknown optional field (every response field is optional); it answers a command it does not know with `E_UNSUPPORTED`, which the host shows as unknown |
 | `serve-api` | unchanged by the `event` message, an addition | consumers ignore unknown message types |
 
-Formats before the first public release carry no compatibility promise:
-the formats that ship in the first public release are each contract's
-number 1, and nothing reads or writes a development format that preceded
-them. From that release on, the rules above apply.
+A number rises only when a reader of the old number would misread the
+new data or must refuse it ([Versions and releases](/en/explanation/versioning/));
+the table above applies that rule to each contract.
 
 Component kinds: a change in a crate's public API that is incompatible
 is breaking for that component; a new event, port, op, VERSION field or

@@ -64,7 +64,7 @@ Parts of the design the code lacks, in whole or in part:
 <!-- end of generated list -->
 <!-- generated from site/scripts/architecture.py: python site/scripts/gen.py -->
 - Host Extension Chain: Not in the code.
-- Action Definitions: Not in the code.
+- Action Definitions: Not in the code; nor is the action file's format number (`action-defs`) in `compat.toml`.
 - Host Machines: Not in the code.
 - AI Agent Link: `dagon serve` has no job that ports DAGON to a board: `POST /v1/ai/port` answers 501.
 - Boot Action Interpreter: Not in the code.
@@ -74,5 +74,5 @@ Parts of the design the code lacks, in whole or in part:
 - Bus Guardian: Not in the code.
 - Delivery Plan: The trial window and the promotion judgement are not in the code.
 - Recovery Policy: No recovery tier is chosen automatically.
-- Retained Codecs: The firmware has none of the retained codecs: the lockup fuse's format exists only in the executable model, and the topology body is `dagon-format`'s (a 32-byte head, 32-byte nodes), not the one in [Retained and persistent formats](/en/explanation/retained-formats/). The hub stores it in one region, with no two-bank replacement.
+- Retained Codecs: The firmware has none of the retained codecs: the lockup fuse's format exists only in the executable model, `compat.toml` has no format number (`boot-record`) for the boot record and the fuse, and the topology body is `dagon-format`'s (a 32-byte head, 32-byte nodes), not the one in [Retained and persistent formats](/en/explanation/retained-formats/). The hub stores it in one region, with no two-bank replacement.
 <!-- end of generated table -->

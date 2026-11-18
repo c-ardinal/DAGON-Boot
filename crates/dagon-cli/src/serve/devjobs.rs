@@ -107,10 +107,7 @@ fn flash_with(
         job.log(&format!("  device   {}  {}", c.id, c.label));
         // The page shows this question (its own wording, with はい / いいえ);
         // the plan is in the log above.
-        let question = format!(
-            "{node} を {}（{}）に書き込みます。よろしいですか。",
-            c.label, c.id
-        );
+        let question = format!("{}（{}）へ{node}の書込を実行しますか。", c.label, c.id);
         if !confirmed(&job.ask(ASK, &question)?) {
             return Err("nothing written to the board".into());
         }

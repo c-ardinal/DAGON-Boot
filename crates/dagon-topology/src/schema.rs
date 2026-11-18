@@ -35,13 +35,13 @@ pub struct Node {
     pub max_attempts: Option<u8>,
     pub listen_window_ms: Option<u16>,
     pub tag: String,
-    /// A 親機's hop towards the PC (or whatever drives it); omitted: USB CDC
+    /// A coordinator's hop towards the PC (or whatever drives it); omitted: USB CDC
     /// to dagon on a PC, as before. Not part of the compiled topology.
     #[serde(default)]
     pub uplink: Option<Uplink>,
 }
 
-/// A 親機's uplink: the kind of hop, and what is at its other end.
+/// A coordinator's uplink: the kind of hop, and what is at its other end.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Uplink {
@@ -59,7 +59,7 @@ impl Default for Uplink {
     }
 }
 
-/// What drives a 親機 through its uplink.
+/// What drives a coordinator through its uplink.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum UplinkHost {
@@ -197,7 +197,7 @@ macro_rules! link_kind_enum {
 dagon_format::with_link_kinds!([link_kind_enum]());
 
 impl LinkKind {
-    /// Kinds the compiled topology can carry between a 親機 and a 子機.
+    /// Kinds the compiled topology can carry between a coordinator and a node linked to it.
     pub fn compiles(self) -> bool {
         matches!(self, LinkKind::I2c | LinkKind::Uart)
     }
@@ -357,7 +357,7 @@ impl Topology {
         self.nodes.iter().find(|n| n.id == id)
     }
 
-    /// A 親機's uplink as used (the default when it names none).
+    /// A coordinator's uplink as used (the default when it names none).
     pub fn uplink(n: &Node) -> Uplink {
         n.uplink.unwrap_or_default()
     }
@@ -377,9 +377,9 @@ impl Topology {
             .find(|l| l.other(a).is_some_and(|e| e.node == b))
     }
 
-    /// The link a 子機 `id` is reached over: the one joining it to a 親機
+    /// The link a node `id` with `role: node` is reached over: the one joining it to a coordinator
     /// (the first listed when several do), else its first link; `None` for a
-    /// 親機 or an unlinked node. Only a 親機 relays, so a 子機's firmware is
+    /// coordinator or an unlinked node. Only a coordinator relays, so the firmware of a node with `role: node` is
     /// built for this link and any other link at it is one it would relay over.
     pub fn reached_over(&self, id: &str) -> Option<&Link> {
         if self.node(id)?.role == Role::Coordinator {
@@ -394,8 +394,8 @@ impl Topology {
         at().find(to_hub).or_else(|| at().next())
     }
 
-    /// The links node `id` would relay over: every link at a 親機, every link
-    /// at a 子機 but [`Topology::reached_over`].
+    /// The links node `id` would relay over: every link at a coordinator, every link
+    /// at a node with `role: node` but [`Topology::reached_over`].
     pub fn relayed_from<'a>(&'a self, id: &'a str) -> impl Iterator<Item = &'a Link> + 'a {
         let up = self.reached_over(id);
         self.links_at(id)

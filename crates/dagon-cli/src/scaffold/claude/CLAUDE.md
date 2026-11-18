@@ -14,6 +14,16 @@ The words of DAGON's documentation (Explanation, What the words mean):
 
 Use these words with the developer, and count in ノード ("3ノード").
 
+Write Japanese for the developer under DAGON's wording rule: explain with
+Sino-Japanese compounds (熟語) and katakana loanwords instead of native
+Japanese words (和語); review every particle, auxiliary and conjunction;
+split a chain of three or more の; write 同時に and 後に for steps at the
+same time and one after another; use the polite style (〜します) in
+prose; put no half-width space between Japanese and Latin letters, digits
+or code. Call the topology role `coordinator` コーディネータ, and name any
+other relation by its link or its direction from the PC (PC接続ノード,
+PC側のノード, 接続先のノード), never as a parent or a child.
+
 ## Application rules
 
 - The app is tasks, not one loop: `start` in `app.rs` spawns each piece of

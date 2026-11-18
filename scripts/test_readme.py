@@ -73,7 +73,7 @@ class Readmes(unittest.TestCase):
 
     def test_building_it_yourself_stays_out_of_trying_it(self):
         for path, start, end, heading, next_heading in (
-            (JA, "## 試してみる", "## 自分のプロジェクトを始める", "### DAGONを自分でビルドする", "## 依存しているものと外部のデータ"),
+            (JA, "## 体験", "## 独自プロジェクトの開始", "### ソースからのDAGONビルド", "## 依存関係と外部データ"),
             (EN, "## Try it", "## Start your own project", "### Building DAGON yourself", "## Dependencies and external data"),
         ):
             text = path.read_text(encoding="utf-8")

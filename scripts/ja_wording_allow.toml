@@ -33,6 +33,145 @@ kind = "plain"
 word = "解下さい"
 reason = "The alpha notice is quoted word for word (scripts/test_markers.py NOTICE_FILES)."
 
+# The alpha notice's copy, and the status words the marker check looks for: a pattern
+# has to hold the word it finds.
+[[allow]]
+path = "scripts/test_markers.py"
+text = "正式リリースまでに破壊的変更が行われるリスクが有ることをご理解下さい。"
+kind = "native"
+word = "行わ"
+reason = "The alpha notice is quoted word for word (NOTICE_JA_LINES)."
+
+[[allow]]
+path = "scripts/test_markers.py"
+text = "|いま"
+kind = "native"
+word = "いま"
+reason = "A pattern of status words the check refuses; it holds the word it finds."
+
+[[allow]]
+path = "scripts/test_markers.py"
+text = "|現在でき"
+kind = "native"
+word = "でき"
+reason = "A pattern of status words the check refuses; it holds the word it finds."
+
+[[allow]]
+path = "scripts/test_markers.py"
+text = ", まだ確"
+kind = "native"
+word = "まだ"
+reason = "The comment names the words the next pattern finds."
+
+[[allow]]
+path = "scripts/test_markers.py"
+text = "|まだ(?:確認|検証)中"
+kind = "native"
+word = "まだ"
+reason = "A pattern of status words the check refuses; it holds the word it finds."
+
+[[allow]]
+path = "scripts/test_markers.py"
+text = "\"## 現在でき"
+kind = "native"
+word = "でき"
+reason = "A planted status heading the pattern test expects the check to find."
+
+# The AI instruction states the wording rule with the words it replaces.
+[[allow]]
+path = "crates/dagon-cli/src/ask.rs"
+text = "使用 not 使う, 送信 not 送る, 確認 not 確かめる, 書込 not 書き込む."
+kind = "native"
+word = "使う"
+reason = "The instruction names the native word or conjunction the model must not use."
+
+[[allow]]
+path = "crates/dagon-cli/src/ask.rs"
+text = "使用 not 使う, 送信 not 送る, 確認 not 確かめる, 書込 not 書き込む."
+kind = "native"
+word = "送る"
+reason = "The instruction names the native word or conjunction the model must not use."
+
+[[allow]]
+path = "crates/dagon-cli/src/ask.rs"
+text = "使用 not 使う, 送信 not 送る, 確認 not 確かめる, 書込 not 書き込む."
+kind = "native"
+word = "確かめ"
+reason = "The instruction names the native word or conjunction the model must not use."
+
+[[allow]]
+path = "crates/dagon-cli/src/ask.rs"
+text = "使用 not 使う, 送信 not 送る, 確認 not 確かめる, 書込 not 書き込む."
+kind = "retired"
+word = "書き込む"
+reason = "The instruction names the native word or conjunction the model must not use."
+
+[[allow]]
+path = "crates/dagon-cli/src/ask.rs"
+text = "ながら and てから; put no"
+kind = "joint"
+word = "ながら"
+reason = "The instruction names the native word or conjunction the model must not use."
+
+[[allow]]
+path = "crates/dagon-cli/src/ask.rs"
+text = "ながら and てから; put no"
+kind = "joint"
+word = "てから"
+reason = "The instruction names the native word or conjunction the model must not use."
+
+# The consent lists the AI link shows.
+[[allow]]
+path = "crates/dagon-cli/src/consent.rs"
+text = "\"選んだノードやリンク\","
+kind = "native"
+word = "選ん"
+reason = "The consent lists are a contract shown by the page and the terminal and pinned by the agent API reference (crates/dagon-cli/src/agents/tests.rs); they change together with that page and the Console's copy."
+
+[[allow]]
+path = "crates/dagon-cli/src/consent.rs"
+text = "\"確認した結果（問題・◇ 制限・書き込みの記録）\","
+kind = "retired"
+word = "書き込み"
+reason = "The consent lists are a contract shown by the page and the terminal and pinned by the agent API reference (crates/dagon-cli/src/agents/tests.rs); they change together with that page and the Console's copy."
+
+[[allow]]
+path = "crates/dagon-cli/src/consent.rs"
+text = "NEVER_SENDS: [&str; 3] = [\"鍵\","
+kind = "native"
+word = "鍵"
+reason = "The consent lists are a contract shown by the page and the terminal and pinned by the agent API reference (crates/dagon-cli/src/agents/tests.rs); they change together with that page and the Console's copy."
+
+[[allow]]
+path = "crates/dagon-cli/src/consent.rs"
+text = "s.contains(\"書き込みの記録\")"
+kind = "retired"
+word = "書き込み"
+reason = "The consent lists are a contract shown by the page and the terminal and pinned by the agent API reference (crates/dagon-cli/src/agents/tests.rs); they change together with that page and the Console's copy."
+
+# A released changelog section stays as released.
+[[allow]]
+path = "CHANGELOG.md"
+text = "runs DAGON Console on a simulated 親機 with two 子機 in the browser"
+kind = "retired"
+word = "親機"
+reason = "The cli 0.1.0 section is released (tag cli-v0.1.0); a released entry is not rewritten."
+
+[[allow]]
+path = "CHANGELOG.md"
+text = "runs DAGON Console on a simulated 親機 with two 子機 in the browser"
+kind = "retired"
+word = "子機"
+reason = "The cli 0.1.0 section is released (tag cli-v0.1.0); a released entry is not rewritten."
+
+# The README's problem statement under the title.
+[[allow]]
+path = "README.md"
+text = "設計は美麗なのに、運用は煩雑。"
+kind = "plain"
+word = "用は煩雑"
+reason = "The problem statement is a headline, not prose."
+
 # The glossary names each retired term once, to point a reader who meets it at the term that replaces it.
 [[allow]]
 path = "site/src/content/docs/explanation/words.md"

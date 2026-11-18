@@ -978,7 +978,7 @@ fn hub_pins(b: &BoardDef, m: &McuDef) -> Result<(), String> {
     };
     fail(m.coordinator.is_none(), || {
         format!(
-            "coordinator pins on a board whose MCU {} cannot be the 親機",
+            "coordinator pins on a board whose MCU {} cannot be the coordinator",
             m.id
         )
     })?;

@@ -446,7 +446,7 @@ fn code_name(s: &str, extra: u8) -> bool {
 }
 
 /// What board package code is generated from: pin names, each bus's pins
-/// and speed by its kind, no pin used twice, and the uplink node pins of
+/// and speed by its kind, no pin used twice, and the coordinator pins of
 /// `[coordinator]` the ones of DAGON's links.
 pub(super) fn wiring(b: &BoardDef, _: &McuDef) -> Result<(), String> {
     let mut used = std::collections::BTreeMap::new();
@@ -529,7 +529,7 @@ pub(super) fn wiring(b: &BoardDef, _: &McuDef) -> Result<(), String> {
     coordinator_links(b)
 }
 
-/// A board with buses names the uplink node pins of `[coordinator]` (numbers the
+/// A board with buses names the coordinator pins of `[coordinator]` (numbers the
 /// page wires new links to) as DAGON's links on those pins.
 fn coordinator_links(b: &BoardDef) -> Result<(), String> {
     let Some(h) = &b.coordinator else {

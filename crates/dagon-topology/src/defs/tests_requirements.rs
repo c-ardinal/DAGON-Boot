@@ -277,5 +277,5 @@ fn coordinator_pins_are_usable() {
     }
     let f4 = Registry::builtin().mcu("stm32f401re").unwrap();
     let e = requirements::check_board(&board(lcd), f4).unwrap_err();
-    assert!(e.contains("cannot be the uplink node"), "{e}");
+    assert!(e.contains("cannot be the coordinator"), "{e}");
 }

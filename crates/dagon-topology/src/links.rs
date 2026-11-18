@@ -1,5 +1,5 @@
 //! Which link kinds each MCU's firmware implements, up (towards the PC or
-//! the uplink node) and down (to its downstream nodes), from the MCU definitions' `[links]`
+//! the node nearer the PC) and down (to the node at the other end of the link), from the MCU definitions' `[links]`
 //! (kept equal to the MCU packages' `LINK_KINDS` by a test): a kind missing
 //! there is accepted in a 構成 but reported as not available (V-24),
 //! and `dagon gen` refuses to generate it.
@@ -10,9 +10,9 @@ use crate::schema::LinkKind;
 /// Direction of a hop as seen from one MCU.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Dir {
-    /// Towards the PC (an uplink node's uplink) or the uplink node (a downstream node's link).
+    /// Towards the PC (a coordinator's uplink) or the node nearer the PC.
     Up,
-    /// From an uplink node to its downstream nodes.
+    /// From the node nearer the PC to the node at the other end of the link.
     Down,
 }
 

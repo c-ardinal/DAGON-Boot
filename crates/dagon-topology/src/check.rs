@@ -1,7 +1,7 @@
 //! Validation rules for `dagon topo check`.
 //!
 //! Errors V-01..V-21 (no V-19), V-25, V-26 and V-27; warnings V-22 and V-24
-//! (V-24 is an error for an uplink on a downstream node); information V-23 (a valid part
+//! (V-24 is an error for an uplink on a node with `role: node`); information V-23 (a valid part
 //! that updating skips). Errors block compiling the topology; the others
 //! do not.
 //!
@@ -152,7 +152,7 @@ pub fn uart0_choices(reg: &Registry, mcu: &str, board: Option<&str>) -> (Vec<u8>
 
 /// The `[[link_port]]` a new end of a `kind` link on a node of `mcu` (and
 /// `board`, else the MCU's default board) starts at, from its definitions: the
-/// port of the board's own DAGON bus of that kind, else of the uplink node I2C pins
+/// port of the board's own DAGON bus of that kind, else of the coordinator's I2C pins
 /// the board names, else the port named like the link's UART `iface` (`hw-`
 /// and the port, or the port itself), else the MCU's first port of the kind.
 /// The Console offers this one; the check (V-27) judges whatever is written.
@@ -253,7 +253,7 @@ impl<'a> Ctx<'a> {
 
     /// Hops whose kind the MCU firmware at either end does not run
     /// (未対応のリンク): accepted and drawn, reported by name;
-    /// `dagon gen` refuses them. An uplink on a downstream node is an error.
+    /// `dagon gen` refuses them. An uplink on a node with `role: node` is an error.
     fn v24(&mut self) {
         for (i, n) in self.t.nodes.iter().enumerate() {
             let Some(up) = n.uplink else { continue };
@@ -262,7 +262,7 @@ impl<'a> Ctx<'a> {
                     "V-24",
                     format!("nodes[{i}].uplink"),
                     format!(
-                        "'{}' is a downstream node; only an uplink node has an uplink",
+                        "'{}' has `role: node`; only a node with `role: coordinator` has an uplink",
                         n.id
                     ),
                 );
@@ -354,10 +354,10 @@ impl<'a> Ctx<'a> {
         self.t.links.iter().enumerate()
     }
 
-    /// Links with the first uplink node at one end, over I2C or UART, with the
-    /// position and the end at the uplink node: the ones its own pins, controllers
+    /// Links with the first coordinator at one end, over I2C or UART, with the
+    /// position and the end at the coordinator: the ones its own pins, controllers
     /// and PIO serve, whichever end it is listed as. Other links (between
-    /// uplink node, deeper, CAN, Ethernet) are reported by V-23 instead.
+    /// coordinator, deeper, CAN, Ethernet) are reported by V-23 instead.
     fn hub_links(&self) -> impl Iterator<Item = (usize, &'a Link, usize, &'a End)> + 'a {
         let hub = self.coordinator().map(|c| c.id.as_str());
         self.t.links.iter().enumerate().filter_map(move |(i, l)| {
@@ -366,7 +366,7 @@ impl<'a> Ctx<'a> {
         })
     }
 
-    /// Whether end `k` of link `i` is the first uplink node's end of one of its [`Self::hub_links`].
+    /// Whether end `k` of link `i` is the first coordinator's end of one of its [`Self::hub_links`].
     fn is_hub_end(&self, i: usize, k: usize) -> bool {
         self.hub_links().any(|(j, _, e, _)| (j, e) == (i, k))
     }
@@ -550,8 +550,8 @@ impl<'a> Ctx<'a> {
 
     /// Valid shapes that updating does not reach, told as information
     /// (never errors): more than one coordinator and their trees, nodes
-    /// below a downstream node and links of a kind the compiled topology cannot carry.
-    /// Updating covers one uplink node with its direct downstream nodes
+    /// linked through another node and links of a kind the compiled topology cannot carry.
+    /// Updating covers one coordinator with the nodes linked straight to it
     /// and skips the rest (see [`crate::updatable`]).
     fn v23(&mut self) {
         let hubs: Vec<&str> = self
@@ -596,16 +596,16 @@ impl<'a> Ctx<'a> {
                 // Unknown nodes are V-04's.
                 _ if role(a).is_none() || role(b).is_none() => None,
                 (Some(f), [_, _]) => Some(format!(
-                    "'{}' is an uplink node linked to the uplink node '{f}': updating reaches the first uplink node's tree only and skips it",
+                    "'{}' is a coordinator linked to the coordinator '{f}': updating reaches the first coordinator's tree only and skips it",
                     if a == f { b } else { a }
                 )),
                 (Some(_), _) => None,
                 (None, []) => Some(format!(
-                    "the link between the downstream nodes {} is below a downstream node: updating reaches the uplink node's direct downstream nodes only and skips it",
+                    "the link between the nodes {} is one link further from the coordinator: updating reaches only the nodes linked straight to the coordinator and skips it",
                     pair(a, b)
                 )),
                 (None, [h, ..]) => Some(format!(
-                    "the link between {} is under the second uplink node '{h}': updating reaches the first uplink node's tree only and skips it",
+                    "the link between {} is under the second coordinator '{h}': updating reaches the first coordinator's tree only and skips it",
                     pair(a, b)
                 )),
             };
@@ -738,7 +738,7 @@ impl<'a> Ctx<'a> {
     /// Every pin on every link end is one its own node's definition defines:
     /// its `pins`, `nrst` and `boot` on its board's header (or its MCU's GPIO
     /// range when it names only an MCU), its `node_pins` as one of its board's
-    /// I2C pairs. The first uplink node's ends of its links are covered by `v07_v08`.
+    /// I2C pairs. The first coordinator's ends of its links are covered by `v07_v08`.
     fn v07_every_end(&mut self) {
         for (i, l, k, e) in self.ends() {
             let ep = end_path(i, k);

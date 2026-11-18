@@ -441,7 +441,7 @@ fn v20_bus_speeds_come_from_every_node_on_the_bus() {
             .map(|i| i.message.clone())
             .collect()
     };
-    // The fake downstream node's firmware runs its I2C link at 100 kHz only: the sample's
+    // The fake MCU's firmware runs its I2C link at 100 kHz only: the sample's
     // 400 kHz bus is refused, and the message names what every node names.
     let slow = fake_registry_with(
         "v20-named",

@@ -112,7 +112,7 @@ mod tests {
 
     #[test]
     fn steady_requests_do_not_hide_a_stuck_background_task() {
-        // F401: the display task is stuck; the hub keeps sending requests
+        // F401: the display task is stuck; the coordinator keeps sending requests
         // (10 ms of serving every 100 ms). The pre-request feed is gated,
         // so feeding stops once the display deadline, moved on only by
         // the serving time, has passed.

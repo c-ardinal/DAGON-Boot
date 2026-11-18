@@ -67,7 +67,7 @@ $env:DAGON_UNINSTALL = "1"; irm https://raw.githubusercontent.com/c-ardinal/DAGO
 PowerShellのスクリプトは、実行したあとで`DAGON_UNINSTALL`を消します。同じウィンドウで続けて実行すると、外さずに入れます。
 
 - 外すのは`dagon`だけです。Windowsはそのフォルダが空なら消し、ユーザーのPATHとこのプロセスのPATHからそのフォルダの項目も外します。インストーラーがその項目を足したかは記録がないので、あれば外します。
-- `~/.dagon`には触りません。署名の鍵（`~/.dagon/keys`）は残ります。消すと、その鍵で書いたノードに、もう書き込めなくなります。
+- `~/.dagon`には触りません。署名の鍵（`~/.dagon/keys`）は残ります。消すと、その鍵で書いたノードに、もう書込できなくなります。
 - もう一度実行しても成功します。
 - `cargo install`で入れたときは`cargo uninstall dagon-cli`です。
 
@@ -103,7 +103,7 @@ STM32F401REのノードがあると、`dagon doctor`はST-LINKがつながって
 
 ## ネットワークが要るとき
 
-`dagon new`で作るプロジェクトは、DAGONを手元の`dagon`と同じリリースから取得します（`dagon.toml`の`[dagon] git`と`tag = "cli-v<version>"`）。
+`dagon new`で作成するプロジェクトは、DAGONを手元の`dagon`と同じリリースから取得します（`dagon.toml`の`[dagon] git`と`tag = "cli-v<version>"`）。
 
 - ビルドのときにcargoが取得します。
 - `dagon flash`は、ブートローダ、stage0、factoryエージェントを、cargoが取得したそのタグのコピーからビルドします。

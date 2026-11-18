@@ -1,11 +1,11 @@
 ---
 title: リファレンス
-description: DAGON自身のソースから作るページです。どのページも元のソースを書いています。
+description: DAGON自身のソースから作成するページです。どのページも元のソースを書いています。
 sidebar:
   order: 0
 ---
 
-ここのページは、DAGON自身が読むソースから作っています。
+ここのページは、DAGON自身が読むソースから作成しています。
 ページと元のソースが食い違うと、リポジトリの検査が失敗します。
 コマンドの説明とrustdocの本文は、元のソースのままで英語です。
 
@@ -14,7 +14,7 @@ sidebar:
 - [イベント](/reference/events/)と[ポート](/reference/ports/): 拡張が使うすべてのイベントとポート
 - [エージェント定義の形式](/reference/agent-definition/): DAGONが読むエージェントのファイル
 - [ボードとマイコン](/reference/boards/): すべてのボードとマイコンの定義
-- [取り決めと部品](/reference/contracts/): `compat.toml`にある、すべての形式番号と部品のバージョン
+- [規約と部品](/reference/contracts/): `compat.toml`にある、すべての形式番号と部品のバージョン
 - [マイコンごとのツール](/reference/tools/): `dagon doctor`がマイコンごとに確かめるツール
 - [Rust API](/reference/rust-api/): ワークスペースのcrateとそのrustdoc
 

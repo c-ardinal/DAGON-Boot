@@ -14,7 +14,7 @@ files is in [MCU and board definitions](/en/reference/definitions/).
 
 ## MCUs
 
-| Id | Name | Port | Flash | RAM | Up links | Down links | Can be 親機 | First write |
+| Id | Name | Port | Flash | RAM | Up links | Down links | Can be hub | First write |
 |---|---|---|---|---|---|---|---|---|
 | `esp32s3` | ESP32-S3 | `vendor-stage2` | 16 MiB |  | uart, usb-cdc |  |  | `espflash` |
 | `rp2040` | RP2040 | `self-boot` | 4 MiB | 264 KiB | usb-cdc | i2c, uart | yes | `uf2-drive` |

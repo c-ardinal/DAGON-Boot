@@ -30,31 +30,31 @@ text_bytes = 16384                   # .ext.text + .ext.rodata + the data load i
 <!-- generated from dagon-extension's manifest types: python site/scripts/gen.py -->
 | キー | 型 | 必須か | 意味 |
 |---|---|---|---|
-| `format` | 整数 | 必須 | 最初に読みます。このdagonが読まない番号は、両方の番号を示して受け付けません。 |
+| `format` | 整数 | 必須 | 最初に読込します。このdagonが解釈しない番号は、両方の番号を明示して拒否します。 |
 | `id` | 文字列 | 必須 | 拡張のid: `a-z 0-9 -`、1から32文字。 |
-| `layers` | 文字列の配列 | 必須 | 動くレイヤー: `boot`、`app`、`relay`、`host`。 |
-| `provides` | 文字列の配列 | 任意 | 一覧のすべてのレイヤーにあるポート。信頼された拡張だけのポートには`trusted = true`が要ります。 |
-| `observes` | 文字列の配列 | 任意 | `layer.kind`、`layer.prefix*`（カタログの種類の少なくとも1つに一致すること）、または`layer.*`。 |
-| `decides` | 文字列の配列 | 任意 | 一覧のレイヤーのどれかで尋ねられる判断点。信頼された拡張はどれにも答えません。 |
-| `trusted` | 真偽値 | 任意 | この拡張は、そのプロジェクトにとってDAGONの一部です。特権で、DAGON自身のメモリの中で動き、サンドボックスの制限はどれも効きません。信頼された拡張だけのポートには必要です。観測するだけの拡張も指定できます（ブートローダで動く、プロジェクト自身のコード）。 |
-| `capabilities` | `[capabilities]`テーブル | 任意 | DAGONが拡張に渡すもの（下の`[capabilities]`のキー）。 |
-| `limits` | `[limits]`テーブル | 任意 | デバイスのレイヤー: 信頼されていない拡張と、イベントを観測するすべての拡張では、`max_run_us`は1から判断の上限（50 ms）まで（ハンドラの呼び出しごとにこれに照らして測ります）。信頼されていないものだけ: `stack_bytes`は256以上、`text_bytes`は0より大きいこと（下の`[limits]`のキー）。 |
+| `layers` | 文字列の配列 | 必須 | 動作するレイヤー: `boot`、`app`、`relay`、`host`。 |
+| `provides` | 文字列の配列 | 任意 | 一覧の全レイヤーにあるポート。信頼された拡張専用のポートには`trusted = true`が必要です。 |
+| `observes` | 文字列の配列 | 任意 | `layer.kind`、`layer.prefix*`（カタログの種類の最低1つに一致すること）、または`layer.*`。 |
+| `decides` | 文字列の配列 | 任意 | 一覧のいずれかのレイヤーで照会する判断点。信頼された拡張はどれにも応答しません。 |
+| `trusted` | 真偽値 | 任意 | この拡張は、そのプロジェクトにとってDAGONの一部です。特権で、DAGON自身のメモリ内で動作し、サンドボックスの制限はどれも無効です。信頼された拡張専用のポートには必要です。観測専用の拡張も指定可能です（ブートローダで動作する、プロジェクト自身のコード）。 |
+| `capabilities` | `[capabilities]`テーブル | 任意 | DAGONが拡張に付与するもの（以下の`[capabilities]`のキー）。 |
+| `limits` | `[limits]`テーブル | 任意 | デバイスのレイヤー: 信頼されていない拡張と、イベントを観測する全部の拡張では、`max_run_us`は1から判断の上限（50 ms）まで（ハンドラの呼出ごとにこの値と照合して計測します）。信頼されていない拡張のみ: `stack_bytes`は256以上、`text_bytes`は0超（以下の`[limits]`のキー）。 |
 
 `[capabilities]`:
 
 | キー | 型 | 必須か | 意味 |
 |---|---|---|---|
-| `peripherals` | 文字列の配列 | 任意 | ボードの`[[peripheral]]`のid: ウィンドウにできるブロックへのウィンドウ。 |
-| `pins` | 文字列の配列 | 任意 | ボードの`[[pin]]`の名前。ピンのサービスを通して使います。 |
-| `buses` | 文字列の配列 | 任意 | ボードの`[[bus]]`のid。バスのサービスを通して使います。 |
+| `peripherals` | 文字列の配列 | 任意 | ボードの`[[peripheral]]`のid: ウィンドウ化が可能なブロックへのウィンドウ。 |
+| `pins` | 文字列の配列 | 任意 | ボードの`[[pin]]`の名称。ピンのサービス経由で使用します。 |
+| `buses` | 文字列の配列 | 任意 | ボードの`[[bus]]`のid。バスのサービス経由で使用します。 |
 | `timer` | 真偽値 | 任意 | 時間のサービス。 |
 
 `[limits]`:
 
 | キー | 型 | 必須か | 意味 |
 |---|---|---|---|
-| `max_run_us` | 整数 | 必須 | ハンドラの呼び出しごと。 |
-| `stack_bytes` | 整数 | 任意 | サンドボックスの拡張には必須です（`STACK_MIN`以上）。信頼された拡張はDAGONのスタックで動きます。 |
+| `max_run_us` | 整数 | 必須 | ハンドラの呼出ごと。 |
+| `stack_bytes` | 整数 | 任意 | サンドボックスの拡張には必須です（`STACK_MIN`以上）。信頼された拡張はDAGONのスタックで動作します。 |
 | `ram_bytes` | 整数 | 任意 | `.ext.data` + `.ext.bss`。 |
 | `text_bytes` | 整数 | 任意 | `.ext.text` + `.ext.rodata` + `.ext.data`のロードイメージ。 |
 <!-- end of generated table -->
@@ -89,11 +89,11 @@ trusted = [{ id = "hsm-verify", sha256 = "<source SHA-256, 64 hex digits>" }]
 
 `nodes/<id>/dagon/`には、最後の`dagon gen`が書いたものだけがあります。そこにあるほかのファイルのうち、genの印（dagon genが生成したと最初の行にある）を持つものは消します（印の無いものは残して報告します）。genが受け付けなかった、または生成できなかったノードには、genのファイルを残しません。`nodes`、`nodes/<id>`、`nodes/<id>/dagon`がシンボリックリンクかジャンクションのときは、genはそこに何も書かず、何も消さず、そのことを報告します。
 
-レベルが`none`のときはマップを作らず、`dagon gen`はノードの拡張が保護なしで動くことを知らせます。
+レベルが`none`のときはマップを作成せず、`dagon gen`はノードの拡張が保護なしで動くことを知らせます。
 
 ## ブート拡張
 
-DAGONのブート段階を持つマイコン（RP2040、STM32F401RE）では、`dagon gen`はノードのブート用crateもプロジェクトの`boot/<id>/`に書き出します。元になるのは、マイコンの定義にあるブートローダのテンプレート（`bootcore/template/`、`[package.metadata.dagon] bootcore = "<mcu id>"`で見つけます）です。書き出すのは`Cargo.toml`（ブートローダのライブラリ、`dagon-events`、各ブート拡張のcrate、そして`[package.metadata.dagon.boot]`の下のノード、マイコン、ボード、信頼された拡張）、`boot.rs`（ブートローダの`main`。`nodes/<id>/dagon/boot_wiring.rs`から）、`graph.stamp`（後述）、`.cargo/config.toml`（ターゲット、`DAGON_BOOT_CRATE`、ノードの`DAGON_TARGET_TAG`）です。どのマイコンでも、すべてのノードについて`boot/<id>/mcu.toml`も書きます。ノードのファームウェアのビルドが読むマイコンの定義です（[マイコンとボードの定義](/reference/definitions/)）。独立したフォルダにしているのは、cargoがcrateより上のすべてのフォルダの`.cargo/config.toml`を合わせて読み、ノードのアプリのcrateにはアプリ用のものがあるからです。`boot/<id>/`には、`nodes/<id>/dagon/`と同じく、最後の`dagon gen`が書いたものだけがあります。そこにあるcargoの`target/`と`Cargo.lock`には触れません。あなたが決める欄が1つあります。`boot/<id>/Cargo.toml`の`[package]`の下の`version`、つまりブートローダのバージョンです。`dagon gen`はテンプレートの値を1度だけ書き、それ以降はあなたの値を保ちます。ブートローダをリリースするたびに上げてください（ノードは、動かしているものとバージョンが違うブートローダを書き込みます）。`dagon gen`とビルドは、`Cargo.lock`にあるそのcrate自身の項目をこの値にそろえ、ロックのほかの部分は変えません。そのファイルを読めない、または解析できないときは、`dagon gen`は理由を示して止まり、ファイルはそのままです。ノードを飛ばすときは、ほかのブート用crateのファイルは消しますが、このファイルは残します。ビルドは、そのフォルダで`cargo build --release`を実行します（`DAGON_PUBKEY`はどのイメージとも同じです）。
+DAGONのブート段階を持つマイコン（RP2040、STM32F401RE）では、`dagon gen`はノードのブート用crateもプロジェクトの`boot/<id>/`に書き出します。元になるのは、マイコンの定義にあるブートローダのテンプレート（`bootcore/template/`、`[package.metadata.dagon] bootcore = "<mcu id>"`で見つけます）です。書き出すのは`Cargo.toml`（ブートローダのライブラリ、`dagon-events`、各ブート拡張のcrate、そして`[package.metadata.dagon.boot]`の下のノード、マイコン、ボード、信頼された拡張）、`boot.rs`（ブートローダの`main`。`nodes/<id>/dagon/boot_wiring.rs`から）、`graph.stamp`（後述）、`.cargo/config.toml`（ターゲット、`DAGON_BOOT_CRATE`、ノードの`DAGON_TARGET_TAG`）です。どのマイコンでも、すべてのノードについて`boot/<id>/mcu.toml`も書きます。ノードのファームウェアのビルドが読むマイコンの定義です（[マイコンとボードの定義](/reference/definitions/)）。独立したフォルダにしているのは、cargoがcrateより上のすべてのフォルダの`.cargo/config.toml`を合わせて読み、ノードのアプリのcrateにはアプリ用のものがあるからです。`boot/<id>/`には、`nodes/<id>/dagon/`と同じく、最後の`dagon gen`が書いたものだけがあります。そこにあるcargoの`target/`と`Cargo.lock`には触れません。あなたが決める欄が1つあります。`boot/<id>/Cargo.toml`の`[package]`の下の`version`、つまりブートローダのバージョンです。`dagon gen`はテンプレートの値を1度だけ書き、それ以降はあなたの値を保ちます。ブートローダをリリースするたびに上げてください（ノードは、動かしているものとバージョンが違うブートローダを書込します）。`dagon gen`とビルドは、`Cargo.lock`にあるそのcrate自身の項目をこの値にそろえ、ロックのほかの部分は変えません。そのファイルを読めない、または解析できないときは、`dagon gen`は理由を示して止まり、ファイルはそのままです。ノードを飛ばすときは、ほかのブート用crateのファイルは消しますが、このファイルは残します。ビルドは、そのフォルダで`cargo build --release`を実行します（`DAGON_PUBKEY`はどのイメージとも同じです）。
 
 ブートローダは拡張を特権で動かすので、信頼された拡張（マニフェストが`trusted = true`で、`[extensions.nodes.<id>] trusted`にソースのハッシュとともに挙げられたもの）だけを動かします。`boot.watchdog_armed`から`boot.before_jump`または`boot.halt`まで、ブートのイベント（[イベント](/reference/events/)、レイヤー`boot`）はそれぞれ、`observes`がそのイベントを挙げている拡張に、チェーンの順に届きます。呼び出しごとに`max_run_us`に照らして時間を測ります。それより長くかかった呼び出しは止めませんが、ブートローダはその後、`boot.extension_overran`（拡張、その持ち時間、かかった時間）を、その種類を観測している拡張に届け、先に進みます。ブート拡張が何をしても、ブートローダが起動するスロットは変わりません。呼び出しの合計が試行のウォッチドッグの周期の4分の1を超える可能性がある組み合わせは、`dagon gen`が受け付けません。数えるのは、観測するブートイベントごとに1回の呼び出しと、`boot.extension_overran`を観測する拡張については、いずれかのブート拡張の呼び出しごとにさらに1回です。
 

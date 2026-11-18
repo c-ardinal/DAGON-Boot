@@ -5,16 +5,16 @@ editUrl: false
 ---
 
 :::note
-`targets/mcu/*/dagon-mcu.toml`, `targets/boards/*/dagon-board.toml`から生成しています。直接編集せず、`python site/scripts/gen.py`でもう一度生成してください。
+`targets/mcu/*/dagon-mcu.toml`, `targets/boards/*/dagon-board.toml`から生成しています。直接編集せず、`python site/scripts/gen.py`で再度生成してください。
 :::
 
-このリリースの`targets/mcu/`のマイコンの定義と、`targets/boards/`のボードの定義です。
-定義のフォルダを足すと行が増えます。どちらのファイルの形式も
+このリリースにある`targets/mcu/`のマイコン定義と、`targets/boards/`のボードの定義です。
+定義のフォルダを追加すると行が増加します。どちらのファイルの形式も
 [マイコンとボードの定義](/reference/definitions/)にあります。
 
 ## マイコン
 
-| Id | 名前 | ポート | フラッシュ | RAM | 上りのつながり | 下りのつながり | 親機にできるか | 初回の書き込み |
+| Id | 名称 | ポート | フラッシュ | RAM | 上りリンク | 下りリンク | PC接続ノード可否 | 初回の書込 |
 |---|---|---|---|---|---|---|---|---|
 | `esp32s3` | ESP32-S3 | `vendor-stage2` | 16 MiB |  | uart, usb-cdc |  |  | `espflash` |
 | `rp2040` | RP2040 | `self-boot` | 4 MiB | 264 KiB | usb-cdc | i2c, uart | 可 | `uf2-drive` |
@@ -22,7 +22,7 @@ editUrl: false
 
 ## ボード
 
-| Id | 製品 | マイコン | フラッシュ | 既定のつながり |
+| Id | 製品 | マイコン | フラッシュ | 既定のリンク |
 |---|---|---|---|---|
 | `m5stopwatch` | M5StopWatch | ESP32-S3 (`esp32s3`) | 16 MiB | uart |
 | `nucleo-f401re` | NUCLEO-F401RE | STM32F401RE (`stm32f401re`) | 512 KiB | i2c |

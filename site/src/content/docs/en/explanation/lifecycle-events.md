@@ -27,7 +27,7 @@ The words of this document:
 - *relay*: the hub's PC link and sub-node links.
 - *host*: `dagon-host` driven by the CLI and `dagon serve`.
 - *extension*: code or data outside DAGON that DAGON runs at one of its extension points.
-- 親機/子機: hub/node.
+- PC接続ノード/接続先のノード: hub/node.
 
 ## 1. State machines and their events
 

@@ -3,20 +3,20 @@ title: "マイコンとリンクを足す"
 description: "DAGONに新しいマイコンやリンクを足すときに、書くものと触らないものです。"
 ---
 
-層の図は[しくみ](/explanation/)にあります。
+層の図は[DAGONの構造](/explanation/)にあります。
 
 ## マイコンを足す
 
 `crates/`は変えません。マイコンの知識は`targets/mcu/<id>/`にだけ置きます。
 
-1. `targets/mcu/<id>/`にcrate `dagon-mcu-<id>`を作ります。このcrateは自分の`[workspace]`を持ちます。ルートの`Cargo.toml`は変えません。
+1. `targets/mcu/<id>/`にcrate `dagon-mcu-<id>`を作成します。このcrateは自分の`[workspace]`を持ちます。ルートの`Cargo.toml`は変えません。
 2. `dagon-mcu.toml`を書きます。キーは[マイコンとボードの定義](/reference/definitions/)にあります。フォルダを足すと定義が増えます。
-3. `crates/dagon-port/src/lib.rs`のトレイトを実装します: `Flash`、`Link`、`Reset`、`Watchdog`、そしてブートの種類で`BootSelectS`か`BootSelectV`。親機にするマイコンは`StreamPort`、`I2cBus`、`SubControl`も実装します。マイクロ秒の時計はポートではなくDAGON自身のもので、`crates/dagon-events/src/compose.rs`の`Clock`をマイコンのcrateが実装します。
+3. `crates/dagon-port/src/lib.rs`のトレイトを実装します: `Flash`、`Link`、`Reset`、`Watchdog`、そしてブートの種類で`BootSelectS`か`BootSelectV`。PC接続ノードにするマイコンは`StreamPort`、`I2cBus`、`SubControl`も実装します。マイクロ秒の時計はポートではなくDAGON自身のもので、`crates/dagon-events/src/compose.rs`の`Clock`をマイコンのcrateが実装します。
 4. `crates/dagon-agent/src/lib.rs`の`SlotStore`を実装します（`targets/mcu/stm32f401re/src/store.rs`が例です）。
 5. DAGONのブートを持つマイコンは`stage0/`と`bootcore/`を用意します（`targets/mcu/stm32f401re/`が例です）。
-6. どのマイコンも`template/`を用意します。`dagon gen`はここからノードのcrateを作ります。
+6. どのマイコンも`template/`を用意します。`dagon gen`はここからノードのcrateを作成します。
 7. `compat.toml`に部品を足します（[バージョンとリリース](/explanation/versioning/)）。
-8. `dagon sim`で確かめ、`dagon conform`を親機を通して実行します。
+8. `dagon sim`で確かめ、`dagon conform`をPC接続ノードを通して実行します。
 
 `plugin/skills/dagon-port/SKILL.md`は、同じ手順をClaude Codeで進めます。
 
@@ -25,7 +25,7 @@ description: "DAGONに新しいマイコンやリンクを足すときに、書�
 リンクの種類は決まった一覧で、コードの中の1か所にあります。そのため`crates/`も変えます。
 
 1. `crates/dagon-format/src/link.rs`の`with_link_kinds!`に1行足します。構成の名前とイベントのコードはここから来ます。
-2. そのリンクを持つマイコンで、`dagon_port::Link`（親機から子機へのバイト列なら`StreamPort`）を実装します。`targets/mcu/esp32s3/src/links.rs`が例です。
+2. そのリンクを持つマイコンで、`dagon_port::Link`（PC接続ノードから接続先のノードへのバイト列なら`StreamPort`）を実装します。`targets/mcu/esp32s3/src/links.rs`が例です。
 3. マイコンの`LINK_KINDS`（`targets/mcu/rp2040/src/kinds.rs`）と、`dagon-mcu.toml`の`[links]`に足します。
 4. DAGON Consoleでの表示の言葉を、`web/src/app/copy.ts`の`LINK_KIND_WORDS`に足します（`label`はキャンバスと表、`choice`はインスペクタの一覧）。足すまでDAGON Consoleのテストが失敗します。
 5. PC側で新しい媒体を使うときは、`crates/dagon-host/src/lib.rs`の`Transport`を実装します（`crates/dagon-cli/src/serial.rs`が例です）。

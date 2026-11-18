@@ -7,11 +7,11 @@ sidebar:
 
 ## In the browser
 
-The [DAGON Console demo](~/demo/) runs in the browser, against a simulated 親機 (hub) and two 子機 (children).
+The [DAGON Console demo](~/demo/) runs in the browser, against a simulated hub and two children.
 
 1. Make a 構成 from the sample.
 2. Switch to 書込 (write) and press 接続する (connect).
-3. Press 書き込む (write) to write the prepared new version to the nodes.
+3. Press 書込 (write) to write the prepared new version to the nodes.
 
 The demo reads and writes no files, connects to no device and holds no keys. Those controls say why when you point at them.
 

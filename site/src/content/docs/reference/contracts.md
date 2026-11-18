@@ -1,32 +1,32 @@
 ---
-title: 取り決めと部品
-description: 取り決めごとの形式の番号と、部品ごとのバージョンです。
+title: 規約と部品
+description: 規約ごとの形式の番号と、部品ごとのバージョンです。
 editUrl: false
 ---
 
 :::note
-`compat.toml`から生成しています。直接編集せず、`python site/scripts/gen.py`でもう一度生成してください。
+`compat.toml`から生成しています。直接編集せず、`python site/scripts/gen.py`で再度生成してください。
 :::
 
-DAGONの部品のあいだの取り決めとその番号、部品ごとのバージョンと、読み書きする形式の番号です。
-どれも`compat.toml`にあるとおりです。変えるときの決まりは
+DAGONの部品間の規約とその番号、部品ごとのバージョンと、読込と書込の対象とする形式番号です。
+いずれも`compat.toml`の記載と同一です。変更時の規則は
 [バージョンとリリース](/explanation/versioning/)にあります。
 
 部品のバージョンは、その部品の最終リリースの値です（初回リリース前は0.1.0）。形式の番号は本ツリーの値です。
 タグ`<部品>-v<バージョン>`以後の変更は、次回のリリースまで未リリースです。
 
-## 取り決め
+## 規約
 
-| 取り決め | 形式の番号 | 番号の置き場所 |
+| 規約 | 形式の番号 | 番号の格納先 |
 |---|---|---|
-| `wire` | 2 | ホスト、親機、ノードのあいだのフレームとペイロード: すべてのフレームのバイト2、HELLOのproto_ver（dagon-proto PROTO_VERSION） |
+| `wire` | 2 | ホスト、PC接続ノード、他のノード間のフレームとペイロード: 全フレームのバイト2、HELLOのproto_ver（dagon-proto PROTO_VERSION） |
 | `image-header` | 1 | 署名付きの512バイトのイメージのヘッダ: オフセット0x004（dagon-format header::HDR_VERSION） |
 | `state-log` | 1 | ブートローダとアプリの状態ログの面: オフセット0x004（dagon-format statelog::FORMAT_VERSION） |
 | `manifest` | 1 | リリースのマニフェスト: オフセット4（dagon-format manifest::MF_VERSION） |
 | `bundle` | 1 | リリースのファイル.dgb: オフセット4（dagon-format bundle::BN_VERSION） |
-| `topology-bin` | 2 | コンパイル済みの構成: オフセット4（dagon-format topology::TP_VERSION） |
+| `topology-bin` | 2 | コンパイル済の構成: オフセット4（dagon-format topology::TP_VERSION） |
 | `topology-yaml` | 2 | 構成のソース: その`dagon:`キー（dagon-topology SCHEMA_VERSION） |
-| `definitions` | 3 | dagon-mcu.toml / dagon-board.toml / [board.&lt;id&gt;]: `format`キー。省くと1（dagon-topology defs::FORMAT） |
+| `definitions` | 3 | dagon-mcu.toml / dagon-board.toml / [board.&lt;id&gt;]: `format`キー。省略時は1（dagon-topology defs::FORMAT） |
 | `serve-api` | 1 | dagon serveのHTTP API: GET /v1/helloの`api`（dagon-cli versions::SERVE_API） |
 | `layout` | 1 | 構成の隣の配置ファイル: その`format`（dagon-cli versions::LAYOUT_FORMAT） |
 | `event` | 1 | ライフサイクルイベントの種類、コード、ペイロード、EventRecord（dagon-events EVENT_FORMAT） |

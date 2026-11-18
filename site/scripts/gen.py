@@ -62,9 +62,9 @@ def page(lang, title, description, sources, body, english=""):
     `english`: what on the Japanese page stays in the source's English."""
     names = ", ".join(f"`{s}`" for s in sources)
     if lang == "ja":
-        note = f"{names}から生成しています。直接編集せず、`{REGEN}`でもう一度生成してください。"
+        note = f"{names}から生成しています。直接編集せず、`{REGEN}`で再度生成してください。"
         if english:
-            note += f"\n{english}は元のソースのままで、英語です。"
+            note += f"\n{english}はソースの原文のままで、英語です。"
     else:
         note = f"Generated from {names}; do not edit. Regenerate with `{REGEN}`."
     return (
@@ -154,14 +154,14 @@ def serve_api(lang="en"):
         body = f"""
 どのルートも、`dagon serve`が表示するループバックのアドレスの下にあります。
 `/v1/`へのリクエストには、serveが表示したアドレスの合言葉を
-`Authorization: Bearer <passphrase>`で付けます（無いと401）。HostとOriginの確認も通ります（通らないと403）。
+`Authorization: Bearer <passphrase>`で付与します（不在の場合は401）。HostとOriginの確認も実施します（不合格の場合は403）。
 
 | メソッド | パス | 内容 |
 |---|---|---|
 {table}
 
-`{ws}`はWebSocketです。ページが最初のメッセージで合言葉を送ると、serveのイベント
-（作業の進み具合、ログ、結果、質問、親機の受け渡し）を受け取ります。
+`{ws}`はWebSocketです。ページが最初のメッセージで合言葉を送信すると、serveのイベント
+（作業の進捗、ログ、結果、質問、PC接続ノードの受渡）を受信します。
 """
     else:
         body = f"""
@@ -289,11 +289,11 @@ def agent_definition(lang="en"):
     rows = "\n".join(builtin)
     if lang == "ja":
         body = f"""
-エージェントはTOMLファイルです。組み込みのものは`dagon`に入っていて、自分のものは
-`~/.dagon/agents/*.toml`に足します（プロジェクトの中には置きません）。知らないキー、
-DAGONに無い種類、使われているidがあるファイルは読み込みません。
+エージェントはTOMLファイルです。組込のエージェントは`dagon`に内蔵し、利用者独自のエージェントは
+`~/.dagon/agents/*.toml`に追加します（プロジェクト内には配置しません）。未知のキー、
+DAGONにない種類、使用済のidがあるファイルは読込しません。
 
-定義の形式: **{fmt}**（`dagon_agent = {fmt}`）。別の番号のファイルは、理由を示して受け付けません。
+定義の形式: **{fmt}**（`dagon_agent = {fmt}`）。別の番号のファイルは、理由を明示して拒否します。
 
 ## エージェント
 
@@ -305,21 +305,21 @@ DAGONに無い種類、使われているidがあるファイルは読み込み�
 
 ## `[ways.transport]`
 
-`kind`は次のどれかです: {kind_list}。
+`kind`は以下のいずれかです: {kind_list}。
 
 ### `kind = "command"`
 
 {command}
 
-`system`は次のどれかです: {via_list}。
+`system`は以下のいずれかです: {via_list}。
 
 ### `kind = "messages-http"`
 
 {http}
 
-## 組み込みのエージェント
+## 組込のエージェント
 
-| Id | 名前 | 提供元 | つなぎ方 |
+| Id | 名称 | 提供元 | 接続方法 |
 |---|---|---|---|
 {rows}
 """
@@ -395,19 +395,19 @@ def boards(lang="en"):
     table_m, table_b = "\n".join(rows_m), "\n".join(rows_b)
     if lang == "ja":
         body = f"""
-このリリースの`targets/mcu/`のマイコンの定義と、`targets/boards/`のボードの定義です。
-定義のフォルダを足すと行が増えます。どちらのファイルの形式も
+このリリースにある`targets/mcu/`のマイコン定義と、`targets/boards/`のボードの定義です。
+定義のフォルダを追加すると行が増加します。どちらのファイルの形式も
 [マイコンとボードの定義](/reference/definitions/)にあります。
 
 ## マイコン
 
-| Id | 名前 | ポート | フラッシュ | RAM | 上りのつながり | 下りのつながり | 親機にできるか | 初回の書き込み |
+| Id | 名称 | ポート | フラッシュ | RAM | 上りリンク | 下りリンク | PC接続ノード可否 | 初回の書込 |
 |---|---|---|---|---|---|---|---|---|
 {table_m}
 
 ## ボード
 
-| Id | 製品 | マイコン | フラッシュ | 既定のつながり |
+| Id | 製品 | マイコン | フラッシュ | 既定のリンク |
 |---|---|---|---|---|
 {table_b}
 """
@@ -419,7 +419,7 @@ files is in [MCU and board definitions](/en/reference/definitions/).
 
 ## MCUs
 
-| Id | Name | Port | Flash | RAM | Up links | Down links | Can be 親機 | First write |
+| Id | Name | Port | Flash | RAM | Up links | Down links | Can be hub | First write |
 |---|---|---|---|---|---|---|---|---|
 {table_m}
 
@@ -448,8 +448,8 @@ def cli_markdown():
 
 
 def cli(lang="en"):
-    lead = tr(lang, """`dagon`のすべてのコマンド、引数、オプションです。`dagon <command> --help`が表示するものと同じです。
-多くのコマンドは、既定の値を`./dagon.toml`（または`--config <file>`）から取ります。""",
+    lead = tr(lang, """`dagon`の全コマンド、引数、オプションです。`dagon <command> --help`の表示内容と同一です。
+多数のコマンドは、既定の値を`./dagon.toml`（または`--config <file>`）から取得します。""",
               """Every `dagon` command, its arguments and options, as `dagon <command> --help`
 prints them. Most commands take their defaults from `./dagon.toml` (or
 `--config <file>`).""")
@@ -476,16 +476,16 @@ def contracts(lang="en"):
     table_f, table_c = "\n".join(rows_f), "\n".join(rows_c)
     if lang == "ja":
         body = f"""
-DAGONの部品のあいだの取り決めとその番号、部品ごとのバージョンと、読み書きする形式の番号です。
-どれも`compat.toml`にあるとおりです。変えるときの決まりは
+DAGONの部品間の規約とその番号、部品ごとのバージョンと、読込と書込の対象とする形式番号です。
+いずれも`compat.toml`の記載と同一です。変更時の規則は
 [バージョンとリリース](/explanation/versioning/)にあります。
 
 部品のバージョンは、その部品の最終リリースの値です（初回リリース前は0.1.0）。形式の番号は本ツリーの値です。
 タグ`<部品>-v<バージョン>`以後の変更は、次回のリリースまで未リリースです。
 
-## 取り決め
+## 規約
 
-| 取り決め | 形式の番号 | 番号の置き場所 |
+| 規約 | 形式の番号 | 番号の格納先 |
 |---|---|---|
 {table_f}
 
@@ -518,8 +518,8 @@ format numbers are this tree's. Changes since the tag
 |---|---|---|---|
 {table_c}
 """
-    return page(lang, tr(lang, "取り決めと部品", "Contracts and components"),
-                tr(lang, "取り決めごとの形式の番号と、部品ごとのバージョンです。", "Every contract's format number and every component's version, from compat.toml."),
+    return page(lang, tr(lang, "規約と部品", "Contracts and components"),
+                tr(lang, "規約ごとの形式の番号と、部品ごとのバージョンです。", "Every contract's format number and every component's version, from compat.toml."),
                 ["compat.toml"], body)
 
 
@@ -531,8 +531,8 @@ TOOL_KINDS = {
     ("rustup", "target"): ("Rustターゲット", "Rust target"),
     ("rustup", "toolchain"): ("コンパイラ", "compiler"),
     ("espup",): ("コンパイラ", "compiler"),
-    ("espflash",): ("書き込みツール", "write tool"),
-    ("probe-rs", "--version"): ("書き込みツール", "write tool"),
+    ("espflash",): ("書込ツール", "write tool"),
+    ("probe-rs", "--version"): ("書込ツール", "write tool"),
     ("probe-rs", "list"): ("ドライバ", "driver"),
 }
 NO_KIND = set()
@@ -559,11 +559,11 @@ def tools(lang="en"):
     table = "\n".join(rows)
     if lang == "ja":
         body = f"""
-Rustのほかに、マイコンごとに要るツールです。マイコンの定義の`[[doctor]]`にあるとおりです。
-`dagon doctor`はプロジェクトの中ではそのマイコンの分を、外ではすべてのマイコンの分を確かめます。
-`dagon doctor --fix`は、管理者の権限が要らないものを入れます。
+Rust以外に、マイコンごとに必要なツールです。マイコン定義にある`[[doctor]]`の記載と同一です。
+`dagon doctor`はプロジェクト内ではそのマイコンの分を、プロジェクト外では全マイコンの分を確認します。
+`dagon doctor --fix`は、管理者の権限が不要なツールをインストールします。
 
-| マイコン | 種類 | ツール | 入れ方 | 補足 |
+| マイコン | 種類 | ツール | インストール方法 | 補足 |
 |---|---|---|---|---|
 {table}
 """
@@ -579,7 +579,7 @@ no administrator rights.
 {table}
 """
     return page(lang, tr(lang, "マイコンごとのツール", "Tools by MCU"),
-                tr(lang, "dagon doctorがマイコンごとに確かめるものです。", "What dagon doctor checks for each MCU, from the MCU definitions."),
+                tr(lang, "dagon doctorがマイコンごとに確認する項目です。", "What dagon doctor checks for each MCU, from the MCU definitions."),
                 ["targets/mcu/*/dagon-mcu.toml"], body)
 
 
@@ -615,10 +615,10 @@ def rust_api(lang="en"):
     table = "\n".join(rows)
     if lang == "ja":
         body = f"""
-ワークスペースのすべてのcrateのRust APIの文書（rustdoc）を、このサイトと一緒に公開しています。
-下の名前を選ぶと、そのcrateを開きます。
+ワークスペースの全crateのRust APIの文書（rustdoc）を、このサイトと同時に公開しています。
+以下の名称を選択すると、そのcrateの文書をオープンします。
 
-| Crate | 中身 |
+| Crate | 内容 |
 |---|---|
 {table}
 """
@@ -716,17 +716,17 @@ def merge_rows(lang):
         keys = tr(lang, "、", ", ").join(f"`{k}`" for k in re.findall(r'"([^"]+)"', arg or ""))
         text = {
             "Keyed": tr(lang, f"キー（{keys}）でエントリごとに合成", f"merged entry by entry by key ({keys})"),
-            "AddOrDelete": tr(lang, f"キー（{keys}）でエントリを丸ごと足すか消す", f"whole entries added or removed by key ({keys})"),
-            "Whole": tr(lang, "書くと丸ごと置き換わる", "replaced whole when given"),
-            "WholeWhenChanged": tr(lang, f"キーごとに合成。{keys}を変えるときはテーブルを丸ごと書く",
+            "AddOrDelete": tr(lang, f"キー（{keys}）でエントリ全体を追加か削除", f"whole entries added or removed by key ({keys})"),
+            "Whole": tr(lang, "記述すると全体を置換", "replaced whole when given"),
+            "WholeWhenChanged": tr(lang, f"キーごとに合成。{keys}の変更時はテーブル全体を記述",
                                    f"merged key by key; a new {keys} comes with the whole table"),
-            "Fixed": tr(lang, "上書きできない", "may not be overridden"),
-            "Same": tr(lang, "変えられない（定義の識別か、パッケージのファイル）", "may not change (the definition's identity or a file of its package)"),
+            "Fixed": tr(lang, "上書き不可", "may not be overridden"),
+            "Same": tr(lang, "変更不可（定義の識別情報か、パッケージのファイル）", "may not change (the definition's identity or a file of its package)"),
         }[rule]
         if how == "ordered":
-            text += tr(lang, "。`dagon-order`で順を与えられる", "; `dagon-order` gives its order")
+            text += tr(lang, "。`dagon-order`で順番を指定可能", "; `dagon-order` gives its order")
         rows.append(f"| {tr(lang, 'マイコン' if kind == 'Mcu' else 'ボード', 'MCU' if kind == 'Mcu' else 'board')} | `{path}` | {text} |")
-    head = tr(lang, "| 定義 | 場所 | 規則 |", "| Definition | Path | Rule |")
+    head = tr(lang, "| 定義 | 位置 | 規則 |", "| Definition | Path | Rule |")
     return head + "\n|---|---|---|\n" + "\n".join(rows) + "\n"
 
 

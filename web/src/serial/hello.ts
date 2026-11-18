@@ -1,6 +1,6 @@
 // HELLO payload shapes (dagon_proto::payload::{HelloReq, HelloResp}). The page
 // encodes requests and decodes responses through dagon-wasm; the response
-// encoder here exists only for the mock hub, and is dagon-proto's too.
+// encoder here exists only for the mock PC-connected node, and is dagon-proto's too.
 import { respond } from '../wasm/dagon.ts';
 
 export const ROLE_HUB = 0;

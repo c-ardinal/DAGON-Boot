@@ -1,5 +1,5 @@
-// Link geometry: vertical cubic Béziers from a parent's bottom port to a
-// child's top port (a cable's rest shape, see cable.ts), and where the wire
+// Link geometry: vertical cubic Béziers from the bottom port of the node nearer the PC
+// to the top port of the node at the other end of the link (a cable's rest shape, see cable.ts), and where the wire
 // bundle's strands and ties sit.
 
 export interface Pt {

@@ -10,10 +10,10 @@ const html = () =>
     props: {
       target: '[3] ウォッチ',
       reason: '理由',
-      fix: '次にすること',
+      fix: '後続の手順',
       onclose: () => undefined,
       onmore: () => undefined,
-      buttons: createRawSnippet(() => ({ render: () => '<button>書き込む</button>' })),
+      buttons: createRawSnippet(() => ({ render: () => '<button>書込</button>' })),
     },
   }).body;
 
@@ -29,7 +29,7 @@ describe('the modal of a write that could not be done', () => {
     const b = html();
     expect(b).toContain(WRITE.failed);
     expect(b).toContain('理由');
-    expect(b.indexOf('次にすること')).toBeLessThan(b.indexOf('書き込む</button>'));
+    expect(b.indexOf('後続の手順')).toBeLessThan(b.indexOf('書込</button>'));
   });
 
   test('its own label, when the outcome has one', () => {

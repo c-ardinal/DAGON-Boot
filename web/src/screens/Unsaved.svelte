@@ -7,7 +7,7 @@
     reason: string;
     onsave: () => void;
     ondiscard: () => void;
-    /** "やめる" or Escape: back to the page, edits kept. */
+    /** "キャンセル" or Escape: back to the page, edits kept. */
     onstay: () => void;
   }
 

@@ -159,7 +159,7 @@ export interface RecoverResult {
 /** Why a release is refused before anything is sent (dagon-host's check). */
 export type Refusal = 'source' | 'key' | 'topology' | 'format';
 
-/** dagon-host's procedures for one hub session, with the shapes dagon-wasm returns. */
+/** dagon-host's procedures for one PC-connected node session, with the shapes dagon-wasm returns. */
 export interface Host {
   hello(to: Target): Promise<HelloResp>;
   status(to: Target): Promise<NodeState>;
@@ -294,7 +294,7 @@ export interface WireRequest {
   bulk: Uint8Array;
 }
 
-/** Reads a request for a node of the in-memory hub (`relays`: the one that relays): malformed, an unknown must field and an unserved command come back as `refusal`. */
+/** Reads a request for a node of the in-memory PC-connected node (`relays`: the one that relays): malformed, an unknown must field and an unserved command come back as `refusal`. */
 export function readRequest(cmd: number, payload: Uint8Array, relays: boolean): WireRequest {
   const r = request_read(cmd, payload, relays);
   try {
@@ -305,12 +305,12 @@ export function readRequest(cmd: number, payload: Uint8Array, relays: boolean): 
   }
 }
 
-/** The commands a node of the in-memory hub serves (`relays`: the one that relays), as its HELLO carries them. */
+/** The commands a node of the in-memory PC-connected node serves (`relays`: the one that relays), as its HELLO carries them. */
 export function servedCmds(relays: boolean): Uint8Array {
   return node_cmds(relays);
 }
 
-/** Response payloads for the in-memory hub, written by dagon-proto's writer. */
+/** Response payloads for the in-memory PC-connected node, written by dagon-proto's writer. */
 export const respond = {
   status: (status: number): Uint8Array => response_status(status),
   helloBody: (h: HelloResp): Uint8Array =>

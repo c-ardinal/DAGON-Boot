@@ -6,7 +6,7 @@ const hub = (id: string) => ({ id, hub: true });
 const node = (id: string) => ({ id, hub: false });
 
 describe('treeLayout', () => {
-  test('one 親機 sits centred over its 子機', () => {
+  test('one coordinator sits centred over its nodes', () => {
     const l = treeLayout([hub('h'), node('a'), node('b')], [{ from: 'h', to: 'a' }, { from: 'h', to: 'b' }], o);
     expect(l.at.a).toEqual({ x: 0, y: 80, depth: 1 });
     expect(l.at.b).toEqual({ x: 120, y: 80, depth: 1 });
@@ -15,7 +15,7 @@ describe('treeLayout', () => {
     expect(l.roots).toEqual(['h']);
   });
 
-  test('several 親機 each get a tree, side by side, at any depth', () => {
+  test('several coordinators each get a tree, side by side, at any depth', () => {
     const l = treeLayout(
       [hub('h1'), node('a'), hub('h2'), node('p'), node('s')],
       [{ from: 'h1', to: 'a' }, { from: 'h2', to: 'p' }, { from: 'p', to: 's' }],
@@ -29,14 +29,14 @@ describe('treeLayout', () => {
     expect(l.at.s.x).toBe(l.at.h2.x);
   });
 
-  test('a 親機 linked from another node sits under it, not as a root', () => {
+  test('a coordinator linked from another node sits under it, not as a root', () => {
     const l = treeLayout([hub('h1'), hub('h2'), node('m')], [{ from: 'h1', to: 'h2' }, { from: 'h2', to: 'm' }], o);
     expect(l.roots).toEqual(['h1']);
     expect(l.at.h2.depth).toBe(1);
     expect(l.at.m.depth).toBe(2);
   });
 
-  test('a 子機 nobody links to stands in the first row; a cycle does not loop', () => {
+  test('a node nobody links to stands in the first row; a cycle does not loop', () => {
     const l = treeLayout([hub('h'), node('x'), node('c1'), node('c2')], [{ from: 'c1', to: 'c2' }, { from: 'c2', to: 'c1' }], o);
     expect(l.at.x.depth).toBe(1);
     expect(Object.keys(l.at).sort()).toEqual(['c1', 'c2', 'h', 'x']);

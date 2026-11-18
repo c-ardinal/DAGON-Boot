@@ -82,5 +82,5 @@ Parts of the design the code lacks, in whole or in part:
 - Bus Guardian: Not in the code.
 - Delivery Plan: The trial window and the promotion judgement are not in the code.
 - Recovery Policy: No recovery tier is chosen automatically.
-- Retained Codecs: The firmware has none of the retained codecs: the lockup fuse's format exists only in the executable model, `compat.toml` has no format number (`boot-record`) for the boot record and the fuse, and the topology body is `dagon-format`'s (a 32-byte head, 32-byte nodes), not the one in [Retained and persistent formats](/en/explanation/retained-formats/). The hub stores it in one region, with no two-bank replacement.
+- Retained Codecs: The firmware has none of the retained codecs: the lockup fuse's format exists only in the executable model, `compat.toml` has no format number (`boot-record`) for the boot record and the fuse, and the topology body is `dagon-format`'s (a 32-byte head, 32-byte nodes), not the one in [Retained and persistent formats](/en/explanation/retained-formats/). The hub stores it in one region, with no two-bank replacement. The state log's keyed records and the link diagnostics records exist only in the executable model too: the log's compaction in `dagon-core` does not copy a keyed record.
 <!-- end of generated table -->

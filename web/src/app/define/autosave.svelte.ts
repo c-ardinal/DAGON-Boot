@@ -89,7 +89,7 @@ export class Autosave {
 
   /**
    * Runs `then` once the project's YAML has every edit, after the saves
-   * already queued (「プロジェクトを作る」: gen reads that YAML);
+   * already queued (「プロジェクト作成」: gen reads that YAML);
    * false, without running it, when the save does not go through.
    */
   async whenSaved(then: () => Promise<unknown>): Promise<boolean> {
@@ -104,19 +104,19 @@ export class Autosave {
     this.asking = go;
   }
 
-  /** The dialog's "もう一度保存する". */
+  /** The dialog's "構成の再保存". */
   async saveAgain(): Promise<void> {
     if (!(await this.now())) return;
     this.proceed();
   }
 
-  /** The dialog's "変更を捨てて進む": the edits stay out of the YAML. */
+  /** The dialog's "変更の破棄と続行": the edits stay out of the YAML. */
   discard(): void {
     this.cancel();
     this.proceed();
   }
 
-  /** The dialog's "やめる". */
+  /** The dialog's "キャンセル". */
   stay(): void {
     this.asking = null;
   }

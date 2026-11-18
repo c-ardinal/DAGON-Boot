@@ -18,7 +18,7 @@
 
   interface Props {
     notice: Notice;
-    /** 詳しく見る: opens the record behind the notice. */
+    /** 詳細表示: opens the record behind the notice. */
     onmore?: () => void;
     ondone: () => void;
   }

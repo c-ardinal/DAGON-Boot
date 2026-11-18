@@ -69,7 +69,7 @@ describe("each node's target is the one dagon-host gives", () => {
   });
 
   test('a node on a port the connected node relays over no entry of has no target', () => {
-    // The watch on the hub's USB port, which the hub relays over no entry of.
+    // The watch on the PC-connected node's USB port, which the node connected to the PC relays over no entry of.
     const onUsb = sample.replace(
       /  - kind: uart\n    iface: pio-uart\n    ends:\n.*\n.*\n    baud: 115200\n    control:\n      kind: cooperative\n      rom_entry: force-download-boot\n/,
       '  - kind: usb-cdc\n    ends:\n      - { node: hub, port: usb }\n      - { node: watch, port: usb-serial-jtag }\n',

@@ -23,7 +23,7 @@ enabled = false
 [[area]]
 name = "web"
 paths = ["web/*"]
-enabled = false
+enabled = true
 
 [[area]]
 name = "readme-crates-scripts"

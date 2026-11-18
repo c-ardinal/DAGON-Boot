@@ -16,7 +16,7 @@ const status = (key: boolean): AgentStatus => ({
       provider: 'Anthropic',
       ways: [
         { id: 'claude-code', name: 'Claude Code', kind: 'command', available: true, key: null },
-        { id: 'api', name: 'API キー', kind: 'messages-http', available: key, key },
+        { id: 'api', name: 'APIキー', kind: 'messages-http', available: key, key },
       ],
     },
   ],

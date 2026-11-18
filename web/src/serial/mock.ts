@@ -1,10 +1,10 @@
-// In-memory hub for development and tests: the sample hub plus the
+// In-memory PC-connected node for development and tests: the sample PC-connected node plus the
 // 7-segment node (I2C 0x42) and the watch (UART), answering in the
 // dagon-proto frame format. It covers what the page drives: HELLO, STATUS,
 // RELAY to the two nodes and the update steps
 // (XFER_BEGIN/HDR/DATA/END, SET_PENDING, REBOOT, CONFIRM, SHOW). Images are
 // not checked here; dagon-host checks the release before sending. Every
-// request is read by dagon-proto's reader before the hub acts on it, and
+// request is read by dagon-proto's reader before the node connected to the PC acts on it, and
 // every response is written by its writer (dagon-wasm): no command, status
 // or field number and no payload layout is written here.
 import { CMD, encodeFrame, parseFrame, STATUS, WIRE } from './frame.ts';
@@ -25,7 +25,7 @@ const MODE_AGENT = 3;
 const KEY_ID = Uint8Array.of(0x3f, 0x9a, 0x21, 0xc7, 0x00, 0x00, 0x00, 0x00);
 const V100 = versionRaw(1, 0, 0);
 
-/** The sample hub: 1.0.0, confirmed, sample key id. */
+/** The sample PC-connected node: 1.0.0, confirmed, sample key id. */
 export const SAMPLE_HUB_HELLO: HelloResp = {
   get protoVer() {
     return wireVersion();
@@ -111,11 +111,11 @@ function sampleDevices(hub: HelloResp): Map<DeviceKey, Device> {
 
 export interface MockOptions {
   hello?: HelloResp;
-  /** Never answer (a device that is not a hub). */
+  /** Never answer (a device that is not a node connected to the PC). */
   silent?: boolean;
-  /** Delay of the hub's HELLO reply, to make the checking state visible. */
+  /** Delay of the PC-connected node's HELLO reply, to make the checking state visible. */
   delayMs?: number;
-  /** Nodes behind the hub that do not answer RELAY. */
+  /** Nodes behind the node connected to the PC that do not answer RELAY. */
   quiet?: DeviceKey[];
   /** Devices answering as their factory agent (HELLO mode 3) until the next REBOOT. */
   factory?: DeviceKey[];
@@ -124,7 +124,7 @@ export interface MockOptions {
   /** Devices that come back on their previous version after REBOOT (the new one did not start). */
   fallBack?: DeviceKey[];
   /**
-   * Opens that fail after the hub's REBOOT, while its USB device is away
+   * Opens that fail after the PC-connected node's REBOOT, while its USB device is away
    * (default 2). `Infinity`: it stays away until `replug()`, as when the
    * browser cannot reopen it without the user choosing it again.
    */
@@ -141,7 +141,7 @@ export class MockTransport implements Transport {
   private hubAway: number;
   /** Devices that took a REBOOT, in order. */
   readonly reboots: DeviceKey[] = [];
-  /** Failing opens left while the rebooting hub is away. */
+  /** Failing opens left while the rebooting PC-connected node is away. */
   private away = 0;
   constructor(private readonly opts: MockOptions = {}) {
     this.quiet = new Set(opts.quiet);
@@ -171,12 +171,12 @@ export class MockTransport implements Transport {
     this.refuse = { ...this.refuse, [key]: status };
   }
 
-  /** Opens that fail after the hub's next REBOOT (`Infinity`: until `replug()`). */
+  /** Opens that fail after the PC-connected node's next REBOOT (`Infinity`: until `replug()`). */
   setHubAway(opens: number): void {
     this.hubAway = opens;
   }
 
-  /** The rebooted hub's USB device is back. */
+  /** The rebooted PC-connected node's USB device is back. */
   replug(): void {
     this.away = 0;
   }
@@ -207,7 +207,7 @@ export class MockTransport implements Transport {
     const hub = this.devices.get('hub')!;
     const body = req.refusal ?? (frame.cmd === CMD.RELAY ? await this.relay(req) : await answer(hub, frame.cmd, req, this.fellBack('hub'), this.refuse.hub));
     const resp = encodeFrame({ flags: WIRE.FLAG_RESP, seq: frame.seq, cmd: frame.cmd, payload: body });
-    // Only the hub's own HELLO waits, so the checking state shows without slowing a scan.
+    // Only the PC-connected node's own HELLO waits, so the checking state shows without slowing a scan.
     setTimeout(() => this.queue.put(resp), frame.cmd === CMD.HELLO ? (this.opts.delayMs ?? 0) : 0);
     if (frame.cmd === CMD.REBOOT && body[0] === STATUS.OK) {
       this.reboots.push('hub');

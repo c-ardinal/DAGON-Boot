@@ -4,7 +4,7 @@
     chip: string;
     spoken: string;
     silent: boolean;
-    /** A label-value line under the chip ("目安 約 1 分", "自動の再接続 あと 30 s"). */
+    /** A label-value line under the chip ("推定 約1分", "自動再接続 あと30秒"). */
     note?: string;
   }
 
@@ -47,7 +47,7 @@
   interface Props {
     config: Config | null;
     live: Record<string, Live>;
-    /** The hub is connected: the PC link is solid and nodes carry live marks. */
+    /** The coordinator is connected: the PC link is solid and nodes carry live marks. */
     connected: boolean;
     selected: string | null;
     onselect: (key: string) => void;
@@ -114,7 +114,7 @@
   const NAME_PX = 14;
   /** Card heights before they are measured (px). */
   const EST_H = { normal: 140, compact: 56 };
-  /** Room above a top 親機 for its uplink card, and around the graph when fitting (px). */
+  /** Room above a top coordinator for its uplink card, and around the graph when fitting (px). */
   const UPLINK_ROOM = 84;
   const SIDE = 24;
   /** Between a bundle's outer strand and its chip, and the chip's height (px). */
@@ -470,7 +470,7 @@
   );
   const still = $derived(lightsStill(Object.values(states)));
 
-  /** A 親機's own connection line: its uplink as the 構成 writes it, or the link from the node above it. */
+  /** A coordinator's own connection line: its uplink as the 構成 writes it, or the link from the node above it. */
   function hubVia(n: Node): string {
     if (!n.uplink) return n.via || NODE.usb;
     return NODE.uplinkVia(kindLabel(n.uplink.kind), n.uplink.host);
@@ -479,27 +479,38 @@
   /** The card's one mono line: MCU and how it is reached. */
   const metaOf = (n: Node) => [n.mcu, n.role === 'hub' ? hubVia(n) : n.via].filter(Boolean).join(' · ');
 
-  /** 親機 nobody links to, each with its uplink (what drives it, as the 構成 writes it) above it. */
+  /** Coordinators nobody links to, each with its uplink (what drives it, as the 構成 writes it) above it. */
   const tops = $derived((config?.nodes ?? []).filter((n) => n.role === 'hub' && tree.roots.includes(n.id)));
-  /** The 親機 this page connects to: the one updating reaches (the cut's), else the first one the 構成 names. */
+  /** The coordinator this page connects to: the one updating reaches (the cut's), else the first one the 構成 names. */
   const firstHub = $derived(
     config?.nodes.find((n) => n.role === 'hub' && config.reach.includes(n.id))?.id ?? config?.nodes.find((n) => n.role === 'hub')?.id,
   );
 
-  /** The role on the card: 親機, 子機, 孫機, and below that its row. */
+  /** The role on the card: coordinator; links from the nearest coordinator above; or ノード when no coordinator is above it. */
   function roleOf(n: Node): string {
     if (n.role === 'hub') return NODE.roleHub;
+    if (!underCoordinator(n.id)) return NODE.roleOther;
     const d = belowHub(n.id);
     return d <= 1 ? NODE.roleNode : d === 2 ? NODE.roleGrandchild : NODE.roleDeeper(d);
   }
 
-  /** Links from the nearest 親機 above node `id` (1 for a 子機; a node no 親機 reaches counts as a 子機). */
+  /** Links from the nearest coordinator above node `id` (1 for a node; a node no coordinator reaches counts as a node). */
   function belowHub(id: string, seen = new Set<string>()): number {
     const up = config?.links.find((l) => l.to === id)?.from;
     const p = config?.nodes.find((x) => x.id === up);
     if (!p || p.role === 'hub' || seen.has(id)) return 1;
     seen.add(id);
     return belowHub(p.id, seen) + 1;
+  }
+
+  /** Whether the links above node `id` lead up to a coordinator (not to a node nobody links to, nor round a loop). */
+  function underCoordinator(id: string, seen = new Set<string>()): boolean {
+    const up = config?.links.find((l) => l.to === id)?.from;
+    const p = config?.nodes.find((x) => x.id === up);
+    if (!p || seen.has(id)) return false;
+    if (p.role === 'hub') return true;
+    seen.add(id);
+    return underCoordinator(p.id, seen);
   }
 
   function l0Of(n: Node): string {
@@ -716,7 +727,7 @@
       {/each}
 
       {#each drawn as d (d.key)}
-        <!-- A link's end on its parent, over the card's edge; in 準備 another link can start from it. -->
+        <!-- A link's end on the node nearer the PC, over the card's edge; in 準備 another link can start from it. -->
         <!-- svelte-ignore a11y_no_static_element_interactions -->
         <span
           transition:fade

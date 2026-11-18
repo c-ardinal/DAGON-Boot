@@ -11,7 +11,7 @@ describe('the chip a node keeps after a write', () => {
 
   test('a node the stopped write never reached: not written, no error chip, its state stays what the watch saw', () => {
     const c = resultChip('unwritten')!;
-    expect(c).toEqual({ chip: NODE.unwritten, spoken: '未書き込み', silent: false });
+    expect(c).toEqual({ chip: NODE.unwritten, spoken: '未書込', silent: false });
     expect(nodeState({ connected: true, responding: true, chip: c.chip })).toBe('alive');
   });
 

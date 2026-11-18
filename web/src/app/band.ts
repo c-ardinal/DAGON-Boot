@@ -17,7 +17,7 @@ export interface Band extends BandCopy {
 
 /** Names a button needs beyond its action: the node to recover, how many still answer. */
 export interface Names {
-  /** lost after the CLI gave back a device that is not this 親機: why. */
+  /** lost after the CLI gave back a device that is not this PC-connected node: why. */
   refused?: ReconnectNote['kind'] | null;
   stuck?: string;
   responding?: number;
@@ -29,7 +29,7 @@ export interface Names {
   rest?: boolean;
   /** There is a build to write: the main action writes it. */
   built?: boolean;
-  /** The 親機 is simulated, so no device list appears. */
+  /** The node connected to the PC is simulated, so no device list appears. */
   sim?: boolean;
   /** What the last run left (done): the band says only that. */
   finish?: Finish | null;

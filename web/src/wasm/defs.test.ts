@@ -6,6 +6,12 @@ const text = (rel: string) => new TextDecoder().decode(readFileSync(new URL(`../
 const mcu = (id: string, files: [string, string][] = []) => ({ label: id, toml: text(`targets/mcu/${id}/dagon-mcu.toml`), files });
 const board = (id: string) => ({ label: id, toml: text(`targets/boards/${id}/dagon-board.toml`) });
 
+/** The [connection] table of an MCU definition, as its file writes it. */
+const connectionOf = (id: string) => {
+  const table = text(`targets/mcu/${id}/dagon-mcu.toml`).split(/^\[connection\]$/m)[1].split(/^\[/m)[0];
+  return { label: /^label = "([^"]*)"$/m.exec(table)?.[1], hint: /^hint = "([^"]*)"$/m.exec(table)?.[1] };
+};
+
 /** The builtin set: the id of every board package of the tree (as a set; order carries no meaning). */
 const expectBuiltin = (ids: string[]) => {
   const want = readdirSync(new URL('../../../targets/boards/', import.meta.url), { withFileTypes: true })
@@ -26,10 +32,8 @@ const served = JSON.stringify({
 });
 
 describe('definitions from dagon serve', () => {
-  test('the write panel says how to connect each MCU, as it always has', () => {
-    expect(mcuConnection('rp2040')).toEqual({ label: 'USB（BOOT を押しながら）', hint: 'BOOT を押しながら USB をつないでから、書き込んでください。' });
-    expect(mcuConnection('stm32f401re')).toEqual({ label: 'ST-LINK', hint: 'ST-LINK を USB でつないでから、書き込んでください。' });
-    expect(mcuConnection('esp32s3')).toEqual({ label: 'USB-C', hint: 'USB-C でつないでから、書き込んでください（つながらないときは BOOT を押しながら）。' });
+  test('the write panel says how to connect each MCU, in the words of its definition', () => {
+    for (const id of ['rp2040', 'stm32f401re', 'esp32s3']) expect(mcuConnection(id)).toEqual(connectionOf(id));
     expect(mcuConnection('nope')).toBeNull();
   });
 

@@ -12,7 +12,7 @@ use std::panic::{catch_unwind, AssertUnwindSafe};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Violation {
-    /// Property id (P1..P26) or `panic`.
+    /// Property id (P1..P26, C1..C3, L1..L9, `state`) or `panic`.
     pub property: &'static str,
     /// Index of the operation during which it failed.
     pub step: usize,

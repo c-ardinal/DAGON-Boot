@@ -40,9 +40,9 @@ export default defineConfig({
       },
       social: [{ icon: 'github', label: 'GitHub', href: 'https://github.com/c-ardinal/DAGON-Boot' }],
       sidebar: [
-        { label: 'はじめに', translations: { en: 'Getting started' }, items: [{ autogenerate: { directory: 'getting-started' } }] },
-        { label: 'やり方', translations: { en: 'How-to guides' }, items: [{ autogenerate: { directory: 'how-to' } }] },
-        { label: 'しくみ', translations: { en: 'Explanation' }, items: [{ autogenerate: { directory: 'explanation' } }] },
+        { label: '入門', translations: { en: 'Getting started' }, items: [{ autogenerate: { directory: 'getting-started' } }] },
+        { label: '手順', translations: { en: 'How-to guides' }, items: [{ autogenerate: { directory: 'how-to' } }] },
+        { label: '構造', translations: { en: 'Explanation' }, items: [{ autogenerate: { directory: 'explanation' } }] },
         { label: 'リファレンス', translations: { en: 'Reference' }, items: [{ autogenerate: { directory: 'reference' } }] },
       ],
       plugins: [

@@ -47,7 +47,7 @@ def render(url):
         "# DAGON",
         "",
         "> DAGON is the boot stage and the update path for groups of microcontrollers: signed images,",
-        "> trial boots that go back by themselves, and one 親機 (hub) that writes every node.",
+        "> trial boots that go back by themselves, and one node connected to the PC that writes every node.",
         "",
         f"- [DAGON Console demo]({site}/demo/): the Console on simulated nodes in the browser",
     ]

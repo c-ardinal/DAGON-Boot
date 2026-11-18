@@ -171,3 +171,39 @@ text = "設計は美麗なのに、運用は煩雑。"
 kind = "plain"
 word = "用は煩雑"
 reason = "The problem statement is a headline, not prose."
+
+# The glossary names each retired term once, to point a reader who meets it at the term that replaces it.
+[[allow]]
+path = "site/src/content/docs/explanation/words.md"
+text = "- **親機/子機/孫機**: 廃止した用語です。"
+kind = "retired"
+word = "親機"
+reason = "The glossary's entry for the retired term names it, pointing at ノード."
+
+[[allow]]
+path = "site/src/content/docs/explanation/words.md"
+text = "- **親機/子機/孫機**: 廃止した用語です。"
+kind = "retired"
+word = "子機"
+reason = "The glossary's entry for the retired term names it, pointing at ノード."
+
+[[allow]]
+path = "site/src/content/docs/explanation/words.md"
+text = "- **親機/子機/孫機**: 廃止した用語です。"
+kind = "retired"
+word = "孫機"
+reason = "The glossary's entry for the retired term names it, pointing at ノード."
+
+[[allow]]
+path = "site/src/content/docs/explanation/words.md"
+text = "- **書き込む/書き込みモード**: 廃止した用語です。"
+kind = "retired"
+word = "書き込む"
+reason = "The glossary's entry for the retired term names it, pointing at 書込."
+
+[[allow]]
+path = "site/src/content/docs/explanation/words.md"
+text = "- **書き込む/書き込みモード**: 廃止した用語です。"
+kind = "retired"
+word = "書き込み"
+reason = "The glossary's entry for the retired term names it, pointing at 書込モード."

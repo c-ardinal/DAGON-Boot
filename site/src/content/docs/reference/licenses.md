@@ -22,7 +22,7 @@ description: "DAGONのライセンス、依存ライブラリのライセンス�
 - `lightningcss`（MPL-2.0）はwebのビルドツールのビルド時の依存だけで、DAGON Consoleには何も含まれません。
 - DAGON Consoleに含まれるnpmのコードは、Svelteのクライアント用ランタイムと、それが読み込む`clsx`と`esm-env`（いずれもMIT）だけです。他のnpmのライブラリはビルドとテストの道具です（表の"Ships in"列）。
 - `web/public/fonts/`の書体はSIL Open Font License 1.1です: Doto、DotGothic16、Zen Kaku Gothic New、JetBrains Mono（ライセンス文はファイルの隣にあります。`web/README.md`を参照）。
-- サンプル`samples/rp2040-round-lcd`の画面の日本語の状態語は、Noto Sans JP（SIL Open Font License 1.1）から作ったビットマップです（ライセンス文は`samples/rp2040-round-lcd/screen/fonts/`）。
+- サンプル`samples/rp2040-round-lcd`の画面の日本語の状態語は、Noto Sans JP（SIL Open Font License 1.1）から作成したビットマップです（ライセンス文は`samples/rp2040-round-lcd/screen/fonts/`）。
 
 Rust crates: 408 packages, 449 name/version pairs. "Used by": `crates/` is the host workspace, `samples/...` the sample apps, other names are firmware packages under `targets/`.
 
@@ -542,7 +542,7 @@ npm packages (`web/package-lock.json`): 89. Only those marked "page" ship in the
 ## 使用していないコンポーネント(公開されているブートローダ実装は使用していません)
 
 
-公開されているブートローダ実装（例: embassy-boot、MCUboot、wolfBoot）のコードもロジックも使っていません。起動の判断、イメージとリリースの形式、状態ログ、書き込みのプロトコル、受け手はこのプロジェクトのために書いたものです。
+公開されているブートローダ実装（例: embassy-boot、MCUboot、wolfBoot）のコードもロジックも使っていません。起動の判断、イメージとリリースの形式、状態ログ、書込のプロトコル、受け手はこのプロジェクトのために書いたものです。
 
 
 ## 無改変のベンダーコンポーネント

@@ -33,14 +33,14 @@ description: "リポジトリにあるもの、その場所、DAGONそのもの�
 
 プロジェクトは`dagon new --dagon-path <クローン>`（または`DAGON_HOME`を設定）でそのクローンを使います。`dagon.toml`には`[dagon] path`が書かれます。
 
-### リリースのアーカイブを作る
+### リリースのアーカイブを作成する
 
-`python scripts/release.py [--target <triple>]`が、そのツリーからページをビルドし、ページを組み込んだ`out/release/dagon-cli-<version>-<target>.*`を作ります。組み込むページがないときは、ビルドが止まります。
+`python scripts/release.py [--target <triple>]`が、そのツリーからページをビルドし、ページを組み込んだ`out/release/dagon-cli-<version>-<target>.*`を作成します。組み込むページがないときは、ビルドが止まります。
 
 `.github/workflows/release.yml`は、`cli-v*`のタグがpushされたときに同じことを各プラットフォームで行います。
 
 1. コミットが求める上げ幅にバージョンが足りているかを`scripts/bump_check.py`で確かめます。
-2. 各システムのアーカイブと`.sha256`を作ります。
+2. 各システムのアーカイブと`.sha256`を作成します。
 3. すべてのビルドが通ると、GitHubのリリースを公開します。リリースは各システムのアーカイブと`.sha256`を持ちます。
 
 ビルドが1つでも失敗すると、公開しません。手で動かしたときも公開しません。

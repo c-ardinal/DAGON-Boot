@@ -86,7 +86,7 @@ Names in definitions (ids, product names, pin labels, partition names) appear in
 dagon gen
 ```
 
-Each node gets a crate in `nodes/<id>/`. DAGON Console does the same with 「プロジェクトを作る」.
+Each node gets a crate in `nodes/<id>/`. DAGON Console does the same with 「プロジェクト作成」.
 
 Write your application in `nodes/<id>/src/app.rs`. It has two things:
 
@@ -231,7 +231,7 @@ The single steps are `dagon build`, `dagon image`, `dagon release` and `dagon ap
 1. In 準備, press 「ビルドする」. It builds every node, signs and makes the package.
 2. In 書込, check the nodes to write on their cards.
 3. Pick the version in the header: the latest build, or a kept one to go back.
-4. Press 「書き込む」. It writes over Web Serial.
+4. Press 「書込」. It writes over Web Serial.
 
 Each card shows its current → new version and one % for the whole write, then the result.
 

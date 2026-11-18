@@ -253,7 +253,7 @@ const FEATURES: [&str; 13] = [
     "doctor",
 ];
 
-/// Largest layout file (名称 and editor positions) accepted.
+/// Largest layout file (表示名 and editor positions) accepted.
 const MAX_LAYOUT: usize = 256 * 1024;
 
 type Res = Result<Response, Response>;
@@ -1289,7 +1289,7 @@ fn layout_path(server: &Server) -> Result<PathBuf, Response> {
     inside(&cfg, &p.with_file_name(name)).map_err(|e| Response::error(403, &e))
 }
 
-/// GET /v1/layout: 名称 and editor positions (an empty layout before the first save).
+/// GET /v1/layout: 表示名 and editor positions (an empty layout before the first save).
 fn layout_get(server: &Server) -> Res {
     let p = layout_path(server)?;
     if !p.exists() {

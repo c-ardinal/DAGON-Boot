@@ -255,14 +255,16 @@ where
         self.r.links.iter().find(|k| k.link.id == link).copied()
     }
 
-    /// RELAY: E_ARG for a link the node does not have, or an address or
-    /// frame that link does not take; E_UNSUPPORTED for a link the board
-    /// does not wire.
+    /// RELAY: E_ARG, before anything is forwarded, for a link the node does
+    /// not have, an address that link does not take, or an inner frame
+    /// that is not one whole frame within the tunnel from the uplink's
+    /// `max` payload over that link ([`cmd::relay_admits`]); E_UNSUPPORTED
+    /// for a link the board does not wire.
     async fn relay(&mut self, r: &RelayReq<'_>, max: usize) -> (Status, usize) {
         let Some(route) = self.route(r.link) else {
             return (Status::Arg, 0);
         };
-        if !route.link.fits(r.addr, r.inner.len()) {
+        if !cmd::relay_admits(&route.link, r, max) {
             return (Status::Arg, 0);
         }
         let Some(port) = route.port else {

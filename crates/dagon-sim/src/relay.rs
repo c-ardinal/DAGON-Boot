@@ -494,16 +494,21 @@ impl SimRelay {
         Handler::new(Cmd::I2cRaw, |r, p| Ok(r.i2c_raw(&I2cRaw::of(p)?))),
     ];
 
-    /// RELAY over the link its id names: `Arg` for an id the table does not
-    /// list (or an address or size the link does not take), `Unsupported`
-    /// for a link kind the simulator has no medium for.
+    /// RELAY over the link its id names: `Arg`, before anything is
+    /// forwarded, for an id the table does not list, an address the link
+    /// does not take or an inner frame the tunnel from USB over that link
+    /// does not admit (`Relay::admits`); `Unsupported` for a link kind the
+    /// simulator has no medium for.
     fn relay(&mut self, r: &Relay<'_>) -> Answer {
         let t = u64::from(r.timeout_ms.unwrap_or(dagon_port::timeout::RELAY_WAIT_MS));
         let Some(link) = self
             .links
             .iter()
             .find(|l| l.id == r.link)
-            .filter(|l| l.fits(r.addr, r.inner.len()))
+            .filter(|l| {
+                l.addressing.accepts(r.addr)
+                    && r.admits(max_payload::USB, usize::from(l.max_payload))
+            })
             .copied()
         else {
             return (Status::Arg, Vec::new());

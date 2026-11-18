@@ -999,6 +999,43 @@ impl<'a> Relay<'a> {
     /// fields and the delimiter.
     pub const OVERHEAD_MAX: usize = 1 + 3 + 4 + 1;
 
+    /// The bytes of an OK response around the node's response frame: the
+    /// status and the delimiter.
+    pub const RESP_OVERHEAD: usize = 1 + BULK_RESP_AT;
+
+    /// The largest inner frame a relay forwards over a link carrying
+    /// `egress` payload bytes, for a request that came in on a link
+    /// carrying `ingress`: one frame of the egress link, and no more than
+    /// a RELAY request and its OK response carry on the ingress link. For
+    /// a relay reached through another, `ingress` is what the outer tunnel
+    /// carries as payload (its MTU less `frame_len(0)`).
+    pub const fn tunnel_mtu(ingress: usize, egress: usize) -> usize {
+        let request = ingress.saturating_sub(Self::OVERHEAD_MAX);
+        let response = ingress.saturating_sub(Self::RESP_OVERHEAD);
+        let link = crate::frame_len(egress);
+        let around = if request < response {
+            request
+        } else {
+            response
+        };
+        if link < around {
+            link
+        } else {
+            around
+        }
+    }
+
+    /// Whether a relay forwards this request from a link carrying
+    /// `ingress` payload bytes over one carrying `egress`: its inner frame
+    /// is one whole frame of this wire version (start, version, length and
+    /// CRC; the payload is not read) within [`Relay::tunnel_mtu`].
+    pub fn admits(&self, ingress: usize, egress: usize) -> bool {
+        let n = self.inner.len();
+        n <= Self::tunnel_mtu(ingress, egress)
+            && crate::Frame::decode(self.inner, n.saturating_sub(crate::frame_len(0)))
+                .is_ok_and(|(_, len)| len == n)
+    }
+
     pub fn parse(b: &'a [u8]) -> Result<Self, Status> {
         Self::of(&rd(b, &Cmd::Relay.spec().req)?)
     }

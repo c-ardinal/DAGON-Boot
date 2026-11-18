@@ -179,6 +179,58 @@ class Stack(unittest.TestCase):
         _, _, why = self.measure(image(code))
         self.assertEqual(why, ["__aeabi_memcpy: calls itself", "__aeabi_memset: calls itself"])
 
+    def test_a_branch_back_to_the_start_of_a_function_that_takes_stack_is_recursion(self):
+        back = 0xE000 | (((TEXT - (TEXT + 4 + 4)) >> 1) & 0x7FF)  # B from TEXT + 4
+        for name, code, frame in (
+                # SUB SP first, no PUSH.
+                ("sub-sp", [0xB082, NOP, back, NOP], 8),
+                ("sub-sp-no-record", [0xB082, NOP, back, NOP], None),
+                # The PUSH after another instruction.
+                ("late-push", [0x2000, PUSH_R7_LR, back, NOP], 8),
+                ("late-push-no-record", [0x2000, PUSH_R7_LR, back, NOP], None)):
+            _, _, why = self.measure(image([(codec("a"), code, frame)]))
+            self.assertIn(f"{codec('a')}: calls itself", why, name)
+            self.assertTrue(any(w.startswith("recursion at") for w in why), (name, why))
+
+    def test_a_jump_table_inside_its_function_is_branches_and_one_outside_fails(self):
+        tbb, tbh = (0xE8DF, 0xF000), (0xE8DF, 0xF010)
+        tail = (NOP, NOP, BX_LR)
+        for name, inst, table, kinds in (
+                ("tbb inside", tbb, struct.pack("<2B", 1, 2), {"branch"}),
+                ("tbb outside", tbb, struct.pack("<2B", 1, 0xFF), {"unknown"}),
+                ("tbh inside", tbh, struct.pack("<2H", 3, 4), {"branch"}),
+                ("tbh outside", tbh, struct.pack("<2H", 3, 0x4000), {"unknown"}),
+                # TBB from a register: no table after it.
+                ("tbb no table", (0xE8D1, 0xF000), b"", {"unknown"})):
+            code = struct.pack("<2H", *inst) + table + struct.pack("<3H", *tail)
+            data = [(TEXT + 4, TEXT + 4 + len(table))] if table else []
+            f = codec_budget.Function("x", TEXT, code, data)
+            got = {k for k, _, _ in codec_budget.transfers(f)}
+            self.assertEqual(got, kinds, name)
+            if kinds == {"branch"}:
+                self.assertTrue(all(f.start <= t < f.end
+                                    for _, t, _ in codec_budget.transfers(f)), name)
+
+    def test_the_other_control_instructions_are_read_or_fail(self):
+        cases = {
+            "cbz forward": ([0xB108, NOP, NOP, BX_LR], {("branch", TEXT + 6)}),
+            "svc": ([0xDF01, BX_LR], {("unknown", None)}),
+            "udf traps": ([0xDEFE], set()),
+            "bkpt traps": ([0xBE00], set()),
+            "ldmdb sp with pc": ([0xE91D, 0x8000], {("indirect", None)}),
+            "ldm r0 with pc": ([0xE890, 0x8000], {("indirect", None)}),
+            "pop.w pc returns": ([0xE8BD, 0x8080], set()),
+            "subs pc, lr": ([0xF3DE, 0x8F04], {("indirect", None)}),
+            "ldr pc, [r0]": ([0xF8D0, 0xF000], {("indirect", None)}),
+            "pop {pc} single returns": ([0xF85D, 0xFB04], set()),
+            "mov pc, lr": ([0x46F7], {("indirect", None)}),
+            "it eq, bxeq lr": ([0xBF08, BX_LR, BX_LR], set()),
+        }
+        for name, (hw, want) in cases.items():
+            f = codec_budget.Function("x", TEXT, struct.pack(f"<{len(hw)}H", *hw), [])
+            got = {(k, t) for k, t, _ in codec_budget.transfers(f)}
+            self.assertEqual(got, want, name)
+
     def test_a_loop_to_the_start_of_a_leaf_without_a_prologue_is_a_loop(self):
         # subs r0, #1; bne <start>; bx lr
         leaf = [0x3801, 0xD000 | ((-3) & 0xFF), BX_LR]

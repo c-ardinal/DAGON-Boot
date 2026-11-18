@@ -25,14 +25,15 @@ the size checks measure are not these. From that ELF:
 - stack: the deepest path of the call graph from any codec function (but
   its `core::fmt` impls, `is_root`), each function's frame added once per
   call on the path. The graph is read from the code: every Thumb call and
-  branch out of a function. A call or branch whose target is no function
-  start, an indirect call or branch (but a handler row's, `dispatch`), a
+  branch out of a function (`transfers`). A call or branch whose target is
+  no function start, an indirect call or branch (but a handler row's,
+  `dispatch`), a jump table with a case outside its function, an SVC, a
   function with no frame record whose code does not give its frame, and
   recursion each fail the image: the figure is then not a bound. What a
   handler row's action takes is the node's, not the codec's.
 
 Any function of the image that calls itself, or branches back to its own
-prologue, fails it too, codec or not.
+start while it takes stack, fails it too, codec or not.
 
 A symbol is the codec's when the outermost crate of its Rust (v0) symbol
 name is `dagon_proto`: its own functions, their generic copies and the
@@ -196,12 +197,16 @@ def wide(h: int) -> bool:
 
 
 def transfers(f: Function) -> list[tuple[str, int | None, int]]:
-    """Each transfer of control in `f`'s code that may leave it: (kind,
-    target, at). Kinds: `call` (BL), `branch` (B, B<c>, B.W, B<c>.W: out of
-    the function a tail call), `indirect` (BLX or BX to a register other
-    than LR, MOV or ADD to PC, LDR to PC) and `unknown` (BLX to an address:
-    ARM state, which no M profile core runs). Returns (POP or LDM with PC,
-    BX LR) are not transfers."""
+    """Each transfer of control in `f`'s code: (kind, target, at). Kinds:
+    `call` (BL), `branch` (B, B<c>, B.W, B<c>.W, CBZ, CBNZ and the cases of
+    a jump table, `table_jump`; out of the function a tail call),
+    `indirect` (BLX or BX to a register but LR, MOV or ADD to PC but a
+    jump table's, LDR to PC but POP, LDM with PC but POP, SUBS PC, LR) and
+    `unknown` (BLX to an address, ARM state; SVC; a jump table whose table
+    or a case of which this does not find inside the function). Returns
+    (POP with PC, BX LR) and traps (UDF, BKPT: the fault handler, no path
+    back) are no transfers; inside an IT block each instruction is read as
+    it would run, its condition aside."""
     out = []
     hw = f.halfwords()
     i = 0
@@ -212,17 +217,25 @@ def transfers(f: Function) -> list[tuple[str, int | None, int]]:
             i += 1
             continue
         if wide(h) and i + 1 < len(hw):
-            out += wide_transfer(h, hw[i + 1], at)
+            h2 = hw[i + 1]
+            if h & 0xFFF0 == 0xE8D0 and h2 & 0xFFE0 == 0xF000:  # TBB, TBH
+                out += table_jump(f, at, 4, 2 if h2 & 0x10 else 1, h & 0xF == 15)
+            else:
+                out += wide_transfer(h, h2, at)
             i += 2
             continue
         i += 1
         pc = at + 4
         if h & 0xF000 == 0xD000 and (h >> 8) & 0xF < 0xE:
             out.append(("branch", pc + sign(h & 0xFF, 8) * 2, at))
+        elif h & 0xFF00 == 0xDF00:  # SVC
+            out.append(("unknown", None, at))
         elif h & 0xF800 == 0xE000:
             out.append(("branch", pc + sign(h & 0x7FF, 11) * 2, at))
+        elif h & 0xF500 == 0xB100:  # CBZ, CBNZ
+            out.append(("branch", pc + ((((h >> 9) & 1) << 6) | (((h >> 3) & 0x1F) << 1)), at))
         elif h & 0xFF87 == 0x4487 and f.in_data(at + 2):
-            out += table_jump(f, at)
+            out += table_jump(f, at, 2, 1, True)
         elif h & 0xFF87 == 0x4780 or h & 0xFF87 in (0x4687, 0x4487):
             out.append(("indirect", None, at))
         elif h & 0xFF87 == 0x4700 and (h >> 3) & 0xF != 14:
@@ -230,15 +243,22 @@ def transfers(f: Function) -> list[tuple[str, int | None, int]]:
     return out
 
 
-def table_jump(f: Function, at: int) -> list[tuple[str, int | None, int]]:
-    """The branches of an ARMv6-M jump table: LLVM's ADD PC, Rm with the
-    byte table right after it, each entry half the distance from PC (at +
-    4) to its case. Every case is inside the function (else the jump is
-    `unknown`)."""
-    end = next(b for a, b in f.data if a <= at + 2 < b)
-    cases = f.code[at + 2 - f.start:end - f.start]
-    targets = {at + 4 + 2 * b for b in cases}
-    if all(f.start <= t < f.end for t in targets):
+def table_jump(f: Function, at: int, size: int, width: int,
+               inline: bool) -> list[tuple[str, int | None, int]]:
+    """The cases of a jump table at `at` (an instruction of `size` bytes)
+    whose table of `width`-byte entries follows it as data (`inline`: it
+    reads the table from PC), each entry half the distance from PC (at + 4)
+    to its case: TBB, TBH, and ARMv6-M's ADD PC, Rm with a byte table.
+    Every case is inside the function, else the jump is `unknown`, as is a
+    table this does not find right after the instruction."""
+    table = at + size
+    region = next(((a, b) for a, b in f.data if a <= table < b), None)
+    if not inline or region is None or region[0] != table:
+        return [("unknown", None, at)]
+    raw = f.code[table - f.start:region[1] - f.start]
+    cases = raw if width == 1 else struct.unpack_from(f"<{len(raw) // 2}H", raw)
+    targets = {at + 4 + 2 * c for c in cases}
+    if targets and all(f.start <= t < f.end for t in targets):
         return [("branch", t, at) for t in sorted(targets)]
     return [("unknown", None, at)]
 
@@ -249,6 +269,8 @@ def wide_transfer(h: int, h2: int, at: int) -> list[tuple[str, int | None, int]]
     if h & 0xF800 == 0xF000 and h2 & 0x8000:
         s = (h >> 10) & 1
         if h2 & 0x5000 == 0:  # B<c>.W (T3); condition 111x: a control instruction
+            if h == 0xF3DE and h2 & 0xFF00 == 0x8F00:  # SUBS PC, LR, #imm
+                return [("indirect", None, at)]
             if (h >> 6) & 0xE == 0xE:
                 return []
             imm = ((s << 20) | (((h2 >> 11) & 1) << 19) | (((h2 >> 13) & 1) << 18)
@@ -262,8 +284,8 @@ def wide_transfer(h: int, h2: int, at: int) -> list[tuple[str, int | None, int]]
     # LDR to PC, but POP {PC} (LDR PC, [SP], #4).
     loads_pc = (h2 >> 12 == 0xF and h & 0xFFF0 in (0xF850, 0xF8D0)
                 and not (h == 0xF85D and h2 & 0x0FFF == 0x0B04))
-    # LDM with PC from another base than SP (from SP it is a return).
-    loads_pc |= h & 0xFFD0 in (0xE890, 0xE910) and bool(h2 & 0x8000) and h & 0xF != 13
+    # LDM or LDMDB with PC, but POP.W (LDMIA SP!), a return.
+    loads_pc |= h & 0xFFD0 in (0xE890, 0xE910) and bool(h2 & 0x8000) and h != 0xE8BD
     return [("indirect", None, at)] if loads_pc else []
 
 
@@ -299,20 +321,25 @@ def prologue_frame(f: Function) -> int | None:
     return total
 
 
-def reenters(f: Function, kind: str) -> bool:
-    """Whether a `kind` transfer to `f`'s own start calls `f` again: a call
-    always; a branch when `f` starts with a PUSH (it runs its prologue
-    again: a tail call to itself, not a loop)."""
-    h = f.halfwords()[0] if f.code else 0
-    return kind == "call" or h & 0xFE00 == 0xB400 or h == 0xE92D
+def reenters(f: Function, kind: str, recorded: dict[int, int]) -> bool:
+    """Whether a `kind` transfer to `f`'s own start enters `f` again: a
+    call always; a branch unless `f` takes no stack at all (its frame
+    record, or its code, gives 0): a function that takes any may take it
+    again on that path, so its branch back to its start is taken for a
+    tail call to itself, not a loop."""
+    if kind == "call":
+        return True
+    frame = recorded[f.start] if f.start in recorded else prologue_frame(f)
+    return frame != 0
 
 
-def self_calls(funcs: dict[int, Function]) -> list[Function]:
+def self_calls(funcs: dict[int, Function], recorded: dict[int, int]) -> list[Function]:
     """Every function of the image, codec or not, that calls itself or
-    branches back to its own prologue. None may: an `__aeabi_mem*` helper
-    that calls `memcpy` by name is lowered to a call to itself."""
+    branches back to its own start (`reenters`). None may: an
+    `__aeabi_mem*` helper that calls `memcpy` by name is lowered to a call
+    to itself."""
     return [f for f in funcs.values()
-            if any(t == f.start and reenters(f, k) for k, t, _ in transfers(f))]
+            if any(t == f.start and reenters(f, k, recorded) for k, t, _ in transfers(f))]
 
 
 def is_codec(name: str) -> bool:
@@ -361,7 +388,8 @@ def deepest(funcs: dict[int, Function], recorded: dict[int, int]) -> tuple[int, 
                 out |= rows or set()
             elif kind == "unknown":
                 why.append(f"{f.name}: a transfer at {at:#x} to no known target")
-            elif not f.start <= target < f.end or (target == f.start and reenters(f, kind)):
+            elif (not f.start <= target < f.end
+                  or (target == f.start and reenters(f, kind, recorded))):
                 if target in funcs:
                     out.add(target)
                 else:
@@ -406,9 +434,9 @@ def measure(elf: bytes) -> tuple[dict[str, int], str, list[str]]:
             ram += size
         else:
             flash += size
-    funcs = functions(elf)
-    depth, root, why = deepest(funcs, frames(elf))
-    why += [f"{f.name}: calls itself" for f in self_calls(funcs)]
+    funcs, recorded = functions(elf), frames(elf)
+    depth, root, why = deepest(funcs, recorded)
+    why += [f"{f.name}: calls itself" for f in self_calls(funcs, recorded)]
     return {"flash_bytes": flash, "stack_bytes": depth, "ram_bytes": ram}, root, why
 
 

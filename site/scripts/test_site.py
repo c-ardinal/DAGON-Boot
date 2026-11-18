@@ -80,8 +80,11 @@ class Generated(unittest.TestCase):
 
     def test_every_command_has_its_section(self):
         text = gen.cli_markdown()
-        top = re.search(r"Commands:\n(.*?)\n\n", text, re.S).group(1)
-        for name in re.findall(r"^  (\w[\w-]*) ", top, re.M):
+        # The top help lists the commands under task headings, before "Options:".
+        top = re.search(r"^## dagon\n\n```text\n(.*?)\nOptions:\n", text, re.S | re.M).group(1)
+        names = re.findall(r"^  (\w[\w-]*) ", top, re.M)
+        self.assertGreater(len(names), 10)
+        for name in names:
             if name != "help":
                 self.assertIn(f"## dagon {name}\n", text, name)
 

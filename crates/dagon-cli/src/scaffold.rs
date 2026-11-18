@@ -1139,6 +1139,38 @@ const CLAUDE_FILES: [(&str, &str); 4] = [
     ),
 ];
 
+/// The documentation's words page: the one list of DAGON's words, which
+/// the project's CLAUDE.md carries in place of `WORDS_AT`.
+const WORDS_PAGE: &str = include_str!("../../../site/src/content/docs/explanation/words.md");
+const WORDS_AT: &str = "<!-- words -->";
+
+/// The bullet items of the words page (continuation lines included).
+fn word_list() -> String {
+    let mut fences = 0;
+    let mut in_item = false;
+    let mut out = Vec::new();
+    for line in WORDS_PAGE.lines() {
+        if fences < 2 {
+            fences += usize::from(line.trim_end() == "---");
+            continue;
+        }
+        in_item = line.starts_with("- ") || (in_item && line.starts_with("  "));
+        if in_item {
+            out.push(line);
+        }
+    }
+    out.join("\n")
+}
+
+/// A file's text as `dagon new` writes it: CLAUDE.md with the word list.
+fn project_text(file: &str, text: &str) -> String {
+    if file == "CLAUDE.md" {
+        text.replace(WORDS_AT, &word_list())
+    } else {
+        text.to_string()
+    }
+}
+
 /// `path` as its folder and its last name, for the genfs calls.
 fn split(path: &Path) -> Result<(&Path, String), String> {
     let name = path
@@ -1174,7 +1206,9 @@ pub fn new_project(
     let written = files
         .into_iter()
         .chain(CLAUDE_FILES)
-        .try_for_each(|(f, text)| genfs::write(dir, &genfs::Rel::new(f)?, text.as_bytes()));
+        .try_for_each(|(f, text)| {
+            genfs::write(dir, &genfs::Rel::new(f)?, project_text(f, text).as_bytes())
+        });
     let made = written.and_then(|_| init_project(dir, name, "topology.yaml", keys, src));
     let mut made = match made {
         Ok(m) => m,

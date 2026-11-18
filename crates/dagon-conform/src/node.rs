@@ -24,14 +24,14 @@ use dagon_ed25519::Ed25519Compact;
 use dagon_format::header::{self, HEADER_SIZE};
 use dagon_format::{sha256, verify_signed, Sha256};
 use dagon_port::{Flash, FlashRegion};
-use dagon_proto::handler::{self, Handler};
+use dagon_proto::handler::{self, Ceiling, Handler};
 use dagon_proto::payload::{verdict, CmdSet, ConfRunReq, ConfRunResp, CONF_DETAIL_MAX};
 use dagon_proto::{flags, frame_len, Cmd, Frame, Status, HEADER_LEN};
 
 /// The command a conformance build answers in front of the agent. Its
-/// handler holds the board's flash and watchdog hook, so the row hands
-/// back the request it read and [`handle_frame`] runs the test.
-const TABLE: [Handler<(), ConfRunReq>; 1] = [Handler::new(Cmd::ConfRun, |_, p| ConfRunReq::of(p))];
+/// handler holds the board's flash and watchdog hook, so the row has no
+/// action: [`handle_frame`] takes its typed request and runs the test.
+const TABLE: [Handler<(), ()>; 1] = [Handler::deferred(Cmd::ConfRun)];
 
 /// What [`handle_frame`] answers: the node's HELLO names it with its
 /// agent's commands (`dagon_agent::Agent::also_serves`).
@@ -100,25 +100,33 @@ pub fn run<F: Flash>(
 
 /// Answers a CONF_RUN request frame; writes the response frame to `out`
 /// (at least [`RESPONSE_MAX`] bytes) and returns its length. `None` when the
-/// frame is not a CONF_RUN request: pass it on to the agent. `feed` feeds
-/// the watchdog during the test.
+/// frame is not a CONF_RUN request: pass it on to the agent. `ceiling` is
+/// the most payload bytes the answer may have: the agent's
+/// (`dagon_agent::Agent::ceiling`), or a link's max payload for a
+/// requester that said nothing; a request whose answer would not fit it is
+/// refused with E_ARG and no test runs. `feed` feeds the watchdog during
+/// the test.
 pub fn handle_frame<F: Flash>(
     request: &[u8],
-    max_payload: usize,
+    ceiling: impl Into<Ceiling>,
     flash: &mut F,
     setup: &NodeSetup<'_>,
     out: &mut [u8],
     feed: &mut dyn FnMut(),
 ) -> Option<usize> {
-    let (frame, _) = Frame::decode(request, max_payload).ok()?;
+    let ceiling = ceiling.into();
+    let (frame, _) = Frame::decode(request, usize::from(ceiling.link)).ok()?;
     let row = handler::find(&TABLE, frame.cmd)?;
     if frame.flags & (flags::RESP | flags::EVENT) != 0 {
         return None;
     }
     let body = &mut out[HEADER_LEN + 1..];
-    let (status, len) = match row.read(frame.payload) {
+    let asked = row
+        .request(frame.payload, ceiling)
+        .and_then(|r| r.conf_run());
+    let (status, len) = match asked {
         Err(s) => (s, 0),
-        Ok((req, _)) => match run(flash, setup, req, feed) {
+        Ok(req) => match run(flash, setup, req, feed) {
             None => (Status::Unsupported, 0),
             Some(o) => {
                 let resp = ConfRunResp {

@@ -826,6 +826,22 @@ fn conf_run_is_read_before_a_test_runs() {
         assert_eq!((f.calls, feeds), (0, 0), "{plant:?}");
     });
     assert_eq!(commands, 1);
+    // A requester that takes the smallest payload a link offers cannot
+    // take CONF_RUN's answer: refused, and no test runs.
+    let floor = dagon_proto::handler::Ceiling {
+        link: 512,
+        peer: Some(dagon_proto::max_payload::SMALLEST as u16),
+    };
+    let mut req = [0u8; 32];
+    let mut out = [0u8; RESPONSE_MAX];
+    req[8] = 2;
+    let n = dagon_proto::finish(&mut req, 0, 1, Cmd::ConfRun as u8, 1).unwrap();
+    let len = node::handle_frame(&req[..n], floor, &mut f, &setup, &mut out, &mut || {
+        feeds += 1
+    });
+    let (fr, _) = Frame::decode(&out[..len.unwrap()], 256).unwrap();
+    assert_eq!(split_status(fr.payload).unwrap().0, Status::Arg);
+    assert_eq!((f.calls, feeds), (0, 0));
     // A well-formed request does run its test.
     assert_eq!(
         ask(Cmd::ConfRun as u8, &[2], &mut f, &mut feeds),

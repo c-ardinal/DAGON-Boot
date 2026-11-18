@@ -9,8 +9,12 @@
 //! `Status::Unsupported` for what the implementation cannot do,
 //! `Status::Flash` for a write to its store that did not complete.
 
-use dagon_proto::diag::{ClearScope, DiagInfo, Entry, Key, Peer, Seed};
-use dagon_proto::Status;
+use dagon_proto::diag::{ClearScope, DiagInfo, Entry, Key, Peer, Seed, RESP_MAX};
+use dagon_proto::{frame_len, Status};
+
+/// Bytes of the longest LINK_DIAG answer frame: the room a store gives
+/// ([`DiagStore::Room`]).
+pub const ANSWER_FRAME: usize = frame_len(RESP_MAX);
 
 /// One exchange the node started with a peer, as the link worker saw it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -27,6 +31,13 @@ pub trait DiagStore {
     /// Whether the node keeps link diagnostics: `false` only for
     /// [`NoDiag`].
     const SERVED: bool = true;
+
+    /// Where the agent writes a LINK_DIAG answer frame: `[u8;
+    /// ANSWER_FRAME]` for a store, nothing for [`NoDiag`], so a node that
+    /// keeps no records holds no room for them. Only one answer is in it
+    /// at a time; a resend is read again.
+    type Room: AsRef<[u8]> + AsMut<[u8]>;
+    const ROOM: Self::Room;
 
     /// What every LINK_DIAG response says of the store.
     fn info(&mut self) -> DiagInfo;
@@ -69,6 +80,8 @@ pub struct NoDiag;
 
 impl DiagStore for NoDiag {
     const SERVED: bool = false;
+    type Room = [u8; 0];
+    const ROOM: Self::Room = [];
 
     fn info(&mut self) -> DiagInfo {
         DiagInfo::NONE

@@ -1,4 +1,4 @@
-//! `release build`: release checks, signed manifest and `.dgb` bundle with
+//! `dagon release`: release checks, signed manifest and `.dgb` bundle with
 //! the topology canonical binary as the `dest = TOPOLOGY` item.
 
 use std::fmt;

@@ -447,7 +447,7 @@ impl McuDef {
     }
 }
 
-/// The pins a board wires new links to when it is the 親機 (numbered
+/// The pins a board wires new links to when it is the uplink node (numbered
 /// GPIOs, as the topology's `buses[]` and `links[].pins` take them).
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -531,7 +531,7 @@ pub enum AddressingSpec {
     Fixed(u8),
 }
 
-/// Link kinds by direction: `up` towards the PC or the 親機, `down` to 子機.
+/// Link kinds by direction: `up` towards the PC or the uplink node, `down` to downstream nodes.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Links {
@@ -971,7 +971,7 @@ pub struct BoardDef {
     /// `cooperative`), `rom_entry` (`force-download-boot`, `m5pm1`, `stm32-i2c-rom`). Left out for
     /// the coordinator.
     pub default_link: Option<DefaultLink>,
-    /// Pins the page wires new links to when this board is the 親機: `i2c = { controller, sda, scl }`
+    /// Pins the page wires new links to when this board is the uplink node: `i2c = { controller, sda, scl }`
     /// (a new I2C bus; `controller` is one of the board's `i2c`) and `pio_uart = { tx, rx }` (a new
     /// PIO UART link), numbered GPIOs below the MCU's `gpio_count`. Only on boards whose MCU has
     /// `[coordinator]`.

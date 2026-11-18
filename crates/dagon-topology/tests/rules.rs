@@ -128,7 +128,7 @@ fn v23_several_coordinators_over_can() {
     // The shape itself parses: no V-01, and the coordinator count is not V-03.
     let rules = error_rules(&yaml);
     assert!(rules.is_empty(), "{rules:?}");
-    // The second 親機 is skipped: the compiled topology is the sample's.
+    // The second uplink node is skipped: the compiled topology is the sample's.
     let (_, skipped) = dagon_topology::updatable(&dagon_topology::parse_str(&yaml).unwrap());
     assert_eq!(
         skipped,
@@ -467,7 +467,7 @@ fn v24_names_a_hop_its_firmware_cannot_do_yet_without_blocking() {
         "{w:?}"
     );
     assert!(check_str(&yaml).is_pushable(), "a warning only");
-    // A link the 親機 or the 子機 cannot do: V-24 names both ends, V-23 says
+    // A link the uplink node or the downstream node cannot do: V-24 names both ends, V-23 says
     // it cannot be updated.
     // The link's kind (the first `kind: i2c` is the bus's).
     let ble = mutate("  - kind: i2c\n    bus: ", "  - kind: ble\n    bus: ");
@@ -515,7 +515,7 @@ fn v23_v24_messages_and_skip_reasons_state_facts_only() {
         .map(|i| i.message)
         .collect();
     assert!(
-        said.iter().any(|m| m.contains("second 親機")),
+        said.iter().any(|m| m.contains("second uplink node")),
         "every V-23 shape is reached: {said:?}"
     );
     use dagon_topology::Skip;

@@ -1,7 +1,7 @@
 //! Validation rules for `dagon topo check`.
 //!
 //! Errors V-01..V-21 (no V-19), V-25, V-26 and V-27; warnings V-22 and V-24
-//! (V-24 is an error for an uplink on a 子機); information V-23 (a valid part
+//! (V-24 is an error for an uplink on a downstream node); information V-23 (a valid part
 //! that updating skips). Errors block compiling the topology; the others
 //! do not.
 //!
@@ -152,7 +152,7 @@ pub fn uart0_choices(reg: &Registry, mcu: &str, board: Option<&str>) -> (Vec<u8>
 
 /// The `[[link_port]]` a new end of a `kind` link on a node of `mcu` (and
 /// `board`, else the MCU's default board) starts at, from its definitions: the
-/// port of the board's own DAGON bus of that kind, else of the 親機 I2C pins
+/// port of the board's own DAGON bus of that kind, else of the uplink node I2C pins
 /// the board names, else the port named like the link's UART `iface` (`hw-`
 /// and the port, or the port itself), else the MCU's first port of the kind.
 /// The Console offers this one; the check (V-27) judges whatever is written.
@@ -252,8 +252,8 @@ impl<'a> Ctx<'a> {
     }
 
     /// Hops whose kind the MCU firmware at either end does not run
-    /// (使えないつながり): accepted and drawn, reported by name;
-    /// `dagon gen` refuses them. An uplink on a 子機 is an error.
+    /// (未対応のリンク): accepted and drawn, reported by name;
+    /// `dagon gen` refuses them. An uplink on a downstream node is an error.
     fn v24(&mut self) {
         for (i, n) in self.t.nodes.iter().enumerate() {
             let Some(up) = n.uplink else { continue };
@@ -261,7 +261,10 @@ impl<'a> Ctx<'a> {
                 self.err(
                     "V-24",
                     format!("nodes[{i}].uplink"),
-                    format!("'{}' is a 子機; only a 親機 has an uplink", n.id),
+                    format!(
+                        "'{}' is a downstream node; only an uplink node has an uplink",
+                        n.id
+                    ),
                 );
                 continue;
             }
@@ -351,10 +354,10 @@ impl<'a> Ctx<'a> {
         self.t.links.iter().enumerate()
     }
 
-    /// Links with the first 親機 at one end, over I2C or UART, with the
-    /// position and the end at the 親機: the ones its own pins, controllers
+    /// Links with the first uplink node at one end, over I2C or UART, with the
+    /// position and the end at the uplink node: the ones its own pins, controllers
     /// and PIO serve, whichever end it is listed as. Other links (between
-    /// 親機, deeper, CAN, Ethernet) are reported by V-23 instead.
+    /// uplink node, deeper, CAN, Ethernet) are reported by V-23 instead.
     fn hub_links(&self) -> impl Iterator<Item = (usize, &'a Link, usize, &'a End)> + 'a {
         let hub = self.coordinator().map(|c| c.id.as_str());
         self.t.links.iter().enumerate().filter_map(move |(i, l)| {
@@ -363,7 +366,7 @@ impl<'a> Ctx<'a> {
         })
     }
 
-    /// Whether end `k` of link `i` is the first 親機's end of one of its [`Self::hub_links`].
+    /// Whether end `k` of link `i` is the first uplink node's end of one of its [`Self::hub_links`].
     fn is_hub_end(&self, i: usize, k: usize) -> bool {
         self.hub_links().any(|(j, _, e, _)| (j, e) == (i, k))
     }
@@ -547,8 +550,8 @@ impl<'a> Ctx<'a> {
 
     /// Valid shapes that updating does not reach, told as information
     /// (never errors): more than one coordinator and their trees, nodes
-    /// below a 子機 and links of a kind the compiled topology cannot carry.
-    /// Updating covers one 親機 with its direct 子機
+    /// below a downstream node and links of a kind the compiled topology cannot carry.
+    /// Updating covers one uplink node with its direct downstream nodes
     /// and skips the rest (see [`crate::updatable`]).
     fn v23(&mut self) {
         let hubs: Vec<&str> = self
@@ -593,16 +596,16 @@ impl<'a> Ctx<'a> {
                 // Unknown nodes are V-04's.
                 _ if role(a).is_none() || role(b).is_none() => None,
                 (Some(f), [_, _]) => Some(format!(
-                    "'{}' is a 親機 linked to the 親機 '{f}': updating reaches the first 親機's tree only and skips it",
+                    "'{}' is an uplink node linked to the uplink node '{f}': updating reaches the first uplink node's tree only and skips it",
                     if a == f { b } else { a }
                 )),
                 (Some(_), _) => None,
                 (None, []) => Some(format!(
-                    "the link between the 子機 {} is below a 子機: updating reaches the 親機's direct 子機 only and skips it",
+                    "the link between the downstream nodes {} is below a downstream node: updating reaches the uplink node's direct downstream nodes only and skips it",
                     pair(a, b)
                 )),
                 (None, [h, ..]) => Some(format!(
-                    "the link between {} is under the second 親機 '{h}': updating reaches the first 親機's tree only and skips it",
+                    "the link between {} is under the second uplink node '{h}': updating reaches the first uplink node's tree only and skips it",
                     pair(a, b)
                 )),
             };
@@ -735,7 +738,7 @@ impl<'a> Ctx<'a> {
     /// Every pin on every link end is one its own node's definition defines:
     /// its `pins`, `nrst` and `boot` on its board's header (or its MCU's GPIO
     /// range when it names only an MCU), its `node_pins` as one of its board's
-    /// I2C pairs. The first 親機's ends of its links are covered by `v07_v08`.
+    /// I2C pairs. The first uplink node's ends of its links are covered by `v07_v08`.
     fn v07_every_end(&mut self) {
         for (i, l, k, e) in self.ends() {
             let ep = end_path(i, k);

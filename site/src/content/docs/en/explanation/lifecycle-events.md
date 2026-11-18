@@ -1375,8 +1375,11 @@ The one authentication rule, applied by every verifier in the chain
   in the field but is rebuilt for every new node with the toolchain of
   that build, so an image without spare room becomes a first write that
   cannot be built. Both stage0s use the compact SHA-256 rounds, since
-  the unrolled ones do not fit the RP2040's region. A stage0 that needs more
-  takes a larger region before the first public release.
+  the unrolled ones do not fit the RP2040's region. After the first public
+  release the stage0 region is fixed: a larger stage0 is a new format number,
+  and existing nodes move to it by a first write through the ROM loader (a
+  direct write), since the normal update path never rewrites stage0 (power-cut
+  safety).
 - **Stage0's clock and its verify time.** Stage0 runs its checks on the
   clock the definitions choose for the node: the MCU definition's
   `[[stage0.clock]]` setup that matches the board's `[clock] source`

@@ -480,6 +480,9 @@ DAGONの部品のあいだの取り決めとその番号、部品ごとのバー
 どれも`compat.toml`にあるとおりです。変えるときの決まりは
 [バージョンとリリース](/explanation/versioning/)にあります。
 
+部品のバージョンは、その部品の最終リリースの値です（初回リリース前は0.1.0）。形式の番号は本ツリーの値です。
+タグ`<部品>-v<バージョン>`以後の変更は、次回のリリースまで未リリースです。
+
 ## 取り決め
 
 | 取り決め | 形式の番号 | 番号の置き場所 |
@@ -488,7 +491,7 @@ DAGONの部品のあいだの取り決めとその番号、部品ごとのバー
 
 ## 部品
 
-| 部品 | バージョン | crate | 形式 |
+| 部品 | バージョン（最終リリース） | crate | 形式（本ツリー） |
 |---|---|---|---|
 {table_c}
 """
@@ -499,6 +502,10 @@ every component with its version and the format numbers it reads and
 writes, as `compat.toml` holds them. The rules for changing them are in
 [Versions and releases](/en/explanation/versioning/).
 
+A component's version is its last release (0.1.0 before its first); the
+format numbers are this tree's. Changes since the tag
+`<component>-v<version>` are unreleased until its next version.
+
 ## Contracts
 
 | Contract | Format | Where the number is written |
@@ -507,7 +514,7 @@ writes, as `compat.toml` holds them. The rules for changing them are in
 
 ## Components
 
-| Component | Version | Packages | Formats |
+| Component | Version (last release) | Packages | Formats (this tree) |
 |---|---|---|---|
 {table_c}
 """
@@ -779,6 +786,7 @@ REGIONS = [
     ("reference/topology.md", "dagon-topology's End", lambda lang: field_table(rust_struct(SCHEMA, "End"), lang) + "\n"),
     ("how-to/swap-link.md", "dagon_format::with_link_kinds!", kinds_sentence),
     ("explanation/limitations.md", "the MCU definitions' [links]", firmware_kinds),
+    ("explanation/limitations.md", "site/scripts/architecture.py", architecture.gap_list),
     ("explanation/index.md", "site/scripts/architecture.py", lambda lang: f"<div>{architecture.node_svg(lang)}</div>\n\n{architecture.component_table(lang)}"),
 ]
 

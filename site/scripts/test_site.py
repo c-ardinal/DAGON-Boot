@@ -339,6 +339,23 @@ class Architecture(unittest.TestCase):
         named += [n for _, cells in a.DEVICE_COLS for c in cells.values() for n in c] + [n for c in a.MCU.values() for n in c]
         self.assertEqual(sorted(named), sorted(a.COMPONENTS))
 
+    def test_each_component_the_tree_lacks_has_one_gap_source(self):
+        a = gen.architecture
+        # The catalogs' pages are checked against dagon_events::PORTS by dagon-catalog's tests.
+        ports = set(re.findall(r"^\| `(\w+)` \|", (llms.DOCS / "en/reference/ports.md").read_text(encoding="utf-8"), re.M))
+        gaps = (llms.DOCS / "en/explanation/limitations.md").read_text(encoding="utf-8")
+        listed = set(re.findall(r"^- `(\w+)`:", gaps.split(self.CATALOG_GAPS, 1)[1].split("<!--", 1)[0], re.M))
+        for name, gap in a.NOT_IN_TREE.items():
+            with self.subTest(name=name):
+                self.assertIn(name, a.COMPONENTS)
+                self.assertNotIn(name, ports, "a port's gap is its PORTS record's")
+                if isinstance(gap, str):
+                    self.assertIn(gap, listed, "the record this component is part of lists its gap")
+                else:
+                    self.assertEqual(len(gap), 2)
+
+    CATALOG_GAPS = "<!-- generated from dagon_events::PORTS: DAGON_BLESS=1 cargo test -p dagon-catalog --test docs -->"
+
     def test_the_colours_are_the_consoles_tokens(self):
         tokens = (ROOT / "web/src/styles/tokens.css").read_text(encoding="utf-8")
         for colour in gen.architecture.COLOURS:
@@ -366,7 +383,8 @@ class JapaneseSpacing(unittest.TestCase):
 
     def test_the_japanese_sources_have_no_such_space(self):
         values = [*gen.i18n().values(), *tomllib.loads((ROOT / "site/i18n/catalog-ja.toml").read_text(encoding="utf-8")).values(),
-                  *(ja for ja, _ in architecture.COMPONENTS.values())]
+                  *(ja for ja, _ in architecture.COMPONENTS.values()),
+                  *(gap[0] for gap in architecture.NOT_IN_TREE.values() if isinstance(gap, tuple))]
         self.assertEqual([v for v in values if spaces(v)], [])
 
     def test_what_the_rule_finds_and_leaves(self):

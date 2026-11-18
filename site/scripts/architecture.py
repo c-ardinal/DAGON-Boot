@@ -1,7 +1,8 @@
 """DAGON's software architecture: the layered design, as one figure and one table of components.
 
 This is the design, kept by hand here; it is not read from the code. gen.py writes the figure
-to assets/architecture/ for the READMEs and, with the table, into the site's Explanation page.
+to assets/architecture/ for the READMEs and, with the table, into the site's Explanation page, and
+the components this tree lacks (NOT_IN_TREE) into the limitations page.
 """
 from xml.sax.saxutils import escape
 
@@ -183,6 +184,49 @@ COMPONENTS = {
     "ROM Loader Client": ("別のマイコンのROMローダを動かす", "Drives another MCU's ROM loader"),
     "Trusted Extension": ("特権で動く拡張", "An extension that runs privileged"),
 }
+
+ABSENT = ("コードに存在しません。", "Not in the code.")
+# The components above that this tree lacks, in whole or in part: the gap each (Japanese, English), which the
+# limitations page lists. A port's gap, and the sandbox's, is in its dagon_events::PORTS record; a component that
+# is part of such a record names it here instead, and a port is not listed here at all.
+NOT_IN_TREE = {
+    "Host Extension Chain": ABSENT,
+    "Action Definitions": ABSENT,
+    "Host Machines": ABSENT,
+    "AI Agent Link": ("`dagon serve`にボード移植の作業は存在しません。`POST /v1/ai/port`の応答は501です。",
+                      "`dagon serve` has no job that ports DAGON to a board: `POST /v1/ai/port` answers 501."),
+    "Boot Action Interpreter": ABSENT,
+    "Coordinator": ("親機は保存済みリリースを実行しません。書き込みはPCが親機を経由して進行します。",
+                    "The hub runs no stored release: the PC drives a write through the hub."),
+    "Release Store": ABSENT,
+    "Node Recovery": ("回数上限付きの再試行は存在しません。", "There is no bounded retry."),
+    "Bus Guardian": ABSENT,
+    "Entry Gate": "Sandbox",
+    "Service ABI": "Sandbox",
+    "Operation Cancellation": "Sandbox",
+    "Fault Unwind": "Sandbox",
+    "Lockup Fuse": "Sandbox",
+    "Reset Cleanup": "Sandbox",
+    "Boot Record Writer": "BootRecord",
+    "Delivery Plan": ("試行の時間枠と昇格の判定はコードに存在しません。",
+                      "The trial window and the promotion judgement are not in the code."),
+    "Recovery Policy": ("復旧段階の自動選択は存在しません。", "No recovery tier is chosen automatically."),
+    "SandboxArch": "Sandbox",
+    "Retained Codecs": ("ファームウェアに保持形式のコーデックは存在しません。ロックアップヒューズの形式の存在箇所は実行可能モデルのみです。"
+                        "構成本体の形式は`dagon-format`の形式（先頭32バイト、ノード32バイト）で、[保持と永続の形式](/explanation/retained-formats/)"
+                        "の形式ではありません。親機の保存先は単一の領域で、2バンクの置換は存在しません。",
+                        "The firmware has none of the retained codecs: the lockup fuse's format exists only in the executable model, "
+                        "and the topology body is `dagon-format`'s (a 32-byte head, 32-byte nodes), not the one in "
+                        "[Retained and persistent formats](/en/explanation/retained-formats/). The hub stores it in one region, "
+                        "with no two-bank replacement."),
+}
+
+
+def gap_list(lang):
+    """The limitations page's list of the components above this tree lacks, in the table's order."""
+    i = 0 if lang == "ja" else 1
+    return "".join(f"- {name}: {NOT_IN_TREE[name][i]}\n" for name in COMPONENTS if isinstance(NOT_IN_TREE.get(name), tuple))
+
 
 WORDS = {
     "ja": {"title": "DAGON のソフトウェアアーキテクチャ", "component": "コンポーネント", "port": "ポートと取り決め", "contract": "ノードと PC の共通の形式", "hub": "Hub の列は親機のイメージだけ", "vendor": "シリコンとベンダー"},

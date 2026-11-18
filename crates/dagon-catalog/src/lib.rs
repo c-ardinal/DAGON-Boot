@@ -26,7 +26,7 @@ pub const BOOT_OVERRAN: u8 = dagon_events::boot_extensions::ExtensionOverran::EN
 /// What host tools validate against: the catalog types, the ports and the
 /// decision points.
 pub use dagon_events::{
-    Catalog, DecisionPoint, Entry, Layer, Port, PortDefault, Service, Trust, DECISIONS,
+    Catalog, DecisionPoint, Entry, InTree, Layer, Port, PortDefault, Service, Trust, DECISIONS,
     DECISION_BOUND_MS, PORTS,
 };
 
@@ -449,6 +449,34 @@ pub fn ports_md(ports: &[Port], lang: Lang<'_>) -> String {
                 layer_names(p),
                 said(lang, why)
             );
+        }
+    }
+    s
+}
+
+/// The limitations page's list of what this tree lacks of the catalog:
+/// the ports with no trait in the code, then each record's own words.
+pub fn gaps_md(ports: &[Port], lang: Lang<'_>) -> String {
+    let lacking: Vec<_> = ports
+        .iter()
+        .filter(|p| p.trust.is_port() && matches!(p.in_tree, InTree::Lacks(_)))
+        .map(|p| format!("`{}`", p.id))
+        .collect();
+    let mut s = match lang {
+        Lang::Ja(_) => format!(
+            "- 置換用のトレイトがコードに存在しないポート: {}\n",
+            lacking.join("、")
+        ),
+        Lang::En => format!(
+            "- Ports with no trait in the code: {}\n",
+            lacking.join(", ")
+        ),
+    };
+    for p in ports {
+        if let InTree::Lacks(why) = p.in_tree {
+            if !why.is_empty() {
+                let _ = writeln!(s, "- `{}`: {}", p.id, said(lang, why));
+            }
         }
     }
     s

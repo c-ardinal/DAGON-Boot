@@ -42,7 +42,7 @@ Host and Origin checks (403 otherwise).
 | `POST` | `/v1/conform` | The 12 conformance tests on `node` through the hub, after the page hands over the port. |
 | `GET` | `/v1/conform/{node}` | The node's last conformance result (404 before the first run). |
 | `POST` | `/v1/ai/topology` | A job; the model's questions go to the page. |
-| `POST` | `/v1/ai/port` | Porting DAGON to a board: answers 501, this dagon has no porting job. |
+| `POST` | `/v1/ai/port` | Porting DAGON to a board: answers 501. |
 | `GET` | `/v1/jobs/{id}` | A job's state, stage, progress, log lines, question and result. |
 | `POST` | `/v1/jobs/{id}/answer` | `{answer}` to the job's open question (409 when it has none). |
 | `POST` | `/v1/jobs/{id}/cancel` | Stops a running job. |

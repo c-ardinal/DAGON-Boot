@@ -12,6 +12,9 @@ DAGONの部品のあいだの取り決めとその番号、部品ごとのバー
 どれも`compat.toml`にあるとおりです。変えるときの決まりは
 [バージョンとリリース](/explanation/versioning/)にあります。
 
+部品のバージョンは、その部品の最終リリースの値です（初回リリース前は0.1.0）。形式の番号は本ツリーの値です。
+タグ`<部品>-v<バージョン>`以後の変更は、次回のリリースまで未リリースです。
+
 ## 取り決め
 
 | 取り決め | 形式の番号 | 番号の置き場所 |
@@ -33,7 +36,7 @@ DAGONの部品のあいだの取り決めとその番号、部品ごとのバー
 
 ## 部品
 
-| 部品 | バージョン | crate | 形式 |
+| 部品 | バージョン（最終リリース） | crate | 形式（本ツリー） |
 |---|---|---|---|
 | `cli` | 0.1.0 | `dagon-cli` | `wire` 2, `image-header` 1, `state-log` 1, `manifest` 1, `bundle` 1, `topology-bin` 2, `topology-yaml` 2, `definitions` 3, `serve-api` 1, `layout` 1, `event` 1, `extension-manifest` 1, `boot-program` 1, `project` 1 |
 | `boot-rp2040` | 0.1.0 | `dagon-rp2040-stage0`, `dagon-rp2040-bootcore` | `image-header` 1, `state-log` 1, `event` 1 |

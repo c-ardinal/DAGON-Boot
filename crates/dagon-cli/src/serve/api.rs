@@ -216,7 +216,7 @@ pub fn handle(server: &Arc<Server>, req: &Request) -> Response {
         ("POST", ["conform"]) => start(server, req, "conform", job_conform),
         ("GET", ["conform", node]) => conform_get(server, node),
         ("POST", ["ai", "topology"]) => ai_topology_start(server, req),
-        // Porting DAGON to a board: answers 501, this dagon has no porting job.
+        // Porting DAGON to a board: answers 501.
         ("POST", ["ai", "port"]) => Ok(Response::error(501, "porting is not available here")),
         ("GET", ["jobs", id]) => job_get(server, id),
         ("POST", ["jobs", id, "answer"]) => answer(server, id, req),

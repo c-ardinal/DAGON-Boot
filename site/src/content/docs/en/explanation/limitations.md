@@ -35,7 +35,6 @@ The hub and the boot:
 Extension isolation:
 
 - The ESP32-S3's isolation level is `none`. No code programs the PMS and WCL registers.
-- There is no sandbox at run time (Service ABI, Entry Gate, Operation Cancellation, Fault Unwind, Lockup Fuse, Reset Cleanup, SandboxArch). Definitions are checked and protection maps are generated.
 - Protection maps can be generated only for the kinds `armv6m-mpu` and `armv7m-mpu`.
 
 Links:
@@ -49,23 +48,31 @@ Identity and VERSION:
 - The MCU identity is a hand-assigned 16-bit `wire_id`, carried in the image header, the identity reply, VERSION 0x06 and the topology node. It is not the 64-bit name hash of the design.
 - VERSION answers only ids 0x01, 0x06, 0x0A, 0x0B, 0x0C and 0x0D, and refuses a non-empty request.
 
-The signing key:
-
-- The signing key is read only from a file. The environment variable `DAGON_SIGNING_KEY` also holds a file's path. No port lets you choose another means (an environment variable, the OS key store, 1Password and so on).
-
 Values and IDs:
 
 - The USB VID:PID `c0de:cafe` is a test ID, fixed in the code. It is not an assigned one.
 - DAGON's own MCU definitions hold values marked `unverified`.
 - The execution model's budgets ([section 12](/en/explanation/lifecycle-events/#12-execution-model)) are not set the way 12.3 says.
 
-Components in the design figure that the code does not have:
+Parts of the design the code lacks, in whole or in part:
 
-- Ports with no replaceable trait: BuildRunner, Signer, DecisionPolicy, LogStorage, UpdateProtocol, Recovery, ImageVerifier, Digest, CryptoProvider, Diagnostics, Display, LogSink, Agent, Action
-- On the hub: Coordinator, Release Store, Bus Guardian. The PC drives a write through the hub.
-- The write plan: the Delivery Plan's trial window and promotion judgement
-- Recovery: Recovery Policy's and Node Recovery's automatic choice of tier and bounded retry
-- On the host: Host Machines, Host Extension Chain, Action Definitions
-- At boot: Boot Record Writer, Boot Action Interpreter
-- Retained Codecs: the boot record's and the lockup fuse's formats exist only in the executable model, not in the firmware.
-- The topology body: the firmware's format is `dagon-format`'s (a 32-byte head, 32-byte nodes), not the one in [Retained and persistent formats](/en/explanation/retained-formats/). The hub stores it in one region, with no two-bank replacement.
+<!-- generated from dagon_events::PORTS: DAGON_BLESS=1 cargo test -p dagon-catalog --test docs -->
+- Ports with no trait in the code: `UpdateProtocol`, `Digest`, `CryptoProvider`, `DecisionPolicy`, `LogStorage`, `Recovery`, `Diagnostics`, `Display`, `LogSink`, `Signer`, `KeyStore`, `BuildRunner`, `Agent`, `Action`
+- `KeyStore`: The CLI reads the signing key only from a file: `--key` and `DAGON_SIGNING_KEY` each name a file's path.
+- `BootRecord`: The firmware writes no boot record: its format exists only in the executable model (`dagon-retained-model`).
+- `Sandbox`: There is no sandbox at run time (Service ABI, Entry Gate, Operation Cancellation, Fault Unwind, Lockup Fuse, Reset Cleanup, SandboxArch). Definitions are checked and protection maps are generated.
+<!-- end of generated list -->
+<!-- generated from site/scripts/architecture.py: python site/scripts/gen.py -->
+- Host Extension Chain: Not in the code.
+- Action Definitions: Not in the code.
+- Host Machines: Not in the code.
+- AI Agent Link: `dagon serve` has no job that ports DAGON to a board: `POST /v1/ai/port` answers 501.
+- Boot Action Interpreter: Not in the code.
+- Coordinator: The hub runs no stored release: the PC drives a write through the hub.
+- Release Store: Not in the code.
+- Node Recovery: There is no bounded retry.
+- Bus Guardian: Not in the code.
+- Delivery Plan: The trial window and the promotion judgement are not in the code.
+- Recovery Policy: No recovery tier is chosen automatically.
+- Retained Codecs: The firmware has none of the retained codecs: the lockup fuse's format exists only in the executable model, and the topology body is `dagon-format`'s (a 32-byte head, 32-byte nodes), not the one in [Retained and persistent formats](/en/explanation/retained-formats/). The hub stores it in one region, with no two-bank replacement.
+<!-- end of generated table -->

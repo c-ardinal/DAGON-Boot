@@ -155,6 +155,9 @@ impl OwnAgent for RpAgent {
     fn also_serves(&mut self, front: dagon_proto::payload::CmdSet) {
         self.0.also_serves(front)
     }
+    fn ceiling(&self) -> dagon_proto::handler::Ceiling {
+        self.0.ceiling()
+    }
 }
 
 type RpRelay = dagon_relay::Relay<'static, RpAgent, SubLines<'static>, RpWatch, RpClock>;

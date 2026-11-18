@@ -1,4 +1,4 @@
-//! `sim run`: the four simulator scenarios, end to end through dagon-host
+//! `sim`: the four simulator scenarios, end to end through dagon-host
 //! against the simulated hub (RP2040) and F401, with the public RFC 8032
 //! test key. Needs no hardware.
 

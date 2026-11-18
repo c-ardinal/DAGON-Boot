@@ -115,12 +115,13 @@ pub enum Command {
     /// Writes out/build/<id>/app-a.elf, and app-b.elf when the node's MCU
     /// definition gives the app slot B.
     Build(BuildArgs),
-    /// Sign firmware images
-    #[command(subcommand)]
-    Image(ImageCmd),
-    /// Build a signed release package (.dgb)
-    #[command(subcommand)]
-    Release(ReleaseCmd),
+    /// Build and sign an image for a topology node
+    ///
+    /// An input that already is a signed image is verified and checked to
+    /// belong to the node, kind and slot instead.
+    Image(ImageSignArgs),
+    /// Check the images, sign the manifest and write the release package
+    Release(ReleaseBuildArgs),
     /// Make the first-install files of a node from [provision.<node>] in dagon.toml
     Provision(ProvisionArgs),
     /// First write of a node, as its MCU definition says
@@ -167,9 +168,8 @@ pub enum Command {
     /// the public key given here (--pubkey, pubkey in dagon.toml, or the
     /// signing key's public half).
     Serve(ServeArgs),
-    /// Run the simulator
-    #[command(subcommand)]
-    Sim(SimCmd),
+    /// Run the simulator scenarios (no hardware)
+    Sim,
     /// Work with an AI agent
     #[command(subcommand)]
     Ai(AiCmd),
@@ -222,15 +222,6 @@ pub struct TopoCompileArgs {
     pub out: Option<String>,
     #[arg(long, value_name = "FILE", help = CONFIG)]
     pub config: Option<String>,
-}
-
-#[derive(Debug, PartialEq, Subcommand)]
-pub enum ImageCmd {
-    /// Build and sign an image for a topology node
-    ///
-    /// An input that already is a signed image is verified and checked to
-    /// belong to the node, kind and slot instead.
-    Sign(ImageSignArgs),
 }
 
 #[derive(Debug, Default, PartialEq, Args)]
@@ -309,12 +300,6 @@ fn kind_help() -> String {
 fn names_help(what: &str, names: &[(&str, u32)]) -> String {
     let list: Vec<&str> = names.iter().map(|(n, _)| *n).collect();
     format!("{what}: {}", list.join(", "))
-}
-
-#[derive(Debug, PartialEq, Subcommand)]
-pub enum ReleaseCmd {
-    /// Check the images, sign the manifest and write the release package
-    Build(ReleaseBuildArgs),
 }
 
 #[derive(Debug, Default, PartialEq, Args)]
@@ -554,12 +539,6 @@ pub struct ServeArgs {
     pub no_open: bool,
     #[arg(long, value_name = "FILE", help = CONFIG)]
     pub config: Option<String>,
-}
-
-#[derive(Debug, PartialEq, Subcommand)]
-pub enum SimCmd {
-    /// Run the simulator scenarios (no hardware)
-    Run,
 }
 
 #[derive(Debug, PartialEq, Subcommand)]

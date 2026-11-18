@@ -140,9 +140,9 @@ that key. Run from the repository root.
    third one.
 
    ```sh
-   dagon image sign out/watch-good.bin --node watch --version 1.0.0 --out out/watch-good-1.0.0.img
-   dagon image sign out/watch-good.bin --node watch --version 1.1.0 --out out/watch-good-1.1.0.img
-   dagon image sign out/watch-noconfirm.bin --node watch --version 1.2.0 --out out/watch-noconfirm-1.2.0.img
+   dagon image out/watch-good.bin --node watch --version 1.0.0 --out out/watch-good-1.0.0.img
+   dagon image out/watch-good.bin --node watch --version 1.1.0 --out out/watch-good-1.1.0.img
+   dagon image out/watch-noconfirm.bin --node watch --version 1.2.0 --out out/watch-noconfirm-1.2.0.img
    ```
 
 3. First install over USB-C. The 16 MB flash size and the table offset are

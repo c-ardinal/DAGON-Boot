@@ -1,5 +1,5 @@
 //! `dagon build`: per node `cargo build` following `[build.<id>]` in
-//! dagon.toml, producing the ELF files `dagon image sign` takes:
+//! dagon.toml, producing the ELF files `dagon image` takes:
 //! `out/build/<id>/app-a.elf` and, with `slot_b_feature`, `app-b.elf`.
 //!
 //! Each build starts from an empty `out/build/<id>/`; `build.json` is

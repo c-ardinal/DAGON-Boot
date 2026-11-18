@@ -19,10 +19,10 @@ sidebar:
 
 先に`dagon`コマンドを[入れます](/getting-started/install/)。
 
-### `dagon sim run`
+### `dagon sim`
 
 ```sh
-dagon sim run
+dagon sim
 ```
 
 シミュレータ上で、通しのシナリオを実行します。

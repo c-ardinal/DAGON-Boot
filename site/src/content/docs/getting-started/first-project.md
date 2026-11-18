@@ -224,7 +224,7 @@ dagon deploy                       # または: dagon deploy seg watch
 
 ESP32-S3のノードは1回だけビルドします。イメージはどちらのOTAスロットでも動きます。`dagon deploy`がそれをESPのイメージにして（`espflash save-image`）署名し、親機がほかのノードと同じように中継します。
 
-1つずつの手順は`dagon build`、`dagon image sign`、`dagon release build`、`dagon apply`です（`dagon --help`）。
+1つずつの手順は`dagon build`、`dagon image`、`dagon release`、`dagon apply`です（`dagon --help`）。
 
 ### DAGON Consoleで書き込む
 

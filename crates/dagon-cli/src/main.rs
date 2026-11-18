@@ -39,7 +39,7 @@ mod versions;
 use std::path::Path;
 use std::process::ExitCode;
 
-use cli::{AiCmd, Cli, Command, ImageCmd, KeyCmd, ReleaseCmd, SimCmd, TopoCmd};
+use cli::{AiCmd, Cli, Command, KeyCmd, TopoCmd};
 
 fn main() -> ExitCode {
     use clap::FromArgMatches;
@@ -81,8 +81,8 @@ fn main() -> ExitCode {
         Command::Key(KeyCmd::Pub { key }) => run(key_pub(key.as_deref())),
         Command::Topo(TopoCmd::Check(a)) => topo_check(a.json, &a.yaml),
         Command::Topo(TopoCmd::Compile(a)) => run(commands::topo_compile(&a)),
-        Command::Image(ImageCmd::Sign(a)) => run(commands::image_sign(&a)),
-        Command::Release(ReleaseCmd::Build(a)) => run(commands::release_build(&a)),
+        Command::Image(a) => run(commands::image_sign(&a)),
+        Command::Release(a) => run(commands::release_build(&a)),
         Command::Provision(a) => run(commands::provision(&a)),
         Command::Status(a) => run(device::status(&a)),
         Command::Apply(a) => run(device::apply(&a)),
@@ -95,7 +95,7 @@ fn main() -> ExitCode {
         Command::Flash(a) => run(flash::command(&a)),
         Command::Doctor(a) => run(doctor::command(&a)),
         Command::Serve(a) => run(serve::command(&a)),
-        Command::Sim(SimCmd::Run) => run(simrun::run()),
+        Command::Sim => run(simrun::run()),
         Command::Ai(AiCmd::Link(a)) => run(consent::link_command(&a)),
         Command::Ai(AiCmd::Unlink) => run(consent::unlink_command()),
         Command::Ai(AiCmd::Key(k)) => run(keystore::command(&k)),

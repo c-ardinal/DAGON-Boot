@@ -1,6 +1,6 @@
 //! The sample project on the simulator, for tests: the 親機 (RP2040) with
 //! its two 子機 (the F401 on I2C, the ESP32-S3 watch on the UART), all on
-//! 1.0.0, as dagon-sim simulates them for `dagon sim run`, driven by the
+//! 1.0.0, as dagon-sim simulates them for `dagon sim`, driven by the
 //! same dagon-host code as real hardware, with the links' timing.
 //!
 //! Everything is made fresh at start in a demo folder under the system's

@@ -103,7 +103,7 @@ The environment variable `DAGON_UNINSTALL=1` works too. The PowerShell script cl
 #### Try it in the simulator
 
 ```sh
-dagon sim run # runs end-to-end scenarios in the simulator
+dagon sim # runs end-to-end scenarios in the simulator
 ```
 
 ## Start your own project

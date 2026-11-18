@@ -1,4 +1,4 @@
-//! `dagon deploy`: build, sign (slots A and B), release build and apply in
+//! `dagon deploy`: build, sign (slots A and B), release package and apply in
 //! one command. Each node's version is its crate's Cargo.toml `version`
 //! (`--version`, if given, must be the same); before writing, the node →
 //! version list is shown and the user confirms (`--yes` skips). The package

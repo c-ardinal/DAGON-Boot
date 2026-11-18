@@ -166,7 +166,7 @@ DAGONが読み書きする形式、プロトコル、APIには、どれも番号
 | dagon-format | イメージヘッダ、マニフェスト、状態ログ、構成のバイト配置 |
 | dagon-proto | フレーム、コマンド、エラーの定義 |
 | dagon-events | イベント、状態機械、拡張 |
-| Retained Codecs | ブート記録、ヒューズ、構成の本体の形式 |
+| Retained Codecs | ブート記録、ヒューズ、構成の本体、状態ログのキー付記録の形式 |
 | dagon-conform | 実機とシミュレータに共通の適合試験 |
 | dagon-sim | 模擬フラッシュ、模擬リンク、模擬ROMローダ、故障注入 |
 | dagon-retained-model | 保持の形式の実行可能なモデル |

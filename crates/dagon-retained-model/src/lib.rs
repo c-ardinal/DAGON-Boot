@@ -12,16 +12,23 @@
 //! and check the properties P1..P26 (P13 aside) after every operation; a failure
 //! shrinks to a minimal case ([`harness`]). [`identity`] and [`boot`] hold
 //! the MCU identity rules and the sandbox contract the fuse world drives.
+//!
+//! [`journal`] is the state log with keyed records and [`diag`] the link
+//! diagnostics records it holds; [`world_diag`] runs them under the same
+//! faults and checks L1..L9.
 #![forbid(unsafe_code)]
 
 pub mod boot;
+pub mod diag;
 pub mod fuse;
 pub mod harness;
 pub mod identity;
+pub mod journal;
 pub mod mem;
 pub mod record;
 pub mod rng;
 pub mod skew;
+pub mod world_diag;
 pub mod world_fuse;
 pub mod world_record;
 pub mod world_trial;

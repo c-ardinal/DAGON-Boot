@@ -630,7 +630,7 @@ seed counter                             82 00 00 00 01 00 00 00 FF FF FF FF 00 
 
 ### 8.6 Properties
 
-The model injects a power cut after every byte programmed or erased in every operation (the appends of a sample, of a clear and of a seed counter, the cycle-end evaluation, compaction by the app and by the boot loader), foreign bytes anywhere in the flash, and keyed records of a class that nothing decodes. After every operation it checks that the fold is the expected one, and after a power cut that the fold is the one before the record being appended or the one after it, and these properties:
+The model injects a power cut after every byte programmed or erased in every operation (the appends of a sample, of a clear and of a seed counter, the cycle-end evaluation, compaction by the app and by the boot loader), foreign bytes anywhere in the flash, and keyed records of a class that nothing decodes. After every operation it checks that the fold is the expected one, and after a power cut that the fold is the one before the record being appended or the one after it, and these properties, which are claims under power cuts (8.7 has what holds under foreign bytes):
 
 | Id | Property |
 |---|---|
@@ -646,7 +646,7 @@ The model injects a power cut after every byte programmed or erased in every ope
 
 ### 8.7 Limits of the claims
 
-- **Foreign bytes.** L1 to L3 and L9 hold across power cuts. Foreign bytes over a record end the fold at that record, and foreign bytes over the header of the active face make the older face the valid one. The log then reads as it did at an earlier time, or as a part of it: a put that an erase had removed is read again, and the seed counter reads an earlier value. What holds after foreign bytes: no peer is read as ever communicated that had no pass sample at any time (the coincidence of a CRC-32 aside), no byte outside the faces is written, and all properties hold again from the fold that is read.
+- **Foreign bytes.** L1 to L9 are claims under power cuts. Foreign bytes over a record end the fold at that record, and foreign bytes over the header of the active face make the older face the valid one. The log then reads as it did at an earlier time, or as a part of it: a put that an erase had removed is read again, and the seed counter reads an earlier value. Under foreign bytes only these weaker claims hold: no peer is read as ever communicated that had no pass sample at any time (the coincidence of a CRC-32 aside), L5 holds, and L1 to L9 hold again from the next completed record on, counted from the fold that is read.
 - **A face full of the fold.** When the records of the fold fill a face, compaction frees no room: every append fails, and each one erases a face first. The MCU definition's `diag_peers` keeps the records of the fold below one face.
 - **A cut record and the boot path.** A record cut by a power loss ends its face until the next compaction. The boot path never erases, so it appends nothing to such a face, and no trial starts until an append of the running app has compacted.
 - **Erasing both faces.** A log whose two faces are erased holds no record: every peer reads as never communicated with, and the seed counter starts at 0 again.

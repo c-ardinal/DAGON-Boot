@@ -20,7 +20,7 @@ extension), which every MCU package shares, and [`BoardDef`]
 needs only its own `BoardCore` and `BoardDef` and links (see
 `template/src/board.rs`).
 
-## The node linked to the PC with your own task
+## A node with a PC link and your own task
 
 This is what `dagon new` generates for the Waveshare board
 (`../../boards/waveshare-rp2040-touch-lcd-1.28/template`, its manifest kept

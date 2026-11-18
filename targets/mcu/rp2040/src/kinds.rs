@@ -1,4 +1,4 @@
-//! The link kinds this package offers, by direction, for RP2040 (always the node linked to the PC):
+//! The link kinds this package offers, by direction, for RP2040 (always with a PC link):
 //!
 //! README.md, "Links", shows the matrix (generated from `LINK_KINDS`;
 //! a kind the table leaves out is `No`).

@@ -1,4 +1,4 @@
-//! Your application on the node linked to the PC. DAGON relays updates to the downstream nodes,
+//! Your application on a node with a PC link. DAGON relays updates to the nodes away from the PC,
 //! updates this board too, runs a new version on trial and confirms it;
 //! dagon gen never rewrites this file.
 

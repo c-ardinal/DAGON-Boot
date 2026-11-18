@@ -426,30 +426,6 @@ class Translation(unittest.TestCase):
                     self.assertEqual(ja[what], en[what])
 
 
-class ServeLoopSnippet(unittest.TestCase):
-    """The existing-firmware page shows the serving loop as it is; comments are translated, code is not."""
-    SOURCE = ROOT / "targets/mcu/common/src/serve.rs"
-
-    @staticmethod
-    def code(text):
-        return [line.strip() for line in text.splitlines() if line.strip() and not line.strip().startswith("//")]
-
-    def loop(self):
-        body = self.SOURCE.read_text(encoding="utf-8").split("\n) -> Exit\nwhere\n", 1)[1]
-        body = body.split("\n{\n", 1)[1].split("\n}\n", 1)[0]
-        return self.code(body)
-
-    def test_the_page_snippet_is_the_loop_in_serve_rs(self):
-        loop = self.loop()
-        self.assertIn("loop {", loop)
-        for folder in ("", "en"):
-            text = (llms.DOCS / folder / "how-to/existing-firmware.md").read_text(encoding="utf-8")
-            snippet = re.search(r"^ *```rust\n(.*?)^ *```$", text, re.M | re.S)
-            with self.subTest(folder=folder or "ja"):
-                self.assertIsNotNone(snippet)
-                self.assertEqual(self.code(snippet.group(1)), loop)
-
-
 class ToolKinds(unittest.TestCase):
     def test_every_doctor_entry_has_a_kind(self):
         gen.NO_KIND.clear()

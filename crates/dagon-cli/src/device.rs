@@ -620,13 +620,22 @@ where
                 format!("stopped: {e:?}")
             }
             Outcome::NotStarted => "not started".into(),
+            Outcome::NeedsFirstWrite => {
+                ok = false;
+                let node = name(r.node);
+                format!("does not answer, nothing sent; write it directly: dagon flash {node}")
+            }
+            other => {
+                ok = false;
+                format!("not confirmed: {other:?}")
+            }
         };
         println!("{}: {line}", name(r.node));
     }
     if ok {
         Ok(())
     } else {
-        Err("apply stopped; see above".into())
+        Err("not every node was written; see above".into())
     }
 }
 

@@ -86,7 +86,7 @@ COMPONENTS = {
     "Simulator Link": ("dagon-simの模擬リンク", "dagon-sim's simulated link"),
     "ROM Writers": ("PCのdagon-romlinkによるROMの手順", "ROM procedures on the PC through dagon-romlink"),
     "File Key Pair": ("ファイルのキーの組", "Key pair in files"),
-    "DAGON Link": ("ホスト、PC接続ノード、他のノード間のフレームとコマンド", "Frames and commands between host, hub and nodes"),
+    "DAGON Link": ("ホスト、コーディネータ、他のノード間のフレームとコマンド", "Frames and commands between host, hub and nodes"),
     "Release Bundle": ("パッケージファイル（.dgb）の形式", "Format of the package file (.dgb)"),
     "Image Header": ("署名付きのイメージのヘッダ", "Header of a signed image"),
     "Topology Binary": ("コンパイル済の構成の形式", "Format of the compiled topology"),
@@ -150,8 +150,8 @@ COMPONENTS = {
     "LogSink": ("ログの出力先のポート", "Port for where logs go"),
     "BootSelect": ("kind Sはジャンプ、kind Vはベンダーの選択情報の操作", "Kind S: the jump; kind V: the vendor's selection data"),
     "Flash": ("フラッシュの消去、書込、読出", "Flash erase, write and read"),
-    "I2cBus": ("PC接続ノードのI2Cバス", "The hub's I2C bus"),
-    "StreamPort": ("PC接続ノードのバイト列", "The hub's byte stream"),
+    "I2cBus": ("コーディネータのI2Cバス", "The hub's I2C bus"),
+    "StreamPort": ("コーディネータのバイト列", "The hub's byte stream"),
     "SubControl": ("接続先のノードの制御線", "A child's control lines"),
     "Reset": ("システムのリセット", "System reset"),
     "SandboxArch": ("1つのアーキテクチャの特権の入口とアンワインドのレジスタ", "Privilege entry and unwind registers for one architecture"),
@@ -197,7 +197,7 @@ NOT_IN_TREE = {
     "AI Agent Link": ("`dagon serve`にボード移植の作業は存在しません。`POST /v1/ai/port`の応答は501です。",
                       "`dagon serve` has no job that ports DAGON to a board: `POST /v1/ai/port` answers 501."),
     "Boot Action Interpreter": ABSENT,
-    "Coordinator": ("PC接続ノードは保存済みリリースを実行しません。書込はPCがPC接続ノードを経由して進行します。",
+    "Coordinator": ("コーディネータは保存済リリースを実行しません。書込はPCがコーディネータを経由して進行します。",
                     "The hub runs no stored release: the PC drives a write through the hub."),
     "Release Store": ABSENT,
     "Node Recovery": ("回数上限付きの再試行は存在しません。", "There is no bounded retry."),
@@ -216,7 +216,7 @@ NOT_IN_TREE = {
     "Retained Codecs": ("ファームウェアに保持形式のコーデックは存在しません。ロックアップヒューズの形式の存在箇所は実行可能モデルのみです。"
                         "ブート記録とロックアップヒューズの形式番号（`boot-record`）は`compat.toml`に存在しません。"
                         "構成本体の形式は`dagon-format`の形式（先頭32バイト、ノード32バイト）で、[保持と永続の形式](/explanation/retained-formats/)"
-                        "の形式ではありません。PC接続ノードの保存先は単一の領域で、2バンクの置換は存在しません。",
+                        "の形式ではありません。コーディネータの保存先は単一の領域で、2バンクの置換は存在しません。",
                         "The firmware has none of the retained codecs: the lockup fuse's format exists only in the executable model, "
                         "`compat.toml` has no format number (`boot-record`) for the boot record and the fuse, "
                         "and the topology body is `dagon-format`'s (a 32-byte head, 32-byte nodes), not the one in "
@@ -232,7 +232,7 @@ def gap_list(lang):
 
 
 WORDS = {
-    "ja": {"title": "DAGONのソフトウェアアーキテクチャ", "component": "コンポーネント", "port": "ポートと規約", "contract": "ノードとPCの共通形式", "hub": "Hub列はPC接続ノードのイメージのみ", "vendor": "シリコンとベンダー"},
+    "ja": {"title": "DAGONのソフトウェアアーキテクチャ", "component": "コンポーネント", "port": "ポートと規約", "contract": "ノードとPCの共通形式", "hub": "Hub列はコーディネータのイメージのみ", "vendor": "シリコンとベンダー"},
     "en": {"title": "DAGON's software architecture", "component": "Component", "port": "Port or contract", "contract": "Format shared by PC and node", "hub": "The Hub column is hub images only", "vendor": "Silicon and vendor"},
 }
 

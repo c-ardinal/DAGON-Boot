@@ -401,7 +401,7 @@ def boards(lang="en"):
 
 ## マイコン
 
-| Id | 名称 | ポート | フラッシュ | RAM | 上りリンク | 下りリンク | PC接続ノード可否 | 初回の書込 |
+| Id | 名称 | ポート | フラッシュ | RAM | 上りリンク | 下りリンク | コーディネータ可否 | 初回の書込 |
 |---|---|---|---|---|---|---|---|---|
 {table_m}
 
@@ -419,7 +419,7 @@ files is in [MCU and board definitions](/en/reference/definitions/).
 
 ## MCUs
 
-| Id | Name | Port | Flash | RAM | Up links | Down links | Can be hub | First write |
+| Id | Name | Port | Flash | RAM | Up links | Down links | Can be coordinator | First write |
 |---|---|---|---|---|---|---|---|---|
 {table_m}
 

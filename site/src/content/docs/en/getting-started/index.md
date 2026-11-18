@@ -7,7 +7,7 @@ sidebar:
 
 ## In the browser
 
-The [DAGON Console demo](~/demo/) runs in the browser, against a simulated hub and two children.
+The [DAGON Console demo](~/demo/) runs in the browser, against a simulated node connected to the PC and two nodes linked to it.
 
 1. Make a 構成 from the sample.
 2. Switch to 書込 (write) and press 接続する (connect).

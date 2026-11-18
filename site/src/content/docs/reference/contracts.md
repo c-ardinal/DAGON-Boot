@@ -19,7 +19,7 @@ DAGONの部品間の規約とその番号、部品ごとのバージョンと、
 
 | 規約 | 形式の番号 | 番号の格納先 |
 |---|---|---|
-| `wire` | 2 | ホスト、PC接続ノード、他のノード間のフレームとペイロード: 全フレームのバイト2、HELLOのproto_ver（dagon-proto PROTO_VERSION） |
+| `wire` | 2 | ホスト、コーディネータ、他のノード間のフレームとペイロード: 全フレームのバイト2、HELLOのproto_ver（dagon-proto PROTO_VERSION） |
 | `image-header` | 1 | 署名付きの512バイトのイメージのヘッダ: オフセット0x004（dagon-format header::HDR_VERSION） |
 | `state-log` | 1 | ブートローダとアプリの状態ログの面: オフセット0x004（dagon-format statelog::FORMAT_VERSION） |
 | `manifest` | 1 | リリースのマニフェスト: オフセット4（dagon-format manifest::MF_VERSION） |

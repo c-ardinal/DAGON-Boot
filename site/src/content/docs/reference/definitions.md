@@ -31,7 +31,7 @@ description: "dagon-mcu.tomlとdagon-board.toml: DAGONがマイコンやボー�
 | `[writers]` | テーブル | 必須 | マイコンのファームウェアの書込範囲: `[[slot]]`が命名するイメージの種類ごとに、その種類を書込する種類を列挙します（`app = ["app"]`、`bootcore = ["app"]`）。列挙する種類はいずれも、ここにスロットを保持する種類です。ある種類は、自身のスロットで動作して、別の種類のスロットに書込します。自身を列挙した種類は、自身が動作していない自身のスロットに書込します。この記述は、その種類のスロットが2つの場合だけ有効です。種類ごとのスロットは1つ（`a`）か2つ（`a`と`b`）です。スロットが1つの種類は、自身以外の種類による書込の場合だけロード可能です。 |
 | `[writer]` | テーブル | 必須 | 最初の書込のツール: `kind`とそのパラメータ（下記）。 |
 | `[[part]]` | テーブルの配列 | 任意 | 最初の書込のために、この定義のフォルダからビルドするDAGONの部品: `name`、`sub`（定義のフォルダ内のフォルダ）、`bin`。 |
-| `[coordinator]` | テーブル | 任意 | PC接続ノードに指定可能なマイコン専用: `pio_state_machines`、`pio_uart_state_machines`（リンクごと）、`uart0_tx`、`uart0_rx`。構成がそのマイコンをPC接続ノードに指定可能なのは、`[coordinator]`が定義済の場合だけです（V-25）。 |
+| `[coordinator]` | テーブル | 任意 | コーディネータに指定可能なマイコン専用: `pio_state_machines`、`pio_uart_state_machines`（リンクごと）、`uart0_tx`、`uart0_rx`。構成がそのマイコンをコーディネータに指定可能なのは、`[coordinator]`が定義済の場合だけです（V-25）。 |
 | `[link_uart]` | テーブル | 任意 | マイコンの定義のコードがDAGONのUARTリンクに使用するUARTの、ビットレートの算出方法。HALの計算と同一です: そのクロックを、`clocks_per_bit`と`frac_bits`ビットの小数部付きの分周比との積で除算します。端数処理は切捨です。クロックは`clock_hz`（クロック設定に依存しない周波数）か`clock = "app"`（ノードの`[[app.clock]]`の設定のコアクロック。V-26はノードごとにこの値を使用します。`tolerance_ppm`が不在のinternalの設定で動作するノードは、UARTリンクを使用しません）のどちらか1つです。`bauds`は、そのコードがリンクに使用するビットレートの一覧です。構成の確認（V-26）は、どちらかの端の一覧に不在か、どちらかの端で2 %超の誤差を生じるリンクの`baud`を拒否します。DAGON Consoleは両端の一覧にある速度だけを選択肢に表示します。`[links]`に`uart`があるマイコンでは必須です。この項目が不在の場合、そのマイコンのファームウェアが使用する全部のUARTリンクを拒否します。動作が判明している速度が不在のためです。 |
 | `[link_i2c]` | テーブル | 任意 | マイコンの定義のファームウェアが、コントローラとしてもターゲットとしても、DAGONのI2Cリンクに使用するバスの速度の一覧: `hzs`。構成の確認（V-20）は、バス上のいずれかのノードの一覧に不在のバスの`speed_hz`を拒否します。DAGON Consoleは、バス上の全ノードの一覧にある速度だけを選択肢に表示します。`[links]`に`i2c`があるマイコンでは必須です。この項目が不在の場合、そのマイコンのファームウェアが接続する全部のI2Cバスを拒否します。動作が判明している速度が不在のためです。 |
 | `[rom_i2c]` | テーブル | 任意 | ROMのI2Cブートローダ（`stm32-i2c-rom`）: `name`（確認のメッセージでの名称）、`addr`、`max_hz`、`erase_sectors`、待受対象の`pairs = [{ controller, sda, scl }]`。 |
@@ -102,10 +102,10 @@ description: "dagon-mcu.tomlとdagon-board.toml: DAGONがマイコンやボー�
 | `i2c_target` | 真偽値 | 任意 | ボードがI2Cのターゲットになれるか。 |
 | `drawing` | 文字列 | 必須 | UIの図。 |
 | `default` | 真偽値 | 任意 | `true`: マイコンだけを指定したノードの確認に使用するボード（既定のボードが設定済の組込のマイコンについて、プロジェクトはその既定を置換不可です。マークを付与したボードが2つあると読込しません）。マイコンごとに、この指定が可能なボードは最大1つです。マイコンの唯一のボードは、この指定が不在でも既定です。ボードが複数でマークが不在のマイコンには既定がありません（そのノードはボードの事実なしで確認します）。定義の順番で決定することはありません。 |
-| `[[header]]` | テーブルの配列 | 任意 | `[{ pin, label }]`。ボード上で確認実績のない`label`は省略します。構成がこのボードで指定可能なピンの全部です（PC接続ノード側の`pins`・`control`・バスの`sda`/`scl`。ノード側の`node_pins`は`i2c`から選択します）。構成の確認（V-07）はそれ以外を拒否し、DAGON Consoleはこれらのピンだけを選択肢に表示します。 |
+| `[[header]]` | テーブルの配列 | 任意 | `[{ pin, label }]`。ボード上で確認実績のない`label`は省略します。構成がこのボードで指定可能なピンの全部です（コーディネータ側の`pins`・`control`・バスの`sda`/`scl`。ノード側の`node_pins`は`i2c`から選択します）。構成の確認（V-07）はそれ以外を拒否し、DAGON Consoleはこれらのピンだけを選択肢に表示します。 |
 | `[[i2c]]` | テーブルの配列 | 任意 | ヘッダから使用可能な`[{ controller, sda, scl }]`の組。 |
-| `[default_link]` | テーブル | 任意 | 構成で別途指定しない場合の、ノードのボードの配線: `kind`（`i2c`、`uart`、`can`、`ethernet`）、`iface`（`hw-uart0`、`pio-uart`）、`addr`、`baud`、`control`（`full`、`cooperative`）、`rom_entry`（`force-download-boot`、`m5pm1`、`stm32-i2c-rom`）。PC接続ノードでは省略します。 |
-| `[coordinator]` | テーブル | 任意 | このボードがPC接続ノードの場合に、ページが新規リンクを配線するピン: `i2c = { controller, sda, scl }`（新規I2Cバス。`controller`はボードの`i2c`のいずれか）と`pio_uart = { tx, rx }`（新規PIO UARTリンク）。番号がマイコンの`gpio_count`未満のGPIOです。マイコンに`[coordinator]`があるボード専用です。 |
+| `[default_link]` | テーブル | 任意 | 構成で別途指定しない場合の、ノードのボードの配線: `kind`（`i2c`、`uart`、`can`、`ethernet`）、`iface`（`hw-uart0`、`pio-uart`）、`addr`、`baud`、`control`（`full`、`cooperative`）、`rom_entry`（`force-download-boot`、`m5pm1`、`stm32-i2c-rom`）。コーディネータでは省略します。 |
+| `[coordinator]` | テーブル | 任意 | このボードがコーディネータの場合に、ページが新規リンクを配線するピン: `i2c = { controller, sda, scl }`（新規I2Cバス。`controller`はボードの`i2c`のいずれか）と`pio_uart = { tx, rx }`（新規PIO UARTリンク）。番号がマイコンの`gpio_count`未満のGPIOです。マイコンに`[coordinator]`があるボード専用です。 |
 | `[[part]]` | テーブルの配列 | 任意 | ボードの定義自体からビルドする部品（`name`、`sub`、`bin`）。 |
 | `[boot]` | テーブル | 任意 | ブート段階のボードの値: `led`（`[[pin]]`）、`led_active`（`high`、`low`）、`halt = { pattern, period_ms }`（`blink`、`code`、`off`。DAGONのstage0があるマイコンで`led`がある場合は、stage0が周期の10分の1単位でコードを点滅させるため、`blink`の周期は10 ms以上です）、`power_hold = { pin, level }`。ブートのアクションプログラムは`[[boot.action]]`です。ブートのアクションプログラム（`boot-program`形式1）: `on`（イベントのカタログがアクション対応と明示するブートイベント）と`ops`: `{ op = "led", state }`（`on`、`off`、`toggle`）、`{ op = "gpio", pin, level }`（`boot = true`の`[[pin]]`。電源保持のピンは保持のレベルのみ）、`{ op = "delay", ms }`（1から20）、`{ op = "bus_write", device, reg, bytes }`（`writable`の一覧にある`[[device]]`のレジスタ、1から8バイト。`boot_capabilities = ["i2c"]`のマイコンのみ）。イベントごとに最大32の操作と50 msで、バスの書込は5 msとして計算します。 |
 | `[[pin]]` | テーブルの配列 | 任意 | ボードのピン: `pin`、`name`（ボードの定義のコードが参照する名称、`a-z 0-9 _`）、`boot`（ブートプログラムが駆動可能）、`levels`（許可するレベル。省略時は全部）。 |
@@ -118,7 +118,7 @@ description: "dagon-mcu.tomlとdagon-board.toml: DAGONがマイコンやボー�
 
 ボードの定義は、DAGONのUARTリンクを、構成のリンクの`baud`で動かします。`dagon build`、`deploy`、`flash`は、ノードのすべてのビルド（アプリと復旧用のエージェント）に、そのノードのUARTリンクの速度を`DAGON_LINK_BAUD`として渡すので、両端が同じ値でビルドされます。これが無いビルド（単なる`cargo build`）は、`[default_link] baud`か、ボードの`dagon = true`のUARTバスの`baud`を使います。
 
-ノードのI2Cターゲットのアドレスは、構成のそのノードの端の`addr`です。`dagon gen`はそれを`LINK_ADDR`として、アプリの`wiring.rs`とブートローダの`boot_wiring.rs`に書くので、どちらもPC接続ノードが呼ぶアドレスで答えます。構成がアドレスを与えないときは、どちらも`[default_link] addr`を使います。
+ノードのI2Cターゲットのアドレスは、構成のそのノードの端の`addr`です。`dagon gen`はそれを`LINK_ADDR`として、アプリの`wiring.rs`とブートローダの`boot_wiring.rs`に書くので、どちらもコーディネータが呼ぶアドレスで答えます。構成がアドレスを与えないときは、どちらも`[default_link] addr`を使います。
 
 `[[pin]]`とバス全体で、同じピンは2度現れません。コードの生成元になる名前（ピンの名前、バスのidとその信号、デバイスのid。`-`は`_`として読みます）も、それぞれ1度だけ現れます。バスを宣言するボードでは、`[coordinator]`のピンは、`dagon = true`のI2CとUARTのバスのピンです。
 

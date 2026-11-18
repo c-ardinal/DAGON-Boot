@@ -29,7 +29,7 @@ rustdocの本文はソースの原文のままで、英語です。
 | [`dagon-proto`](/api/dagon_proto/) | DAGONのリンクv2: フレームの形式（USB CDC、UART、I2Cで共通）、コマンドの表、ステータスコード、全ペイロードの欄の文法とその唯一の読取側と書込側、型付きのペイロード、I2Cのメールボックスの状態。 |
 | [`dagon-relay`](/api/dagon_relay/) | リレー: ノードが、リンクで接続した他のノードに到達する機構。どのMCUにも依存しません。 |
 | [`dagon-retained-model`](/api/dagon_retained_model/) | 障害注入下での、DAGONの保持と永続の形式の実行可能なモデル |
-| [`dagon-romlink`](/api/dagon_romlink/) | I2CのSTM32システムメモリのブートローダ（ST AN4221）。ホストから、PC接続ノードのNRST/BOOT0の信号線と未加工のI2Cの通信で駆動します。 |
+| [`dagon-romlink`](/api/dagon_romlink/) | I2CのSTM32システムメモリのブートローダ（ST AN4221）。ホストから、コーディネータのNRST/BOOT0の信号線と未加工のI2Cの通信で駆動します。 |
 | [`dagon-sign`](/api/dagon_sign/) | DAGONの署名: キー、署名付きのイメージ、リリースのバンドル、初回インストールのフラッシュの内容。 |
 | [`dagon-sim`](/api/dagon_sim/) | DAGONのシミュレータ: ハードウェアの決定的な代役です。ホストのツール、ブラウザのUI、テストは、ボードなしでも対向側を確保します。 |
 | [`dagon-topology`](/api/dagon_topology/) | 構成のYAML: スキーマ、検証の規則、対応ボードの表。CLIとブラウザ向けのビルドが共有し、同一の規則を使用します。 |

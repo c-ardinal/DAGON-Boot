@@ -11,7 +11,10 @@ use std::rc::Rc;
 use dagon_format::{key_id, ClearSigner, SignError, DIAG_CLEAR_DOMAIN};
 use dagon_host::diag::ClearOutcome;
 use dagon_host::{Error, Host, HostClock, Target, Transport};
-use dagon_proto::diag::{ClearScope, Seed};
+use dagon_proto::diag::{
+    ClearScope, DiagInfo, Elements, Endpoint, Entry, Key, LinkDiagReq, LinkDiagResp, Params, Peer,
+    Seed, NO_INSTANCE,
+};
 use dagon_proto::field::FieldWriter;
 use dagon_proto::payload::HelloResp;
 use dagon_proto::table::hello;
@@ -30,8 +33,12 @@ struct Wire {
     lose_and_reset: Option<(u8, usize)>,
     /// HELLO answers lose their KEY_ID.
     no_key_id: bool,
+    /// LINK_DIAG is answered with the body this makes of the request.
+    forge: Option<Forge>,
     now: u64,
 }
+
+type Forge = Box<dyn FnMut(&LinkDiagReq) -> Vec<u8>>;
 
 #[derive(Clone)]
 struct Direct {
@@ -92,6 +99,16 @@ impl Transport for Direct {
                 node.agent.restart();
                 return Ok(());
             }
+        }
+        let forged = wire.forge.as_mut().filter(|_| f.cmd == Cmd::LinkDiag as u8);
+        if let Some(forge) = forged {
+            let body = forge(&LinkDiagReq::parse(f.payload).unwrap());
+            let mut out = vec![0u8; dagon_proto::frame_len(1 + body.len())];
+            out[HEADER_LEN] = Status::Ok as u8;
+            out[HEADER_LEN + 1..HEADER_LEN + 1 + body.len()].copy_from_slice(&body);
+            let n = finish(&mut out, flags::RESP, f.seq, f.cmd, 1 + body.len()).unwrap();
+            self.pending.borrow_mut().extend(&out[..n]);
+            return Ok(());
         }
         let reply = match reply {
             Some(r) if wire.no_key_id && f.cmd == Cmd::Hello as u8 => without_key_id(&r),
@@ -236,4 +253,124 @@ fn a_lost_answer_across_a_reset_is_read_back() {
     d.wire.borrow_mut().lose_and_reset = Some((Cmd::LinkDiagClear as u8, 1));
     let r = block_on(host.link_diag_clear(Target::Local, scope, Some(&signer)));
     assert_eq!(r.unwrap(), ClearOutcome::NotCleared);
+}
+
+fn peer(link: u8, addr: u8) -> Vec<u8> {
+    Peer {
+        link,
+        addr,
+        instance: NO_INSTANCE,
+    }
+    .to_bytes()
+    .to_vec()
+}
+
+/// A LINK_DIAG answer body of a power-cut-retained store.
+fn page(elements: Elements<'_>, next: Option<&[u8]>) -> Vec<u8> {
+    let r = LinkDiagResp {
+        format: dagon_proto::table::link_diag::FORMAT,
+        info: DiagInfo {
+            availability: 0x7F,
+            store: dagon_proto::table::link_diag::store::RETENTION_POWER_CUT,
+            policy: dagon_proto::payload::PolicySet::EMPTY.with(1),
+            params: Params::default(),
+        },
+        elements,
+        next: next.map(|k| Key::new(k).unwrap()),
+    };
+    let mut b = vec![0u8; 400];
+    let n = r.encode(&mut b).unwrap();
+    b.truncate(n);
+    b
+}
+
+/// The clear's answer is lost across a reset, and the read-back gets the
+/// pages `forge` makes: a malformed one is never taken for the end of the
+/// records.
+fn read_back(scope: ClearScope, forge: Forge) -> Result<ClearOutcome, Error<()>> {
+    let (mut host, d, _) = bench();
+    let mut w = d.wire.borrow_mut();
+    w.lose_and_reset = Some((Cmd::LinkDiagClear as u8, 1));
+    w.forge = Some(forge);
+    drop(w);
+    block_on(host.link_diag_clear(Target::Local, scope, Some(&Signer::new(keypair()))))
+}
+
+#[test]
+fn a_malformed_read_back_is_never_cleared() {
+    let other = Endpoint { link: 2, addr: 9 };
+    let entry = Entry {
+        dtc: 1,
+        link: EP.link,
+        addr: EP.addr,
+        status: 0x09,
+        fdc: 0,
+    }
+    .to_bytes();
+    let two = [peer(1, 5), peer(1, 3)].concat();
+    let cases: Vec<(&str, ClearScope, Forge)> = vec![
+        (
+            "ENTRIES in report 2",
+            ClearScope::EndpointAll(EP),
+            Box::new(move |_| page(Elements::Entries(&entry), None)),
+        ),
+        (
+            "a 5-byte NEXT",
+            ClearScope::All,
+            Box::new(|_| page(Elements::Peers(&peer(1, 3)), Some(&[0, 0, 1, 1, 3]))),
+        ),
+        (
+            "keys out of order",
+            ClearScope::All,
+            Box::new(move |_| page(Elements::Peers(&two), None)),
+        ),
+        (
+            "NEXT not the last key",
+            ClearScope::All,
+            Box::new(|_| page(Elements::Peers(&peer(1, 3)), Some(&[1, 7]))),
+        ),
+        (
+            "NEXT with no element",
+            ClearScope::All,
+            Box::new(|_| page(Elements::None, Some(&[1, 7]))),
+        ),
+        (
+            "a peer of another endpoint",
+            ClearScope::EndpointAll(EP),
+            Box::new(move |_| page(Elements::Peers(&peer(other.link, other.addr)), None)),
+        ),
+        (
+            "a key at or below the cursor",
+            ClearScope::All,
+            Box::new(|q: &LinkDiagReq| {
+                let at = q.cursor.map_or(vec![1, 3], |c| c.as_bytes().to_vec());
+                page(Elements::Peers(&peer(at[0], at[1])), Some(&at))
+            }),
+        ),
+    ];
+    for (why, scope, forge) in cases {
+        let r = read_back(scope, forge);
+        assert!(matches!(r, Err(Error::BadResponse)), "{why}: {r:?}");
+    }
+}
+
+/// Pages that always name one more peer and a NEXT end when the keys do:
+/// the read-back stops within the 65536 keys a peer can have.
+#[test]
+fn an_endless_read_back_ends_with_the_keys() {
+    let pages = Rc::new(RefCell::new(0u32));
+    let count = pages.clone();
+    let r = read_back(
+        ClearScope::All,
+        Box::new(move |q: &LinkDiagReq| {
+            *count.borrow_mut() += 1;
+            let k = q.cursor.map_or(0, |c| {
+                u16::from_be_bytes([c.as_bytes()[0], c.as_bytes()[1]])
+            });
+            let [link, addr] = k.wrapping_add(1).to_be_bytes();
+            page(Elements::Peers(&peer(link, addr)), Some(&[link, addr]))
+        }),
+    );
+    assert!(matches!(r, Err(Error::BadResponse)), "{r:?}");
+    assert!(*pages.borrow() <= 1 << 16);
 }

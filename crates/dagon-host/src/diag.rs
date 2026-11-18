@@ -31,10 +31,18 @@ pub enum History {
     Unknown,
 }
 
-/// What the report 2 answer `r`, asked about `peer`, says of it. The
-/// instance identifier never changes the class.
+/// What the report 2 answer `r`, asked about `peer` from the first key,
+/// says of it. A page that is not a well-formed answer to that request
+/// (`LinkDiagResp::page_of`) is unknown history. The instance identifier
+/// never changes the class.
 pub fn history(r: &LinkDiagResp<'_>, peer: Endpoint) -> History {
-    if !r.readable() {
+    let asked = LinkDiagReq {
+        report: Report::Peers,
+        endpoint: Some(peer),
+        cursor: None,
+        max_resp: 0,
+    };
+    if r.page_of(&asked).is_err() {
         return History::Unknown;
     }
     if r.elements.peers().any(|p| p.endpoint() == peer) {
@@ -59,6 +67,14 @@ pub enum ClearOutcome {
     NotCleared,
 }
 
+/// Every key a peer can have (link, addr).
+const PEER_KEYS: usize = 1 << 16;
+
+/// An answer to LINK_DIAG_CLEAR carries nothing.
+fn cleared<E>(body: &[u8]) -> Result<(), E> {
+    payload::parse_empty(&Cmd::LinkDiagClear.spec().resp, body).map_err(|_| Error::BadResponse)
+}
+
 impl<T: Transport, C: HostClock> Host<T, C> {
     /// The MAX_RESP of a LINK_DIAG to `to`: the payload the route carries
     /// back, the PC's link for the node it is connected to and the inner
@@ -68,7 +84,10 @@ impl<T: Transport, C: HostClock> Host<T, C> {
     }
 
     /// The ever-communicated records of `to` (of `endpoint` only, when
-    /// given), page by page.
+    /// given), page by page. A page that is not a well-formed answer to
+    /// its request is `Error::BadResponse`: no page is taken for the end
+    /// of the records unless it says so. Keys rise from page to page, so
+    /// there are no more pages than peer keys.
     async fn ever_communicated(
         &mut self,
         to: Target,
@@ -76,7 +95,7 @@ impl<T: Transport, C: HostClock> Host<T, C> {
     ) -> Result<Vec<Peer>, T::Error> {
         let mut peers = Vec::new();
         let mut cursor: Option<Key> = None;
-        loop {
+        for _ in 0..PEER_KEYS {
             let q = LinkDiagReq {
                 report: Report::Peers,
                 endpoint,
@@ -87,16 +106,14 @@ impl<T: Transport, C: HostClock> Host<T, C> {
                 .call(to, Cmd::LinkDiag, &request(|b| q.encode(b)), REQUEST_MS)
                 .await?;
             let r = LinkDiagResp::parse(&body).map_err(|_| Error::BadResponse)?;
-            if !r.readable() {
-                return Err(Error::BadResponse);
-            }
+            r.page_of(&q).map_err(|_| Error::BadResponse)?;
             peers.extend(r.elements.peers());
             match r.next {
-                Some(k) if cursor.is_none_or(|c| k > c) => cursor = Some(k),
-                Some(_) => return Err(Error::BadResponse),
+                Some(k) => cursor = Some(k),
                 None => return Ok(peers),
             }
         }
+        Err(Error::BadResponse)
     }
 
     /// Clears the link diagnostics records of `to` that `scope` names. A
@@ -116,7 +133,8 @@ impl<T: Transport, C: HostClock> Host<T, C> {
     ) -> Result<ClearOutcome, T::Error> {
         if !scope.signed() {
             let req = request(|b| LinkDiagClear { scope, key: None }.encode(b));
-            self.call(to, Cmd::LinkDiagClear, &req, REQUEST_MS).await?;
+            let body = self.call(to, Cmd::LinkDiagClear, &req, REQUEST_MS).await?;
+            cleared(&body)?;
             return Ok(ClearOutcome::Cleared);
         }
         let signer = signer.ok_or(Error::NoSigner)?;
@@ -163,7 +181,7 @@ impl<T: Transport, C: HostClock> Host<T, C> {
             .encode(b)
         });
         match self.call(to, Cmd::LinkDiagClear, &req, REQUEST_MS).await {
-            Ok(_) => Ok(ClearOutcome::Cleared),
+            Ok(body) => cleared(&body).map(|()| ClearOutcome::Cleared),
             Err(Error::Rejected {
                 status: Status::State,
                 ..

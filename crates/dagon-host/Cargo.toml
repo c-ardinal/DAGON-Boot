@@ -25,3 +25,5 @@ dagon-sign = { path = "../dagon-sign" }
 dagon-sim = { path = "../dagon-sim" }
 dagon-topology = { path = "../dagon-topology" }
 ed25519-compact = { version = "2.6", default-features = false }
+# tests/diag_sign.rs: the agent's link diagnostics bench (dagon-agent/tests/diag_bench).
+dagon-events = { path = "../dagon-events" }

@@ -116,6 +116,40 @@ pub trait SigVerifier {
     fn verify(&self, domain: &[u8], msg: &[&[u8]], sig: &[u8; 64]) -> bool;
 }
 
+/// The domain of a signature that authorises a node to clear the link
+/// diagnostics records of who it has communicated with
+/// (`dagon_proto::diag::ClearMessage`).
+pub const DIAG_CLEAR_DOMAIN: &[u8] = b"DAGON/DIAGCLR/1";
+
+/// Every domain a DAGON signature is made in. No domain is a prefix of
+/// another, so a signature made in one never verifies in another.
+pub const SIGN_DOMAINS: [&[u8]; 3] = [
+    header::SIGN_DOMAIN,
+    manifest::SIGN_DOMAIN,
+    DIAG_CLEAR_DOMAIN,
+];
+
+/// Why a [`ClearSigner`] made no signature.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SignError {
+    /// The signing key cannot be used (a key store refused, a device
+    /// holding the key is gone).
+    Unavailable,
+}
+
+/// Makes the signatures a host sends to authorise a node, the
+/// counterpart of [`SigVerifier`] on the host. The secret key stays with
+/// the implementation.
+pub trait ClearSigner {
+    /// The `key_id` of the signing key: a node whose verifier has
+    /// another one refuses its signatures.
+    fn key_id(&self) -> [u8; 8];
+
+    /// The 64-byte signature of `domain` followed by every part of `msg`,
+    /// in order.
+    fn sign(&self, domain: &[u8], msg: &[&[u8]]) -> Result<[u8; 64], SignError>;
+}
+
 /// Checks that `signature` signs `domain` || `message` under `verifier`.
 pub fn verify_signed<V: SigVerifier + ?Sized>(
     verifier: &V,
@@ -170,6 +204,17 @@ mod tests {
             assert_eq!(crc32(&data[..n]), crc32_bitwise(&data[..n]), "{n} bytes");
         }
         assert_eq!(core::mem::size_of_val(&CRC_TABLE), 16 * 4);
+    }
+
+    /// A signature made in one domain never verifies in another: the
+    /// domains differ, and none starts another.
+    #[test]
+    fn signing_domains_are_distinct() {
+        for (i, a) in SIGN_DOMAINS.iter().enumerate() {
+            for b in &SIGN_DOMAINS[i + 1..] {
+                assert!(!a.starts_with(b) && !b.starts_with(a), "{a:?} {b:?}");
+            }
+        }
     }
 
     #[test]

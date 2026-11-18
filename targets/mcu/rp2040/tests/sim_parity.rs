@@ -42,6 +42,7 @@ fn relay(h: &mut SimRelay, l: u8, addr: u8, inner: &[u8]) -> (Status, Status) {
         link: l,
         addr,
         timeout_ms: Some(20),
+        inhibit: false,
         inner,
     };
     let want = if cmd::relay_fits(&RELAY_LINKS, max_payload::USB, &r) {

@@ -626,6 +626,7 @@ seed counter                             82 00 00 00 01 00 00 00 FF FF FF FF 00 
 - A timeout of a peer with no ever-communicated record is no sample.
 - A clear appends one erase. A clear that names nothing the fold holds appends nothing.
 - The seed counter starts at 0 with no record. A request appends the counter plus 1 and returns that value only after the append is complete. At 4294967295 it returns no value; the counter never wraps.
+- A seed for a signed clear comes from one of two sources. A counter seed joins the seed counter, the `mcu_id` and the MCU's factory-unique ID: one node never uses a counter value twice, and two nodes differ when the vendor's uniqueness statement for the ID holds. A random seed is 16 bytes of a hardware random driver and is not claimed unique: over n seeds issued under one signing key on all nodes together, the chance that two are equal is at most n(n-1)/2^129, provided the driver meets the entropy statement of the vendor document its MCU definition cites.
 - The cycle-end evaluation appends one DTC state for each DTC it changes.
 
 ### 8.6 Properties

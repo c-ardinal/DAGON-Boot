@@ -14,6 +14,7 @@ mod defs;
 mod demo;
 mod deploy;
 mod device;
+mod diag;
 mod doctor;
 mod esp;
 mod esp_image;

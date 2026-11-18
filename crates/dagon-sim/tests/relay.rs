@@ -126,6 +126,7 @@ impl Pc {
             link: link_on(NODE_I2C_PORT),
             addr,
             timeout_ms: Some(200),
+            inhibit: false,
             inner: &inner,
         }
         .encode(&mut p)
@@ -332,6 +333,7 @@ fn the_relaying_node_says_what_it_serves_and_reads_before_it_acts() {
                 link: bus,
                 addr: NODE_I2C_ADDR,
                 timeout_ms: None,
+                inhibit: false,
                 inner,
             }
             .encode(b)
@@ -756,6 +758,7 @@ fn uart_node_behind_a_lossy_link() {
             link: link_on(WATCH_UART_PORT),
             addr: link::UART_ADDR,
             timeout_ms: Some(500),
+            inhibit: false,
             inner: &inner,
         }
         .encode(&mut p)

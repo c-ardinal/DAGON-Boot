@@ -784,3 +784,73 @@ fn slot_and_kind_help_list_what_the_parser_takes() {
         assert!(help_of("kind").contains(name), "--kind help lacks {name}");
     }
 }
+
+/// Headings and the commands under them, from the text `dagon --help` prints.
+fn help_sections(help: &str) -> Vec<(String, Vec<String>)> {
+    let mut out: Vec<(String, Vec<String>)> = Vec::new();
+    for l in help.lines() {
+        if let Some(name) = l.strip_prefix("  ") {
+            if let Some(last) = out.last_mut() {
+                let first = name.split_whitespace().next().unwrap_or("");
+                last.1.push(first.to_string());
+            }
+        } else if let Some(h) = l.strip_suffix(':') {
+            out.push((h.to_string(), Vec::new()));
+        }
+    }
+    out
+}
+
+#[test]
+fn top_help_lists_the_commands_under_task_headings() {
+    let help = super::command().render_long_help().to_string();
+    let want: Vec<(String, Vec<String>)> = [
+        ("Set up a project", vec!["new", "gen", "key", "doctor"]),
+        (
+            "Build a release",
+            vec!["topo", "build", "image", "release", "provision"],
+        ),
+        (
+            "Write to a node",
+            vec!["flash", "deploy", "apply", "rollback"],
+        ),
+        ("Check a node", vec!["status", "conform"]),
+        ("Tools", vec!["serve", "sim", "ai"]),
+        ("Help", vec!["help"]),
+    ]
+    .into_iter()
+    .map(|(h, c)| (h.to_string(), c.into_iter().map(String::from).collect()))
+    .collect();
+    let mut got = help_sections(&help);
+    let last = got.pop().map(|(h, _)| h);
+    assert_eq!(last.as_deref(), Some("Options"), "{help}");
+    assert_eq!(got, want, "{help}");
+    assert!(help.contains("Usage: dagon"), "{help}");
+    assert!(
+        help.contains("`dagon <command> --help` describes"),
+        "{help}"
+    );
+}
+
+#[test]
+fn headings_cover_every_visible_command_once_in_markdown_order() {
+    let mut root = super::command();
+    root.build();
+    let visible: Vec<String> = root
+        .get_subcommands()
+        .filter(|c| !c.is_hide_set() && c.get_name() != "help")
+        .map(|c| c.get_name().to_string())
+        .collect();
+    let listed: Vec<String> = super::GROUPS
+        .iter()
+        .flat_map(|(_, names)| names.iter())
+        .filter(|n| **n != "help")
+        .map(|n| n.to_string())
+        .collect();
+    assert_eq!(listed, visible);
+    let md = super::markdown();
+    let at = |n: &str| md.find(&format!("## dagon {n}\n")).expect(n);
+    for w in visible.windows(2) {
+        assert!(at(&w[0]) < at(&w[1]), "{} before {}", w[0], w[1]);
+    }
+}

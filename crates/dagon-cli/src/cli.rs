@@ -42,46 +42,52 @@ pub struct Cli {
     pub command: Option<Command>,
 }
 
+/// The task headings of `dagon --help` and the commands under each, in the
+/// order of `Command` (so `help-markdown` follows it). `help` closes the list.
+pub(crate) const GROUPS: &[(&str, &[&str])] = &[
+    ("Set up a project", &["new", "gen", "key", "doctor"]),
+    (
+        "Build a release",
+        &["topo", "build", "image", "release", "provision"],
+    ),
+    ("Write to a node", &["flash", "deploy", "apply", "rollback"]),
+    ("Check a node", &["status", "conform"]),
+    ("Tools", &["serve", "sim", "ai"]),
+    ("Help", &["help"]),
+];
+
+/// The `dagon` command with its commands listed under the `GROUPS` headings;
+/// clap has one subcommand heading per command, so the list is a template.
+pub fn command() -> clap::Command {
+    let cmd = Cli::command();
+    let mut built = cmd.clone();
+    built.build();
+    let about = |name: &str| {
+        let sub = built.find_subcommand(name);
+        sub.and_then(|c| c.get_about()).map(|a| a.to_string())
+    };
+    let width = GROUPS
+        .iter()
+        .flat_map(|(_, names)| names.iter())
+        .map(|n| n.len())
+        .max()
+        .unwrap_or(0);
+    let mut list = String::new();
+    for (heading, names) in GROUPS {
+        list.push_str(&format!("{heading}:\n"));
+        for name in *names {
+            let text = about(name).unwrap_or_default();
+            list.push_str(&format!("  {name:<width$}  {text}\n"));
+        }
+        list.push('\n');
+    }
+    cmd.help_template(format!(
+        "{{about-with-newline}}\n{{usage-heading}} {{usage}}\n\n{list}Options:\n{{options}}{{after-help}}"
+    ))
+}
+
 #[derive(Debug, PartialEq, Subcommand)]
 pub enum Command {
-    /// Make or show the signing key pair
-    #[command(subcommand)]
-    Key(KeyCmd),
-    /// Check or compile a topology
-    #[command(subcommand)]
-    Topo(TopoCmd),
-    /// Sign firmware images
-    #[command(subcommand)]
-    Image(ImageCmd),
-    /// Build a signed release package (.dgb)
-    #[command(subcommand)]
-    Release(ReleaseCmd),
-    /// Make the first-install files of a node from [provision.<node>] in dagon.toml
-    Provision(ProvisionArgs),
-    /// Show HELLO, STATUS and VERSION of the hub and each topology node
-    ///
-    /// Versions of stage0, boot core, app, wire format and MCU.
-    Status(StatusArgs),
-    /// Write a release package to the nodes
-    ///
-    /// Verifies the release, checks it matches the topology, then writes the
-    /// nodes, the node the PC is connected to last.
-    Apply(ApplyArgs),
-    /// Run the 12 conformance tests on a node
-    ///
-    /// Runs through the hub, or with --usb on a node plugged in directly. The
-    /// images folder holds good-a.img and no-confirm-a.img, and good-b.img and
-    /// no-confirm-b.img for a node with app slot B. Writes result.json and
-    /// report.html into --out, else
-    /// into the images folder (default for both: out/conform/<id> next to
-    /// dagon.toml).
-    Conform(ConformArgs),
-    /// Go back to the node's previously confirmed version
-    ///
-    /// Boots the app slot that holds the previously confirmed version and
-    /// confirms it there. A node whose MCU definition gives the app one slot
-    /// has no previous version to go back to.
-    Rollback(RollbackArgs),
     /// Make a project folder
     ///
     /// Writes dagon.toml and topology.yaml (the sample unless --from), and a
@@ -94,18 +100,29 @@ pub enum Command {
     /// Rewrites only wiring.rs and the package line, never app.rs (main.rs
     /// only with --force-main).
     Gen(GenArgs),
+    /// Make or show the signing key pair
+    #[command(subcommand)]
+    Key(KeyCmd),
+    /// Check the tools each MCU family of the topology needs
+    ///
+    /// Then shows each node's versions when a hub is connected.
+    Doctor(DoctorArgs),
+    /// Check or compile a topology
+    #[command(subcommand)]
+    Topo(TopoCmd),
     /// Build each node of [build.<id>] in dagon.toml
     ///
     /// Writes out/build/<id>/app-a.elf, and app-b.elf when the node's MCU
     /// definition gives the app slot B.
     Build(BuildArgs),
-    /// Build, sign, package and write the nodes in one go
-    ///
-    /// Each node's version is its crate's Cargo.toml version. Lists node and
-    /// version and asks first; keeps the package in out/deploy. Each node's
-    /// boot core comes from its boot crate and is written (before its app) only
-    /// when its version differs from the running boot core's.
-    Deploy(DeployArgs),
+    /// Sign firmware images
+    #[command(subcommand)]
+    Image(ImageCmd),
+    /// Build a signed release package (.dgb)
+    #[command(subcommand)]
+    Release(ReleaseCmd),
+    /// Make the first-install files of a node from [provision.<node>] in dagon.toml
+    Provision(ProvisionArgs),
     /// First write of a node, as its MCU definition says
     ///
     /// Writes through a UF2 drive, probe-rs or espflash. Builds the parts (boot
@@ -113,10 +130,37 @@ pub enum Command {
     /// Writes to the one device the writer reports, or the one you choose or
     /// name.
     Flash(FlashArgs),
-    /// Check the tools each MCU family of the topology needs
+    /// Build, sign, package and write the nodes in one go
     ///
-    /// Then shows each node's versions when a hub is connected.
-    Doctor(DoctorArgs),
+    /// Each node's version is its crate's Cargo.toml version. Lists node and
+    /// version and asks first; keeps the package in out/deploy. Each node's
+    /// boot core comes from its boot crate and is written (before its app) only
+    /// when its version differs from the running boot core's.
+    Deploy(DeployArgs),
+    /// Write a release package to the nodes
+    ///
+    /// Verifies the release, checks it matches the topology, then writes the
+    /// nodes, the node the PC is connected to last.
+    Apply(ApplyArgs),
+    /// Go back to the node's previously confirmed version
+    ///
+    /// Boots the app slot that holds the previously confirmed version and
+    /// confirms it there. A node whose MCU definition gives the app one slot
+    /// has no previous version to go back to.
+    Rollback(RollbackArgs),
+    /// Show HELLO, STATUS and VERSION of the hub and each topology node
+    ///
+    /// Versions of stage0, boot core, app, wire format and MCU.
+    Status(StatusArgs),
+    /// Run the 12 conformance tests on a node
+    ///
+    /// Runs through the hub, or with --usb on a node plugged in directly. The
+    /// images folder holds good-a.img and no-confirm-a.img, and good-b.img and
+    /// no-confirm-b.img for a node with app slot B. Writes result.json and
+    /// report.html into --out, else
+    /// into the images folder (default for both: out/conform/<id> next to
+    /// dagon.toml).
+    Conform(ConformArgs),
     /// Start DAGON Console, the browser tool, and its API on 127.0.0.1
     ///
     /// Opens it with a one-time passphrase. The Console verifies releases with
@@ -611,7 +655,7 @@ pub fn parse_error_text(argv: &[String], e: &clap::Error) -> String {
 /// skipped, and the walk stops at the first word that is not a subcommand of
 /// the current command.
 fn ai_key_command(argv: &[String]) -> Option<clap::Command> {
-    let mut cmd = Cli::command();
+    let mut cmd = command();
     cmd.build();
     let mut path = Vec::new();
     for a in argv.iter().skip(1).filter(|a| !a.starts_with('-')) {
@@ -630,7 +674,7 @@ fn ai_key_command(argv: &[String]) -> Option<clap::Command> {
 
 /// Every visible command's full help, one Markdown section each.
 pub fn markdown() -> String {
-    let mut root = Cli::command();
+    let mut root = command();
     root.build();
     let mut out = String::new();
     section(&root, &mut out);

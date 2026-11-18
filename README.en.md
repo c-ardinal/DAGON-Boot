@@ -138,9 +138,11 @@ flowchart LR
 2. Through the hub, the PC sends each microcontroller its new image. Children come first and the hub last.
 3. A microcontroller writes the new image to a slot other than the running one.
 4. The microcontroller starts the new image on trial.
-5. When its self-check passes, it confirms the new version. Otherwise it resets and, with two slots, goes back to the previous version.
+5. The PC sends CONFIRM, and the microcontroller confirms the new version when its self-check (`self_check`) answers healthy. An image that is not confirmed is reset and, with two slots, goes back to the previous version.
 
-What DAGON does not do, and what an image with one slot cannot do, are in [Limitations](https://c-ardinal.github.io/DAGON-Boot/doc/en/explanation/limitations/).
+Each step reaches extensions as an event, and extensions answer the decision points (accepting an update, when to reboot, the self-check). A microcontroller can also confirm by itself instead of the PC (`Confirm::Own`).
+
+What DAGON does not do by design, what the user is responsible for, and where the code differs from the design are in [Limitations](https://c-ardinal.github.io/DAGON-Boot/doc/en/explanation/limitations/).
 
 ## DAGON's design information
 

@@ -100,5 +100,6 @@ These steps are for firmware that is not a `dagon new` project.
    }
    ```
 
-6. Feed the watchdog: all the time while confirmed, and only for a limited time while on trial. An image that is never confirmed is then reset and, with two slots, goes back to the previous version.
-7. Check the port with `dagon conform`.
+6. Feed the watchdog only through liveness. Register each task's `Level` with a `dagon_mcu_common::guard::Guard`; each task reports `busy` when it starts a piece of work and `idle` when it waits for the next one. `Guard::feed` feeds only while every task is within the deadline of its current work, so a stuck task stops the feeding and the chip resets. On trial, the `Trial` policy decides (`FeedUntilMs`: feed for a while after boot; `NeverFeed`: never feed). An image that is never confirmed is reset and, with two slots, goes back to the previous version.
+7. Choose who confirms with `Confirm`. With the default `Confirm::ByHost`, the host sends CONFIRM and the node confirms when its `self_check` decision answers healthy. With `Confirm::Own`, the start runs `self_check` and confirms by itself after the board's bring-up and before the link serves; this is for a node used without a host, and the host's CONFIRM still works. When you use the agent directly, `Agent::confirm_own` confirms by itself.
+8. Check the port with `dagon conform`.

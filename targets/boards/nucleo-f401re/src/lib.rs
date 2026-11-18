@@ -1,5 +1,5 @@
 //! DAGON board package for the NUCLEO-F401RE (topology board id
-//! `nucleo-f401re`): 512 KiB flash, LD2, DAGON's link to the neighbour toward the PC as an I2C
+//! `nucleo-f401re`): 512 KiB flash, LD2, DAGON's link to the node nearer the PC as an I2C
 //! target on I2C3. Every board fact (pins, buses, the link address, the
 //! boot LED) is read from `dagon-board.toml` when the package builds
 //! ([`def`]); nothing here repeats one.

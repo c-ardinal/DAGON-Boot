@@ -24,7 +24,7 @@ pub fn self_check() -> bool {
 /// `static EXTS: StaticCell<..>`) to observe every update event (transfer,
 /// written, trial, confirmed, rolled back) and answer the decision points;
 /// `confirm: Confirm::Own` confirms a version on trial at start, without
-/// the neighbour toward the PC. The start returns the node's events for your display or log
+/// the node nearer the PC. The start returns the node's events for your display or log
 /// tasks.
 pub fn dagon() -> App {
     App::new(self_check)

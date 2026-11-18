@@ -779,6 +779,7 @@ REGIONS = [
     ("reference/topology.md", "dagon-topology's End", lambda lang: field_table(rust_struct(SCHEMA, "End"), lang) + "\n"),
     ("how-to/swap-link.md", "dagon_format::with_link_kinds!", kinds_sentence),
     ("explanation/limitations.md", "the MCU definitions' [links]", firmware_kinds),
+    ("explanation/limitations.md", "site/scripts/architecture.py", architecture.gap_list),
     ("explanation/index.md", "site/scripts/architecture.py", lambda lang: f"<div>{architecture.node_svg(lang)}</div>\n\n{architecture.component_table(lang)}"),
 ]
 

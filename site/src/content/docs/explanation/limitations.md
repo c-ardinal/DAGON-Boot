@@ -34,7 +34,6 @@ description: "設計との違いと、DAGONがしないことです。仕様上�
 拡張の隔離:
 
 - ESP32-S3の隔離のレベルは`none`です。PMSとWCLのレジスタをプログラムするコードがありません。
-- 実行時のサンドボックスはありません（Service ABI、Entry Gate、Operation Cancellation、Fault Unwind、Lockup Fuse、Reset Cleanup、SandboxArch）。定義の検査と保護マップの生成はあります。
 - 保護マップを生成できる種類は`armv6m-mpu`と`armv7m-mpu`だけです。
 
 リンク:
@@ -48,23 +47,31 @@ description: "設計との違いと、DAGONがしないことです。仕様上�
 - マイコンの識別は手で割り当てた16ビットの`wire_id`です。イメージのヘッダ、識別の返答、VERSIONの0x06、構成のノードが持ちます。設計の、名前のハッシュから導く64ビットの識別ではありません。
 - VERSIONが答えるのはid 0x01、0x06、0x0A、0x0B、0x0C、0x0Dだけです。空でないリクエストは拒みます。
 
-署名の鍵:
-
-- 署名の鍵はファイルからだけ読みます。環境変数`DAGON_SIGNING_KEY`が持つのもファイルのパスです。ほかの手段（環境変数、OSのキーストア、1Passwordなど）をポートで選ぶことはできません。
-
 値とID:
 
 - USBのVID:PID `c0de:cafe`は試験用のIDで、コードに固定されています。割り当てを受けたものではありません。
 - DAGONのマイコンの定義には、`unverified`の印が付いた値があります。
 - 実行モデルの上限（[12節](/explanation/lifecycle-events/#12-実行モデル)）は、12.3の決め方で決めた値ではありません。
 
-設計の図にあってコードに無いコンポーネント:
+設計の構成要素のうち、コードとの差異があるもの:
 
-- 置き換えのトレイトが無いポート: BuildRunner、Signer、DecisionPolicy、LogStorage、UpdateProtocol、Recovery、ImageVerifier、Digest、CryptoProvider、Diagnostics、Display、LogSink、Agent、Action
-- 親機: Coordinator、Release Store、Bus Guardian。書き込みはPCが親機を通して進めます。
-- 書き込みの計画: Delivery Planの試行の時間枠と昇格の判断
-- 復旧: Recovery PolicyとNode Recoveryの、段階の自動の選択と回数に上限のある再試行
-- ホスト: Host Machines、Host Extension Chain、Action Definitions
-- ブート: Boot Record Writer、Boot Action Interpreter
-- Retained Codecs: ブート記録とロックアップヒューズの形式は、実行可能なモデルの中にだけあります。ファームウェアにはありません。
-- 構成の本体: ファームウェアの形式は`dagon-format`のもの（先頭32バイト、ノード32バイト）で、[保持と永続の形式](/explanation/retained-formats/)の形式ではありません。親機は1つの領域に保存し、2バンクの置き換えはありません。
+<!-- generated from dagon_events::PORTS: DAGON_BLESS=1 cargo test -p dagon-catalog --test docs -->
+- 置換用のトレイトがコードに存在しないポート: `UpdateProtocol`、`Digest`、`CryptoProvider`、`DecisionPolicy`、`LogStorage`、`Recovery`、`Diagnostics`、`Display`、`LogSink`、`Signer`、`KeyStore`、`BuildRunner`、`Agent`、`Action`
+- `KeyStore`: CLIの署名鍵の取得元はファイルのみです。`--key`と`DAGON_SIGNING_KEY`はいずれもファイルのパスの指定です。
+- `BootRecord`: ファームウェアはブート記録を保存しません。その形式の存在箇所は実行可能モデル（`dagon-retained-model`）のみです。
+- `Sandbox`: 実行時のサンドボックスは存在しません（Service ABI、Entry Gate、Operation Cancellation、Fault Unwind、Lockup Fuse、Reset Cleanup、SandboxArch）。定義の検査と保護マップの生成は実装済みです。
+<!-- end of generated list -->
+<!-- generated from site/scripts/architecture.py: python site/scripts/gen.py -->
+- Host Extension Chain: コードに存在しません。
+- Action Definitions: コードに存在しません。
+- Host Machines: コードに存在しません。
+- AI Agent Link: `dagon serve`にボード移植の作業は存在しません。`POST /v1/ai/port`の応答は501です。
+- Boot Action Interpreter: コードに存在しません。
+- Coordinator: 親機は保存済みリリースを実行しません。書き込みはPCが親機を経由して進行します。
+- Release Store: コードに存在しません。
+- Node Recovery: 回数上限付きの再試行は存在しません。
+- Bus Guardian: コードに存在しません。
+- Delivery Plan: 試行の時間枠と昇格の判定はコードに存在しません。
+- Recovery Policy: 復旧段階の自動選択は存在しません。
+- Retained Codecs: ファームウェアに保持形式のコーデックは存在しません。ロックアップヒューズの形式の存在箇所は実行可能モデルのみです。構成本体の形式は`dagon-format`の形式（先頭32バイト、ノード32バイト）で、[保持と永続の形式](/explanation/retained-formats/)の形式ではありません。親機の保存先は単一の領域で、2バンクの置換は存在しません。
+<!-- end of generated table -->

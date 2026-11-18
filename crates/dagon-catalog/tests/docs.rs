@@ -7,7 +7,9 @@ use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
-use dagon_catalog::{conflicts, design_ports_table, events_md, machines, ports_md, Lang, REGISTRY};
+use dagon_catalog::{
+    conflicts, design_ports_table, events_md, gaps_md, machines, ports_md, InTree, Lang, REGISTRY,
+};
 use dagon_events::{state_machine, Layer, PORTS};
 
 const BLESS: &str = "`DAGON_BLESS=1 cargo test -p dagon-catalog --test docs`";
@@ -115,6 +117,64 @@ fn the_design_port_table_is_generated() {
     }
 }
 
+/// The limitations page lists what the tree lacks of the catalog, between
+/// its markers; the rest of the page is written by hand.
+#[test]
+fn the_limitations_gap_list_is_generated() {
+    const BEGIN: &str =
+        "<!-- generated from dagon_events::PORTS: DAGON_BLESS=1 cargo test -p dagon-catalog --test docs -->\n";
+    const END: &str = "<!-- end of generated list -->\n";
+    let (ja, _) = with_japanese(|lang| gaps_md(PORTS, lang));
+    for (page, list) in [
+        ("site/src/content/docs/explanation/limitations.md", ja),
+        (
+            "site/src/content/docs/en/explanation/limitations.md",
+            gaps_md(PORTS, Lang::En),
+        ),
+    ] {
+        let text = read(page);
+        let a = text
+            .find(BEGIN)
+            .unwrap_or_else(|| panic!("{page}: no gap list marker {BEGIN}"))
+            + BEGIN.len();
+        let b = a + text[a..].find(END).expect("the gap list's end marker");
+        let mut whole = text.clone();
+        whole.replace_range(a..b, &list);
+        check(page, &whole);
+    }
+}
+
+/// Every item the catalog says the tree has is declared in its crate (a
+/// trait, a type or a machine), so a rename or removal fails here.
+#[test]
+fn what_the_catalog_says_the_tree_has_is_there() {
+    for p in PORTS {
+        let InTree::Has(paths) = p.in_tree else {
+            continue;
+        };
+        assert!(!paths.is_empty(), "{}", p.id);
+        for path in paths {
+            let (krate, item) = path.split_once("::").expect("crate::Item");
+            let src = root()
+                .join("crates")
+                .join(krate.replace('_', "-"))
+                .join("src");
+            let declared = rust_files(&src).iter().any(|f| {
+                let text = std::fs::read_to_string(f).unwrap_or_default();
+                ["trait", "struct", "machine"].iter().any(|k| {
+                    text.contains(&format!("{k} {item} ")) || text.contains(&format!("{k} {item}<"))
+                })
+            });
+            assert!(
+                declared,
+                "{}: {path} is not declared in {}",
+                p.id,
+                src.display()
+            );
+        }
+    }
+}
+
 /// A new or changed description fails until it is translated, and the
 /// table holds nothing the catalogs no longer say.
 #[test]
@@ -123,6 +183,7 @@ fn the_japanese_table_is_exactly_what_the_catalogs_say() {
         events_md(&machines(), lang);
         ports_md(PORTS, lang);
         design_ports_table(PORTS, lang);
+        gaps_md(PORTS, lang);
     });
     let have: BTreeSet<String> = ja_table().into_keys().collect();
     let missing: Vec<_> = asked.difference(&have).collect();

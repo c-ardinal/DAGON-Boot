@@ -131,3 +131,6 @@
 "where images live" = "イメージの置き場所"
 "receives the signing key from where the user chose to keep it (an environment variable, the OS key store, 1Password and so on)" = "利用者が選んだ置き場所（環境変数、OSのキーストア、1Passwordなど）から署名の鍵を受け取る"
 "where the state log lives" = "状態ログの置き場所"
+"There is no sandbox at run time (Service ABI, Entry Gate, Operation Cancellation, Fault Unwind, Lockup Fuse, Reset Cleanup, SandboxArch). Definitions are checked and protection maps are generated." = "実行時のサンドボックスは存在しません（Service ABI、Entry Gate、Operation Cancellation、Fault Unwind、Lockup Fuse、Reset Cleanup、SandboxArch）。定義の検査と保護マップの生成は実装済みです。"
+"The firmware writes no boot record: its format exists only in the executable model (`dagon-retained-model`)." = "ファームウェアはブート記録を保存しません。その形式の存在箇所は実行可能モデル（`dagon-retained-model`）のみです。"
+"The CLI reads the signing key only from a file: `--key` and `DAGON_SIGNING_KEY` each name a file's path." = "CLIの署名鍵の取得元はファイルのみです。`--key`と`DAGON_SIGNING_KEY`はいずれもファイルのパスの指定です。"

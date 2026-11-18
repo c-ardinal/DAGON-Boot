@@ -9,7 +9,7 @@ const job = (p: Partial<Job>): Job => ({ id: 7, kind: 'flash', state: 'queued', 
 const html = (j: Job | null, canWrite = true) =>
   render(FactoryModal, {
     props: {
-      node: { label: '[1] メイン', target: '[1] メイン（ホスト側）· Waveshare RP2040-Touch-LCD' },
+      node: { label: '[1] メイン', target: '[1] メイン（コーディネータ）· Waveshare RP2040-Touch-LCD' },
       how: { label: 'USB', hint: 'BOOTSELを押下した状態でUSBを接続' },
       canWrite,
       job: j,
@@ -38,7 +38,7 @@ describe('direct writing modal of a node', () => {
       },
     }).body;
 
-  test('says it is written directly because the hub does not reach it, and how to connect it', () => {
+  test('says it is written directly because the node connected to the PC does not reach it, and how to connect it', () => {
     const b = child(null);
     expect(b).toContain('[2] 7セグ（1段目）');
     expect(b).toContain(fill(WRITE.factory.childIntro, { node: '[2] 7セグ' }));
@@ -119,7 +119,7 @@ describe('the modal press is the consent serve asks for', () => {
     expect(answerConsent(job({ kind: 'build', state: 'question', question: { id: 'q', text: '?' } }), answer, seen)).toBe(false);
     expect(answer).not.toHaveBeenCalled();
   });
-  test('以降の手順 is for the hub: a node goes on from its own card', () => {
+  test('以降の手順 is for the node connected to the PC: a node goes on from its own card', () => {
     const props = { node: { label: '[2] seg', target: '[2] seg' }, how: [], canWrite: true, job: null, onwrite: () => undefined, oncancel: () => undefined, onclose: () => undefined, onmore: () => undefined } as never;
     expect(render(FactoryModal, { props }).body).toContain(WRITE.factory.after);
     expect(render(FactoryModal, { props: { ...(props as object), child: true } as never }).body).not.toContain(WRITE.factory.after);

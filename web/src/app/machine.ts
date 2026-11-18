@@ -50,7 +50,7 @@ export interface Spec {
 }
 
 const toLost = { lost: 'lost' } as const;
-/** Connected and idle: the header's 切断 releases the hub. */
+/** Connected and idle: the header's 切断 releases the node connected to the PC. */
 const leave = { lost: 'lost', disconnect: 'idle' } as const;
 
 export const MACHINE: Record<L, Spec> = {
@@ -67,7 +67,7 @@ export const MACHINE: Record<L, Spec> = {
   portFailed: { step: 1, primary: (c) => (c.failure === 'unavailable' ? 'reload' : 'connect'), on: { connect: 'choosing' } },
   checking: {
     step: 1,
-    // The 構成 is the project's YAML: connecting never asks whether the hub holds it.
+    // The 構成 is the project's YAML: connecting never asks whether the node connected to the PC holds it.
     on: { noAnswer: 'silentHub', helloDiscover: 'scanning', helloConfigured: 'ready', ...leave },
   },
   silentHub: { step: 1, primary: 'reselect', on: { reselect: 'choosing' } },
@@ -98,12 +98,12 @@ export const MACHINE: Record<L, Spec> = {
   },
   fileReady: { step: 5, primary: 'update', secondary: ['otherFile'], on: { recover: 'recovering', update: 'writing', otherFile: 'reading', watchAlarm: 'nodesSilent', ...leave } },
   writing: { step: 5, on: { hubTurn: 'hubRestarting', nodeStuck: 'stopped', doneNoHub: 'done', ...toLost } },
-  // nodeStuck: the hub came back in time but on its previous version.
+  // nodeStuck: the node connected to the PC came back in time but on its previous version.
   hubRestarting: { step: 5, on: { confirmed: 'done', autoFailed: 'reconnectNeeded', nodeStuck: 'stopped' } },
   reconnectNeeded: { step: 5, primary: 'reconnect', on: { reconnect: 'reconnectNeeded', reconnected: 'done', revertedOnReconnect: 'stopped' } },
   stopped: { step: 5, primary: 'recover', on: { recover: 'recovering', ...leave } },
   done: { step: 6, secondary: ['otherFile'], on: { recover: 'recovering', watchAlarm: 'nodesSilent', rollback: 'recovering', otherFile: 'reading', ...leave } },
-  // hubTurn: recovering or rolling back the hub reboots it; reconnecting is hubRestarting / reconnectNeeded's.
+  // hubTurn: recovering or rolling back the node connected to the PC reboots it; reconnecting is hubRestarting / reconnectNeeded's.
   recovering: { step: 'recover', on: { fixedNoRest: 'done', fixedRest: 'fileReady', gaveUp: 'recoverFailed', hubTurn: 'hubRestarting', ...toLost } },
   recoverFailed: { step: 'recover', primary: 'recoverAgain', on: { recoverAgain: 'recovering', ...leave } },
   lost: { step: 1, primary: 'reconnect', on: { reconnect: 'choosing' } },
@@ -151,11 +151,11 @@ export function hubOf(s: L): HubState {
 /**
  * States in which the header's 接続 / 切断 cannot be used:
  * choosing or scanning, updating, reconnecting, recovering, and the
- * CLI holding the hub.
+ * CLI holding the node connected to the PC.
  */
 export const HUB_LOCKED: ReadonlySet<L> = new Set(['choosing', 'scanning', 'writing', 'hubRestarting', 'reconnectNeeded', 'recovering', 'cliTurn']);
 
 /** States in which nodes are watched every round (no transfer running). */
-/** States a write of one node can start in (the hub answers, nothing runs). */
+/** States a write of one node can start in (the node connected to the PC answers, nothing runs). */
 export const NODE_WRITE: ReadonlySet<L> = new Set(['ready', 'nodesSilent', 'fileReady', 'done', 'stopped', 'recoverFailed']);
 export const WATCHED: ReadonlySet<L> = new Set(['ready', 'nodesSilent', 'fileReady', 'done']);

@@ -34,7 +34,7 @@ export interface LockInput {
   /** The 構成 has an edit not saved yet (it saves by itself within about 0.5 s). */
   unsaved: boolean;
   connecting: boolean;
-  /** No hub is connected. */
+  /** No node is connected to the PC. */
   disconnected: boolean;
   /** DAGON is waiting for its agent's answer. */
   thinking: boolean;

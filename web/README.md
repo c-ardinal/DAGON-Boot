@@ -40,16 +40,16 @@ npm run e2e       # the Console in a real browser: the layout sweep over window 
 npm run fonts     # re-fetch the font subsets after screen text changes
 ```
 
-Query parameters for development (`npm run dev` only; production builds leave the stand-in hub out):
+Query parameters for development (`npm run dev` only; production builds leave the stand-in node out):
 
 | Parameter | Effect |
 |---|---|
-| `?mock` | Uses an in-memory hub instead of Web Serial: the sample hub, the 7-segment node on I2C 0x42 and the watch on UART, all on 1.0.0. It answers HELLO, STATUS, RELAY to the two nodes and the update steps (XFER, SET_PENDING, REBOOT, CONFIRM, SHOW), so finding, sending, monitoring and updating run through `dagon-host` unchanged. Pick `crates/dagon-sim/fixtures/sample-1.1.0.dgb` as the update file. |
+| `?mock` | Uses an in-memory node connected to the PC instead of Web Serial: the sample coordinator, the 7-segment node on I2C 0x42 and the watch on UART, all on 1.0.0. It answers HELLO, STATUS, RELAY to the two nodes and the update steps (XFER, SET_PENDING, REBOOT, CONFIRM, SHOW), so finding, sending, monitoring and updating run through `dagon-host` unchanged. Pick `crates/dagon-sim/fixtures/sample-1.1.0.dgb` as the update file. |
 | `?mock=silent` | In-memory device that never answers (no-response path). |
-| `&quiet=uart,i2c:66` | With `?mock`: these nodes do not answer RELAY (not-answering path after two monitoring rounds; `quiet=uart,i2c:66` is the hub alone). |
-| `&away` | With `?mock`: after its REBOOT the hub stays away until chosen again (the reconnect dialog, after the 45 s automatic reopening). |
+| `&quiet=uart,i2c:66` | With `?mock`: these nodes do not answer RELAY (not-answering path after two monitoring rounds; `quiet=uart,i2c:66` is the node connected to the PC alone). |
+| `&away` | With `?mock`: after its REBOOT the node connected to the PC stays away until chosen again (the reconnect dialog, after the 45 s automatic reopening). |
 | `&factory=uart` | With `?mock`: these nodes answer as their factory agent (recovery takes the factory path). |
-| `?sim` | The simulator (`crates/dagon-sim` through dagon-wasm's `Simulator`, `sim` feature): hub, F401 with its ROM loader, watch. It runs on the wall clock and each answer takes the links' and flash's time (dagon-sim's `TimedRelay`), so a write runs about as long as on hardware. `&wipe` erases the F401 first, so "7セグへの書込" takes the ROM path. |
+| `?sim` | The simulator (`crates/dagon-sim` through dagon-wasm's `Simulator`, `sim` feature): the coordinator, F401 with its ROM loader, watch. It runs on the wall clock and each answer takes the links' and flash's time (dagon-sim's `TimedRelay`), so a write runs about as long as on hardware. `&wipe` erases the F401 first, so "7セグへの書込" takes the ROM path. |
 
 With `?mock` and `?sim` (no serve behind the dev server) the repository's test-key release
 (`crates/dagon-sim/fixtures/sample-full-1.1.0.dgb`, the apps at their real size) and F401 boot core
@@ -57,7 +57,7 @@ With `?mock` and `?sim` (no serve behind the dev server) the repository's test-k
 hands out (GET /v1/release/latest, GET /v1/bootcore/{node}), and the start screen's 空白から作成 / サンプルから作成
 start an unsaved 構成 on the page. Production builds leave every stand-in out.
 
-A simulated hub plugs in as one more `Transport` in `src/serial/devHub.ts`, under its own parameter.
+A simulated node connected to the PC plugs in as one more `Transport` in `src/serial/devHub.ts`, under its own parameter.
 
 ## Layout
 
@@ -66,13 +66,13 @@ A simulated hub plugs in as one more `Transport` in `src/serial/devHub.ts`, unde
 | `src/serial/frame.ts` | DAGON link v1 frame field names and split; encoding, CRC and the stream cutter are `crates/dagon-proto` through dagon-wasm (tests compare against `crates/dagon-format/golden/frame_*.bin`). |
 | `src/serial/transport.ts` | `Transport` (open / close / write frame / read frame with timeout) and the Web Serial implementation. |
 | `src/serial/hello.ts` | HELLO payload types and the response encoder the mock uses. |
-| `src/serial/mock.ts` | In-memory hub (see `?mock`) in the same frame format. |
-| `src/serial/devHub.ts` | Picks the stand-in hub from the page URL. |
+| `src/serial/mock.ts` | In-memory node connected to the PC (see `?mock`) in the same frame format. |
+| `src/serial/devHub.ts` | Picks the stand-in node connected to the PC from the page URL. |
 | `src/serial/simHub.ts` | The simulator as a `Transport` and clock (builds with the `sim` feature). |
-| `src/serial/hostLink.ts` | The byte link `dagon-host` runs on, over a `Transport`; the device under it can be replaced (the hub chosen again after its reboot). |
+| `src/serial/hostLink.ts` | The byte link `dagon-host` runs on, over a `Transport`; the device under it can be replaced (the node connected to the PC chosen again after its reboot). |
 | `src/wasm/dagon.ts` | The only entry to `crates/dagon-wasm`: frame encoding and stream cutting, HELLO request / response, version text, board table, topology check and compile, release verification. `src/wasm/pkg/` is build output and not committed. |
 | `src/app/machine.ts` | Operating-mode state machine: states, main and side actions, transitions (`machine.test.ts` checks one main action at most and no dead ends). |
-| `src/app/operate.svelte.ts` | The operating-mode session: connect, find, send, monitoring every `watch_interval_ms()`, release check and update (`apply`, hub reconnect, confirm rule), one node's write (`writeNode`: re-transfer, factory, ROM path after the question) and going back (`rollback`), all through `dagon-host` in `dagon-wasm`. |
+| `src/app/operate.svelte.ts` | The operating-mode session: connect, find, send, monitoring every `watch_interval_ms()`, release check and update (`apply`, reconnecting the node connected to the PC, confirm rule), one node's write (`writeNode`: re-transfer, factory, ROM path after the question) and going back (`rollback`), all through `dagon-host` in `dagon-wasm`. |
 | `src/app/band.ts` | Bottom band per state: cause chip, sentence, named buttons. |
 | `src/app/sample.ts` | The sample 構成 (`topology/sample.yaml` plus names and wiring). |
 | `src/app/connect.ts` | Device chooser and error mapping. |
@@ -80,7 +80,7 @@ A simulated hub plugs in as one more `Transport` in `src/serial/devHub.ts`, unde
 | `src/graph/` | The graph: own SVG (wire bundles, ties) + HTML (nodes, chips, ports) under a view only pan, zoom and fit change; links are damped cables (`cable.ts`); roving focus with arrow keys. |
 | `src/app/start.svelte.ts` | The start screen: making and opening projects through serve (GET /v1/project, GET /v1/fs, POST /v1/project/open, /new). |
 | `src/app/define/` | 準備: the document and its history, the check's problems, the 構成 differences of a release (otherTopology), and the serve link (`cli.svelte.ts`: passphrase, API, events, saving the YAML). |
-| `src/screens/` | Header, menu popover and its restart dialog, start screen, bottom band, the columns over the canvas (focal number, parts, detail, zoom, notices), hub reconnect dialog; `define/` holds 準備's columns. |
+| `src/screens/` | Header, menu popover and its restart dialog, start screen, bottom band, the columns over the canvas (focal number, parts, detail, zoom, notices), the reconnect dialog of the node connected to the PC; `define/` holds 準備's columns. |
 | `src/styles/tokens.css` | Design tokens: colour, type, spacing, radius, z-index, motion. |
 
 `Transport` carries whole frames: the page owns choosing and opening the device, and the protocol
@@ -104,7 +104,7 @@ DAGON_PUBKEY=../keys/dagon.pub npm run build
 
 Without it (and without `DAGON_ALLOW_TEST_KEY=1`) `npm run wasm` and `npm run build` stop. `npm test` and `npm run dev` build with
 `DAGON_ALLOW_TEST_KEY=1` and the `sim` feature (`npm run wasm:dev`): when `DAGON_PUBKEY` is unset
-they use the public RFC 8032 test key, which the stand-in hubs' release (`crates/dagon-sim/fixtures`)
+they use the public RFC 8032 test key, which the stand-in nodes' release (`crates/dagon-sim/fixtures`)
 is signed with, and the build warns. `npm run build` leaves the simulator out.
 
 ## Web Serial on http://127.0.0.1

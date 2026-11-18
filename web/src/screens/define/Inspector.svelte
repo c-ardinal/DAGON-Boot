@@ -50,7 +50,7 @@
   const hub = $derived(t.nodes.find((n) => n.role === 'coordinator'));
   /** The bus speeds every node on the selected bus names in its MCU definition: the only ones it may be set to. */
   const hzs = $derived(bus ? i2cHzs(busNodes(t, bus.id)) : []);
-  /** The hub's own pins: what a bus or a link from it may be set to (the check refuses any other). */
+  /** The coordinator's own pins: what a bus or a link from it may be set to (the check refuses any other). */
   const hubPins = $derived(definedPins(hub));
   const MAX_ATTEMPTS = [1, 2, 3, 4, 5];
   const nodeLink = $derived(node ? linkIndexOf(t, node.id) : -1);
@@ -59,7 +59,7 @@
   const byId = (id: string) => t.nodes.find((n) => n.id === id);
   const HOSTS: UplinkHost[] = ['pc-cli', 'browser', 'embedded'];
   const kindOption = (k: Kind, ok: boolean) => (ok ? kindChoice(k) : INSPECT.unavailableOption(kindChoice(k)));
-  /** A hub's uplink: the kinds its MCU definition offers upwards, and the one the 構成 writes when it is not among them. */
+  /** A coordinator's uplink: the kinds its MCU definition offers upwards, and the one the 構成 writes when it is not among them. */
   const uplinkKinds = (mcu: string, current: Kind): Kind[] => {
     const up: Kind[] = linkKinds(mcu).up;
     return up.includes(current) ? up : [...up, current];
@@ -71,7 +71,7 @@
     return d.problems.filter((p) => p.select === d.selected && (p.field === field || p.field.startsWith(`${field}.`)));
   }
 
-  /** Who else uses hub GPIO `n` (the wiring table's in-use note). */
+  /** Who else uses coordinator GPIO `n` (the wiring table's in-use note). */
   function usedBy(n: number, self: string): string | null {
     for (const l of (t.links ?? []).map((x) => linkView(t, x))) {
       if (`${l.to}.nrst` !== self && l.nrst === n) return `${name(l.to)}の${INSPECT.reset}`;
@@ -149,7 +149,7 @@
           onchange={(e) => {
             const parent = e.currentTarget.value;
             const current = nodeLink >= 0 ? linkView(t, (t.links ?? [])[nodeLink]).from : '';
-            // The same parent again changes nothing: the link keeps its settings.
+            // The same node nearer the PC again changes nothing: the link keeps its settings.
             if (parent === current) return;
             // なし removes the link: that is a deletion, so it asks first like every other; until the answer the control shows the true value.
             if (!parent) {
@@ -164,7 +164,7 @@
           {#each t.nodes.filter((x) => x.id !== node.id) as p (p.id)}<option value={p.id}>{name(p.id)}</option>{/each}
         </select></label
       >
-      <!-- A hub linked from another node has that node above it (上位ノード); one nobody links to has its own uplink. -->
+      <!-- A coordinator linked from another node has that node above it (PC側のノード); one nobody links to has its own uplink. -->
       {#if node.role === 'coordinator' && nodeLink < 0}
         {@const up = node.uplink ?? { kind: LinkKind.UsbCdc, host: 'pc-cli' as UplinkHost }}
         <label

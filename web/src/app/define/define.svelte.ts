@@ -156,7 +156,7 @@ export class Define {
 
   /**
    * A part dropped on the canvas: placed as "配置" places it (DEFS: the board decides
-   * hub or node), then, when dropped just under a card, linked under it in the same one edit.
+   * coordinator or node), then, when dropped just under a card, linked under it in the same one edit.
    */
   placeAt(part: { board: string } | { mcu: string }, name: string, parent: string | null): void {
     const r = 'board' in part ? place(this.doc, part.board) : placeMcu(this.doc, part.mcu);
@@ -167,7 +167,7 @@ export class Define {
     this.status = ANNOUNCE.placed(name, next.topo.nodes.find((n) => n.id === r.id)!.role === 'coordinator');
   }
 
-  /** A port drag: node `id` under `parent`, with the link "上位ノード" would make. */
+  /** A port drag: node `id` under `parent`, with the link "PC側のノード" would make. */
   link(id: string, parent: string): void {
     this.apply(connect(this.doc, id, parent));
   }

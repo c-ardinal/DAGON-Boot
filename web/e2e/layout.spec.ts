@@ -211,7 +211,7 @@ test('Escape closes the open bubble wherever focus is, before anything under it'
   await expect(page.locator('.float.sheet')).toHaveCount(0);
 });
 
-test('上位ノード なし asks first; cancelling shows the true parent, and picking it again keeps the link as it is', async ({ page }) => {
+test('PC側のノード なし asks first; cancelling shows the true node nearer the PC, and picking it again keeps the link as it is', async ({ page }) => {
   await page.setViewportSize({ width: 1920, height: 1080 });
   await openSample(page);
   await page.locator('.node').nth(1).dispatchEvent('click');

@@ -45,7 +45,7 @@ describe('bottom band', () => {
     expect(b.secondary).toEqual([]);
   });
 
-  test('simulated: before connecting, the band says no device list appears for the simulated hub', () => {
+  test('simulated: before connecting, the band says no device list appears for the simulated PC-connected node', () => {
     for (const st of ['idle', 'choosing'] as const) {
       expect(bandOf(st, { hasConfig: true }, { sim: true }).sentence).toBe(SIM.connect.sentence);
     }

@@ -13,7 +13,7 @@ const filled = [
   copy.BUTTON_FOR.updateResponding(2),
   copy.CANVAS.dotRespondingName(3, 3),
   copy.CANVAS.dotFoundName(3),
-  copy.NODE.name({ name: '7セグ', product: 'NUCLEO-F401RE', mcu: 'STM32F401RE', role: '1段目', via: '上位ノードとI2C 0x42', state: '応答あり', version: '1.0.0' }),
+  copy.NODE.name({ name: '7セグ', product: 'NUCLEO-F401RE', mcu: 'STM32F401RE', role: '1段目', via: 'PC側のノードとI2C 0x42', state: '応答あり', version: '1.0.0' }),
   copy.LINK.bundle('I2C', 5, 3),
   copy.LINK.name('I2C · 5本（うち共有3）', 'メイン', '7セグ', '0x42'),
   copy.DETAIL.ms(8),

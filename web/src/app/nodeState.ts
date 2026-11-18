@@ -15,7 +15,7 @@ export const STATE_ICON = {
 } as const satisfies Record<NodeState, string>;
 
 export interface StateInput {
-  /** The page is connected to the hub. */
+  /** The page is connected to the node connected to the PC. */
   connected: boolean;
   /** Last watch result: null before the first answer or miss. */
   responding?: boolean | null;

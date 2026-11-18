@@ -1,7 +1,7 @@
 // The link to `dagon serve`: the passphrase from
 // the URL fragment kept in sessionStorage, API calls with it as a Bearer
 // token, and the event WebSocket for job progress, logs, results, questions
-// and the hub hand-over. Keys never come here: hello reports only whether
+// and the coordinator hand-over. Keys never come here: hello reports only whether
 // a key exists and its id. Paths are never sent (serve takes them from
 // dagon.toml) except where to open or make a project, chosen from serve's own
 // GET /v1/fs list.
@@ -156,7 +156,7 @@ export class Cli {
   /** The open project's definitions did not load (GET /v1/definitions 500): the builtin set is not used in their place. */
   defsFailed = $state(false);
   jobs = $state<Job[]>([]);
-  /** CLI asked for the hub's port (device.need) and has not returned it yet. */
+  /** CLI asked for the coordinator's port (device.need) and has not returned it yet. */
   holdsHub = $state(false);
 
   private pass: string | null = null;
@@ -167,7 +167,7 @@ export class Cli {
    * (the page has shown why). Every job asks it in `start`.
    */
   guard: (kind: 'gen' | 'build' | 'release' | 'flash') => boolean = () => false;
-  /** Called when the CLI needs the hub (the page closes Web Serial first) and when it returns it. */
+  /** Called when the CLI needs the coordinator (the page closes Web Serial first) and when it returns it. */
   onDevice: (need: boolean) => void | Promise<void> = () => undefined;
 
   constructor(deps: CliDeps = {}) {

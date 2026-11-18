@@ -173,7 +173,7 @@ describe('define session', () => {
     d.apply(setLink(d.doc, 0, 'addr', 0x39));
     expect(d.operable).toBe('problems');
     d.undo();
-    // A second hub over CAN: valid, a part updating skips (V-23, information).
+    // A second coordinator over CAN: valid, a part updating skips (V-23, information).
     const r = placeMcu(d.doc, 'rp2040');
     d.apply(connect(setNode(r.doc, r.id, 'role', 'coordinator'), r.id, 'hub'));
     expect(d.errors).toBe(0);
@@ -216,10 +216,10 @@ describe('define session', () => {
     );
     expect(d.importYaml(espHub)).toBe(true);
     const p = d.problems.find((x) => x.rule === 'V-25')!;
-    expect([p.short, p.sentence]).toEqual(['ホスト側ノードに不適合のマイコン', 'hubの代替として、ホスト側ノードに適合するマイコンのノードをホスト側ノードにしてください。']);
+    expect([p.short, p.sentence]).toEqual(['コーディネータに不適合のマイコン', 'hubの代替として、コーディネータに適合するマイコンのノードをコーディネータにしてください。']);
   });
 
-  test('by MCU, only an MCU whose definition has [coordinator] becomes the hub', () => {
+  test('by MCU, only an MCU whose definition has [coordinator] becomes the coordinator', () => {
     expect(placeMcu(emptyDoc(), 'esp32s3').doc.topo.nodes[0].role).toBe('node');
     expect(placeMcu(emptyDoc(), 'rp2040').doc.topo.nodes[0].role).toBe('coordinator');
   });

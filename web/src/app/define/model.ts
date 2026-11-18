@@ -29,7 +29,7 @@ export interface TNode {
   max_attempts?: number;
   listen_window_ms?: number;
   tag: string;
-  /** A hub's hop towards the PC (or what drives it); none: USB CDC to dagon. */
+  /** A coordinator's hop towards the PC (or what drives it); none: USB CDC to dagon. */
   uplink?: { kind: Kind; host?: UplinkHost };
 }
 
@@ -69,7 +69,7 @@ export interface TLink {
   control?: TControl;
 }
 
-/** Links from a hub (0) outwards: how many links each node is from one. */
+/** Links from a coordinator (0) outwards: how many links each node is from one. */
 function hops(t: Topo): Map<string, number> {
   const out = new Map<string, number>();
   let at = t.nodes.filter((n) => n.role === 'coordinator').map((n) => n.id);
@@ -86,7 +86,7 @@ function hops(t: Topo): Map<string, number> {
 }
 
 /**
- * The two ends of link `l` as the editor draws them: `up` the end nearer a hub (the first listed
+ * The two ends of link `l` as the editor draws them: `up` the end nearer a coordinator (the first listed
  * on a tie), `down` the end the link is shown under. Display only: the link has no direction and
  * the check reads its ends unordered.
  */
@@ -156,7 +156,7 @@ export const topoFromNames = (t: Topo): Topo => withKinds(t, codeOf);
 /** The 構成 with its kinds by name, as its YAML writes them and the check reads them. */
 export const topoWithNames = (t: Topo): Topo => withKinds(t, (k) => (typeof k === 'number' ? nameOf(k) : k));
 
-/** Kinds `mcu`'s firmware implements up (to the PC or the hub) and down (to nodes); the rest are not available. */
+/** Kinds `mcu`'s firmware implements up (to the PC or the coordinator) and down (to nodes); the rest are not available. */
 export function linkKinds(mcu: string): { up: LinkKind[]; down: LinkKind[] } {
   return link_kinds(mcu) as { up: LinkKind[]; down: LinkKind[] };
 }
@@ -206,7 +206,7 @@ export function hopAvailable(kind: Kind, from: TNode | undefined, to: TNode | un
   return (!from || linkKinds(from.mcu).down.includes(kind as LinkKind)) && (!to || linkKinds(to.mcu).up.includes(kind as LinkKind));
 }
 
-/** Sets (or, with null, removes) hub `id`'s uplink. */
+/** Sets (or, with null, removes) coordinator `id`'s uplink. */
 export function setUplink(doc: Doc, id: string, uplink: TNode['uplink'] | null): Doc {
   const nodes = doc.topo.nodes.map((n) => {
     if (n.id !== id) return n;
@@ -257,7 +257,7 @@ export interface BoardTemplate {
   header: string[];
   i2cPairs: { sda: string; scl: string }[];
   link: { kind: LinkKind; iface: string | null; addr: number | null; baud: number | null; control: 'full' | 'cooperative'; romEntry: string | null } | null;
-  /** Pins of a new I2C bus / PIO UART link when the board is the hub (its [coordinator]). */
+  /** Pins of a new I2C bus / PIO UART link when the board is the coordinator (its [coordinator]). */
   coordinator: { i2c: { controller: string; sda: number; scl: number }; pioUart: { tx: number; rx: number } } | null;
 }
 
@@ -273,19 +273,19 @@ export function template(board: string): BoardTemplate | null {
   return board_template(board) as BoardTemplate | null;
 }
 
-/** Hub `h`'s board's [coordinator] pins (a node placed by MCU: its MCU's default board, if any). */
+/** Coordinator `h`'s board's [coordinator] pins (a node placed by MCU: its MCU's default board, if any). */
 function hubPins(h: TNode): BoardTemplate['coordinator'] {
   const board = h.board ?? defaultBoard(h.mcu);
   return (board ? template(board)?.coordinator : null) ?? null;
 }
 
-/** A new I2C bus on hub `h` towards `n`: the first speed both definitions name (none: the check asks); without defined pins the check asks for them. */
+/** A new I2C bus on coordinator `h` towards `n`: the first speed both definitions name (none: the check asks); without defined pins the check asks for them. */
 function hubBus(h: TNode, n: TNode): TBus {
   const hz = i2cHzs([h, n])[0];
   return { id: 'i2c-main', kind: BUS_KIND, ...hubPins(h)?.i2c, ...(hz === undefined ? {} : { speed_hz: hz }), pullups: 'external' } as TBus;
 }
 
-/** UART0 pins for a link from `h`: its MCU's [coordinator] pair, else the hub MCU's; none defined: the check asks for them. */
+/** UART0 pins for a link from `h`: its MCU's [coordinator] pair, else the coordinator MCU's; none defined: the check asks for them. */
 function firstUart0(t: Topo, h: TNode): { pins?: { tx: number; rx: number } } {
   const c = [uart0Pins(h), uart0Pins(hub(t))].find((p) => p.tx.length && p.rx.length);
   return c ? { pins: { tx: c.tx[0], rx: c.rx[0] } } : {};
@@ -323,7 +323,7 @@ export function fromYaml(yaml: string, names: Record<string, string> = {}): Doc 
 
 const hub = (t: Topo) => t.nodes.find((n) => n.role === 'coordinator');
 
-/** Children by the current order, then the hub (V-14 wants the hub last). */
+/** The other nodes by the current order, then the coordinator (V-14 wants the coordinator last). */
 function reorder(t: Topo): Topo {
   const ids = t.nodes.map((n) => n.id);
   const kept = t.update.order.filter((id) => ids.includes(id));
@@ -344,7 +344,7 @@ export function canPlace(doc: Doc, board: string): boolean {
   return template(board) !== null && doc.topo.nodes.length < maxNodes();
 }
 
-/** "配置": a board with no link of its own (it cannot be a node) is a hub, the second and on too; else a node. */
+/** "配置": a board with no link of its own (it cannot be a node) is a coordinator, the second and on too; else a node. */
 export function place(doc: Doc, board: string, name?: string): { doc: Doc; id: string } {
   const tpl = template(board);
   if (!tpl) return { doc, id: '' };
@@ -403,8 +403,8 @@ export function freeAddrs(t: Topo, except?: number): number[] {
 }
 
 /**
- * "上位ノード": links node `id` to `parent` (the hub when omitted). From the
- * hub to a node the board's default link (I2C or UART); between hubs a link
+ * "PC側のノード": links node `id` to `parent` (the coordinator when omitted). From the
+ * coordinator to a node the board's default link (I2C or UART); between coordinators a link
  * of a kind both MCUs define a port for, and deeper a UART link, both
  * described only. Each end starts at the port its definitions name.
  */
@@ -418,9 +418,9 @@ export function connect(doc: Doc, id: string, parent?: string): Doc {
   const tpl = stand ? template(stand) : null;
   const d = tpl?.link ?? { kind: LinkKind.Uart, iface: 'pio-uart', addr: null, baud: null, control: 'cooperative' as const, romEntry: null };
   if (h.role !== 'coordinator' || n.role === 'coordinator') {
-    // Below a node the board's own way into its loader, as under the hub (V-11 asks for it on every UART link).
+    // Below a node the board's own way into its loader, as under the coordinator (V-11 asks for it on every UART link).
     const control: TControl = { kind: d.control, ...(d.romEntry ? { rom_entry: d.romEntry } : {}) };
-    // Between hubs: CAN where both MCUs define a port for it, else the first kind both define one for.
+    // Between coordinators: CAN where both MCUs define a port for it, else the first kind both define one for.
     const both = (k: LinkKind) => [h, n].every((x) => default_port(x.mcu, x.board, k, undefined) != null);
     const kind = [LinkKind.Can, ...linkKindCodes().filter((k) => k !== LinkKind.I2c && k !== LinkKind.Uart)].find(both) ?? LinkKind.Can;
     const link: TLink =
@@ -629,8 +629,8 @@ export function toConfig(doc: Doc, boards: Board[]): Config {
   const t = doc.topo;
   const links = t.links ?? [];
   const bus = (id?: string) => (t.buses ?? []).find((b) => b.id === id);
-  // Depth by parent links from a hub nobody links to (0), at any depth; a hub linked from
-  // another node sits below it, and a node with no parent in the node row.
+  // Depth by parent links from a coordinator nobody links to (0), at any depth; a coordinator linked from
+  // another node sits below it, and a node no link reaches in the first row.
   const shown = links.map((l) => sides(t, l));
   const parent = (id: string) => shown.find((s) => s.down.node === id)?.up.node;
   const depth = (id: string, seen = new Set<string>()): number => {

@@ -39,7 +39,7 @@ import { SAMPLE_CONFIG, type Config, type Node } from './sample.ts';
 import { topoFromNames, type Topo } from './define/model.ts';
 import { imageRows } from './slots.ts';
 
-/** What the page knows about one node from the hub. */
+/** What the page knows about one node from the node connected to the PC. */
 export interface Live {
   /** null until the first answer or miss. */
   responding: boolean | null;
@@ -175,12 +175,12 @@ export function refusalAnnounce(k: Refusal): string {
 }
 
 export interface Deps {
-  /** Opens the device: the browser chooser, or a stand-in hub. Throws ConnectError. */
+  /** Opens the device: the browser chooser, or a stand-in PC-connected node. Throws ConnectError. */
   open: () => Promise<Transport>;
   ready?: () => Promise<unknown>;
   /** Starts the 5 s monitoring timer (off in tests, which call `round`). */
   timer?: boolean;
-  /** The user chooses the hub again after its reboot (the browser chooser). Throws ConnectError. */
+  /** The user chooses the node connected to the PC again after its reboot (the browser chooser). Throws ConnectError. */
   reselect?: () => Promise<Transport>;
   /** Clock of dagon-host's timeouts (tests run it fast). */
   clock?: LinkClock;
@@ -221,7 +221,7 @@ export function failureStage(reason: string): Pick<Progress, 'stage' | 'reason'>
 }
 
 /**
- * Where a hub chosen again by hand stands: on the app just `sent`; else, when
+ * Where a node connected to the PC chosen again by hand stands: on the app just `sent`; else, when
  * only a boot core was sent, its running boot core `core` tells whether that
  * core went back or took over: with the app still to write, or with none to write when the package's is what it runs
  * (`appSame`).
@@ -251,7 +251,7 @@ export class Operate {
   /** Each node's target, as dagon-host gave it for the configuration it holds (`tellConfig`). */
   private targetsBy: Record<string, Target> = {};
   live = $state<Record<string, Live>>({});
-  /** Nodes found by the last scan (hub included). */
+  /** Nodes found by the last scan (PC-connected node included). */
   found = $state(0);
   /** `node:<id>` or `link:<to>`. */
   selected = $state<string | null>(null);
@@ -266,7 +266,7 @@ export class Operate {
   progress = $state<Record<string, Progress>>({});
   /** The node the update stopped at. */
   failed = $state<string | null>(null);
-  /** Clock time when dagon-host stops reopening the rebooted hub. */
+  /** Clock time when dagon-host stops reopening the rebooted PC-connected node. */
   reconnectUntil = $state<number | null>(null);
   /** The node being recovered or rolled back (and tried again from recoverFailed). */
   recovering = $state<string | null>(null);
@@ -286,11 +286,11 @@ export class Operate {
   fileVersions = $state<Record<string, number>>({});
   /** Date.now() when the running update or recovery started (elapsed time); null when none runs. */
   startedAt = $state<number | null>(null);
-  /** Why the page could not get the rebooted hub back by itself (reconnectNeeded's diagnostic log). */
+  /** Why the page could not get the rebooted PC-connected node back by itself (reconnectNeeded's diagnostic log). */
   reconnectNotes = $state<ReconnectNote[]>([]);
   /** Why the device the CLI gave back was not taken (lost shows it); null otherwise. */
   returnRefused = $state<ReconnectNote | null>(null);
-  /** The hub's HELLO when the user connected: what "the same hub" means after its reboot. */
+  /** The PC-connected node's HELLO when the user connected: what "the same node" means after its reboot. */
   private hubHello: HelloResp | null = null;
   /** Nodes whose card check is off: the next write leaves them out. */
   skip = $state(new Set<string>());
@@ -428,12 +428,12 @@ export class Operate {
     this.state = to;
     this.stillSince = WORKING.has(to) ? Infinity : Math.min(this.stillSince, this.now());
     this.latestMissing = false;
-    // Out of the hub's reboot (confirmed, stopped, lost, ...): no version to keep a reopened device by any more.
+    // Out of the PC-connected node's reboot (confirmed, stopped, lost, ...): no version to keep a reopened device by any more.
     if (to !== 'hubRestarting' && to !== 'reconnectNeeded') this.transport?.expectHub?.(null);
     if (focus) this.focusRequest++;
   }
 
-  /** `dagon serve` needs the hub's port (device.need): close Web Serial and show cliTurn. */
+  /** `dagon serve` needs the PC-connected node's port (device.need): close Web Serial and show cliTurn. */
   async handOver(): Promise<void> {
     this.session++;
     await this.drop();
@@ -456,7 +456,7 @@ export class Operate {
   /**
    * The CLI gave the port back (device.returned): the page opens the device
    * it had again by itself and goes on watching (ready, BAND.cliTurn); when that fails
-   * the user connects again (lost, BAND.lost). It must be the same hub as before
+   * the user connects again (lost, BAND.lost). It must be the same PC-connected node as before
    * (notThisHub against the first HELLO); otherwise it is closed and the
    * reason goes to the log.
    */
@@ -507,7 +507,7 @@ export class Operate {
   }
 
   /**
-   * "接続" / "ホスト側ノードの探索" / "ホスト側ノードの再選択" / "再接続".
+   * "接続" / "PC接続ノードの探索" / "PC接続ノードの再選択" / "再接続".
    * With nothing on the canvas, connecting goes on to find the nodes.
    */
   async connect(): Promise<void> {
@@ -553,7 +553,7 @@ export class Operate {
     this.status = FAILURE_BAND[f].chip;
   }
 
-  /** The scan after "ホスト側ノードの探索". */
+  /** The scan after "PC接続ノードの探索". */
   async discover(my = this.session): Promise<void> {
     this.go('helloDiscover');
     this.stopWatching();
@@ -589,7 +589,7 @@ export class Operate {
     if (id && this.host && WATCHED.has(this.state)) void this.refreshStatus(id);
   }
 
-  /** The device went away (USB unplugged). The hub leaving for its reboot is not a loss. */
+  /** The device went away (USB unplugged). The node connected to the PC leaving for its reboot is not a loss. */
   lose(): void {
     if (this.state === 'hubRestarting' || this.state === 'reconnectNeeded') return;
     this.session++;
@@ -660,7 +660,7 @@ export class Operate {
     return p.length ? Math.floor(p.reduce((a, b) => a + b, 0) / p.length) : 0;
   }
 
-  /** The nodes an update runs on: those answering now and checked on their cards (the hub alone when only it answers). */
+  /** The nodes an update runs on: those answering now and checked on their cards (the node connected to the PC alone when only it answers). */
   private answering(): string[] {
     return this.reach.filter((n) => this.live[n.id]?.responding === true && !this.skip.has(n.id)).map((n) => n.id);
   }
@@ -726,7 +726,7 @@ export class Operate {
     this.targets = this.reach.map((n) => n.id).filter((x) => chosen.has(x));
   }
 
-  /** "nノードへの書込": dagon-host's apply on the checked nodes, children first and the hub last. */
+  /** "nノードへの書込": dagon-host's apply on the checked nodes, the other nodes first and the node connected to the PC last. */
   async update(): Promise<void> {
     const c = this.config;
     const f = this.file;
@@ -835,7 +835,7 @@ export class Operate {
     return to;
   }
 
-  /** The hub reboots onto `version`: dagon-host reopens it for host_reconnect_ms (hubRestarting), keeping only that hub. */
+  /** The node connected to the PC reboots onto `version`: dagon-host reopens it for host_reconnect_ms (hubRestarting), keeping only that PC-connected node. */
   private hubAway(version: number | undefined): void {
     if (version !== undefined) this.transport?.expectHub?.(version, this.hubHello);
     this.reconnectNotes = [];
@@ -844,7 +844,7 @@ export class Operate {
     this.go('hubTurn');
   }
 
-  /** dagon-host gave up reopening the hub (reconnectNeeded): the dialog opens, with why. */
+  /** dagon-host gave up reopening the node connected to the PC (reconnectNeeded): the dialog opens, with why. */
   private autoFailed(): void {
     this.reconnectNotes = this.transport?.notes?.() ?? [];
     this.alert = ANNOUNCE.reconnectTimeout;
@@ -856,7 +856,7 @@ export class Operate {
     return (this.deps.clock ?? performance).now();
   }
 
-  /** Where the run ended: all done, a node that stopped, or the hub to choose again. */
+  /** Where the run ended: all done, a node that stopped, or the node connected to the PC to choose again. */
   private finish(results: NodeResult[]): void {
     const reach = this.reach;
     for (const r of results) {
@@ -919,11 +919,11 @@ export class Operate {
   }
 
   /**
-   * "再接続" while the hub reboots: the user chooses it again. While
+   * "再接続" while the node connected to the PC reboots: the user chooses it again. While
    * dagon-host still reopens (hubRestarting) the chosen device goes under its next
    * reopen; after that (reconnectNeeded) dagon-host applies the confirm rule to it.
    * `onlyMine` (a device the browser reported connected, nobody chose it):
-   * taken only when it is the hub on trial with the version just sent.
+   * taken only when it is the node connected to the PC on trial with the version just sent.
    * Resolves whether the device was taken.
    */
   async reconnectHub(pick = this.deps.reselect, onlyMine = false): Promise<boolean> {
@@ -971,8 +971,8 @@ export class Operate {
   }
 
   /**
-   * Why the device under the link is not the hub the update rebooted, or null.
-   * HELLO carries no serial number, so "the same hub" is the role, MCU and
+   * Why the device under the link is not the node connected to the PC the update rebooted, or null.
+   * HELLO carries no serial number, so "the same node" is the role, MCU and
    * release key of its first HELLO; `onTrial` (a device nobody chose) also
    * needs it on trial with the version just sent. One the user chose may be
    * back on its previous version: CONFIRM then stops there (stopped).
@@ -989,7 +989,7 @@ export class Operate {
     if (old && old !== t) void old.close().catch(() => undefined);
   }
 
-  /** The version just sent to the hub, if any. */
+  /** The version just sent to the node connected to the PC, if any. */
   private hubSent(): number | null {
     const hub = this.reach.find((n) => this.isLocal(n));
     return hub ? (this.sentVersion[hub.id] ?? null) : null;
@@ -999,7 +999,7 @@ export class Operate {
     if (!this.reconnectNotes.some((x) => JSON.stringify(x) === JSON.stringify(why))) this.reconnectNotes = [...this.reconnectNotes, why];
   }
 
-  /** reconnectNeeded: the hub confirmed on the version just sent goes on to done; on its previous version it stops there (stopped). */
+  /** reconnectNeeded: the node connected to the PC confirmed on the version just sent goes on to done; on its previous version it stops there (stopped). */
   private confirmed(r: ConfirmResult, core: number | null, appSame: boolean): void {
     const hub = this.reach.find((n) => this.isLocal(n))!;
     const stage = hubBack(r, this.sentVersion[hub.id], this.coreSent[hub.id], core, appSame);
@@ -1146,7 +1146,7 @@ export class Operate {
       else if (e.phase === PHASE.transfer) this.progress[n.id] = { stage: 'writing', percent: e.percent };
       // TRANSFER and REBOOT carry the version the node is given (FAILED carries the one it runs).
       if ((e.phase === PHASE.transfer || e.phase === PHASE.reboot) && !e.bootCore) this.sentVersion[n.id] = e.version;
-      // The hub reboots onto it: the same reconnect and confirm rule as an update (hubRestarting / reconnectNeeded).
+      // The node connected to the PC reboots onto it: the same reconnect and confirm rule as an update (hubRestarting / reconnectNeeded).
       if (e.phase === PHASE.reboot && this.isLocal(n)) {
         this.progress[n.id] = { stage: 'rebooting', percent: 100 };
         this.hubAway(this.sentVersion[n.id]);
@@ -1171,7 +1171,7 @@ export class Operate {
     this.live[n.id] = { ...(this.live[n.id] ?? UNKNOWN), responding: true, lastSeen: Date.now() };
     const rest = this.file?.verdict === 'pass' ? Object.entries(this.progress).filter(([, p]) => p.stage === 'unwritten').map(([id]) => id) : [];
     this.status = kind === 'rollback' ? ANNOUNCE.rolledBack(n.name, versionText(r.version)) : ANNOUNCE.recovered(n.name, rest.length);
-    // The hub's REBOOT event moved the state on while dagon-host ran.
+    // The PC-connected node's REBOOT event moved the state on while dagon-host ran.
     if ((this.state as L) === 'hubRestarting') {
       this.go('confirmed');
     } else if (rest.length) {
@@ -1194,7 +1194,7 @@ export class Operate {
 
   /** A recovery or rollback that did not get through, shown with dagon-host's reason. */
   private recoveryFailed(n: Node, reason: string): void {
-    // The rebooted hub was not reopened in time: the user chooses it again (reconnectNeeded).
+    // The rebooted PC-connected node was not reopened in time: the user chooses it again (reconnectNeeded).
     if (this.state === 'hubRestarting' && reason === 'NO ANSWER') return this.autoFailed();
     const percent = this.progress[n.id]?.percent ?? 0;
     this.progress[n.id] = { ...failureStage(reason), percent };

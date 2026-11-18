@@ -3,13 +3,13 @@ import { CMD, encodeFrame, newFrameStream, parseFrame, STATUS, WIRE } from './fr
 import { ROLE_HUB, type HelloResp } from './hello.ts';
 
 /**
- * Why reopening the rebooted hub did not get it back (the diagnostic log
+ * Why reopening the rebooted PC-connected node did not get it back (the diagnostic log
  * under the reconnect dialog). `away`: the port the page had would not
  * open; `none`: no other allowed device of the same kind appeared;
  * `several`: more than one appeared and no version to tell them by;
- * `otherHub`: a hub with another MCU or release key than the one connected;
+ * `otherHub`: a node connected to the PC with another MCU or release key than the one connected;
  * `silent`: a candidate did not answer HELLO; `notHub`: it answered as a
- * node; `version`: a hub not on trial with the version just sent.
+ * node; `version`: a node connected to the PC not on trial with the version just sent.
  */
 export type ReconnectNote =
   | { kind: 'away' | 'none' | 'silent' | 'notHub' | 'otherHub' }
@@ -17,18 +17,18 @@ export type ReconnectNote =
   | { kind: 'version'; version: number; trial: boolean };
 
 /**
- * Frame-level link to the hub, the shape dagon-host drives (and what
+ * Frame-level link to the node connected to the PC, the shape dagon-host drives (and what
  * dagon-wasm will receive from the page): whole frames in, whole frames out.
  * The page owns choosing and opening the device; protocol steps live in
  * dagon-host.
  */
-/** What the link to the hub does while the hub reboots: goes away and is opened again, or stays. */
+/** What the link to the node connected to the PC does while the node connected to the PC reboots: goes away and is opened again, or stays. */
 export type ReconnectKind = 'reopen' | 'stays';
 
 export interface Transport {
   /** Largest frame payload of this link (USB CDC when absent). */
   maxPayload?(): number;
-  /** What the link does while the hub reboots (reopen when absent). */
+  /** What the link does while the node connected to the PC reboots (reopen when absent). */
   reconnectKind?(): ReconnectKind;
   open(): Promise<void>;
   close(): Promise<void>;
@@ -37,23 +37,23 @@ export interface Transport {
   /** Next complete, CRC-checked frame, or null when `timeoutMs` passes first. */
   read(timeoutMs: number): Promise<Uint8Array | null>;
   /**
-   * The hub `first` reboots onto `version` on trial: reopening it later keeps
-   * only that hub (notThisHub); null clears it.
+   * The node connected to the PC `first` reboots onto `version` on trial: reopening it later keeps
+   * only that PC-connected node (notThisHub); null clears it.
    */
   expectHub?(version: number | null, first?: HubIdentity | null): void;
-  /** Why the reopens since `expectHub` did not get the hub back, oldest first. */
+  /** Why the reopens since `expectHub` did not get the node connected to the PC back, oldest first. */
   notes?(): ReconnectNote[];
 }
 
-/** What "the same hub" means: HELLO carries no serial number, so the MCU and release key of the first HELLO. */
+/** What "the same node" means: HELLO carries no serial number, so the MCU and release key of the first HELLO. */
 export type HubIdentity = Pick<HelloResp, 'mcuId' | 'keyId'>;
 
 /**
  * The one check every path that adopts a port goes through (dagon-host's
  * reopen in hubRestarting, the device reported or chosen in reconnectNeeded, the CLI's hand-back):
- * why the device answering `h` is not the hub first seen as `first`, or null.
+ * why the device answering `h` is not the node connected to the PC first seen as `first`, or null.
  * With `version` it must also be on trial with that version (the one just
- * sent); without it a hub back on its previous version still passes, for
+ * sent); without it a node connected to the PC back on its previous version still passes, for
  * CONFIRM to stop there (stopped).
  */
 export function notThisHub(h: HelloResp | null, first: HubIdentity | null, version: number | null): ReconnectNote | null {
@@ -140,7 +140,7 @@ export class FrameQueue {
 const CDC_BAUD = 115200;
 
 export class WebSerialTransport implements Transport {
-  /** Web Serial reaches the hub's USB CDC port, which goes away on its reboot. */
+  /** Web Serial reaches the PC-connected node's USB CDC port, which goes away on its reboot. */
   maxPayload(): number {
     return WIRE.MAX_PAYLOAD_USB;
   }
@@ -154,7 +154,7 @@ export class WebSerialTransport implements Transport {
   private pump: Promise<void> | null = null;
   private closing = false;
 
-  /** `serial` finds the device again when it came back as a new port (the hub after its reboot). */
+  /** `serial` finds the device again when it came back as a new port (the node connected to the PC after its reboot). */
   constructor(
     public port: SerialPort,
     private readonly serial: Pick<Serial, 'getPorts'> | null = globalThis.navigator?.serial ?? null,
@@ -166,9 +166,9 @@ export class WebSerialTransport implements Transport {
   private back = new Set<SerialPort>();
   /** Only a port that was open before may be looked for again; the first open is the one the user chose. */
   private opened = false;
-  /** The version the hub reboots onto (expectHub); null when none was sent. */
+  /** The version the node connected to the PC reboots onto (expectHub); null when none was sent. */
   private expected: number | null = null;
-  /** The hub as first seen (expectHub); null when not known. */
+  /** The node connected to the PC as first seen (expectHub); null when not known. */
   private identity: HubIdentity | null = null;
   private log: ReconnectNote[] = [];
 
@@ -181,7 +181,7 @@ export class WebSerialTransport implements Transport {
     this.pump = this.readLoop();
   }
 
-  /** `version` the hub reboots onto; null once that is over (confirmed, stopped or given up). */
+  /** `version` the node connected to the PC reboots onto; null once that is over (confirmed, stopped or given up). */
   expectHub(version: number | null, first: HubIdentity | null = null): void {
     this.expected = version;
     this.identity = version === null ? null : first;
@@ -205,14 +205,14 @@ export class WebSerialTransport implements Transport {
 
   /**
    * Opens this port, or else the allowed port of the same USB device
-   * (vendor and product id) that appeared since: after a reboot the hub
+   * (vendor and product id) that appeared since: after a reboot the node connected to the PC
    * enumerates again and the browser may hand it out as a new port, still
    * allowed when it reports the same USB serial number. Web Serial does not
    * show that serial number, so once a version was sent (`expectHub`) only
-   * the hub on trial with it is kept, even when one port appeared (dagon-host
+   * the node connected to the PC on trial with it is kept, even when one port appeared (dagon-host
    * checks the version only); with none sent, a single port is taken as it
    * is. Otherwise nothing is opened
-   * (another hub of the same kind must not be taken for this one) and the
+   * (another PC-connected node of the same kind must not be taken for this one) and the
    * user chooses again.
    */
   private async reopenable(): Promise<SerialPort> {
@@ -229,7 +229,7 @@ export class WebSerialTransport implements Transport {
     }
   }
 
-  /** The one port that is this hub coming back, or null (with the reason noted). */
+  /** The one port that is this PC-connected node coming back, or null (with the reason noted). */
   private async candidate(): Promise<SerialPort | null> {
     const want = this.port.getInfo();
     const ports = (await this.serial?.getPorts()) ?? [];

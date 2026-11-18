@@ -19,7 +19,7 @@
     onlocked?: () => void;
     menuOpen?: boolean;
     onmenu?: () => void;
-    /** The hub is simulated (模擬, always shown). */
+    /** The node connected to the PC is simulated (模擬, always shown). */
     sim?: boolean;
     /** The open project's name. */
     title?: string;

@@ -64,7 +64,7 @@
   import { dagonReady, mcuConnection, releaseVersions, require_release_key, set_release_key, trialMs, useDefinitions, versionText } from './wasm/dagon.ts';
 
   const params = new URLSearchParams(location.search);
-  // The stand-in hubs are for development builds only; the public demo page always drives the simulator.
+  // The stand-in nodes connected to the PC are for development builds only; the public demo page always drives the simulator.
   const stand = import.meta.env.DEV ? devHub(params) : DEMO_SITE ? devHub(new URLSearchParams('sim')) : null;
   const dev = stand !== null;
   const serial = navigator.serial;
@@ -79,22 +79,22 @@
       opened = t ?? (await ports.chooseAndOpen());
       return opened;
     },
-    // The stand-in hub comes back by itself; a real one is chosen again in the browser.
+    // The stand-in PC-connected node comes back by itself; a real one is chosen again in the browser.
     reselect: async () => {
       if (dev && opened) {
         if (opened instanceof MockTransport) opened.replug();
         await opened.open();
         return opened;
       }
-      // `opened` follows only once Operate took it as this hub (reconnectChosen).
+      // `opened` follows only once Operate took it as this PC-connected node (reconnectChosen).
       return ports.chooseAndOpen();
     },
     timer: true,
-    // The simulator's clock runs at the demo's speed; a real hub keeps the default.
+    // The simulator's clock runs at the demo's speed; a real PC-connected node keeps the default.
     get clock() {
       return stand?.clock;
     },
-    // The CLI gave the hub back: the device the page had, opened again without the chooser.
+    // The CLI gave the node connected to the PC back: the device the page had, opened again without the chooser.
     again: async () => {
       if (!opened) throw new Error('no device');
       await opened.open();
@@ -113,7 +113,7 @@
   /** `dagon serve`: the page is always its page; `none` or `stopped` when it cannot be reached. */
   const cli = new Cli();
   const demoStandIn = import.meta.env.DEV && params.has('demo');
-  /** The hub and node are simulated: the demo page's own simulator. */
+  /** The node connected to the PC and the other nodes are simulated: the demo page's own simulator. */
   const simulated = DEMO_SITE || demoStandIn;
   /** The 定義 document: the project's 構成 as edited (its YAML is the one source of truth). */
   const d = new Define();
@@ -305,7 +305,7 @@
   const modeLocked = $derived(busyStates.includes(op.state));
 
   function switchMode(m: 'operate' | 'define') {
-    // 運用 only with a 構成 that has no problems (parts updating skips do not stop it); the YAML decides, never the hub.
+    // 運用 only with a 構成 that has no problems (parts updating skips do not stop it); the YAML decides, never the node connected to the PC.
     if (m === 'operate' && d.operable !== 'ok') return lock(d.operable);
     // ... and only the saved one, the 構成 build, sign and release use too.
     if (m === 'operate' && autosave.pending) {
@@ -577,9 +577,9 @@
     if (opened instanceof WebSerialTransport && portOf(e) === opened.port) op.lose();
   });
   /**
-   * An allowed device came (back): while dagon-host reopens the rebooted hub
+   * An allowed device came (back): while dagon-host reopens the rebooted PC-connected node
    * (hubRestarting) it is a candidate; once that is over (reconnectNeeded) the page takes it by
-   * itself when it is the hub on trial with the version just sent.
+   * itself when it is the node connected to the PC on trial with the version just sent.
    */
   ports.on('connect', (e) => {
     const port = portOf(e);
@@ -587,7 +587,7 @@
     connecting = connecting.then(() => hubConnected(port)).catch(() => undefined);
   });
   let connecting: Promise<void> = Promise.resolve();
-  /** "再接続": the device the user chose, kept only when Operate took it as this hub. */
+  /** "再接続": the device the user chose, kept only when Operate took it as this PC-connected node. */
   async function reconnectChosen() {
     if (await op.reconnectHub()) opened = op.device;
   }
@@ -615,7 +615,7 @@
     'chooseFile', 'updateResponding', 'otherFile', 'update', 'useLatest', 'recover', 'recoverAgain', 'defineFix',
   ]);
 
-  /** States 書込 writes in directly: the hub answers and nothing runs. */
+  /** States 書込 writes in directly: the node connected to the PC answers and nothing runs. */
   const WRITABLE: ReadonlySet<string> = new Set(['ready', 'nodesSilent', 'done']);
   /** States that show the update's progress (node chips, percent, the dot number). */
   const UPDATING: ReadonlySet<string> = new Set(['writing', 'hubRestarting', 'reconnectNeeded', 'stopped', 'done', 'recovering', 'recoverFailed']);
@@ -653,7 +653,7 @@
       Object.entries(op.progress).flatMap(([id, p]): [string, Chip][] => {
         const c = cardChipOf(id, p);
         if (!c) return [];
-        // The countdown beside the rebooting hub while the page reconnects by itself.
+        // The countdown beside the rebooting PC-connected node while the page reconnects by itself.
         return [[id, p.stage === 'rebooting' && reconnectLeft !== null ? { ...c, note: `${RECONNECT.auto} ${RECONNECT.left(reconnectLeft)}` } : c]];
       }),
     ),
@@ -929,7 +929,7 @@
   );
 
   const hub = $derived(hubOf(op.state));
-  /** The hub this page talks to (the one writing reaches). */
+  /** The node connected to the PC this page talks to (the one writing reaches). */
   const hubNode = $derived(op.config?.nodes.find((n) => n.role === 'hub' && op.config?.reach.includes(n.id)));
   const connected = $derived(!['idle', 'lost'].includes(hub));
   /** DAGON waits for its agent's answer (the lock table's DAGONの回答待機). */
@@ -939,7 +939,7 @@
   /** The lock table's states now, leftmost first. */
   const lockStates = $derived(
     activeStates({
-      // the page has no demo playback of its own; a simulator is driven by the user like a real hub.
+      // the page has no demo playback of its own; a simulator is driven by the user like a real PC-connected node.
       demo: false,
       updating: ['writing', 'hubRestarting', 'reconnectNeeded'].includes(op.state),
       recovering: op.state === 'recovering',
@@ -1277,7 +1277,7 @@
     if (cause && bad !== 'modal' && !untrack(() => refusalOpen || stopNode !== null)) untrack(() => (notice = { word: cause, error: cause.startsWith('×'), detail }));
   });
 
-  /** 書込: the hub answered nothing (silentHub) → writing directly over USB; otherwise the next step of writing through DAGON. */
+  /** 書込: the node connected to the PC answered nothing (silentHub) → writing directly over USB; otherwise the next step of writing through DAGON. */
   const writeAction = $derived(
     op.state === 'silentHub' ? null : op.state === 'ready' && !op.latestMissing && band.secondary.some((b) => b.action === 'useLatest') ? 'useLatest' : (band.primary?.action ?? null),
   );
@@ -1290,7 +1290,7 @@
     act(writeAction);
   }
 
-  /** Writing directly over USB to the hub whose DAGON answered nothing (the hub first: it reaches the rest). */
+  /** Writing directly over USB to the node connected to the PC whose DAGON answered nothing (the node connected to the PC first: it reaches the rest). */
   let factory = $state<{ node: string; id: number | null } | null>(null);
   const hubId = $derived((hubNode ?? op.config?.nodes.find((n) => n.role === 'hub'))?.id ?? null);
   const factoryNode = $derived(op.config?.nodes.find((n) => n.id === factory?.node) ?? null);

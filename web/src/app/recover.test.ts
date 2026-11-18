@@ -72,7 +72,7 @@ async function stoppedAt(opts: MockOptions, fetchAsset: Fetch = site) {
 }
 
 describe('recovery from the page with dagon-host recover', () => {
-  test('ROM path against the simulated F401 ROM loader (no hub): an erased 7セグ comes back on 1.1.0', async () => {
+  test('ROM path against the simulated F401 ROM loader (no PC-connected node): an erased 7セグ comes back on 1.1.0', async () => {
     const sim = simulator(7)!;
     expect(sim, 'built with the sim feature (npm run wasm:dev)').not.toBeNull();
     expect(sim.hub().wipe(0x42)).toBe(true);
@@ -294,14 +294,14 @@ describe('recovery from the page with dagon-host recover', () => {
     expect(await op.noWrite(both)).toBe(null);
   }, 120_000);
 
-  test('the hub chosen again after a boot core took over, with an app that needs no writing, is done', () => {
+  test('the node connected to the PC chosen again after a boot core took over, with an app that needs no writing, is done', () => {
     const core = 0x01010000;
     expect(hubBack({ outcome: 'notOnTrial', version: 0x01000000 } as never, undefined, core, core, true)).toBe('done');
     expect(hubBack({ outcome: 'notOnTrial', version: 0x01000000 } as never, undefined, core, core, false)).toBe('unwritten');
     expect(hubBack({ outcome: 'notOnTrial', version: 0x01000000 } as never, undefined, core, 0x01000000, true)).toBe('coreBack');
   });
 
-  test('the hub chosen again by hand after its boot core write: what it says decides the words', () => {
+  test('the node connected to the PC chosen again by hand after its boot core write: what it says decides the words', () => {
     const on = (version: number) => ({ outcome: 'notOnTrial', version }) as never;
     // The app was not sent: the boot core is what stopped the write.
     expect(hubBack(on(5), undefined, 9, 5)).toBe('coreBack');
@@ -486,7 +486,7 @@ describe('recovery from the page with dagon-host recover', () => {
     expect([v(t.helloOf('i2c:66').activeVersion), t.helloOf('i2c:66').trial]).toEqual(['1.0.0', false]);
   }, 120_000);
 
-  test('recovering the hub: not back in 45 s, chosen again (reconnectNeeded), then confirmed on the release', async () => {
+  test('recovering the node connected to the PC: not back in 45 s, chosen again (reconnectNeeded), then confirmed on the release', async () => {
     const { t, op } = await stoppedAt({ refuse: { hub: 0x07 } });
     expect([op.failed, op.recoverTarget?.id]).toEqual(['hub', 'hub']);
     t.setRefuse('hub');
@@ -501,7 +501,7 @@ describe('recovery from the page with dagon-host recover', () => {
     expect([v(t.helloOf('hub').activeVersion), t.helloOf('hub').trial]).toEqual(['1.1.0', false]);
   }, 120_000);
 
-  test('rolling the hub back: not back in 45 s, chosen again (reconnectNeeded), then confirmed on the previous version', async () => {
+  test('rolling the node connected to the PC back: not back in 45 s, chosen again (reconnectNeeded), then confirmed on the previous version', async () => {
     const t = new MockTransport();
     const op = session(t, fastClock());
     await op.connect();

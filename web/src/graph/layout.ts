@@ -5,7 +5,7 @@
 
 export interface LayoutNode {
   id: string;
-  /** A hub roots its tree at depth 0; a node nobody links to sits in the first row under them. */
+  /** A coordinator roots its tree at depth 0; a node nobody links to sits in the first row under them. */
   hub: boolean;
 }
 

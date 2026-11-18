@@ -162,7 +162,7 @@ describe('dagon serve link', () => {
     expect(cli.jobs[0]).toMatchObject({ state: 'succeeded', result: { files: 6 }, ended: 1000 });
   });
 
-  test('the hub hand-over: device.need closes the page side, then tells serve it was released; device.returned gives it back', async () => {
+  test('the coordinator hand-over: device.need closes the page side, then tells serve it was released; device.returned gives it back', async () => {
     const f = fake();
     const cli = new Cli(f.deps);
     const seen: boolean[] = [];

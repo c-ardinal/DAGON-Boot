@@ -6,14 +6,14 @@ import { LOCAL } from '../wasm/dagon.ts';
 
 // dagon-host's own HELLO and monitoring round, driven through the JS link.
 describe('dagon-host over the page link', () => {
-  test('hub HELLO', async () => {
+  test('PC-connected node HELLO', async () => {
     const t = new MockTransport();
     await t.open();
     const h = await new WasmHost(hostLink(t)).hello(LOCAL);
     expect(h).toEqual(SAMPLE_HUB_HELLO);
   });
 
-  test('monitoring: a silent hub still counts as answering after one miss, not after two', async () => {
+  test('monitoring: a silent PC-connected node still counts as answering after one miss, not after two', async () => {
     const t = new MockTransport({ silent: true });
     await t.open();
     const host = new WasmHost(hostLink(t));

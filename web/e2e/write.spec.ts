@@ -14,7 +14,7 @@ const toWrite = async (page: Page, query: string, size = { width: 1920, height: 
   await expect(page.locator('.split .main')).toHaveAttribute('aria-disabled', 'false', { timeout: 30_000 });
   await expect(page.locator('.split .caret')).toHaveAttribute('aria-disabled', 'false', { timeout: 30_000 });
 };
-/** A card's check, by its order in the sample: hub, seg, watch. */
+/** A card's check, by its order in the sample: PC-connected node, seg, watch. */
 const check = (page: Page, n: 'hub' | 'seg' | 'watch') => page.locator('.check').nth(['hub', 'seg', 'watch'].indexOf(n));
 const sentence = (page: Page) => page.locator('#band .sentence').innerText();
 const finished = (page: Page) => expect(page.locator('.split .main')).toHaveAttribute('aria-disabled', 'false', { timeout: 240_000 });
@@ -27,7 +27,7 @@ test('the split button writes the checked nodes, again after done, and says when
   await expect(page.locator('#band .sentence')).toContainText('『書込』をクリック');
 
   await check(page, 'watch').click();
-  // Every height any card has while the write runs, the hub's reboot included.
+  // Every height any card has while the write runs, the PC-connected node's reboot included.
   await page.evaluate(() => {
     const seen = new Set<string>();
     (window as unknown as { seen: Set<string> }).seen = seen;

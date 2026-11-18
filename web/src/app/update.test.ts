@@ -12,11 +12,11 @@ import { Operate, waterOf } from './operate.svelte.ts';
 import { SAMPLE_CONFIG, SAMPLE_YAML } from './sample.ts';
 
 const repo = (rel: string) => new URL(`../../../${rel}`, import.meta.url);
-/** dagon-sim's sample release 1.1.0: hub A/B, seg A/B and watch images for sample, test key. */
+/** dagon-sim's sample release 1.1.0: PC-connected node A/B, seg A/B and watch images for sample, test key. */
 const RELEASE = new Uint8Array(readFileSync(repo('crates/dagon-sim/fixtures/sample-1.1.0.dgb')));
 const SIM_PAIR_YAML = new TextDecoder().decode(readFileSync(repo('topology/sim-pair.yaml')));
 
-/** dagon-host's real timeouts (45 s hub reconnect, 30 s node wait) on a clock that runs fast. */
+/** dagon-host's real timeouts (45 s PC-connected node reconnect, 30 s node wait) on a clock that runs fast. */
 function fastClock(): LinkClock {
   let t = 0;
   return {
@@ -49,8 +49,8 @@ async function sentTo(opts: MockOptions = {}, keep?: (bytes: Uint8Array) => Prom
 
 const v = (raw: number) => versionText(raw);
 
-describe('update from the page with dagon-host apply against the mock hub', () => {
-  test('all three: children in update order, the hub last, reconnect after its reboot, each confirmed on 1.1.0', async () => {
+describe('update from the page with dagon-host apply against the mock PC-connected node', () => {
+  test('all three: the other nodes in update order, the node connected to the PC last, reconnect after its reboot, each confirmed on 1.1.0', async () => {
     const { t, op } = await sentTo();
     op.takeFile('sample-1.1.0.dgb', RELEASE);
     expect([op.state, op.file?.verdict, op.targets]).toEqual(['fileReady', 'pass', ['hub', 'seg', 'watch']]);
@@ -67,7 +67,7 @@ describe('update from the page with dagon-host apply against the mock hub', () =
     }
   }, 60_000);
 
-  test('the hub alone: with the nodes silent, "update the answering one first" updates only the hub', async () => {
+  test('the node connected to the PC alone: with the nodes silent, "update the answering one first" updates only the node connected to the PC', async () => {
     const { t, op } = await sentTo({ quiet: ['i2c:66', 'uart'] });
     await op.round();
     await op.round();
@@ -122,10 +122,10 @@ describe('update from the page with dagon-host apply against the mock hub', () =
     expect(d.doc.topo.links?.[0].ends[1].addr).toBe(0x43);
   }, 20_000);
 
-  test('a second hub, a grandchild and a loop of nodes are skipped with why: the reachable part updates as before', async () => {
+  test('a second coordinator, a node two links from the coordinator and a loop of nodes are skipped with why: the reachable part updates as before', async () => {
     const { t, op } = await sentTo();
     const d = new Define();
-    // hub2 and x - y (linked to no hub) sit between hub and seg in nodes[], so a node's topology index is not its 構成 position.
+    // hub2 and x - y (linked to no coordinator) sit between `hub` and seg in nodes[], so a node's topology index is not its 構成 position.
     // On a board with a crystal: a UART end needs a clock of known accuracy (V-26).
     const extra = (id: string, role: string) =>
       `  - id: ${id}\n    mcu: rp2040\n    board: waveshare-rp2040-touch-lcd-1.28\n    role: ${role}\n    port: self-boot\n    tag: ${id}\n`;
@@ -169,7 +169,7 @@ describe('update from the page with dagon-host apply against the mock hub', () =
     expect(bandOf(op.state, op.ctx).sentence).toBe(BAND.formatRefused.sentence);
   }, 20_000);
 
-  test('hub not back within 45 s: chosen again by the user, then dagon-host confirms it', async () => {
+  test('PC-connected node not back within 45 s: chosen again by the user, then dagon-host confirms it', async () => {
     const { t, op } = await sentTo({ hubAway: Infinity });
     op.takeFile('sample-1.1.0.dgb', RELEASE);
     const run = op.update();
@@ -185,7 +185,7 @@ describe('update from the page with dagon-host apply against the mock hub', () =
     expect([v(t.helloOf('hub').activeVersion), t.helloOf('hub').trial]).toEqual(['1.1.0', false]);
   }, 60_000);
 
-  test('hub not back within 45 s and back on its previous version when chosen again: stopped there, not done', async () => {
+  test('PC-connected node not back within 45 s and back on its previous version when chosen again: stopped there, not done', async () => {
     const { t, op } = await sentTo({ hubAway: Infinity, fallBack: ['hub'] });
     op.takeFile('sample-1.1.0.dgb', RELEASE);
     await op.update();
@@ -197,7 +197,7 @@ describe('update from the page with dagon-host apply against the mock hub', () =
     expect(op.status).toBe(ANNOUNCE.previous('メイン'));
   }, 60_000);
 
-  test('a USB disconnect while the hub reboots is not taken for a lost connection', async () => {
+  test('a USB disconnect while the node connected to the PC reboots is not taken for a lost connection', async () => {
     const { op } = await sentTo({ hubAway: 5 });
     op.takeFile('sample-1.1.0.dgb', RELEASE);
     const run = op.update();
@@ -336,7 +336,7 @@ describe('update from the page with dagon-host apply against the mock hub', () =
     expect(t.reboots).toEqual([]);
   }, 20_000);
 
-  test('the hub back by itself within 45 s: the reconnect dialog state (reconnectNeeded) is never entered', async () => {
+  test('the node connected to the PC back by itself within 45 s: the reconnect dialog state (reconnectNeeded) is never entered', async () => {
     const { op } = await sentTo({ hubAway: 3 });
     op.takeFile('sample-1.1.0.dgb', RELEASE);
     const seen = new Set<string>();
@@ -352,7 +352,7 @@ describe('update from the page with dagon-host apply against the mock hub', () =
     expect([op.state, op.startedAt]).toEqual(['done', null]);
   }, 60_000);
 
-  test('auto reconnect failed (reconnectNeeded): a device the browser reports is taken by itself when it is the hub on trial with the version just sent', async () => {
+  test('auto reconnect failed (reconnectNeeded): a device the browser reports is taken by itself when it is the node connected to the PC on trial with the version just sent', async () => {
     const { t, op } = await sentTo({ hubAway: Infinity });
     op.takeFile('sample-1.1.0.dgb', RELEASE);
     await op.update();
@@ -366,7 +366,7 @@ describe('update from the page with dagon-host apply against the mock hub', () =
     expect([v(t.helloOf('hub').activeVersion), t.helloOf('hub').trial]).toEqual(['1.1.0', false]);
   }, 60_000);
 
-  test('auto reconnect failed: a reported device that is not the hub on trial is left alone, with the reason noted', async () => {
+  test('auto reconnect failed: a reported device that is not the node connected to the PC on trial is left alone, with the reason noted', async () => {
     const { t, op } = await sentTo({ hubAway: Infinity, fallBack: ['hub'] });
     op.takeFile('sample-1.1.0.dgb', RELEASE);
     await op.update();
@@ -383,7 +383,7 @@ describe('update from the page with dagon-host apply against the mock hub', () =
     expect([op.state, op.progress.hub.stage]).toEqual(['stopped', 'previous']);
   }, 60_000);
 
-  test('the header 切断 releases the hub to idle while idle, and does nothing while an update runs', async () => {
+  test('the header 切断 releases the node connected to the PC to idle while idle, and does nothing while an update runs', async () => {
     const { t, op } = await sentTo({ hubAway: Infinity });
     await op.disconnect();
     expect([op.state, op.status]).toEqual(['idle', ANNOUNCE.hubLost]);
@@ -402,7 +402,7 @@ describe('update from the page with dagon-host apply against the mock hub', () =
     expect(op.state).toBe('reconnectNeeded');
   }, 60_000);
 
-  test('reconnectNeeded: two devices reported at once (another hub and this one) do not interleave; only this hub is taken', async () => {
+  test('reconnectNeeded: two devices reported at once (another PC-connected node and this one) do not interleave; only this PC-connected node is taken', async () => {
     const { t, op } = await sentTo({ hubAway: Infinity });
     op.takeFile('sample-1.1.0.dgb', RELEASE);
     await op.update();
@@ -468,7 +468,7 @@ describe('update from the page with dagon-host apply against the mock hub', () =
     });
   }, 60_000);
 
-  test('the record of a hub found back on its previous version when chosen again', async () => {
+  test('the record of a node connected to the PC found back on its previous version when chosen again', async () => {
     const { t, op } = await sentTo({ hubAway: Infinity, fallBack: ['hub'] });
     op.takeFile('sample-1.1.0.dgb', RELEASE);
     await op.update();
@@ -528,7 +528,7 @@ describe('update from the page with dagon-host apply against the mock hub', () =
     expect(bandOf(op.state, op.ctx, { finish: op.finished }).sentence).toBe(BAND_FOR.doneBack('7セグ', '1.0.0').sentence);
   }, 60_000);
 
-  test('the CLI gives the hub back: the page opens it again by itself and goes on watching', async () => {
+  test('the CLI gives the node connected to the PC back: the page opens it again by itself and goes on watching', async () => {
     const t = new MockTransport();
     const op = new Operate({
       open: async () => {
@@ -551,7 +551,7 @@ describe('update from the page with dagon-host apply against the mock hub', () =
     expect(op.responding).toBe(3);
   }, 20_000);
 
-  test('the CLI gives back another hub than the one connected: closed, lost, the reason in the log', async () => {
+  test('the CLI gives back another PC-connected node than the one connected: closed, lost, the reason in the log', async () => {
     const t = new MockTransport();
     const other = new MockTransport({ hello: { ...SAMPLE_HUB_HELLO, mcuId: 9 } });
     const op = new Operate({
@@ -578,7 +578,7 @@ describe('update from the page with dagon-host apply against the mock hub', () =
     expect(op.returnRefused).toBeNull();
   }, 20_000);
 
-  test('the version to keep a reopened hub by is cleared once the hub is confirmed', async () => {
+  test('the version to keep a reopened PC-connected node by is cleared once the node connected to the PC is confirmed', async () => {
     class Recording extends MockTransport {
       expected: (number | null)[] = [];
       expectHub(v: number | null): void {
@@ -604,7 +604,7 @@ describe('update from the page with dagon-host apply against the mock hub', () =
     expect(t.expected.slice(sent + 1)).toContain(null);
   }, 60_000);
 
-  test('the CLI gives the hub back but it cannot be opened: lost, connect again', async () => {
+  test('the CLI gives the node connected to the PC back but it cannot be opened: lost, connect again', async () => {
     const t = new MockTransport();
     const op = new Operate({
       open: async () => {
@@ -636,7 +636,7 @@ describe('update from the page with dagon-host apply against the mock hub', () =
     ).toEqual({ seg: 62, watch: 100, z: 100 });
   });
 
-  test('the hub came back on its previous version: stopped there, marked previous', async () => {
+  test('the node connected to the PC came back on its previous version: stopped there, marked previous', async () => {
     const { t, op } = await sentTo({ fallBack: ['hub'] });
     op.takeFile('sample-1.1.0.dgb', RELEASE);
     await op.update();

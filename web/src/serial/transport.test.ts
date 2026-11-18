@@ -92,7 +92,7 @@ describe('WebSerialTransport read loop', () => {
     expect(t.port).toBe(chosen);
   });
 
-  test('never takes another hub of the same kind: not one that was there before, not one of two that appeared', async () => {
+  test('never takes another PC-connected node of the same kind: not one that was there before, not one of two that appeared', async () => {
     const ids = { usbVendorId: 0x2e8a, usbProductId: 0x000a };
     const same = () => Object.assign(new FakePort([readable(() => undefined)]), { getInfo: () => ids });
     let lost = false;
@@ -114,12 +114,12 @@ describe('WebSerialTransport read loop', () => {
     expect(t.port).toBe(mine);
   });
 
-  describe('several devices of the same kind after the hub reboots', () => {
+  describe('several devices of the same kind after the node connected to the PC reboots', () => {
     const ids = { usbVendorId: 0x2e8a, usbProductId: 0x000a };
     const V100 = versionRaw(1, 0, 0);
     const V110 = versionRaw(1, 1, 0);
 
-    /** A port that answers HELLO with `hello` (null: never answers), like a real hub over USB. */
+    /** A port that answers HELLO with `hello` (null: never answers), like a real PC-connected node over USB. */
     function answering(hello: HelloResp | null) {
       let ctrl: ReadableStreamDefaultController<Uint8Array> | null = null;
       const p = {
@@ -167,7 +167,7 @@ describe('WebSerialTransport read loop', () => {
 
     const hub = (activeVersion: number, trial: boolean): HelloResp => ({ ...SAMPLE_HUB_HELLO, activeVersion, trial });
 
-    test('keeps only the hub on trial with the version just sent, and notes why the others were not taken', async () => {
+    test('keeps only the node connected to the PC on trial with the version just sent, and notes why the others were not taken', async () => {
       const other = answering(hub(V100, false));
       const back = answering(hub(V110, true));
       const t = await rebooted([other, back], V110);
@@ -177,7 +177,7 @@ describe('WebSerialTransport read loop', () => {
       await t.close();
     });
 
-    test('takes nothing when two hubs are on trial with that version, or when no version was sent', async () => {
+    test('takes nothing when two nodes connected to the PC are on trial with that version, or when no version was sent', async () => {
       const t = await rebooted([answering(hub(V110, true)), answering(hub(V110, true))], V110);
       await expect(t.open()).rejects.toThrow('lost');
       expect(t.notes()).toContainEqual({ kind: 'several', count: 2 });
@@ -187,7 +187,7 @@ describe('WebSerialTransport read loop', () => {
       expect(u.notes()).toEqual([{ kind: 'away' }, { kind: 'several', count: 2 }]);
     });
 
-    test('one device appeared after a version was sent: taken only when it is the hub on trial with it', async () => {
+    test('one device appeared after a version was sent: taken only when it is the node connected to the PC on trial with it', async () => {
       const wrong = await rebooted([answering(hub(V100, false))], V110);
       await expect(wrong.open()).rejects.toThrow('lost');
       expect(wrong.notes()).toEqual([{ kind: 'away' }, { kind: 'version', version: V100, trial: false }]);
@@ -202,7 +202,7 @@ describe('WebSerialTransport read loop', () => {
     test.each([
       ['another MCU', { mcuId: 9 }],
       ['another release key', { keyId: Uint8Array.of(1, 2, 3, 4, 5, 6, 7, 8) }],
-    ])('hubRestarting: a hub of the same USB kind on trial with the version just sent but %s is not this hub: closed, not kept, logged', async (_, differs) => {
+    ])('hubRestarting: a node connected to the PC of the same USB kind on trial with the version just sent but %s is not this PC-connected node: closed, not kept, logged', async (_, differs) => {
       const first = hub(V100, false);
       const impostor = answering({ ...hub(V110, true), ...differs });
       const t = await rebooted([impostor], V110, first);
@@ -239,7 +239,7 @@ describe('WebSerialTransport read loop', () => {
     test('a port the browser reported connected again is a candidate even though it was allowed before', async () => {
       const back = answering(hub(V110, true));
       const t = await rebooted([], V110);
-      // `back` was already allowed when the hub was opened…
+      // `back` was already allowed when the node connected to the PC was opened…
       (t as unknown as { known: Set<unknown> }).known.add(back);
       const ports = (await (t as unknown as { serial: Serial }).serial.getPorts()) as unknown[];
       ports.push(back);

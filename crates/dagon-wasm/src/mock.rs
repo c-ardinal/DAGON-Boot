@@ -5,11 +5,10 @@
 //! writer.
 
 use dagon_format::Version;
-use dagon_proto::handler::{self, Handler};
+use dagon_proto::handler::{self, Ceiling, Handler};
 use dagon_proto::payload::{
-    confirm_of, encode_bulk_resp, encode_digest, encode_next_offset, put_refusal, reboot_of,
-    status_req_of, CmdSet, HelloReq, HelloResp, Relay, SetPending, Show, SlotInfo, SlotState,
-    StatusResp, XferBegin, XferChunk, REFUSAL_MAX,
+    encode_bulk_resp, encode_digest, encode_next_offset, put_refusal, CmdSet, HelloResp, SlotInfo,
+    SlotState, StatusResp, XferChunk, REFUSAL_MAX,
 };
 use dagon_proto::{flags, max_payload, Cmd, FrameError, Status, CRC_LEN, HEADER_LEN};
 use wasm_bindgen::prelude::*;
@@ -95,36 +94,36 @@ fn chunk(r: &mut Request, c: XferChunk<'_>) {
     (r.offset, r.bulk) = (c.offset, c.data.to_vec());
 }
 
-/// The commands the page's nodes serve: each row puts what its request
-/// says into the [`Request`] the page acts on. RELAY is the last row, for
-/// the node that relays.
+/// The commands the page's nodes serve: each row puts what its typed
+/// request says into the [`Request`] the page acts on. RELAY is the last
+/// row, for the node that relays.
 const TABLE: [Handler<Request, ()>; 11] = [
-    Handler::new(Cmd::Hello, |_, p| HelloReq::of(p).map(|_| ())),
-    Handler::new(Cmd::Status, |r, p| {
-        r.target = status_req_of(p)?;
+    Handler::new(Cmd::Hello, |_, q| q.hello().map(|_| ())),
+    Handler::new(Cmd::Status, |r, q| {
+        r.target = q.status()?;
         Ok(())
     }),
-    Handler::new(Cmd::XferBegin, |r, p| {
-        let b = XferBegin::of(p)?;
+    Handler::new(Cmd::XferBegin, |r, q| {
+        let b = q.xfer_begin()?;
         (r.target, r.slot) = (b.target, b.slot);
         Ok(())
     }),
-    Handler::new(Cmd::XferData, |r, p| XferChunk::of(p).map(|c| chunk(r, c))),
+    Handler::new(Cmd::XferData, |r, q| q.xfer_data().map(|c| chunk(r, c))),
     Handler::new(Cmd::XferEnd, |_, _| Ok(())),
-    Handler::new(Cmd::XferHdr, |r, p| XferChunk::of(p).map(|c| chunk(r, c))),
-    Handler::new(Cmd::SetPending, |r, p| {
-        let s = SetPending::of(p)?;
+    Handler::new(Cmd::XferHdr, |r, q| q.xfer_hdr().map(|c| chunk(r, c))),
+    Handler::new(Cmd::SetPending, |r, q| {
+        let s = q.set_pending()?;
         (r.target, r.slot) = (s.target, s.slot);
         Ok(())
     }),
-    Handler::new(Cmd::Reboot, |_, p| reboot_of(p).map(|_| ())),
-    Handler::new(Cmd::Confirm, |r, p| {
-        r.target = confirm_of(p)?;
+    Handler::new(Cmd::Reboot, |_, q| q.reboot().map(|_| ())),
+    Handler::new(Cmd::Confirm, |r, q| {
+        r.target = q.confirm()?;
         Ok(())
     }),
-    Handler::new(Cmd::Show, |_, p| Show::of(p).map(|_| ())),
-    Handler::new(Cmd::Relay, |r, p| {
-        let x = Relay::of(p)?;
+    Handler::new(Cmd::Show, |_, q| q.show().map(|_| ())),
+    Handler::new(Cmd::Relay, |r, q| {
+        let x = q.relay()?;
         (r.link, r.addr, r.bulk) = (x.link, x.addr, x.inner.to_vec());
         Ok(())
     }),
@@ -143,7 +142,7 @@ fn table(relays: bool) -> &'static [Handler<Request, ()>] {
 fn read_request(cmd: u8, p: &[u8], relays: bool) -> Result<Request, Status> {
     let mut r = Request::default();
     let row = handler::find(table(relays), cmd).ok_or(Status::Unsupported)?;
-    row.call(&mut r, p)?;
+    row.call(&mut r, p, Ceiling::link(max_payload::USB))?;
     Ok(r)
 }
 
@@ -284,7 +283,9 @@ pub fn response_relay(frame: &[u8]) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use dagon_proto::payload::{parse_bulk_resp, parse_digest, parse_next_offset, refused_field};
+    use dagon_proto::payload::{
+        parse_bulk_resp, parse_digest, parse_next_offset, refused_field, XferBegin,
+    };
     use dagon_proto::split_status;
 
     #[test]

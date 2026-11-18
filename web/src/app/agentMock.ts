@@ -1,12 +1,12 @@
-// Development stand-in for serve's agent routes (site/src/content/docs/reference/agent-api.md), until
-// the CLI side is merged: `?agent` links on the page only, `?agent=linked`
+// Development stand-in for serve's agent routes (site/src/content/docs/reference/agent-api.md):
+// `?agent` links on the page only, `?agent=linked`
 // starts linked, `&agentdemo` refuses linking (403). The
 // answers are fixed sentences, never an agent's.
 import type { AgentApi, AgentStatus } from './agent.svelte.ts';
 
 export const MOCK_TEXTS = (): string[] => [...SENDS, ...NEVER, ...Object.values(ANSWERS)];
 
-const SENDS = ['構成と定義の事実（ノード・リンク・部品・設定値）', '選んだノードやリンク', '確かめた結果（問題・◇ 未対応・書き込みの記録）'];
+const SENDS = ['構成と定義の事実（ノード・リンク・部品・設定値）', '選んだノードやリンク', '確認した結果（問題・◇ 制限・書き込みの記録）'];
 const NEVER = ['鍵', 'コマンドとその出力の全文', 'ファイルのパス'];
 const ANSWERS: Record<string, string> = {
   problem: 'このノードに問題はありません。\n\n確かめた結果と書き込みの記録のどちらにも、このノードの問題は出ていません。',

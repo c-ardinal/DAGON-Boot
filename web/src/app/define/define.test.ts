@@ -147,7 +147,7 @@ describe('define session', () => {
     expect([p.severity, p.select, p.field]).toEqual(['error', 'link:watch', 'addr']);
   });
 
-  test('Delete removes the selected node (undoable); export and import round-trip; a broken file is C09', () => {
+  test('Delete removes the selected node (undoable); export and import round-trip; a broken file is refused with its notice', () => {
     const d = new Define();
     d.placeSample();
     d.selected = 'node:watch';
@@ -165,7 +165,7 @@ describe('define session', () => {
     expect(e.unreadable).toBe(true);
   });
 
-  test('運用 can be entered with a 構成 that has no problems, parts not updatable yet included (M69)', () => {
+  test('運用 can be entered with a 構成 that has no problems, parts updating skips included', () => {
     const d = new Define();
     expect(d.operable).toBe('empty');
     d.placeSample();
@@ -178,7 +178,7 @@ describe('define session', () => {
     d.apply(connect(setNode(r.doc, r.id, 'role', 'coordinator'), r.id, 'hub'));
     expect(d.errors).toBe(0);
     expect(d.operable).toBe('ok');
-    expect(d.notYet).toBe(1);
+    expect(d.skipped).toBe(1);
     expect(problemChip(d.problems.find((p) => p.rule === 'V-23')!)).toEqual({ mark: '◇', kind: 'unsupported' });
   });
 
@@ -229,7 +229,7 @@ describe('define session', () => {
     expect(LINK.bundle('I2C', 5, 3)).toBe('I2C · 5 本（うち共有 3）');
   });
 
-  test('an empty file or one that is not a 構成 mapping is C09, not a crash', () => {
+  test('an empty file or one that is not a 構成 mapping is refused with its notice, not a crash', () => {
     const d = new Define();
     for (const text of ['', '42', '[a, b]', 'name: x']) {
       expect(d.importYaml(text), JSON.stringify(text)).toBe(false);

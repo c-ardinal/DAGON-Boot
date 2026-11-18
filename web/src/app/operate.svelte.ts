@@ -171,7 +171,7 @@ export function refusalOf(e: unknown): Refusal {
 
 /** The announcement of a refused release, the same wherever the check ran (file, recovery). */
 export function refusalAnnounce(k: Refusal): string {
-  return k === 'topology' ? ANNOUNCE.A10topology : k === 'format' ? ANNOUNCE.A10format : ANNOUNCE.A10source;
+  return k === 'topology' ? ANNOUNCE.fileTopology : k === 'format' ? ANNOUNCE.fileFormat : ANNOUNCE.fileSource;
 }
 
 export interface Deps {
@@ -280,7 +280,7 @@ export class Operate {
    * the file carries none.
    */
   fileTopology = $state<Topo | null>(null);
-  /** "最新のリリースを使う" found no release (M58 in the band until the next step). */
+  /** "最新のリリースを使う" found no release (BAND.noRelease until the next step). */
   latestMissing = $state(false);
   /** The version the chosen release gives each node (shown as "↑ 1.0.0 → 1.1.0" before the update). */
   fileVersions = $state<Record<string, number>>({});
@@ -449,14 +449,14 @@ export class Operate {
     this.session++;
     await this.drop();
     this.alert = '';
-    this.status = ANNOUNCE.A21lost;
+    this.status = ANNOUNCE.hubLost;
     this.go('disconnect', false);
   }
 
   /**
    * The CLI gave the port back (device.returned): the page opens the device
-   * it had again by itself and goes on watching (ready, M67); when that fails
-   * the user connects again (lost, M34). It must be the same 親機 as before
+   * it had again by itself and goes on watching (ready, BAND.cliTurn); when that fails
+   * the user connects again (lost, BAND.lost). It must be the same 親機 as before
    * (notThisHub against the first HELLO); otherwise it is closed and the
    * reason goes to the log.
    */
@@ -484,11 +484,11 @@ export class Operate {
         this.returnRefused = e;
       }
       await this.drop();
-      this.alert = ANNOUNCE.A21lost;
+      this.alert = ANNOUNCE.hubLost;
       return this.go('lost', false);
     }
     if (my !== this.session) return;
-    this.status = ANNOUNCE.A05;
+    this.status = ANNOUNCE.hubConnected;
     this.go('cliReturn', false);
     this.startWatching();
   }
@@ -540,7 +540,7 @@ export class Operate {
       return this.fail(my, 'noAnswer', 'no-response');
     }
     if (my !== this.session) return;
-    this.status = ANNOUNCE.A05;
+    this.status = ANNOUNCE.hubConnected;
     if (discover) return this.discover(my);
     this.go('helloConfigured');
     this.startWatching();
@@ -575,7 +575,7 @@ export class Operate {
         }),
       );
       this.found = seen.size;
-      this.status = ANNOUNCE.A06(this.found);
+      this.status = ANNOUNCE.found(this.found);
       this.go('scanned');
       this.startWatching();
     } catch {
@@ -596,7 +596,7 @@ export class Operate {
     void this.drop();
     const was = this.state;
     this.go('lost');
-    if (this.state !== was) this.alert = ANNOUNCE.A21lost;
+    if (this.state !== was) this.alert = ANNOUNCE.hubLost;
   }
 
   /** One monitoring round: HELLO to every node, then STATUS of the selected one. */
@@ -618,7 +618,7 @@ export class Operate {
           hello: r.hello ?? was.hello,
           lastSeen: r.hello ? Date.now() : was.lastSeen,
         };
-        if (was.responding !== false && !r.responding) this.alert = ANNOUNCE.A21silent(n.name);
+        if (was.responding !== false && !r.responding) this.alert = ANNOUNCE.nodeSilent(n.name);
       }
       const id = this.selected?.startsWith('node:') ? this.selected.slice(5) : null;
       if (id) await this.refreshStatus(id);
@@ -628,7 +628,7 @@ export class Operate {
     } finally {
       this.watching = false;
     }
-    if (this.responding !== before) this.status = ANNOUNCE.A08(this.responding, this.reach.length);
+    if (this.responding !== before) this.status = ANNOUNCE.responding(this.responding, this.reach.length);
     // ready and done move to nodesSilent by themselves while a node does not answer: it stays visible and recoverable
     // (after "応答する n つだけ先に書き込む" the ones left out are named there).
     if ((this.state === 'ready' || this.state === 'done') && this.stuck) this.go('watchAlarm', false);
@@ -679,7 +679,7 @@ export class Operate {
     this.file = file;
     this.refusal = undefined;
     this.fileTopology = null;
-    this.status = ANNOUNCE.A09(name, FILE.size(bytes.length));
+    this.status = ANNOUNCE.fileChecking(name, FILE.size(bytes.length));
     this.go('read', false);
     try {
       check_release_for(bytes, topo_compile(this.config.yaml));
@@ -698,7 +698,7 @@ export class Operate {
     this.fileVersions = Object.fromEntries(this.reach.flatMap((n, i) => (given.has(i) ? [[n.id, given.get(i)!]] : [])));
     this.rest = false;
     this.targets = this.answering();
-    this.status = ANNOUNCE.A10ok(this.targets.length, this.config.nodes.length - this.reach.length);
+    this.status = ANNOUNCE.fileOk(this.targets.length, this.config.nodes.length - this.reach.length);
     this.go('pass');
   }
 
@@ -771,7 +771,7 @@ export class Operate {
     if (e.phase === PHASE.transfer && e.bootCore) this.coreSent[n.id] = e.version;
     const was = this.progress[n.id] ?? { stage: 'waiting', percent: 0 };
     if (e.phase === PHASE.transfer || e.phase === PHASE.verify) {
-      if (was.stage !== 'writing') this.status = ANNOUNCE.A11(n.name);
+      if (was.stage !== 'writing') this.status = ANNOUNCE.writing(n.name);
       this.progress[n.id] = { stage: 'writing', percent: e.phase === PHASE.verify ? 100 : e.percent, ...(e.bootCore ? { core: e.version } : {}) };
     } else if (e.phase === PHASE.reboot && this.isLocal(n)) {
       this.progress[n.id] = { stage: 'rebooting', percent: 100, ...(e.bootCore ? { core: e.version } : {}) };
@@ -840,14 +840,14 @@ export class Operate {
     if (version !== undefined) this.transport?.expectHub?.(version, this.hubHello);
     this.reconnectNotes = [];
     this.reconnectUntil = this.now() + host_reconnect_ms();
-    this.status = ANNOUNCE.A12;
+    this.status = ANNOUNCE.hubRestarting;
     this.go('hubTurn');
   }
 
   /** dagon-host gave up reopening the hub (reconnectNeeded): the dialog opens, with why. */
   private autoFailed(): void {
     this.reconnectNotes = this.transport?.notes?.() ?? [];
-    this.alert = ANNOUNCE.A21timeout;
+    this.alert = ANNOUNCE.reconnectTimeout;
     this.go('autoFailed');
   }
 
@@ -898,7 +898,7 @@ export class Operate {
     const n = this.config!.nodes.find((x) => x.id === id)!;
     this.failed = id;
     this.progress[id] = { stage, percent: this.progress[id]?.percent ?? 0, reason };
-    this.status = stage === 'previous' ? ANNOUNCE.A13previous(n.name) : stage === 'coreBack' ? ANNOUNCE.A13core(n.name) : ANNOUNCE.A13(n.name);
+    this.status = stage === 'previous' ? ANNOUNCE.previous(n.name) : stage === 'coreBack' ? ANNOUNCE.coreBack(n.name) : ANNOUNCE.stopped(n.name);
     this.go(this.state === 'reconnectNeeded' ? 'revertedOnReconnect' : 'nodeStuck');
     this.startWatching();
   }
@@ -906,7 +906,7 @@ export class Operate {
   private done(): void {
     // An app left unchanged is on the package's version too.
     const v = Object.values(this.sentVersion)[0] ?? Object.values(this.fileVersions)[0];
-    this.status = ANNOUNCE.A14(v === undefined ? '' : versionText(v));
+    this.status = ANNOUNCE.done(v === undefined ? '' : versionText(v));
     this.finished = {
       kind: 'updated',
       left: this.reach.filter((n) => !this.updated.has(n.id) && !this.skip.has(n.id)).length,
@@ -963,7 +963,7 @@ export class Operate {
     if (!r) {
       // Never left open while 切断 is held: the dialog stays, with the reason under 詳しく見る.
       void t.close().catch(() => undefined);
-      this.alert = ANNOUNCE.A21timeout;
+      this.alert = ANNOUNCE.reconnectTimeout;
       return false;
     }
     this.confirmed(r.confirmed, r.core, r.appSame);
@@ -1017,7 +1017,7 @@ export class Operate {
       return this.done();
     }
     this.finishRun(hub, r.version);
-    this.status = ANNOUNCE.A14(versionText(r.version));
+    this.status = ANNOUNCE.done(versionText(r.version));
     this.go('reconnected');
     this.startWatching();
   }
@@ -1036,7 +1036,7 @@ export class Operate {
   async useLatest(): Promise<boolean> {
     const bytes = await this.latest();
     if (!bytes) {
-      this.alert = ANNOUNCE.A22latest;
+      this.alert = ANNOUNCE.noRelease;
       this.latestMissing = true;
       return false;
     }
@@ -1096,7 +1096,7 @@ export class Operate {
     return this.writeNode();
   }
 
-  /** "前のバージョンに戻す" (the detail of a node, UC-O10 / M38): the version in the other slot. */
+  /** "前のバージョンに戻す" (the detail of a node, and the trial choice): the version in the other slot. */
   async rollback(id: string): Promise<void> {
     const reach = this.reach;
     const n = reach.find((x) => x.id === id);
@@ -1170,7 +1170,7 @@ export class Operate {
     this.finishRun(n, r.version);
     this.live[n.id] = { ...(this.live[n.id] ?? UNKNOWN), responding: true, lastSeen: Date.now() };
     const rest = this.file?.verdict === 'pass' ? Object.entries(this.progress).filter(([, p]) => p.stage === 'unwritten').map(([id]) => id) : [];
-    this.status = kind === 'rollback' ? ANNOUNCE.A15(n.name, versionText(r.version)) : ANNOUNCE.A16(n.name, rest.length);
+    this.status = kind === 'rollback' ? ANNOUNCE.rolledBack(n.name, versionText(r.version)) : ANNOUNCE.recovered(n.name, rest.length);
     // The hub's REBOOT event moved the state on while dagon-host ran.
     if ((this.state as L) === 'hubRestarting') {
       this.go('confirmed');
@@ -1198,7 +1198,7 @@ export class Operate {
     if (this.state === 'hubRestarting' && reason === 'NO ANSWER') return this.autoFailed();
     const percent = this.progress[n.id]?.percent ?? 0;
     this.progress[n.id] = { ...failureStage(reason), percent };
-    this.status = REFUSALS.includes(reason) ? refusalAnnounce(reason as Refusal) : ANNOUNCE.A13(n.name);
+    this.status = REFUSALS.includes(reason) ? refusalAnnounce(reason as Refusal) : ANNOUNCE.stopped(n.name);
     this.go(this.state === 'hubRestarting' ? 'nodeStuck' : 'gaveUp');
   }
 

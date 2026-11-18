@@ -269,7 +269,7 @@ pub fn read_topology(cfg: &Config, path: &Path) -> Result<dagon_topology::Topolo
             format!(": {} {}: {}", i.rule, i.path, i.message)
         });
         format!(
-            "{}: no part of this topology can be updated yet; the part updating would reach does not pass the checks on its own{first}",
+            "{}: no part of this topology can be updated: the part updating would reach does not pass the checks on its own{first}",
             path.display()
         )
     })
@@ -280,12 +280,7 @@ pub fn read_topology(cfg: &Config, path: &Path) -> Result<dagon_topology::Topolo
 pub fn skipped_lines(cut: &dagon_topology::Cut) -> Vec<String> {
     cut.skipped
         .iter()
-        .map(|(id, why)| {
-            format!(
-                "note: '{id}' is not updatable yet and is skipped: {}",
-                why.reason()
-            )
-        })
+        .map(|(id, why)| format!("note: updating skips '{id}': {}", why.reason()))
         .collect()
 }
 

@@ -33,8 +33,8 @@ const HISTORY = 100;
 
 /**
  * Whether 運用 can be entered: a 構成 with no problems. Parts
- * updating does not reach yet are valid and do not stop it; they
- * are skipped there. `empty` and `problems` say M69.
+ * updating does not reach are valid and do not stop it; they
+ * are skipped there. `empty` and `problems` say MODE.lockedProblems.
  */
 export type Operable = 'ok' | 'empty' | 'problems';
 
@@ -71,7 +71,7 @@ export class Define {
   readonly warnings = $derived(this.problems.filter((p) => p.severity === 'warning').length);
   readonly config: Config = $derived(toConfig(this.doc, supportedBoards()));
   /** Nodes updating skips: shown as 書き込めない, never a problem. */
-  readonly notYet = $derived(this.config.nodes.filter((n) => n.notYet).length);
+  readonly skipped = $derived(this.config.nodes.filter((n) => n.skip).length);
   readonly operable: Operable = $derived(
     this.doc.topo.nodes.length === 0
       ? 'empty'
@@ -146,12 +146,12 @@ export class Define {
     this.selected = null;
   }
 
-  /** "置く" from the node list (A01). */
+  /** "置く" from the node list (announced as placed). */
   place(board: string, product: string): void {
     const r = place(this.doc, board);
     if (!r.id || !this.apply(r.doc)) return;
     this.selected = `node:${r.id}`;
-    this.status = ANNOUNCE.A01(product, r.doc.topo.nodes.find((n) => n.id === r.id)!.role === 'coordinator');
+    this.status = ANNOUNCE.placed(product, r.doc.topo.nodes.find((n) => n.id === r.id)!.role === 'coordinator');
   }
 
   /**
@@ -164,7 +164,7 @@ export class Define {
     const next = parent ? connect(r.doc, r.id, parent) : r.doc;
     if (!this.apply(next)) return;
     this.selected = `node:${r.id}`;
-    this.status = ANNOUNCE.A01(name, next.topo.nodes.find((n) => n.id === r.id)!.role === 'coordinator');
+    this.status = ANNOUNCE.placed(name, next.topo.nodes.find((n) => n.id === r.id)!.role === 'coordinator');
   }
 
   /** A port drag: node `id` under `parent`, with the link "つなぐ先" would make. */
@@ -198,7 +198,7 @@ export class Define {
     const r = placeMcu(this.doc, mcu);
     if (!r.id || !this.apply(r.doc)) return;
     this.selected = `node:${r.id}`;
-    this.status = ANNOUNCE.A01(name, r.doc.topo.nodes.find((n) => n.id === r.id)!.role === 'coordinator');
+    this.status = ANNOUNCE.placed(name, r.doc.topo.nodes.find((n) => n.id === r.id)!.role === 'coordinator');
   }
 
   /** What the user asked to delete (`node:id` / `link:to`): a modal confirms before anything goes. */
@@ -218,7 +218,7 @@ export class Define {
     this.removeSelected(key);
   }
 
-  /** Deletes the node or link at `key` (A03). */
+  /** Deletes the node or link at `key` (announced as removed). */
   removeSelected(key: string | null = this.selected): void {
     const s = key;
     if (!s) return;
@@ -226,7 +226,7 @@ export class Define {
       const id = s.slice(5);
       const name = this.doc.names[id] ?? id;
       if (!this.apply(removeNode(this.doc, id))) return;
-      this.status = ANNOUNCE.A03(name);
+      this.status = ANNOUNCE.removed(name);
     } else if (s.startsWith('link:')) {
       const t = this.doc.topo;
       const i = (t.links ?? []).findIndex((l) => linkKey(t, l) === s);
@@ -251,7 +251,7 @@ export class Define {
     return { name: `${this.doc.topo.name || 'topology'}.yaml`, text: kept };
   }
 
-  /** "読み込む": a YAML file; C09 when it does not parse. */
+  /** "読み込む": a YAML file; DEFINE.unreadableChip when it does not parse. */
   importYaml(text: string): boolean {
     try {
       const doc = fromYaml(text);

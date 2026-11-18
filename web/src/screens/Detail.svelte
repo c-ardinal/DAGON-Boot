@@ -13,7 +13,7 @@
     connected: boolean;
     /** Node actions are offered (watching, nothing running). */
     act?: boolean;
-    /** M38 "このバージョンで確定する". */
+    /** The trial choice: "このバージョンで確定する". */
     onkeep?: (id: string) => void;
     /** "前のバージョンに戻す". */
     onback?: (id: string) => void;
@@ -170,10 +170,10 @@
 {#snippet nodeDetail(n: Node, l: Live | undefined)}
   <section aria-labelledby="detail-h">
     <h2 id="detail-h" class="title" tabindex="-1">{n.name}</h2>
-    {#if n.notYet}
-      <!-- Updating does not reach it yet (V-23): nothing is watched or written there. -->
-      <p class="choice">{NODE.notYet}</p>
-      <p>{NODE.notYetWhy[n.notYet] ?? ''}</p>
+    {#if n.skip}
+      <!-- Updating skips it (V-23): nothing is watched or written there. -->
+      <p class="choice">{NODE.skipped}</p>
+      <p>{NODE.skippedWhy[n.skip] ?? ''}</p>
     {:else if connected}
       {@const rows = health(l)}
       {@const r = raw(l)}

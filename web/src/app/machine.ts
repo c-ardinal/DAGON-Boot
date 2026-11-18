@@ -77,7 +77,7 @@ export const MACHINE: Record<L, Spec> = {
     step: 4,
     primary: 'chooseFile',
     secondary: ['useLatest'],
-    // rollback: M38's "前のバージョンに戻す" for a node left on trial.
+    // rollback: the trial choice's "前のバージョンに戻す" for a node left on trial.
     on: { recover: 'recovering', watchAlarm: 'nodesSilent', chooseFile: 'reading', useLatest: 'reading', cliClaim: 'cliTurn', rollback: 'recovering', ...leave },
   },
   nodesSilent: {

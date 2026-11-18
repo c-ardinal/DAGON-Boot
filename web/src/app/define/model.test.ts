@@ -121,7 +121,7 @@ describe('define document', () => {
     expect(ownFlash(fromYaml(SAMPLE_YAML), 'hub')).toBeNull();
   });
 
-  test('any shape: a second 親機 over CAN and a grandchild are drawn in rows and told as not updatable yet (V-23)', () => {
+  test('any shape: a second 親機 over CAN and a grandchild are drawn in rows and told as skipped by updating (V-23)', () => {
     let doc = fromYaml(SAMPLE_YAML);
     doc = placeMcu(doc, 'rp2040').doc;
     const hub2 = doc.topo.nodes[doc.topo.nodes.length - 1].id;
@@ -134,16 +134,16 @@ describe('define document', () => {
     // Information, never an error: nothing tells the 構成 is wrong.
     expect(v23.every((p) => p.severity === 'info')).toBe(true);
     expect(problems(doc).filter((p) => p.severity === 'error')).toEqual([]);
-    expect(v23[0].sentence).toContain('飛ばします');
+    expect(v23[0].sentence).toContain('スキップします');
     expect(v23[0].sentence).not.toContain('してください');
-    // The CAN hop to it is not available yet either, told as skipped, not as a thing to fix.
+    // The CAN hop to it is not available either, told as skipped, not as a thing to fix.
     const v24 = problems(doc).find((p) => p.rule === 'V-24' && p.select === `link:${hub2}`)!;
     expect(v24.sentence).toContain('飛ばす');
     expect(v24.sentence).not.toContain('してください');
     const c = toConfig(doc, supportedBoards());
     // Linked from the first 親機, the second one sits below it, skipped as a second 親機's tree.
-    expect(c.nodes.find((n) => n.id === hub2)).toMatchObject({ depth: 1, notYet: 'second-hub' });
-    expect(c.nodes.filter((n) => n.notYet).map((n) => n.id)).toEqual([hub2]);
+    expect(c.nodes.find((n) => n.id === hub2)).toMatchObject({ depth: 1, skip: 'second-hub' });
+    expect(c.nodes.filter((n) => n.skip).map((n) => n.id)).toEqual([hub2]);
     expect(topo_compile(toYaml(doc.topo))).toEqual(topo_compile(SAMPLE_YAML));
 
     let deep = removeNode(fromYaml(SAMPLE_YAML), 'watch');
@@ -152,12 +152,12 @@ describe('define document', () => {
     // No [coordinator] on the F401: the first UART0 pins the 親機's definitions allow together (its MCU's pairs on its board's header).
     expect(deep.topo.links!.map((l) => linkView(deep.topo, l)).find((l) => l.from === 'seg')).toMatchObject({ iface: 'hw-uart0', pins: { tx: 16, rx: 17 } });
     const cfg = toConfig(deep, supportedBoards());
-    expect(cfg.nodes.map((n) => [n.id, n.depth, n.notYet])).toEqual([['hub', 0, undefined], ['seg', 1, undefined], ['m5stopwatch', 2, 'deep']]);
+    expect(cfg.nodes.map((n) => [n.id, n.depth, n.skip])).toEqual([['hub', 0, undefined], ['seg', 1, undefined], ['m5stopwatch', 2, 'deep']]);
     // Any depth: a node below the 孫機 is placed and connected too.
     const deeper = connect(place(deep, 'nucleo-f401re').doc, 'nucleo', 'm5stopwatch');
     expect(problems(deeper).filter((p) => p.severity === 'error')).toEqual([]);
     const dc = toConfig(deeper, supportedBoards());
-    expect(dc.nodes.find((n) => n.id === 'nucleo')).toMatchObject({ depth: 3, notYet: 'deep' });
+    expect(dc.nodes.find((n) => n.id === 'nucleo')).toMatchObject({ depth: 3, skip: 'deep' });
     expect(problems(deep).map((p) => p.rule)).toContain('V-23');
     // Valid as placed: the 孫機's link carries its board's way into its loader, so nothing is an error.
     expect(problems(deep).filter((p) => p.severity === 'error')).toEqual([]);
@@ -176,7 +176,7 @@ describe('define document', () => {
     expect(setUplink(doc, 'hub', null).topo.nodes.find((n) => n.id === 'hub')?.uplink).toBeUndefined();
   });
 
-  test('hops the firmware cannot do yet are known, and reported as まだ使えないつながり (◇)', () => {
+  test('hops the firmware does not run are known, and reported as 使えないつながり (◇)', () => {
     expect(linkKinds('rp2040')).toEqual({ up: [LinkKind.UsbCdc], down: [LinkKind.I2c, LinkKind.Uart] });
     const doc = fromYaml(SAMPLE_YAML);
     const [hub, seg] = ['hub', 'seg'].map((id) => doc.topo.nodes.find((n) => n.id === id));
@@ -211,9 +211,9 @@ describe('define document', () => {
       const c = toConfig(doc, supportedBoards());
       if (!check(toYaml(doc.topo)).ok) continue;
       // Total and disjoint: each node is either reached or told why.
-      for (const n of c.nodes) expect(c.reach.includes(n.id), `${n.id} ${n.notYet}`).toBe(!n.notYet);
+      for (const n of c.nodes) expect(c.reach.includes(n.id), `${n.id} ${n.skip}`).toBe(!n.skip);
       // The cut keeps 構成 order, so it is the nodes' order with the skipped ones left out.
-      expect(c.reach).toEqual(c.nodes.filter((n) => !n.notYet).map((n) => n.id));
+      expect(c.reach).toEqual(c.nodes.filter((n) => !n.skip).map((n) => n.id));
       expect(c.reach).toContain('hub');
       // The compiled table (dagon-wasm's topo_compile) lists its nodes in reach's order. Layout
       // (dagon-format topology): node_count at byte 6, nodes of 32 bytes from 0x20, target_tag at +16.

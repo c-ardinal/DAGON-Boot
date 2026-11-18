@@ -43,7 +43,7 @@ describe('first paint without dagon-wasm', () => {
     expect(body).not.toContain(DEFINE.listHeading);
   });
 
-  test('not served by dagon serve: the choices are unavailable and the band says how to start it (C11)', () => {
+  test('not served by dagon serve: the choices are unavailable and the band says how to start it', () => {
     stubBrowser('', { addEventListener: () => undefined });
     const { body } = render(App);
     expect(body).toContain(CLI_LINK.needCli);

@@ -391,7 +391,7 @@
       // Beside the strands, on the side the cable leans out to.
       const outward = route[3].x < route[0].x ? -1 : 1;
       const label = bundleLabel(l);
-      return { l, key, open, outward, clear: clearOf(width, midDir), start: route[0], strands: offsets.map((o) => strandPath(points, o)), ties, mid, label, name: LINK.name(LINK.bundle(kindLabel(l.kind), l.wires.length, l.wires.filter((w) => w.shared).length, label.slice(kindLabel(l.kind).length + 1)), nameOf(l.from), nameOf(l.to), l.addr), skipped: !!config?.nodes.find((n) => n.id === l.to)?.notYet };
+      return { l, key, open, outward, clear: clearOf(width, midDir), start: route[0], strands: offsets.map((o) => strandPath(points, o)), ties, mid, label, name: LINK.name(LINK.bundle(kindLabel(l.kind), l.wires.length, l.wires.filter((w) => w.shared).length, label.slice(kindLabel(l.kind).length + 1)), nameOf(l.from), nameOf(l.to), l.addr), skipped: !!config?.nodes.find((n) => n.id === l.to)?.skip };
     }),
   );
 
@@ -430,9 +430,9 @@
   type Mark = Chip | 'skeleton' | null;
 
   function markOf(n: Node): Mark {
-    if (n.notYet) {
-      const why = NODE.notYetWhy[n.notYet] ?? '';
-      return { chip: NODE.notYet, spoken: NODE.notYetName(why), silent: false, note: compact ? undefined : why };
+    if (n.skip) {
+      const why = NODE.skippedWhy[n.skip] ?? '';
+      return { chip: NODE.skipped, spoken: NODE.skippedName(why), silent: false, note: compact ? undefined : why };
     }
     if (chips[n.id]) return chips[n.id];
     if (!connected) return null;
@@ -464,7 +464,7 @@
     Object.fromEntries(
       (config?.nodes ?? []).map((n): [string, NodeState] => {
         const l = live[n.id];
-        return [n.id, nodeState({ connected, responding: l?.responding, trial: !!l?.hello?.trial, chip: chips[n.id]?.chip, writing: fill[n.id] !== undefined || building.includes(n.id), unreachable: !!n.notYet })];
+        return [n.id, nodeState({ connected, responding: l?.responding, trial: !!l?.hello?.trial, chip: chips[n.id]?.chip, writing: fill[n.id] !== undefined || building.includes(n.id), unreachable: !!n.skip })];
       }),
     ),
   );
@@ -642,7 +642,7 @@
           class="node st-{states[n.id]}"
           class:dragging={dragging === n.id}
           class:still
-          class:uns={!!n.notYet}
+          class:uns={!!n.skip}
           class:err={m !== null && m !== 'skeleton' && m.silent}
           class:drop={dropOn === n.id}
           class:checkable={check !== undefined}
@@ -677,7 +677,7 @@
             <!-- Its row, and the chip's below it, are always there: no card changes height when one fills. -->
             <span class="slotline" translate="no">{#each slots ?? [] as sl (sl.row)}<span class:on={sl.on}>{sl.row} {sl.text}</span>{/each}</span>
             <span class="chips"
-              >{#if m === 'skeleton'}<span class="skeleton chip-sk"></span>{:else if m?.chip}<span in:rise={{ dur: '--dur-quick' }} out:lateFade class="chip" class:silent={m.silent} class:uns={!!n.notYet && m.chip === NODE.notYet}>{m.chip}</span>{/if}{#if m && m !== 'skeleton' && m.note}<span class="note" title={m.note}>{m.note}</span>{/if}</span
+              >{#if m === 'skeleton'}<span class="skeleton chip-sk"></span>{:else if m?.chip}<span in:rise={{ dur: '--dur-quick' }} out:lateFade class="chip" class:silent={m.silent} class:uns={!!n.skip && m.chip === NODE.skipped}>{m.chip}</span>{/if}{#if m && m !== 'skeleton' && m.note}<span class="note" title={m.note}>{m.note}</span>{/if}</span
             >
           </span>
           {#if level !== undefined}<span in:fade out:lateFade={{ shown: confirmedOf(n.id) ? 100 : undefined }} class="pct" aria-hidden="true" style:--shown={Math.round(level)}></span>{/if}
@@ -818,7 +818,7 @@
   .bundle.open .wire.shared {
     stroke-dasharray: 6 4;
   }
-  /* ◇ not updatable yet: paper, dashed, never red. */
+  /* ◇ skipped by updating: paper, dashed, never red. */
   .bundle.uns .wire {
     stroke: var(--c-paper);
     stroke-dasharray: 2 4;

@@ -25,7 +25,7 @@ export function coreRows(mcu: string | undefined): number[] {
 }
 
 /**
- * The previous version "前のバージョンに戻す" goes back to (UC-O10): another
+ * The previous version "前のバージョンに戻す" goes back to: another
  * of the node's image slots (`rows`) when it is confirmed, or written and
  * older than the running version (it was confirmed before the running one
  * took over). A newer written image is not a previous version; null when

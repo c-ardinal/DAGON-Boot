@@ -110,7 +110,7 @@
     trialMs: (id) => trialMs(d.doc.topo.nodes.find((n) => n.id === id)?.mcu ?? ''),
   });
 
-  /** `dagon serve`: the page is always its page; K0/K3 when it cannot be reached. */
+  /** `dagon serve`: the page is always its page; `none` or `stopped` when it cannot be reached. */
   const cli = new Cli();
   const demoStandIn = import.meta.env.DEV && params.has('demo');
   /** The 親機 and 子機 are simulated: the demo page's own simulator. */
@@ -286,7 +286,7 @@
     void tick().then(() => document.querySelector<HTMLElement>('[aria-controls="menu"]')?.focus());
   }
 
-  /** 運用 pressed while it cannot be entered: M69 (or 未保存) in the band until the 構成 changes. */
+  /** 運用 pressed while it cannot be entered: MODE.lockedProblems (or 未保存) in the band until the 構成 changes. */
   let locked = $state<{ why: Operable | 'unsaved'; at: number } | null>(null);
   const lockShown = $derived(locked && locked.at === d.revision ? locked.why : null);
   function lock(why: Operable | 'unsaved') {
@@ -305,7 +305,7 @@
   const modeLocked = $derived(busyStates.includes(op.state));
 
   function switchMode(m: 'operate' | 'define') {
-    // 運用 only with a 構成 that has no problems (parts not updatable yet are skipped there); the YAML decides, never the 親機.
+    // 運用 only with a 構成 that has no problems (parts updating skips do not stop it); the YAML decides, never the 親機.
     if (m === 'operate' && d.operable !== 'ok') return lock(d.operable);
     // ... and only the saved one, the 構成 build, sign and release use too.
     if (m === 'operate' && autosave.pending) {
@@ -320,7 +320,7 @@
     const recheck = m === 'operate' && op.file !== null && ['fileRefused', 'otherTopology', 'fileReady'].includes(op.state) && op.config?.yaml !== d.config.yaml;
     if (m === 'operate') op.useConfig(d.config);
     mode = m;
-    d.status = ANNOUNCE.A22(m === 'define');
+    d.status = ANNOUNCE.mode(m === 'define');
     if (recheck && op.file) op.takeFile(op.file.name, op.file.bytes);
   }
 
@@ -442,7 +442,7 @@
   }
   const problemCount = $derived(d.problems.filter((p) => p.severity === 'error').length);
   const drawerTabs = $derived<DrawerTab[]>([
-    { id: 'problems', label: DRAWER.problems, count: problemCount + d.notYet, alarm: problemCount > 0 },
+    { id: 'problems', label: DRAWER.problems, count: problemCount + d.skipped, alarm: problemCount > 0 },
     { id: 'jobs', label: DRAWER.jobs, ...(runningJobs ? { count: runningJobs } : {}) },
     { id: 'output', label: DRAWER.output },
     { id: 'timeline', label: DRAWER.timeline },
@@ -461,7 +461,7 @@
     if (cli.defsFailed) return { cause: DEFINE.defsChip, sentence: DEFINE.defsSentence };
     if (d.unreadable) return { cause: DEFINE.unreadableChip, sentence: DEFINE.unreadableSentence };
     if (firstError) return { sentence: DEFINE.fixSentence };
-    if (d.notYet) return { sentence: DEFINE.notYetSentence(d.notYet) };
+    if (d.skipped) return { sentence: DEFINE.skippedSentence(d.skipped) };
     if (d.doc.topo.nodes.length === 0) return { sentence: CANVAS.empty };
     return { sentence: prepareSentence({ needsSkeleton, building: buildState === 'running', built: builtRevision === d.revision }) };
   });
@@ -567,7 +567,7 @@
     value: problemCount,
     alarm: true,
     sub: [DEFINE.dotNodes, d.doc.topo.nodes.length] as const,
-    more: [[DEFINE.dotLinks, String(d.doc.topo.links?.length ?? 0)], ...(d.notYet ? [[DEFINE.dotNotYet, String(d.notYet)] as const] : [])],
+    more: [[DEFINE.dotLinks, String(d.doc.topo.links?.length ?? 0)], ...(d.skipped ? [[DEFINE.dotSkipped, String(d.skipped)] as const] : [])],
     name: DEFINE.dotProblemsName(problemCount, d.doc.topo.nodes.length, d.doc.topo.links?.length ?? 0),
   });
 
@@ -653,7 +653,7 @@
       Object.entries(op.progress).flatMap(([id, p]): [string, Chip][] => {
         const c = cardChipOf(id, p);
         if (!c) return [];
-        // M27 beside the rebooting hub while the page reconnects by itself.
+        // The countdown beside the rebooting hub while the page reconnects by itself.
         return [[id, p.stage === 'rebooting' && reconnectLeft !== null ? { ...c, note: `${RECONNECT.auto} ${RECONNECT.left(reconnectLeft)}` } : c]];
       }),
     ),
@@ -722,7 +722,7 @@
   const chips = $derived(updating ? progressChips : diffChips);
   /** The water in each node while it is written (writing, hubRestarting, recovering). */
   const fill = $derived(PERCENT.has(op.state) ? Object.fromEntries(Object.keys(waterOf(op.progress)).map((id) => [id, op.percentOf(id, nowMs)])) : {});
-  // The comparison stays while the update runs (P14: never silently replaced).
+  // The comparison stays while the update runs (never silently replaced).
   /** The refusal modal: why the package cannot be written and what to do; closing leaves the band's buttons. */
   let refusalClosed = $state<ReleaseFile | null>(null);
   const refusalOpen = $derived(op.file !== null && (op.state === 'fileRefused' || op.state === 'otherTopology') && refusalClosed !== op.file);
@@ -842,7 +842,7 @@
   $effect(() => {
     if (op.state !== 'reconnectNeeded') dialogDismissed = false;
   });
-  /** Clock for the %, M27 (dagon-host's clock) and the elapsed time (wall clock), read while they show; the % rises as often. */
+  /** Clock for the %, the reconnect countdown (dagon-host's clock) and the elapsed time (wall clock), read while they show; the % rises as often. */
   let nowMs = $state(0);
   let wallMs = $state(Date.now());
   $effect(() => {
@@ -896,7 +896,7 @@
     if (stopped('update')) return;
     const pkg = id === 'latest' ? (latest ? { name: `${latest.label}.dgb`, bytes: latest.bytes } : null) : await cli.keptBytes(id).then((b) => (b ? { name: `${id}.dgb`, bytes: b } : null));
     if (!pkg) {
-      notice = { word: BAND.M58.chip, error: true, detail: BAND.M58.sentence };
+      notice = { word: BAND.noRelease.chip, error: true, detail: BAND.noRelease.sentence };
       return;
     }
     const no = await op.noWrite(pkg.bytes);
@@ -920,7 +920,7 @@
       .slice(-300),
   );
 
-  /** M27: seconds left of the automatic reconnect, in 5 s steps (hubRestarting). */
+  /** Seconds left of the automatic reconnect, in 5 s steps (hubRestarting). */
   const RECONNECT_STEP_S = 5;
   const reconnectLeft = $derived(
     op.reconnectUntil === null || op.state !== 'hubRestarting'
@@ -1067,7 +1067,7 @@
     if (dialogOpen) return { ...b, primary: null };
     // The demo page reads no files: its prepared package is what 書き込む writes.
     if (DEMO_SITE && op.state === 'ready') return { ...b, sentence: SIM.siteWrite };
-    if (op.latestMissing) return { ...b, ...BAND.M58 };
+    if (op.latestMissing) return { ...b, ...BAND.noRelease };
     if (hubNoticeShown) return { ...b, chip: undefined, pair: undefined, sentence: hubNoticeShown };
     return b;
   });
@@ -1996,7 +1996,7 @@
   .why.failed {
     border-color: var(--c-signal);
   }
-  /* Q2: while a dialog is open its own button is the one main action. */
+  /* While a dialog is open its own button is the one main action. */
   .frame.modal :global(footer .primary) {
     visibility: hidden;
   }

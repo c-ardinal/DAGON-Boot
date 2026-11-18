@@ -1,11 +1,11 @@
 ---
 title: "導入から書込まで"
-description: "プロジェクトを始め、構成を描き、ビルドし、最初のバージョンを書込し、新しいバージョンを書込して戻します。"
+description: "プロジェクトを始め、構成を描き、ビルドし、最初のバージョンを書込し、新しいバージョンを書込後にロールバックします。"
 ---
 
 このページの例は見本の構成です。丸いLCDのRP2040（PC接続ノード）、NUCLEO-F401RE（I2C）、M5StopWatch（UART）の3つのノードです。手順2で自分の構成に置き換えられます。
 
-接続先のノードのサンプルアプリの動きは`samples/f401-app`と`samples/esp32s3-app`にあります。
+接続先のノードで動作するサンプルアプリの内容は`samples/f401-app`と`samples/esp32s3-app`にあります。
 
 `dagon`コマンドとツールは、先に[入れる](/getting-started/install/)の手順で用意します。
 
@@ -58,7 +58,7 @@ dagon topo check topology.yaml
 
 ### 言葉の説明から作成する
 
-言葉で書いた説明から、Claude APIで構成の案を作成できます。
+言葉で書いた説明から、Claude APIで構成の案を作成可能です。
 
 ```sh
 dagon ai key set                    # API キーを入力（表示しない）。OS の資格情報ストアに保存する
@@ -246,7 +246,7 @@ ESP32-S3のノードは1回だけビルドします。イメージはどちら�
 
 ノードへ書込したパッケージ（DAGON Console、`dagon apply`、`dagon deploy`）は、すべてプロジェクトの`out/deploy/`に保存されます。名前は`v<バージョン>.dgb`です。ノードごとにバージョンが違うときは`v<いちばん新しいバージョン>-<ダイジェスト>.dgb`です。
 
-戻すには、保存された古いバージョンをもう一度書込します。DAGON Consoleはその一覧を出します。コマンドでは`dagon apply out/deploy/v1.0.0.dgb`で書込できます。
+戻すには、保存された古いバージョンをもう一度書込します。DAGON Consoleはその一覧を出します。コマンドでは`dagon apply out/deploy/v1.0.0.dgb`で書込可能です。
 
 `dagon rollback`は、前に確定したバージョンへ戻します。アプリのスロットが1つのノードには戻る先が無く、`dagon rollback`はそう答えます。
 

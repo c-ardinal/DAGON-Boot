@@ -45,9 +45,7 @@ use crate::{
     sys::{EspClock, EspReset, RtcWatchdog},
     CONFIRMED_WDT_MS, TRIAL_WDT_MS,
 };
-use dagon_agent::{
-    reply_status, Agent, SlotStore, StoreError, TrialPolicy, IDLE_TIMEOUT_MS, NO_ADDR,
-};
+use dagon_agent::{reply_status, Agent, SlotStore, StoreError, TrialPolicy, NO_ADDR};
 use dagon_ed25519::Ed25519Compact;
 use dagon_events::{Published, Watchdog as Periods};
 pub use dagon_mcu_common::hooks::BoardExtension;
@@ -409,27 +407,22 @@ impl Link {
     }
 
     async fn run(mut self) {
-        let idle = Duration::from_millis(IDLE_TIMEOUT_MS.into());
-        let mut last = Instant::now();
         let mut req = [0u8; MAX_UART_FRAME];
         loop {
             self.wdt.borrow_mut().feed();
-            if last.elapsed() >= idle {
-                self.agent.abort();
-                last = Instant::now();
-            }
             let ev = select3(
                 self.uart.read_frame(),
                 self.usb.read_frame(),
                 Timer::after(FEED_PERIOD),
             )
             .await;
+            // The transfer's idle deadline runs on its own link only.
+            self.agent.tick(Instant::now().as_millis());
             let (n, via) = match ev {
                 Either3::First(Ok(f)) => (copy(&mut req, f), Via::Uart),
                 Either3::Second(Ok(f)) => (copy(&mut req, f), Via::Usb),
                 _ => continue,
             };
-            last = Instant::now();
             if self.serve(&req[..n], via).await >= INTER_BYTE_TIMEOUT_MS {
                 // Bytes that came in meanwhile wait in the FIFO and read as
                 // one batch with one time: no partial frame may run across

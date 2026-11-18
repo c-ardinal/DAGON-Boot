@@ -31,15 +31,11 @@ pub mod max_payload {
     pub const USB: usize = 1088;
     pub const UART: usize = 1024;
     pub const I2C: usize = 256;
-    /// The least of them: every node's HELLO and CAPS answers fit it.
-    pub const SMALLEST: usize = {
-        let a = if USB < UART { USB } else { UART };
-        if a < I2C {
-            a
-        } else {
-            I2C
-        }
-    };
+    /// The least a link offers, whatever its medium: a link that carries
+    /// less in one piece puts frames together below the frame, up to at
+    /// least this. Every node's HELLO and CAPS answers fit it, so a
+    /// requester learns over any link what the node serves.
+    pub const SMALLEST: usize = 64;
 }
 
 pub const fn frame_len(payload_len: usize) -> usize {

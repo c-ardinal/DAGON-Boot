@@ -1,18 +1,81 @@
 //! A node's handler table: one row for each command it serves, and
 //! nothing for the rest of the command table. What the node says it serves
-//! (HELLO's `cmds`, CAPS) is read from these rows, and a request reaches a
-//! row's handler only after the one reader accepted its core and every
-//! field, so nothing has happened when a request is refused.
+//! (HELLO's `cmds`, CAPS) is read from these rows.
+//!
+//! A row is in two parts that cannot be mixed. Its decoder is the
+//! command's own ([`Req::decoder`]): it makes the typed request out of a
+//! message the one reader accepted, refusing a value outside its range.
+//! Its action takes the node and that typed request and nothing else: no
+//! payload bytes and no parsed message reach it. Between the two the
+//! answer the request asks for is held against what the requester takes
+//! ([`Ceiling`]). So when a request is refused, for its form, a value or
+//! the size of its answer, no action has run.
 
 use crate::field::{read, Parsed};
-use crate::payload::CmdSet;
+use crate::payload::{CmdSet, Req};
 use crate::table::CmdSpec;
 use crate::{Cmd, Status};
 
-/// What a row runs on a request the reader accepted: it takes the typed
-/// request out of `Parsed` (refusing a value outside its range) and hands
-/// it to the node's handler.
-pub type Run<C, R> = fn(&mut C, &Parsed<'_>) -> Result<R, Status>;
+/// The typed request of a message the reader accepted.
+pub type Decode = for<'a> fn(&Parsed<'a>) -> Result<Req<'a>, Status>;
+
+/// What a row does with the node and a typed request.
+pub type Act<C, R> = for<'a> fn(&mut C, Req<'a>) -> Result<R, Status>;
+
+/// The most payload bytes an answer may have: what the link carries, and
+/// what the requester said it takes in its HELLO.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Ceiling {
+    /// Max payload of the link the request came over.
+    pub link: u16,
+    /// HELLO `max_payload` of the requester; `None` before its HELLO.
+    pub peer: Option<u16>,
+}
+
+impl Ceiling {
+    /// A link of `max` payload bytes whose requester has said nothing.
+    pub const fn link(max: usize) -> Self {
+        Ceiling {
+            link: if max > u16::MAX as usize {
+                u16::MAX
+            } else {
+                max as u16
+            },
+            peer: None,
+        }
+    }
+
+    /// The same ceiling over a link that carries `max` payload bytes at
+    /// most.
+    pub fn within(self, max: usize) -> Self {
+        Ceiling {
+            link: self.link.min(Ceiling::link(max).link),
+            ..self
+        }
+    }
+
+    /// The same requester over a link that carries `max` payload bytes:
+    /// for a node whose requests come over another link than the one this
+    /// ceiling was made for (a relay's uplink).
+    pub fn over(self, max: usize) -> Self {
+        Ceiling {
+            link: Ceiling::link(max).link,
+            ..self
+        }
+    }
+
+    /// The payload bytes an answer may have.
+    pub fn bytes(self) -> usize {
+        usize::from(self.peer.map_or(self.link, |p| p.min(self.link)))
+    }
+}
+
+impl From<usize> for Ceiling {
+    /// [`Ceiling::link`].
+    fn from(max: usize) -> Self {
+        Ceiling::link(max)
+    }
+}
 
 /// One command a node serves, for a node state `C` and an outcome `R`.
 pub struct Handler<C, R> {
@@ -21,37 +84,55 @@ pub struct Handler<C, R> {
     pub spec: &'static CmdSpec,
     /// Whether bulk follows the request's fields.
     pub bulk: bool,
-    pub run: Run<C, R>,
+    decode: Decode,
+    act: Act<C, R>,
 }
 
 impl<C, R> Handler<C, R> {
-    pub const fn new(cmd: Cmd, run: Run<C, R>) -> Self {
+    /// The row of `cmd`: the command's decoder, and `act` for what it
+    /// decodes.
+    pub const fn new(cmd: Cmd, act: Act<C, R>) -> Self {
         let spec = cmd.spec();
         Handler {
             cmd,
             spec,
             bulk: spec.req.bulk,
-            run,
+            decode: Req::decoder(cmd),
+            act,
         }
     }
 
-    /// Reads `payload` as the command's request, then runs the handler.
-    /// `Status::Arg` or `Status::Field` when the reader refuses it, with
-    /// the handler not run.
-    pub fn call(&self, node: &mut C, payload: &[u8]) -> Result<R, Status> {
-        let request = read(payload, &self.spec.req)?;
-        (self.run)(node, &request)
+    /// The typed request in `payload`, with nothing done: `Status::Arg`
+    /// or `Status::Field` when the reader refuses it, `Status::Arg` for a
+    /// value outside its range and for an answer that would not fit
+    /// `ceiling`.
+    pub fn request<'a>(&self, payload: &'a [u8], ceiling: Ceiling) -> Result<Req<'a>, Status> {
+        let message = read(payload, &self.spec.req)?;
+        let request = (self.decode)(&message)?;
+        if !request.fits(ceiling) {
+            return Err(Status::Arg);
+        }
+        Ok(request)
+    }
+
+    /// Runs the row's action on a request [`Handler::request`] gave.
+    pub fn act(&self, node: &mut C, request: Req<'_>) -> Result<R, Status> {
+        (self.act)(node, request)
+    }
+
+    /// [`Handler::request`], then the action.
+    pub fn call(&self, node: &mut C, payload: &[u8], ceiling: Ceiling) -> Result<R, Status> {
+        let request = self.request(payload, ceiling)?;
+        self.act(node, request)
     }
 }
 
-impl<R> Handler<(), R> {
-    /// For a node whose handlers cannot run from a row (they wait on a
-    /// link, or hold what a row cannot name): reads `payload` as the
-    /// command's request and returns what the row took out of it, with
-    /// the request's bulk. The node runs its handler on that.
-    pub fn read<'a>(&self, payload: &'a [u8]) -> Result<(R, &'a [u8]), Status> {
-        let request = read(payload, &self.spec.req)?;
-        Ok(((self.run)(&mut (), &request)?, request.bulk))
+impl Handler<(), ()> {
+    /// A row whose handler cannot run from the table (it waits on a link,
+    /// or holds what a row cannot name): the node takes the typed request
+    /// from [`Handler::request`] and runs its handler on that.
+    pub const fn deferred(cmd: Cmd) -> Self {
+        Handler::new(cmd, |_, _| Ok(()))
     }
 }
 

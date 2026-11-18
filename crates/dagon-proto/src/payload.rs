@@ -8,6 +8,7 @@
 use crate::field::{
     read, shortest, shortest_value, FieldSpec, FieldWriter, MsgSpec, Parsed, Refusal,
 };
+use crate::handler::{Ceiling, Decode};
 use crate::table::{
     caps, conf_run, confirm, error, hello, i2c_raw, reboot, relay, set_pending, show, status,
     subctl, version, xfer_begin, xfer_end, ERROR,
@@ -147,8 +148,10 @@ impl SlotState {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Bits<const N: usize>([u8; N]);
 
-/// Command numbers (HELLO's `cmds`).
-pub type CmdSet = Bits<32>;
+/// Command numbers (HELLO's `cmds`): room for every command of this
+/// crate's table. A command above them, in the set of a node built with a
+/// later table, is one this crate does not know and is left out.
+pub type CmdSet = Bits<{ crate::table::CMDS_LEN }>;
 
 /// Field numbers of one message (CAPS).
 pub type FieldSet = Bits<{ caps::FIELD_SET_LEN as usize }>;
@@ -196,15 +199,17 @@ impl<const N: usize> Bits<N> {
         self.0.get(..n).unwrap_or(&[])
     }
 
-    /// `Status::Arg` for a last byte of zero (not the set's one encoding)
-    /// and for more bytes than the set has.
+    /// `Status::Arg` for a last byte of zero (not the set's one encoding).
+    /// Bytes past the set's room hold numbers it has none for, and are
+    /// left out.
     pub fn from_bytes(b: &[u8]) -> Result<Self, Status> {
-        let mut set = Self::EMPTY;
-        let room = set.0.get_mut(..b.len()).ok_or(Status::Arg)?;
         if b.last().is_none_or(|last| *last == 0) {
             return Err(Status::Arg);
         }
-        room.copy_from_slice(b);
+        let mut set = Self::EMPTY;
+        for (to, from) in set.0.iter_mut().zip(b) {
+            *to = *from;
+        }
         Ok(set)
     }
 
@@ -349,8 +354,9 @@ const _: () = assert!(HelloResp::MAX_LEN < crate::max_payload::SMALLEST);
 const _: () = assert!(CapsResp::MAX_LEN < crate::max_payload::SMALLEST);
 
 impl HelloResp {
-    /// The longest body this crate writes.
-    pub const MAX_LEN: usize = 6 + 4 * 3 + 4 + 6 + 10 + 2 + hello::CMDS.max as usize;
+    /// The longest body this crate writes: every command of its table
+    /// served.
+    pub const MAX_LEN: usize = 6 + 4 * 3 + 4 + 6 + 10 + 2 + crate::table::CMDS_LEN;
 
     pub fn parse(b: &[u8]) -> Result<Self, Status> {
         let p = rd(b, &Cmd::Hello.spec().resp)?;
@@ -674,106 +680,71 @@ impl VersionResp {
     }
 }
 
-/// CAPS request: the number of the command asked about.
-pub fn parse_caps_req(b: &[u8]) -> Result<u8, Status> {
-    caps_req_of(&rd(b, &Cmd::Caps.spec().req)?)
-}
-
-/// The same from a request the reader accepted.
-pub fn caps_req_of(p: &Parsed<'_>) -> Result<u8, Status> {
-    let [cmd] = at(p.core, 0)?;
-    Ok(cmd)
-}
-
-pub fn encode_caps_req(cmd: u8, out: &mut [u8]) -> Result<usize, FrameError> {
-    let mut w = FieldWriter::new(out);
-    w.put(&[cmd])?;
-    Ok(w.len())
-}
-
-/// The longest inner frame a relaying node forwards over one of its links.
+/// CAPS request.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct TunnelMtu {
-    /// RELAY `link`.
-    pub link: u8,
-    pub mtu: u16,
+pub struct CapsReq {
+    /// The number of the command asked about.
+    pub cmd: u8,
+    /// About RELAY: the link whose tunnel is asked for. `None` (left out
+    /// on the wire): no tunnel is asked for.
+    pub link: Option<u8>,
 }
 
-const TUNNEL_LEN: usize = caps::TUNNEL_LEN as usize;
-
-/// The tunnel entries of a CAPS response, as they are packed in it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct TunnelMtus<'a>(&'a [u8]);
-
-impl<'a> TunnelMtus<'a> {
-    /// What a node that does not relay, or any node about another command
-    /// than RELAY, sends: nothing.
-    pub const NONE: Self = TunnelMtus(&[]);
-
-    /// `entries` packed into `buf`. Refused when `buf` is too small or
-    /// they are more than a response carries (`caps::TUNNEL_MAX`).
-    pub fn pack(
-        entries: impl IntoIterator<Item = TunnelMtu>,
-        buf: &'a mut [u8],
-    ) -> Result<Self, FrameError> {
-        let mut w = FieldWriter::new(buf);
-        for e in entries {
-            w.put(&[e.link])?.put(&e.mtu.to_le_bytes())?;
-        }
-        let n = w.len();
-        if n > usize::from(caps::TUNNEL_MTU.max) {
-            return Err(FrameError::Field);
-        }
-        Ok(TunnelMtus(buf.get(..n).unwrap_or(&[])))
+impl CapsReq {
+    pub fn parse(b: &[u8]) -> Result<Self, Status> {
+        Self::of(&rd(b, &Cmd::Caps.spec().req)?)
     }
-
-    pub fn iter(&self) -> impl Iterator<Item = TunnelMtu> + 'a {
-        self.0.chunks_exact(TUNNEL_LEN).filter_map(|x| {
-            Some(TunnelMtu {
-                link: *x.first()?,
-                mtu: u16::from_le_bytes(at(x, 1).ok()?),
-            })
+    /// From a request the reader accepted.
+    pub fn of(p: &Parsed<'_>) -> Result<Self, Status> {
+        let [cmd] = at(p.core, 0)?;
+        Ok(CapsReq {
+            cmd,
+            link: val::<1>(p, &caps::LINK)?.map(|[l]| l),
         })
     }
-
-    /// The entry of `link`.
-    pub fn of_link(&self, link: u8) -> Option<u16> {
-        self.iter().find(|e| e.link == link).map(|e| e.mtu)
+    pub fn encode(&self, out: &mut [u8]) -> Result<usize, FrameError> {
+        let mut w = FieldWriter::new(out);
+        w.put(&[self.cmd])?;
+        if let Some(l) = self.link {
+            w.field(&caps::LINK, &[l])?;
+        }
+        Ok(w.len())
     }
 }
 
 /// CAPS response body: what the node knows of the command asked about.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct CapsResp<'a> {
+pub struct CapsResp {
     /// The fields it reads in the command's request. A must field outside
     /// this set is refused with `Status::Field`.
     pub req_fields: FieldSet,
     /// The fields it may send in the command's response.
     pub resp_fields: FieldSet,
-    pub tunnel_mtu: TunnelMtus<'a>,
+    /// From a node that relays, about RELAY over the link the request
+    /// names: the longest inner frame it forwards for this requester
+    /// ([`Relay::tunnel_mtu`]).
+    pub tunnel_mtu: Option<u16>,
 }
 
-impl<'a> CapsResp<'a> {
-    /// The longest body: both sets and every tunnel entry.
-    pub const MAX_LEN: usize = Self::FIELDS_LEN + 3 + caps::TUNNEL_MTU.max as usize;
-    /// The longest body without tunnel entries.
-    pub const FIELDS_LEN: usize = 2 * (2 + caps::FIELD_SET_LEN as usize);
+impl CapsResp {
+    /// The longest body: both sets and the tunnel.
+    pub const MAX_LEN: usize = 2 * (2 + caps::FIELD_SET_LEN as usize) + 4;
 
     /// The fields of `cmd` in the command table this node is built with.
-    pub const fn of(cmd: Cmd) -> CapsResp<'static> {
+    pub const fn of(cmd: Cmd) -> CapsResp {
         CapsResp {
             req_fields: FieldSet::of_fields(cmd.spec().req.fields),
             resp_fields: FieldSet::of_fields(cmd.spec().resp.fields),
-            tunnel_mtu: TunnelMtus::NONE,
+            tunnel_mtu: None,
         }
     }
 
-    pub fn parse(b: &'a [u8]) -> Result<Self, Status> {
+    pub fn parse(b: &[u8]) -> Result<Self, Status> {
         let p = rd(b, &Cmd::Caps.spec().resp)?;
         Ok(CapsResp {
             req_fields: FieldSet::of(&p, &caps::REQ_FIELDS)?,
             resp_fields: FieldSet::of(&p, &caps::RESP_FIELDS)?,
-            tunnel_mtu: TunnelMtus(p.field(&caps::TUNNEL_MTU).unwrap_or(&[])),
+            tunnel_mtu: val(&p, &caps::TUNNEL_MTU)?.map(u16::from_le_bytes),
         })
     }
 
@@ -785,8 +756,8 @@ impl<'a> CapsResp<'a> {
         if !self.resp_fields.is_empty() {
             w.field(&caps::RESP_FIELDS, self.resp_fields.as_bytes())?;
         }
-        if !self.tunnel_mtu.0.is_empty() {
-            w.field(&caps::TUNNEL_MTU, self.tunnel_mtu.0)?;
+        if let Some(mtu) = self.tunnel_mtu {
+            w.field(&caps::TUNNEL_MTU, &mtu.to_le_bytes())?;
         }
         Ok(w.len())
     }
@@ -1232,6 +1203,124 @@ impl<'a> ConfRunResp<'a> {
     }
 }
 
+/// A request that says nothing (VERSION, STAY, XFER_END).
+fn nothing(_: &Parsed<'_>) -> Result<(), Status> {
+    Ok(())
+}
+
+/// Every command's typed request in one type, its decoder and the way
+/// back to the command's own type. A command added to the table does not
+/// build until it has a row here.
+macro_rules! requests {
+    ($( $cmd:ident($ty:ty) $name:ident = $of:expr; )*) => {
+        /// A request the one reader accepted, as its command's type. A
+        /// node's handlers are given this and never the bytes it came
+        /// from (`handler::Handler`).
+        #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+        pub enum Req<'a> {
+            $( $cmd($ty), )*
+        }
+
+        mod decode {
+            use super::*;
+            $(
+                pub(super) fn $name<'a>(p: &Parsed<'a>) -> Result<Req<'a>, Status> {
+                    let of: fn(&Parsed<'a>) -> Result<$ty, Status> = $of;
+                    of(p).map(Req::$cmd)
+                }
+            )*
+        }
+
+        impl<'a> Req<'a> {
+            /// The decoder of `cmd`'s request.
+            pub const fn decoder(cmd: Cmd) -> Decode {
+                match cmd {
+                    $( Cmd::$cmd => decode::$name, )*
+                }
+            }
+
+            $(
+                /// The request as its command's type;
+                /// `Status::Unsupported` for another command's.
+                pub fn $name(self) -> Result<$ty, Status> {
+                    match self {
+                        Req::$cmd(request) => Ok(request),
+                        _ => Err(Status::Unsupported),
+                    }
+                }
+            )*
+        }
+    };
+}
+
+requests! {
+    Hello(HelloReq) hello = HelloReq::of;
+    Status(u8) status = status_req_of;
+    Version(()) version = nothing;
+    Caps(CapsReq) caps = CapsReq::of;
+    Stay(()) stay = nothing;
+    XferBegin(XferBegin) xfer_begin = XferBegin::of;
+    XferData(XferChunk<'a>) xfer_data = XferChunk::of;
+    XferEnd(()) xfer_end = nothing;
+    XferHdr(XferChunk<'a>) xfer_hdr = XferChunk::of;
+    SetPending(SetPending) set_pending = SetPending::of;
+    Reboot(u8) reboot = reboot_of;
+    Confirm(u8) confirm = confirm_of;
+    EnterRom(EnterRom) enter_rom = EnterRom::of;
+    Show(Show<'a>) show = Show::of;
+    Relay(Relay<'a>) relay = Relay::of;
+    SubCtl(SubCtl) sub_ctl = SubCtl::of;
+    I2cRaw(I2cRaw<'a>) i2c_raw = I2cRaw::of;
+    ConfRun(ConfRunReq) conf_run = ConfRunReq::of;
+}
+
+/// Bytes of an XFER_HDR / XFER_DATA response body: the next offset.
+const NEXT_OFFSET_LEN: usize = 4;
+/// Bytes of an XFER_END response body: the digest field.
+const DIGEST_LEN: usize = 2 + 32;
+
+impl Req<'_> {
+    /// The longest body of an OK answer to this request (what follows
+    /// the status byte). `None` for RELAY: its answer is the node's frame,
+    /// which the relay bounds by the tunnel over the link the request
+    /// names ([`Relay::admits`]).
+    pub fn response_max(&self) -> Option<usize> {
+        Some(match self {
+            Req::Hello(_) => HelloResp::MAX_LEN,
+            Req::Status(_) => StatusResp::MAX_LEN,
+            Req::Version(()) => VersionResp::MAX_LEN,
+            Req::Caps(_) => CapsResp::MAX_LEN,
+            Req::XferData(_) | Req::XferHdr(_) => NEXT_OFFSET_LEN,
+            Req::XferEnd(()) => DIGEST_LEN,
+            Req::I2cRaw(raw) => BULK_RESP_AT + usize::from(raw.read_len),
+            Req::ConfRun(_) => ConfRunResp::MAX_LEN,
+            Req::Relay(_) => return None,
+            Req::Stay(())
+            | Req::XferBegin(_)
+            | Req::SetPending(_)
+            | Req::Reboot(_)
+            | Req::Confirm(_)
+            | Req::EnterRom(_)
+            | Req::Show(_)
+            | Req::SubCtl(_) => 0,
+        })
+    }
+
+    /// Whether an OK answer to this request, its status byte included,
+    /// fits `ceiling`. A HELLO is held against the `max_payload` it
+    /// brings, which is the requester's from then on.
+    pub fn fits(&self, ceiling: Ceiling) -> bool {
+        let ceiling = match self {
+            Req::Hello(h) => Ceiling {
+                peer: Some(h.max_payload),
+                ..ceiling
+            },
+            _ => ceiling,
+        };
+        self.response_max().is_none_or(|n| n < ceiling.bytes())
+    }
+}
+
 // The table's lengths are the ones the typed payloads name.
 const _: () = assert!(show::TEXT.max as usize == SHOW_TEXT_MAX);
 const _: () = assert!(conf_run::DETAIL.max as usize == CONF_DETAIL_MAX);
@@ -1255,7 +1344,7 @@ mod tests {
             trial: true,
             key_id: [9; 8],
             max_payload: 256,
-            cmds: CmdSet::from_bytes(&[0xFF; 32]).unwrap(),
+            cmds: CmdSet::from_bytes(&[0xFF; crate::table::CMDS_LEN]).unwrap(),
         }
     }
 
@@ -1269,7 +1358,12 @@ mod tests {
         assert_eq!(CmdSet::EMPTY.as_bytes(), &[] as &[u8]);
         assert_eq!(CmdSet::from_bytes(&[]), Err(Status::Arg));
         assert_eq!(CmdSet::from_bytes(&[2, 0]), Err(Status::Arg), "zero tail");
-        assert_eq!(CmdSet::from_bytes(&[1; 33]), Err(Status::Arg));
+        // A later table's set: the commands this one has room for.
+        assert_eq!(
+            CmdSet::from_bytes(&[1; 32]),
+            CmdSet::from_bytes(&[1; crate::table::CMDS_LEN])
+        );
+        assert_eq!(crate::table::CMDS_LEN, 0x71 / 8 + 1);
         assert_eq!(FieldSet::EMPTY.with(64), FieldSet::EMPTY, "no room");
         assert_eq!(
             CmdSet::EMPTY.with(3).union(CmdSet::EMPTY.with(9)),
@@ -1280,40 +1374,72 @@ mod tests {
     #[test]
     fn caps_round_trips_and_names_the_tables_fields() {
         let mut b = [0u8; 1 + CapsResp::MAX_LEN];
-        let n = encode_caps_req(Cmd::Relay as u8, &mut b).unwrap();
-        assert_eq!(parse_caps_req(&b[..n]), Ok(Cmd::Relay as u8));
+        for link in [None, Some(7)] {
+            let req = CapsReq {
+                cmd: Cmd::Relay as u8,
+                link,
+            };
+            let n = req.encode(&mut b).unwrap();
+            assert_eq!(CapsReq::parse(&b[..n]), Ok(req));
+        }
         let c = CapsResp::of(Cmd::Relay);
         assert_eq!(c.req_fields, FieldSet::EMPTY.with(1).with(2));
-        assert_eq!(c.resp_fields, FieldSet::EMPTY);
-        let mut packed = [0u8; 255];
-        let links = [(1u8, 268u16), (2, 1031)];
-        let entries = links.map(|(link, mtu)| TunnelMtu { link, mtu });
-        let with = CapsResp {
-            tunnel_mtu: TunnelMtus::pack(entries, &mut packed).unwrap(),
-            ..c
-        };
-        let n = with.encode(&mut b).unwrap();
-        let back = CapsResp::parse(&b[..n]).unwrap();
-        assert_eq!(back, with);
-        assert_eq!(back.tunnel_mtu.of_link(2), Some(1031));
-        assert_eq!(back.tunnel_mtu.of_link(3), None);
-        // No more entries than a response on the smallest link carries.
-        let most = usize::from(caps::TUNNEL_MAX);
-        let many = |n: usize| {
-            (0..n).map(|i| TunnelMtu {
-                link: i as u8,
-                mtu: 1,
-            })
-        };
-        let mut room = [0u8; 300];
+        assert_eq!((c.resp_fields, c.tunnel_mtu), (FieldSet::EMPTY, None));
         let full = CapsResp {
             req_fields: FieldSet::from_bytes(&[0xFF; 8]).unwrap(),
             resp_fields: FieldSet::from_bytes(&[0xFF; 8]).unwrap(),
-            tunnel_mtu: TunnelMtus::pack(many(most), &mut room).unwrap(),
+            tunnel_mtu: Some(1031),
         };
         assert_eq!(full.encode(&mut b), Ok(CapsResp::MAX_LEN));
-        let mut room = [0u8; 300];
-        assert!(TunnelMtus::pack(many(most + 1), &mut room).is_err());
+        assert_eq!(CapsResp::parse(&b[..CapsResp::MAX_LEN]), Ok(full));
+    }
+
+    /// The answers a requester needs before it knows a node fit the
+    /// smallest payload a link offers, and an answer is held against what
+    /// the requester takes.
+    #[test]
+    fn answers_are_held_against_the_ceiling() {
+        assert_eq!(crate::max_payload::SMALLEST, 64);
+        assert_eq!((HelloResp::MAX_LEN, CapsResp::MAX_LEN), (55, 24));
+        let link = Ceiling::link(256);
+        let small = Ceiling {
+            peer: Some(64),
+            ..link
+        };
+        assert_eq!((link.bytes(), small.bytes()), (256, 64));
+        assert_eq!(small.within(32).bytes(), 32);
+        let caps = Req::Caps(CapsReq { cmd: 1, link: None });
+        assert!(caps.fits(small) && Req::Status(0).fits(link));
+        assert!(!Req::Status(0).fits(small), "STATUS is 84 bytes");
+        // A HELLO is held against the payload it brings, not the last one.
+        let hello = |max_payload| {
+            Req::Hello(HelloReq {
+                proto_ver: 2,
+                max_payload,
+            })
+        };
+        assert!(hello(64).fits(link) && hello(1088).fits(small));
+        assert!(
+            hello(56).fits(link) && !hello(55).fits(link),
+            "1 + 55 bytes"
+        );
+        // I2C_RAW: the status, the delimiter and the bytes read.
+        let raw = |read_len| {
+            Req::I2cRaw(I2cRaw {
+                read_len,
+                data: &[],
+            })
+        };
+        assert!(raw(62).fits(small) && !raw(63).fits(small));
+        assert!(raw(254).fits(link) && !raw(255).fits(link));
+        let relay = Req::Relay(Relay {
+            link: 0,
+            addr: 0,
+            timeout_ms: None,
+            inner: &[],
+        });
+        assert_eq!(relay.response_max(), None);
+        assert!(relay.fits(small), "the relay bounds it by the tunnel");
     }
 
     #[test]

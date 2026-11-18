@@ -149,25 +149,26 @@ fn capability_vectors() {
     );
     assert_crc(&file);
 
+    let asked = CapsReq {
+        cmd: Cmd::Relay as u8,
+        link: Some(rp2040_relay_link("i2c0")),
+    };
     let file = golden(
         "frame_caps_req.bin",
-        &frame(0, 0x16, Cmd::Caps, |b| {
-            encode_caps_req(Cmd::Relay as u8, b).unwrap()
-        }),
+        &frame(0, 0x16, Cmd::Caps, |b| asked.encode(b).unwrap()),
     );
     let f = decode(&file);
-    assert_eq!(parse_caps_req(f.payload), Ok(Cmd::Relay as u8));
-    expect_at(&file, &[(0, &[0xDA, 0x6F, 2, 0, 0x16, 0x04, 1, 0, 0x50])]);
+    assert_eq!(CapsReq::parse(f.payload), Ok(asked));
+    // core: the command asked about; must field 1: the link of its tunnel
+    expect_at(
+        &file,
+        &[(0, &[0xDA, 0x6F, 2, 0, 0x16, 0x04, 4, 0, 0x50, 0x03, 1])],
+    );
+    assert_eq!(file[11], rp2040_relay_link("i2c0"));
     assert_crc(&file);
 
-    let links = [(1u8, 268u16), (2, 1031)];
-    let mut packed = [0u8; 6];
     let caps = CapsResp {
-        tunnel_mtu: TunnelMtus::pack(
-            links.map(|(link, mtu)| TunnelMtu { link, mtu }),
-            &mut packed,
-        )
-        .unwrap(),
+        tunnel_mtu: Some(268),
         ..CapsResp::of(Cmd::Relay)
     };
     let file = golden(
@@ -181,12 +182,10 @@ fn capability_vectors() {
     expect_at(
         &file,
         &[
-            (0, &[0xDA, 0x6F, 2, flags::RESP, 0x16, 0x04, 12, 0]),
-            (8, &[0x00]),           // status OK
-            (9, &[0x02, 1, 0x06]),  // field 1: request fields 1 and 2
-            (12, &[0x06, 6]),       // field 3: tunnel entries
-            (14, &[1, 0x0C, 0x01]), // first entry: its link, 268
-            (17, &[2, 0x07, 0x04]), // second entry: its link, 1031
+            (0, &[0xDA, 0x6F, 2, flags::RESP, 0x16, 0x04, 8, 0]),
+            (8, &[0x00]),                 // status OK
+            (9, &[0x02, 1, 0x06]),        // field 1: request fields 1 and 2
+            (12, &[0x06, 2, 0x0C, 0x01]), // field 3: a tunnel of 268 bytes
         ],
     );
     assert_crc(&file);

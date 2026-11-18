@@ -72,7 +72,7 @@ commands! {
     /// What the node knows of one command it serves: the fields of its
     /// request and of its response (`payload::CapsResp`). A command the
     /// node does not serve answers `Status::Unsupported`.
-    Caps = 0x04, idempotent: true, req: msg(1, &[], false), resp: msg(0, &caps::RESP, false);
+    Caps = 0x04, idempotent: true, req: msg(1, &caps::REQ, false), resp: msg(0, &caps::RESP, false);
     /// To a node's boot core while its listen window is open: stay in
     /// update mode instead of starting the app. A boot core already in
     /// update mode answers OK; an app answers `Status::State`.
@@ -113,8 +113,10 @@ pub mod hello {
     pub const TRIAL: FieldSpec = FieldSpec::opt(6, 1, 1);
     pub const KEY_ID: FieldSpec = FieldSpec::opt(7, 8, 8);
     /// The commands the node serves, as the set of their numbers
-    /// (`payload::CmdSet`), with room for every number a command can
-    /// have. Left out: the node does not say.
+    /// (`payload::CmdSet`). A reader takes a set as long as any command
+    /// number needs; a node writes one as long as the highest command of
+    /// its table needs ([`super::CMDS_LEN`]). Left out: the node does not
+    /// say.
     pub const CMDS: FieldSpec = FieldSpec::opt(8, 1, 32);
     pub const RESP: [FieldSpec; 8] = [
         ROLE,
@@ -132,25 +134,20 @@ pub mod hello {
 /// has no core.
 pub mod caps {
     use super::{FieldSpec, FIELD_NUM_MAX};
-    use crate::max_payload;
 
+    /// About RELAY, to a node that relays: the link whose tunnel is asked
+    /// for. Left out: no tunnel is asked for.
+    pub const LINK: FieldSpec = FieldSpec::must(1, 1, 1);
+    pub const REQ: [FieldSpec; 1] = [LINK];
     /// Bytes of a set of field numbers (`payload::FieldSet`).
     pub const FIELD_SET_LEN: u8 = (FIELD_NUM_MAX / 8 + 1) as u8;
     /// The fields the node reads in the command's request.
     pub const REQ_FIELDS: FieldSpec = FieldSpec::opt(1, 1, FIELD_SET_LEN);
     /// The fields the node may send in the command's response.
     pub const RESP_FIELDS: FieldSpec = FieldSpec::opt(2, 1, FIELD_SET_LEN);
-    /// Bytes of one tunnel entry: `link u8`, `tunnel_mtu u16`.
-    pub const TUNNEL_LEN: u8 = 3;
-    /// The entries a response has room for on the smallest link, beside
-    /// its status, both field sets and this field's key and two length
-    /// bytes.
-    pub const TUNNEL_MAX: u8 = ((max_payload::SMALLEST - 1 - 2 * (2 + FIELD_SET_LEN as usize) - 3)
-        / TUNNEL_LEN as usize) as u8;
-    /// From a node that relays, for RELAY: per link the longest inner
-    /// frame it forwards, packed.
-    pub const TUNNEL_MTU: FieldSpec =
-        FieldSpec::opt(3, TUNNEL_LEN, TUNNEL_MAX * TUNNEL_LEN).packed(TUNNEL_LEN);
+    /// The longest inner frame the node forwards for this requester over
+    /// the link the request names (`u16`).
+    pub const TUNNEL_MTU: FieldSpec = FieldSpec::opt(3, 2, 2);
     pub const RESP: [FieldSpec; 3] = [REQ_FIELDS, RESP_FIELDS, TUNNEL_MTU];
 }
 
@@ -301,6 +298,20 @@ pub const COMMON: [FieldSpec; 2] = [error::BAD_FIELD, error::WIRE];
 
 /// The body of every non-OK response.
 pub const ERROR: MsgSpec = msg(0, &COMMON, false);
+
+/// Bytes of the set of this table's commands (`payload::CmdSet`): up to
+/// the byte of the highest command number.
+pub const CMDS_LEN: usize = {
+    let mut highest = 0;
+    let mut i = 0;
+    while i < Cmd::ALL.len() {
+        if Cmd::ALL[i] as usize > highest {
+            highest = Cmd::ALL[i] as usize;
+        }
+        i += 1;
+    }
+    highest / 8 + 1
+};
 
 /// The highest number a field of the table has.
 pub const FIELD_NUM_MAX: u16 = 63;

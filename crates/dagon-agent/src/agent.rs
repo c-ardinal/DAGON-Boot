@@ -138,20 +138,29 @@ fn noted(r: Result<(), Refused>) {
     debug_assert!(r.is_ok(), "{r:?}");
 }
 
-impl<S: SlotStore, X: AppChain, V: SigVerifier, const L: usize> Agent<S, X, V, writer::App, L> {
+impl<S: SlotStore, X: AppChain, V: SigVerifier> Agent<S, X, V, writer::App> {
     /// The app's session ([`Agent::for_writer`] with the app's writer).
     pub fn new(cfg: Config, verifier: V, store: S, chain: X) -> Self {
         Self::for_writer(cfg, verifier, store, chain)
     }
 }
 
+impl<S: SlotStore, X: AppChain, V: SigVerifier, W: Writer> Agent<S, X, V, W> {
+    /// The session of writer `W` for a node served over one link
+    /// ([`Agent::with_links`]).
+    pub fn for_writer(cfg: Config, verifier: V, store: S, chain: X) -> Self {
+        Self::with_links(cfg, verifier, store, chain)
+    }
+}
+
 impl<S: SlotStore, X: AppChain, V: SigVerifier, W: Writer, const L: usize> Agent<S, X, V, W, L> {
-    /// DAGON's start: `app.starting`, then the slot store is opened
+    /// The session of writer `W` for a node served over `L` links, named
+    /// by the type it is made for. DAGON's start: `app.starting`, then the slot store is opened
     /// (`app.store_opened`), and in the app's session the store makes its
     /// log room and the boot core's changes it shows are replayed
     /// (`app.trial_started`, `app.rolled_back`). `verifier` checks every
     /// image header under the node's key; HELLO reports its key id.
-    pub fn for_writer(cfg: Config, verifier: V, store: S, mut chain: X) -> Self {
+    pub fn with_links(cfg: Config, verifier: V, store: S, mut chain: X) -> Self {
         let mut node = node::Machine::new();
         let tag = NameDigest::of(NameDigest::TAG, &cfg.target_tag);
         noted(node.starting(&mut chain, tag, cfg.role, cfg.mode));

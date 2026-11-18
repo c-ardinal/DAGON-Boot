@@ -788,7 +788,7 @@ impl TwoLinks {
         let mem: &'static RefCell<Mem> = Box::leak(Box::new(RefCell::new(Mem::new(2, 2))));
         TwoLinks {
             mem,
-            agent: Agent::for_writer(config(), ed25519(&kp), mem, chain()),
+            agent: Agent::with_links(config(), ed25519(&kp), mem, chain()),
         }
     }
 

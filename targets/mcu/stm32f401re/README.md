@@ -64,7 +64,7 @@ use {defmt_rtt as _, panic_probe as _};
 
 // DAGON's link is guard task 0, app.rs's tasks follow. Unconfirmed images
 // never feed: they reset after the boot core's trial period unless the
-// upstream node confirmed them.
+// neighbour toward the PC confirmed them.
 // The hops, as dagon gen writes them from the 構成.
 const UPLINK: Kind = Kind::I2c;
 const DOWNLINKS: &[Kind] = &[];
@@ -102,7 +102,7 @@ core's period, opens the board's I2C target, spawns the serving task (guard
 task `node::DAGON_TASK`, 0, `Preempting`) on DAGON's high-priority executor
 (`exec`, an interrupt executor on the unused USART6 vector at P6) and the
 feeder on `spawner`. The app's tasks run in thread mode below it, so the
-upstream node is answered whatever they do. The node's tag comes from
+neighbour toward the PC is answered whatever they do. The node's tag comes from
 `DAGON_TARGET_TAG` in `.cargo/config.toml`
 (`DAGON_TARGET_TAG = { value = "my-node", force = true }` under `[env]`);
 the `App` gives the self-check (whether a version on trial may be

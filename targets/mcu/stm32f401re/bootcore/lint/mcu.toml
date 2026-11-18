@@ -66,7 +66,7 @@ at = 134266880
 size = 16384
 
 [connection]
-hint = "ST-LINK を USB で接続後、書込してください。"
+hint = "ST-LINKをUSBで接続後、書込してください。"
 label = "ST-LINK"
 
 [[core]]

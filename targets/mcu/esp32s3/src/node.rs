@@ -271,7 +271,8 @@ impl Watchdog for SharedWdt {
 }
 
 type Store = EspStore<EspFlash<'static, 'static>, EspBootSelect<'static, 'static>, SharedWdt>;
-type Node = Agent<Store, NodeChain, Ed25519Compact>;
+/// The session of a node served over [`LINKS`] links, numbered as [`Via`].
+type Node = Agent<Store, NodeChain, Ed25519Compact, dagon_agent::writer::App, LINKS>;
 
 impl Otadata for EspBootSelect<'_, '_> {
     fn running(&self) -> u8 {
@@ -304,6 +305,9 @@ enum Via {
     Usb,
 }
 
+/// The links the node is served over: the variants of [`Via`].
+const LINKS: usize = 2;
+
 impl Via {
     /// The link kind's code in events.
     fn code(self) -> u8 {
@@ -320,7 +324,7 @@ struct Link {
     agent: Node,
     /// Whether each uplink (`Via` order) carries frames: up from its first
     /// frame, down when a reply cannot be sent on it.
-    up: [bool; 2],
+    up: [bool; LINKS],
     wdt: &'static RefCell<Wdt>,
     /// The flash, for a conformance build's tests.
     #[cfg(feature = "conform")]
@@ -393,7 +397,7 @@ impl Link {
         let usb = links::UsbCdc::new(UsbSerialJtag::new(p.usb_device).into_async());
         Some(Self {
             agent,
-            up: [false; 2],
+            up: [false; LINKS],
             wdt,
             #[cfg(feature = "conform")]
             storage,
@@ -453,7 +457,7 @@ impl Link {
         self.lease.busy(start, REQUEST_BUDGET_MS);
         self.lease.hold_cpu(start);
         let mut out = [0u8; REPLY_MAX];
-        let decided = self.decide(frame, &mut out);
+        let decided = self.decide(frame, via, &mut out);
         let mut held = self.lease.release_cpu(now_ms());
         if let Some((n, then)) = decided {
             let sent = match via {
@@ -463,7 +467,7 @@ impl Link {
             .is_ok();
             if !sent {
                 self.up[via as usize] = false;
-                self.agent.link_down(via.code(), NO_ADDR);
+                self.agent.link_down_on(via as usize, via.code(), NO_ADDR);
             } else if let Some(status) = reply_status(&out[..n]) {
                 self.agent.replied(status, now_ms().wrapping_sub(start));
             }
@@ -473,8 +477,14 @@ impl Link {
         held
     }
 
-    /// The synchronous part: the reply to send and what follows it.
-    fn decide(&mut self, frame: &[u8], out: &mut [u8; REPLY_MAX]) -> Option<(usize, Then)> {
+    /// The synchronous part: the reply to send to the requester on `via`
+    /// and what follows it.
+    fn decide(
+        &mut self,
+        frame: &[u8],
+        via: Via,
+        out: &mut [u8; REPLY_MAX],
+    ) -> Option<(usize, Then)> {
         let max = dagon_proto::max_payload::UART;
         let mut rom_reply = [0u8; rom::REPLY_LEN];
         let pmic = self.board.board.pmic_download_supported();
@@ -483,7 +493,7 @@ impl Link {
             return Some((n, method.map_or(Then::Nothing, Then::Rom)));
         }
         #[cfg(feature = "conform")]
-        if let Some(n) = self.conform(frame, &mut out[..]) {
+        if let Some(n) = self.conform(frame, via, &mut out[..]) {
             return Some((n, Then::Nothing));
         }
         let agent = &mut self.agent;
@@ -493,7 +503,7 @@ impl Link {
             out[..n].copy_from_slice(&refusal[..n]);
             return Some((n, Then::Nothing));
         }
-        let reply = agent.handle(frame)?;
+        let reply = agent.handle_on(via as usize, frame)?;
         let n = reply.frame.len();
         out.get_mut(..n)?.copy_from_slice(reply.frame);
         let then = if reply.reboot {
@@ -544,7 +554,7 @@ impl Link {
     /// there); without one the request falls through to the agent
     /// (E_UNSUPPORTED).
     #[cfg(feature = "conform")]
-    fn conform(&mut self, frame: &[u8], out: &mut [u8]) -> Option<usize> {
+    fn conform(&mut self, frame: &[u8], via: Via, out: &mut [u8]) -> Option<usize> {
         use crate::layout::REGIONS;
         use dagon_conform::node::{handle_frame, NodeSetup};
         use dagon_proto::{Cmd, Frame};
@@ -560,7 +570,7 @@ impl Link {
         };
         let mut flash = EspFlash::new(self.storage);
         let wdt = self.wdt;
-        let ceiling = self.agent.ceiling().within(max);
+        let ceiling = self.agent.ceiling_on(via as usize).within(max);
         handle_frame(frame, ceiling, &mut flash, &setup, out, &mut || {
             wdt.borrow_mut().feed()
         })

@@ -15,6 +15,7 @@ use dagon_format::header::{mcu_id, port_kind, target_tag, HEADER_SIZE};
 use dagon_format::{Version, DIAG_CLEAR_DOMAIN};
 use dagon_port::diag::{
     CounterSeed, DiagStore, FactoryId, NoDiag, NoSeed, RandomBytes, RandomSeed, Sample, SeedSource,
+    ANSWER_FRAME,
 };
 use dagon_proto::diag::*;
 use dagon_proto::payload::{mode, role, SlotState, StatusResp};
@@ -209,6 +210,8 @@ impl State {
 pub struct Fake(pub Rc<RefCell<State>>);
 
 impl DiagStore for Fake {
+    type Room = [u8; ANSWER_FRAME];
+    const ROOM: Self::Room = [0; ANSWER_FRAME];
     fn info(&mut self) -> DiagInfo {
         self.0.borrow().info
     }

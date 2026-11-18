@@ -191,6 +191,24 @@ fn paging_never_repeats_or_skips() {
     assert_eq!(n.call(Cmd::LinkDiag, &bad).0, Status::Arg);
 }
 
+/// LINK_DIAG is a read: a resend (same seq, RETRY) is read again, and
+/// it leaves another command's kept reply alone.
+#[test]
+fn a_resend_is_read_again() {
+    let (mut n, fake) = counter_node([1, 2, 3, 4]);
+    let ask = enc(|b| peers_req(None, 300).encode(b));
+    let first = n.send(5, 0, Cmd::LinkDiag, &ask);
+    assert_eq!(first.0, Status::Ok);
+    fake.0.borrow_mut().add_peer(1, 9);
+    let again = n.send(5, dagon_proto::flags::RETRY, Cmd::LinkDiag, &ask);
+    assert_eq!(again.0, Status::Ok);
+    let r = LinkDiagResp::parse(&again.1).unwrap();
+    assert_eq!(r.elements.peers().count(), 1, "read again");
+    assert_ne!(first.1, again.1);
+    // A refused read is answered in the same room.
+    assert_eq!(n.send(6, 0, Cmd::LinkDiag, &[2]).0, Status::Arg);
+}
+
 #[test]
 fn max_resp_bounds() {
     let (mut n, fake) = counter_node([1, 2, 3, 4]);

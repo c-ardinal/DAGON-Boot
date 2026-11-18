@@ -267,6 +267,27 @@ fn failure_and_replay() {
     assert_eq!(fake.0.borrow().peers.len(), 1);
 }
 
+/// Only the same bytes again are the accepted request: the same clear
+/// with one more field, even one the node skips, is another request under
+/// a used seed. Fields in another order are no request at all.
+#[test]
+fn retry_of_other_bytes_gets_state() {
+    let (mut n, fake) = counter_node([1, 2, 3, 4]);
+    fake.0.borrow_mut().add_peer(EP.link, EP.addr);
+    let seed = n.seed().unwrap();
+    let scope = ClearScope::EndpointAll(EP);
+    let req = clear_req(scope, Some(sign(&keypair(), &seed, &scope)));
+    assert_eq!(n.call(Cmd::LinkDiagClear, &req).0, Status::Ok);
+    // Optional field 300 (key D8 04), empty, after the KEY.
+    let more = [&req[..], &[0xD8, 0x04, 0]].concat();
+    assert_eq!(n.call(Cmd::LinkDiagClear, &more).0, Status::State);
+    // ADDR (3 bytes) before LINK (3 bytes), right after the core.
+    let swapped = [&req[..1], &req[4..7], &req[1..4], &req[7..]].concat();
+    assert_eq!(n.call(Cmd::LinkDiagClear, &swapped).0, Status::Arg);
+    assert_eq!(n.call(Cmd::LinkDiagClear, &req).0, Status::Ok);
+    assert_eq!(fake.0.borrow().clears.len(), 1);
+}
+
 #[test]
 fn retry_answers_as_first() {
     let (mut n, fake) = counter_node([1, 2, 3, 4]);

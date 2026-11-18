@@ -7,7 +7,7 @@ use dagon_events::{
 use dagon_format::header::{self, image_kind, slot_binding, ImageHeader, HEADER_SIZE};
 use dagon_format::{FormatError, Sha256, SigVerifier};
 use dagon_port::diag::{DiagStore, NoDiag, NoSeed, SeedSource};
-use dagon_proto::diag::LinkDiagResp;
+use dagon_proto::diag::Seed;
 use dagon_proto::handler::{self, Ceiling, Handler};
 use dagon_proto::payload::{
     self, mode, phase, reboot_mode, target, CapsReq, CapsResp, CmdSet, HelloReq, HelloResp,
@@ -30,10 +30,10 @@ mod diag;
 /// A transfer with no request for this long returns to idle.
 pub const IDLE_TIMEOUT_MS: u32 = 10_000;
 
-/// The longest reply body: LINK_DIAG's; the others fit the same buffer.
-const BODY_MAX: usize = LinkDiagResp::MAX_LEN;
-const RESP_BUF: usize = frame_len(1 + BODY_MAX);
-const _: () = assert!(StatusResp::MAX_LEN <= BODY_MAX);
+/// The longest reply a requester's resend may need: STATUS's. LINK_DIAG's
+/// is written in the store's own room and kept for no resend.
+const RESP_BUF: usize = frame_len(1 + StatusResp::MAX_LEN);
+const _: () = assert!(Seed::FIELD_LEN <= StatusResp::MAX_LEN);
 const _: () = assert!(VersionResp::MAX_LEN <= StatusResp::MAX_LEN);
 const _: () = assert!(HelloResp::MAX_LEN <= StatusResp::MAX_LEN);
 const _: () = assert!(CapsResp::MAX_LEN <= StatusResp::MAX_LEN);
@@ -112,7 +112,7 @@ impl Requester {
 /// numbered from 0 by the node that serves them ([`Agent::handle_on`]).
 /// The app's session answers the link diagnostics of store `D` with the
 /// seeds of `Q` ([`Agent::with_diag`]); by default it keeps none.
-pub struct Agent<S, X, V, W = writer::App, const L: usize = 1, Q = NoSeed, D = NoDiag> {
+pub struct Agent<S, X, V, W = writer::App, const L: usize = 1, Q = NoSeed, D: DiagStore = NoDiag> {
     cfg: Config,
     writer: PhantomData<W>,
     verifier: V,
@@ -140,6 +140,9 @@ pub struct Agent<S, X, V, W = writer::App, const L: usize = 1, Q = NoSeed, D = N
     front: CmdSet,
     seeds: Q,
     diag: D,
+    /// Where LINK_DIAG answers are written: the store's room
+    /// (`DiagStore::Room`), none without a store.
+    room: <D as DiagStore>::Room,
     /// The seed held for a signed clear, and what was signed under it.
     auth: diag::Auth,
 }
@@ -199,6 +202,7 @@ impl<S: SlotStore, X: AppChain, V: SigVerifier, W: Writer, const L: usize> Agent
             front: CmdSet::EMPTY,
             seeds: NoSeed,
             diag: NoDiag,
+            room: NoDiag::ROOM,
             auth: diag::Auth::NONE,
         };
         agent.opened();
@@ -232,6 +236,7 @@ impl<S: SlotStore, X: AppChain, V: SigVerifier, W: Writer, const L: usize> Agent
             front: self.front,
             seeds,
             diag: store,
+            room: D::ROOM,
             auth: diag::Auth::NONE,
         }
     }
@@ -429,6 +434,20 @@ impl<
         if frame.flags & (flags::RESP | flags::EVENT) != 0 {
             return None;
         }
+        if Self::SERVES_DIAG && frame.cmd == Cmd::LinkDiag as u8 {
+            // A read: a repeat is read again, and no reply is kept for it.
+            self.links[on].last = None;
+            let n = self.answer_link_diag(&frame)?;
+            let served = self.room.as_ref().get(HEADER_LEN) == Some(&(Status::Ok as u8));
+            if on == self.xfer_link && served {
+                self.xfer_heard_us = self.now_us;
+            }
+            return Some(Reply {
+                frame: self.room.as_ref().get(..n)?,
+                reboot: false,
+                reboot_delay_ms: 0,
+            });
+        }
         if self.links[on].last != Some((frame.seq, frame.cmd)) {
             let handled = self.dispatch(frame.cmd, frame.payload);
             let link = &mut self.links[on];
@@ -532,6 +551,9 @@ impl<
     /// The command's row makes the typed request of the whole payload and
     /// holds its answer against the ceiling; only then its action runs.
     fn dispatch(&mut self, cmd: u8, p: &[u8]) -> Handled {
+        if Self::SERVES_DIAG && cmd == Cmd::LinkDiagClear as u8 {
+            self.auth.received(p);
+        }
         let app_only: &[Handler<Self, Done>] = if W::APP { &Self::APP_ONLY } else { &[] };
         let diag: &[Handler<Self, Done>] = if Self::SERVES_DIAG { &Self::DIAG } else { &[] };
         let seed: &[Handler<Self, Done>] = if Self::SERVES_SEED { &Self::SEED } else { &[] };

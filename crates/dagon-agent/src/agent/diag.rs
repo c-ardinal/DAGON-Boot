@@ -11,7 +11,7 @@ use dagon_proto::diag::{
     LinkDiagResp, Peer, Report, Seed,
 };
 use dagon_proto::table::link_diag::FORMAT;
-use dagon_proto::Status;
+use dagon_proto::{flags, frame_len, payload, Frame, Status, HEADER_LEN};
 
 use super::{Agent, AppChain, Handled};
 use crate::{SlotStore, Writer};
@@ -28,13 +28,25 @@ pub(super) struct Auth {
     /// The signed clear accepted under the last seed: the SHA-256 of its
     /// request and its outcome, until the next DIAG_SEED.
     used: Option<([u8; 32], Result<(), Status>)>,
+    /// The SHA-256 of the LINK_DIAG_CLEAR request being handled, as its
+    /// bytes came: a resend answers as the first only when it is the same
+    /// bytes, which its typed request does not keep.
+    received: [u8; 32],
 }
 
 impl Auth {
     pub(super) const NONE: Auth = Auth {
         seed: None,
         used: None,
+        received: [0; 32],
     };
+
+    /// The LINK_DIAG_CLEAR request `payload` is being handled.
+    pub(super) fn received(&mut self, payload: &[u8]) {
+        let mut h = Sha256::new();
+        h.update(payload);
+        self.received = h.finalize();
+    }
 }
 
 /// One element of either report.
@@ -64,15 +76,6 @@ fn put(out: &mut [u8], b: &[u8]) {
     if let Some(to) = out.get_mut(..b.len()) {
         to.copy_from_slice(b);
     }
-}
-
-/// The SHA-256 of a clear request, in its one encoding.
-fn digest(c: &LinkDiagClear) -> [u8; 32] {
-    let mut b = [0u8; LinkDiagClear::MAX_LEN];
-    let n = c.encode(&mut b).unwrap_or(0);
-    let mut h = Sha256::new();
-    h.update(b.get(..n).unwrap_or(&[]));
-    h.finalize()
 }
 
 impl<S, X, V, W, const L: usize, Q, D> Agent<S, X, V, W, L, Q, D>
@@ -118,7 +121,7 @@ where
     pub(super) fn link_diag(&mut self, q: LinkDiagReq) -> Handled {
         let room = usize::from(q.max_resp)
             .min(self.ceiling_on(self.on).bytes())
-            .min(1 + super::BODY_MAX);
+            .min(self.room.as_ref().len().saturating_sub(frame_len(0)));
         let info = self.diag.info();
         let width = q.report.elem_len();
         let mut packed = [0u8; PACKED_MAX];
@@ -153,8 +156,26 @@ where
             elements,
             next,
         };
-        let len = resp.encode(self.body()).map_err(|_| Status::Range)?;
+        let body = self.room.as_mut().get_mut(HEADER_LEN + 1..);
+        let len = resp
+            .encode(body.unwrap_or(&mut []))
+            .map_err(|_| Status::Range)?;
         Ok((len, None))
+    }
+
+    /// The LINK_DIAG request `f`, answered in the store's room; the
+    /// answer frame's length.
+    pub(super) fn answer_link_diag(&mut self, f: &Frame<'_>) -> Option<usize> {
+        let handled = self.dispatch(f.cmd, f.payload);
+        let out = self.room.as_mut();
+        let len = match handled {
+            Ok((body, _)) => {
+                *out.get_mut(HEADER_LEN)? = Status::Ok as u8;
+                1 + body
+            }
+            Err(s) => payload::put_refusal(out.get_mut(HEADER_LEN..)?, s, f.cmd, f.payload),
+        };
+        dagon_proto::finish(out, flags::RESP, f.seq, f.cmd, len).ok()
     }
 
     /// LINK_DIAG_CLEAR: a DTC scope at once; a signed scope against the
@@ -166,7 +187,7 @@ where
             self.diag.clear(c.scope)?;
             return Ok((0, None));
         };
-        let request = digest(&c);
+        let request = self.auth.received;
         if let Some((done, outcome)) = self.auth.used {
             if done != request {
                 return Err(Status::State);

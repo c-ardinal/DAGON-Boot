@@ -378,7 +378,7 @@ impl Topology {
     }
 
     /// The link a node `id` with `role: node` is reached over: the one joining it to a coordinator
-    /// (the first listed when several do), else its first link; `None` for an
+    /// (the first listed when several do), else its first link; `None` for a
     /// coordinator or an unlinked node. Only a coordinator relays, so the firmware of a node with `role: node` is
     /// built for this link and any other link at it is one it would relay over.
     pub fn reached_over(&self, id: &str) -> Option<&Link> {

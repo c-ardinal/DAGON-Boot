@@ -10,6 +10,7 @@
 
 extern crate alloc;
 
+pub mod diag;
 mod ops;
 mod percent;
 pub mod rom;
@@ -151,6 +152,29 @@ pub enum Error<E> {
         running: Version,
     },
     Unsupported,
+    /// A signed clear was asked for with no signer; nothing was sent.
+    NoSigner,
+    /// The request is `request` payload bytes and the relay's tunnel to
+    /// the node carries `room`: connect the PC to that node directly.
+    /// Nothing was sent.
+    ConnectDirectly {
+        request: usize,
+        room: usize,
+    },
+    /// The request is `request` payload bytes and the PC's link carries
+    /// `room`. Nothing was sent.
+    TooLarge {
+        request: usize,
+        room: usize,
+    },
+    /// The signer's key (`signer`, its key id) is not the one the node
+    /// verifies with (`node`, from its HELLO). No seed was asked for.
+    KeyMismatch {
+        signer: [u8; 8],
+        node: [u8; 8],
+    },
+    /// The signer made no signature.
+    Sign(dagon_format::SignError),
 }
 
 impl<E> From<FormatError> for Error<E> {

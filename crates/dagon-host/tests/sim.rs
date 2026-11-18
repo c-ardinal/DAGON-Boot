@@ -2449,3 +2449,69 @@ fn wire(enc: impl FnOnce(&mut [u8]) -> Result<usize, dagon_proto::FrameError>) -
     b.truncate(n);
     b
 }
+
+/// Signs with the test key.
+struct TestSigner;
+
+impl dagon_format::ClearSigner for TestSigner {
+    fn key_id(&self) -> [u8; 8] {
+        dagon_format::key_id(&key().pk)
+    }
+    fn sign(&self, domain: &[u8], msg: &[&[u8]]) -> Result<[u8; 64], dagon_format::SignError> {
+        Ok(*key().sk.sign([domain, &msg.concat()].concat(), None))
+    }
+}
+
+/// A signed clear of one endpoint is 73 bytes, more than a 64-byte link
+/// carries: the host refuses it before it sends anything, and says to
+/// connect the PC to that node.
+#[test]
+fn authenticated_clear_too_large_for_route() {
+    use dagon_proto::diag::{ClearScope, Endpoint};
+    let s = sim();
+    let mut h = host(&s);
+    let Target::Linked { link, addr, .. } = seg_at() else {
+        panic!("the seg is linked");
+    };
+    let to = Target::Linked {
+        link,
+        addr,
+        max_payload: dagon_proto::max_payload::SMALLEST as u16,
+    };
+    let scope = ClearScope::EndpointAll(Endpoint {
+        link: 0,
+        addr: 0x10,
+    });
+    let e = block_on(h.link_diag_clear(to, scope, Some(&TestSigner))).unwrap_err();
+    assert!(
+        matches!(
+            e,
+            Error::ConnectDirectly {
+                request: 73,
+                room: 64
+            }
+        ),
+        "{e:?}"
+    );
+    assert!(format!("{e:?}").contains("ConnectDirectly"));
+    assert!(s.faults.borrow().seen.is_empty(), "nothing sent");
+}
+
+/// A relay that reads RELAY's INHIBIT names it in CAPS.
+#[test]
+fn inhibit_is_advertised() {
+    use dagon_proto::payload::{CapsReq, CapsResp};
+    let s = sim();
+    let mut h = host(&s);
+    let ask = wire(|b| {
+        CapsReq {
+            cmd: Cmd::Relay as u8,
+            link: None,
+        }
+        .encode(b)
+    });
+    let body = block_on(h.call(Target::Local, Cmd::Caps, &ask, REQUEST_MS)).unwrap();
+    let caps = CapsResp::parse(&body).unwrap();
+    let inhibit = dagon_proto::table::relay::INHIBIT;
+    assert!(caps.req_fields.has(inhibit.num as u8));
+}

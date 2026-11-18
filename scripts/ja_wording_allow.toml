@@ -1,0 +1,15 @@
+# Lines scripts/ja_wording.py leaves alone. Each entry needs all three keys:
+# path (a glob, as in ja_wording_scopes.toml), text (the line holds it) and
+# reason (why the wording rule does not apply there). An entry without a
+# reason fails the check.
+
+# The alpha notice's first sentence has no finding; its second has 行われる and 有る.
+[[allow]]
+path = "README.md"
+text = "正式リリースまでに破壊的変更が行われるリスクが有ることをご理解下さい。"
+reason = "The alpha notice is quoted word for word (scripts/test_markers.py NOTICE_JA_LINES)."
+
+[[allow]]
+path = "site/src/content/docs/index.mdx"
+text = "正式リリースまでに破壊的変更が行われるリスクが有ることをご理解下さい。"
+reason = "The alpha notice is quoted word for word (scripts/test_markers.py NOTICE_FILES)."

@@ -1,0 +1,36 @@
+# Where scripts/ja_wording.py looks. Paths are globs over the repository's
+# tracked files, matched with fnmatch (`*` also crosses `/`). A file belongs to
+# the first area whose paths match it. CI checks only the areas with
+# enabled = true; an area is enabled in the change that brings its text in
+# line with the wording rule. `ja_wording.py --all` checks every area.
+
+# Japanese text here must be in the polite style (sentences end in です/ます).
+polite = ["site/src/content/docs/*", "README.md", "*/README.md"]
+
+# Files that hold the rule's own examples of the words it looks for.
+exclude = ["scripts/ja_wording.toml", "scripts/ja_wording_allow.toml", "scripts/test_ja_wording.py"]
+
+[[area]]
+name = "ja-wording"
+paths = ["scripts/ja_wording.py", "scripts/ja_wording_scopes.toml"]
+enabled = true
+
+[[area]]
+name = "site"
+paths = ["site/*"]
+enabled = false
+
+[[area]]
+name = "web"
+paths = ["web/*"]
+enabled = false
+
+[[area]]
+name = "readme-crates-scripts"
+paths = ["README.md", "README.en.md", "CHANGELOG.md", "compat.toml", "crates/*", "scripts/*", "plugin/*"]
+enabled = false
+
+[[area]]
+name = "targets-samples-assets"
+paths = ["targets/*", "samples/*", "assets/*"]
+enabled = false

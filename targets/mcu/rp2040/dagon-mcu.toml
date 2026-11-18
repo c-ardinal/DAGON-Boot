@@ -583,8 +583,8 @@ size = 0x10_0000
 privileged_why = ["irq-routing", "core-control", "protection"]
 
 [connection]
-label = "USB（BOOT を押しながら）"
-hint = "BOOT を押しながら USB をつないでから、書き込んでください。"
+label = "USB（BOOT 押下）"
+hint = "BOOT 押下の状態で USB を接続後、書込してください。"
 
 [[doctor]]
 what = "target thumbv6m-none-eabi"

@@ -83,8 +83,8 @@ usb_postdiv2 = 5
 usb_refdiv = 1
 
 [connection]
-hint = "BOOT を押しながら USB をつないでから、書き込んでください。"
-label = "USB（BOOT を押しながら）"
+hint = "BOOT 押下の状態で USB を接続後、書込してください。"
+label = "USB（BOOT 押下）"
 
 [coordinator]
 pio_state_machines = 8

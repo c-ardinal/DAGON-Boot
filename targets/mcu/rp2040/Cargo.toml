@@ -17,8 +17,8 @@ mcu = "rp2040"
 lint = { target = "thumbv6m-none-eabi", features = [""] }
 
 [features]
-# The 親機 relay by default: a generated node names this package without
-# features (RP2040 nodes are 親機).
+# The relay by default: a generated node names this package without
+# features (an RP2040 node is always the node linked to the PC).
 default = ["relay"]
 # The embassy-rp parts: flash port, watchdog guard, slot store, link
 # drivers, sub-MCU control lines, and the verifying key from DAGON_PUBKEY.

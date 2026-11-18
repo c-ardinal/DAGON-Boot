@@ -1,5 +1,5 @@
-//! Start-up written by `dagon new`: your board (board.rs), the DAGON 親機
-//! (PC link, relaying to the 子機) and your application in app.rs. You do
+//! Start-up written by `dagon new`: your board (board.rs), the DAGON node
+//! (PC link, relaying to the downstream nodes) and your application in app.rs. You do
 //! not need to change this file.
 //!
 //! DAGON's relay runs on a high-priority interrupt executor; your tasks in

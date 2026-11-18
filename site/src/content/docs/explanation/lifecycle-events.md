@@ -252,7 +252,7 @@ dagon_events::state_machine! {
 | `LogStorage` (状態ログの格納先) | boot, app | マイコン定義のフラッシュの配置 | trusted only | – |
 | `Recovery` (追加の復旧経路: 転送用のサービスの時間枠、ベンダーのダウンロードモード) | boot, app | マイコンとボードの定義に従うBOOTSEL/UF2、factory、ROMの入口 | untrusted, additive (拡張は経路の追加だけが可能で、DAGONの経路は削除不可です) | return, transport, time, memory |
 | `Diagnostics` (追加のVERSIONのTLV、追加のステータス、UDSのDIDの表) | boot, app, relay | なし | untrusted | return, time, memory |
-| `Display` (段階やブートの結果の表示方法) | boot, app, relay | boot: アクションプログラム経由の、ボード定義の`[boot] led`と`halt`; app, relay: なし | untrusted (ブート時は、宣言済のピンとバスを使用してサンドボックス内で動作します) | return, pins, buses, time, memory |
+| `Display` (段階やブートの結果の表示方法) | boot, app, relay | boot: アクションプログラム経由の、ボード定義の`[boot] led`と`halt`; app, relay: なし | untrusted (ブート時は宣言済のピンとバスを使用してサンドボックス内で動作します) | return, pins, buses, time, memory |
 | `LogSink` (`Recent`の溢れと拡張のログの出力先) | app, relay, host | なし | untrusted | return, events, time, memory |
 | `SelfCheck` (試行中スロットの確定時における健全性の応答) | app | 健全 | untrusted (判断点、3) | return, time, memory |
 | `BoardBringUp` (アプリ起動時のボードの電源、ピン、バス) | app, relay | ボードの定義 | untrusted | return, pins, buses, time, memory |

@@ -19,20 +19,6 @@ kind = "plain"
 word = "解下さい"
 reason = "The alpha notice is quoted word for word (scripts/test_markers.py NOTICE_JA_LINES)."
 
-[[allow]]
-path = "site/src/content/docs/index.mdx"
-text = "正式リリースまでに破壊的変更が行われるリスクが有ることをご理解下さい。"
-kind = "native"
-word = "行わ"
-reason = "The alpha notice is quoted word for word (scripts/test_markers.py NOTICE_FILES)."
-
-[[allow]]
-path = "site/src/content/docs/index.mdx"
-text = "正式リリースまでに破壊的変更が行われるリスクが有ることをご理解下さい。"
-kind = "plain"
-word = "解下さい"
-reason = "The alpha notice is quoted word for word (scripts/test_markers.py NOTICE_FILES)."
-
 # The alpha notice's copy, and the status words the marker check looks for: a pattern
 # has to hold the word it finds.
 [[allow]]

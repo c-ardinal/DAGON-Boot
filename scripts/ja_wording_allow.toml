@@ -163,3 +163,11 @@ text = "runs DAGON Console on a simulated 親機 with two 子機 in the browser"
 kind = "retired"
 word = "子機"
 reason = "The cli 0.1.0 section is released (tag cli-v0.1.0); a released entry is not rewritten."
+
+# The README's problem statement under the title.
+[[allow]]
+path = "README.md"
+text = "設計は美麗なのに、運用は煩雑。"
+kind = "plain"
+word = "用は煩雑"
+reason = "The problem statement is a headline, not prose."

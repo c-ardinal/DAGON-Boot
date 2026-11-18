@@ -68,7 +68,7 @@ DAGONの状態変化は、例外なく宣言済の状態機械の遷移を経由
 
 self-bootのマイコン（stage0とブートローダ）の状態は`Entry → HalReady →
 WatchdogArmed → LogRead → BeforeDecision → Planned → Committed →
-Jumping | Halted`です。`plan`は純粋です（フラッシュを読込し、判断と追記する記録を計算します）。`commit`がイメージのライフサイクルの遷移`attempt`、`rolled_back`、`chosen`、`no_image`を実行します。stage0が保持する状態は`Entry`、`CoreChosen`、`Halted`だけです。状態ログのブートローダの記録と試行のセルから、ブートローダのスロットを選択します（`dagon_core::bootcore::start`、retained-formats.md 5）。計数した起動が`trial_attempts`未満の間は待機のコアを、それ以外は確定済のコアを選択します。コアを起動するのは記録が指定する場合だけで、記録のないコアも、起動回数が上限に到達した待機のコアも起動しません。`core_slot_chosen`に先行して、コアのヘッダの署名が検証可能であること、ヘッダが記録の指定どおりであること、本体がヘッダのダイジェストと一致することを検証し（4.3）、試行のコアの起動前にウォッチドッグを開始し、拡張は実行しません。stage0はフラッシュに書込しません。起動可能なコアがない場合（ブートローダのスロットが1個のマイコンで、新規コアの書込が電断で途切れたか、新規コアが試行に不合格の場合）は、状態ログにある確定済APPの記録が指定するアプリを起動します。その起動前に、記録のヘッダのダイジェスト、署名（4.3）、イメージの種類、マイコン、ターゲットのタグ、スロットのバインディング、配置とロードの範囲、本体のダイジェスト、エントリポイントが本体内にあることを検証します。APPの試行がオープン中の間は起動せず、待機のアプリも起動しません。試行のセルは無変更にし、何も記録しません。そのアプリがブートローダを再度書込します。そのようなアプリも不在の場合だけ、何も起動せずに復旧を待機します（4.3）。起動したブートローダは、自身のブート判断の実行前にブートローダの試行を決着させます（`settle_log`）。待機のコアは自身の検査（起動可能なアプリがあり、そのアプリのヘッダがコアのキーで検証可能）の合格後にだけCONFIRMED（ターゲットBOOTCORE）を追記し、それ以外はリセットします。別のコアが待機中の場合に起動した旧コアは、ROLLBACKを追記します。ウォッチドッグの規則は4.1に記載しています。
+Jumping | Halted`です。`plan`は純粋です（フラッシュを読込し、判断と追記する記録を計算します）。`commit`がイメージのライフサイクルの遷移`attempt`、`rolled_back`、`chosen`、`no_image`を実行します。stage0が保持する状態は`Entry`、`CoreChosen`、`Halted`だけです。状態ログのブートローダの記録と試行のセルから、ブートローダのスロットを選択します（`dagon_core::bootcore::start`、retained-formats.md 5）。計数した起動が`trial_attempts`未満の間は待機のコアを、それ以外は確定済のコアを選択します。コアを起動するのは記録が指定する場合だけで、記録のないコアも、起動回数が上限に到達した待機のコアも起動しません。コアの選択に先行して、コアのヘッダの署名が検証可能であること、ヘッダが記録の指定どおりであること、本体がヘッダのダイジェストと一致することを検証し（4.3）、試行のコアの起動前にウォッチドッグを開始し、拡張は実行しません。stage0はフラッシュに書込しません。起動可能なコアがない場合（ブートローダのスロットが1個のマイコンで、新規コアの書込が電断で途切れたか、新規コアが試行に不合格の場合）は、状態ログにある確定済APPの記録が指定するアプリを起動します。その起動前に、記録のヘッダのダイジェスト、署名（4.3）、イメージの種類、マイコン、ターゲットのタグ、スロットのバインディング、配置とロードの範囲、本体のダイジェスト、エントリポイントが本体内にあることを検証します。APPの試行がオープン中の間は起動せず、待機のアプリも起動しません。試行のセルは無変更にし、何も記録しません。そのアプリがブートローダを再度書込します。そのようなアプリも不在の場合だけ、何も起動せずに復旧を待機します（4.3）。起動したブートローダは、自身のブート判断の実行前にブートローダの試行を決着させます（`settle_log`）。待機のコアは自身の検査（起動可能なアプリがあり、そのアプリのヘッダがコアのキーで検証可能）の合格後にだけCONFIRMED（ターゲットBOOTCORE）を追記し、それ以外はリセットします。別のコアが待機中の場合に起動した旧コアは、ROLLBACKを追記します。ウォッチドッグの規則は4.1に記載しています。
 
 ブートローダのイメージのライフサイクル（エージェントの`core_image`の状態機械）は、1.1のアプリイメージのライフサイクルに、ブートローダの経路が保持する遷移で従います。エージェントの`erase`、`written`、`pending_set`（ターゲットBOOTCOREのXFERとSET_PENDINGで、未使用のブートローダのスロットへ遷移。稼働中のコアや確定済のコアのスロットは不可。マイコン定義がブートローダのスロットを1個だけ付与する場合はその1個へ書込し、アプリの試行中はその転送と待機の設定を拒否します。ホストは、最初にアプリを確定またはロールバックするよう要求します）、新規コア自身のCONFIRMEDによる`confirmed`と`demoted`、旧コアのROLLBACKによる`rolled_back`（アプリの起動時にリプレイします）です。アプリから観測可能な`Trial`の状態はありません。アプリの動作開始前に必ず、コアが試行を決着させるからです。ターゲットのバイトが`BOOTCORE`のSTATUSは、ブートローダのスロット（バージョン、ヘッダのダイジェスト、稼働中のコアと確定済のコア）を報告します。マイコン定義がブートローダのスロットを宣言しないボードは、`Unsupported`を返却します。ブートローダのスロットの数と配置は、マイコン定義の`[[slot]] image = "bootcore"`の項目に由来します（1個か2個です。スロット1個で不可能な動作は[制限事項](/explanation/limitations/)に記載しています）。
 
@@ -78,23 +78,18 @@ Jumping | Halted`です。`plan`は純粋です（フラッシュを読込し、
 
 | イベント | 時点 | ペイロード | アクションプログラム |
 |---|---|---|---|
-| `boot.entry` | リセット後に実行するDAGONコードの最初の命令、HALは未初期化 | `stage`、`reset_cause` | いいえ |
-| `boot.hal_ready` | HALとクロックの初期化後 | `stage` | いいえ |
 | `boot.watchdog_armed` | ウォッチドッグを開始した（4.1）。この時点以降、アクションプログラムが動作します | `period_ms` | はい |
 | `boot.log_read` | 状態ログを読込した | `ok`、`pending`、`confirmed`、`attempts` | はい |
 | `boot.before_decision` | `plan`の実行直前。判断前の最後のイベント | `pending`、`confirmed`、`attempts` | はい |
 | `boot.decision_planned` | 判断が決定し、何も書込していない | `Decision` | はい |
-| `boot.core_slot_chosen` | stage0がブートローダのスロットを選択した | `slot`、`version` | いいえ |
 | `boot.slot_chosen` | イメージのライフサイクルの`chosen` | `slot`、`trial`、`version`、`entry` | はい |
 | `boot.attempt_recorded`、`boot.rollback`、`boot.no_image` | イメージのライフサイクル（1.1） | | はい |
 | `boot.before_jump` | 制御がDAGONから離脱する前の最後のイベント | `slot`、`trial` | はい |
 | `boot.recovery` | アプリの代替として復旧の経路に移行 | `path` | はい |
 | `boot.halt` | コアが完全に停止 | `code` | はい（ブートローダ） |
 | `boot.program_step` / `boot.program_skipped` | ブートのアクションを1個実行した/ プログラムを実行しなかった | `index`、`op`、`ok` / `why` | はい |
-| `boot.step` | 診断のステップに到達した | `n` | いいえ |
 
-vendor-stage2のマイコンにはDAGONのブート段階がありません。アプリが起動時に選択データから`boot.slot_chosen`、`boot.rollback`、`boot.recovery`を`replayed:
-true`で発行します。
+vendor-stage2のマイコンにはDAGONのブート段階がありません。アプリが起動時に選択データから、`app.trial_started`と`app.rolled_back`を報告します。
 
 ### 1.3 エージェントのセッション
 
@@ -168,7 +163,7 @@ len, next }`です。プロトコルのリクエストは例外なく遷移で�
 |---|---|---|---|---|
 | アプリのイメージのスロット（ヘッダ、本体）とその選択（状態ログkind S） | ノードのフラッシュ | イメージのライフサイクル（1.1） | `erase`、`written`、`pending_set`、`pending_moved`、`attempt`、`confirmed`、`demoted`、`rolled_back` | 本体が先行、ヘッダが最後（スロットにイメージが存在するのは、ヘッダの再読出と検証の完了以降です）。状態ログは追記だけの記録で、それぞれCRCを保持し、交互に使用する2個の面にあります。途中で途切れた記録はCRCに失敗して無視され、前の記録が有効なままです |
 | ベンダーの選択（kind V） | ノードのフラッシュ | イメージのライフサイクル（1.1） | `pending_set`、`attempt`、`confirmed`、`rolled_back` | ベンダーの2セクタの方式: 連番とCRCを保持する項目全体を別のセクタに書込し、有効で最新の連番が優先されます |
-| ブートローダのスロットとその記録（ブートローダのログ、またはマイコン定義が両方のログに同一の面を付与している構成ではAPPの記録と共有する状態ログ） | ノードのフラッシュ（stage0のあるself-boot） | ブートローダのイメージのライフサイクル（`core_image`、1.2） | エージェントの`erase`、`written`、`pending_set`。新規コアの`confirmed` / `demoted`。旧コアの`rolled_back`。ホストの`provision`（`host.provision.recorded`）。stage0の`chosen`（`boot.core_slot_chosen`、書込なし） | アプリのスロットと状態ログと同一です。stage0の起動回数は、フラッシュではなく試行のセルにあります（retained-formats.md 5） |
+| ブートローダのスロットとその記録（ブートローダのログ、またはマイコン定義が両方のログに同一の面を付与している構成ではAPPの記録と共有する状態ログ） | ノードのフラッシュ（stage0のあるself-boot） | ブートローダのイメージのライフサイクル（`core_image`、1.2） | エージェントの`erase`、`written`、`pending_set`。新規コアの`confirmed` / `demoted`。旧コアの`rolled_back`。ホストの`provision`（`host.provision.recorded`）。stage0の`chosen`（書込なし） | アプリのスロットと状態ログと同一です。stage0の起動回数は、フラッシュではなく試行のセルにあります（retained-formats.md 5） |
 | 工場出荷の復旧用エージェント（vendor-stage2のマイコン） | ノードのフラッシュ、factoryのパーティション、ヘッダは分離 | イメージのライフサイクル（1.1）、ターゲットAGENTの`erase`と`written` | エージェント。確定済のアプリがOTAスロットから稼働中の間だけ | 本体が先行、ヘッダが最後。書込中は、稼働中のアプリ（そのエージェントも対象）が復帰経路です |
 | インストールしたブートイメージの識別（vendor-stage2のマイコン） | プロジェクトの準備の記録 | ホストの`provision` | `host.provision.recorded` | 一時ファイルに書込し、旧ファイルに上書きする形で名称を変更します |
 | エージェントの同意 | `~/.dagon/agent.json` | 接続: `Unlinked → Linked → Unlinked` | `host.agent.linked` / `host.agent.unlinked` | 一時ファイルと名称の変更 |
@@ -212,7 +207,6 @@ dagon_events::state_machine! {
 
 | イベント | レイヤー | Live | Replay | Host |
 |---|---|---|---|---|
-| `boot.entry`、`hal_ready`、`core_slot_chosen`、`step` | boot | いいえ（ウォッチドッグの前、またはstage0） | | |
 | `boot.watchdog_armed`とそれ以降の全ブートのイベント（`halt`とプログラムのイベントも対象） | boot | はい: ブートのアクションプログラム（5.2） | | |
 | `boot.slot_chosen`、`attempt_recorded`、`rollback`、`no_image` | boot | はい | 状態ログ（`app.trial_started`、`app.rolled_back`） | STATUS |
 | `app.*` | app | はい | `trial_started`、`rolled_back`はそれ自体がリプレイです | 返答、リレーの`child_*` |
@@ -396,8 +390,7 @@ serveによるcrateの探索範囲: `dagon.toml [serve] packages`は、プロジ
   erase_regions`のどの領域の`unit_max_ms`と比較しても2倍以上です。
 - **試行のセル。** 試行のセルが書込値を保持しないノード（`bootcore::cell_holds`、アプリのストアとブートローダが検証します）は、ブートローダを受信しません（XFERをunsupportedとして拒否します）。セルの破損を検出した待機中のコアは自身のロールバックを記録します。そのため、破損したコアを回数の制限なしで再試行することはありません。
 
-- **ルートイメージ**（あればstage0、なければブートローダ）は、準備時にマイコンのROMローダで書込します。ROMローダはDAGONの要素を何も検証しません。ROMローダを実行可能な者はルートを置換可能で、同時に全規則を置換可能です。そのため、この規則が成立するのは、DAGONが提供する全書込経路（リンク、UDSのような置換した転送、コーディネータのリレー）に対してで、ROM経由の物理的な再書込に対してではありません。マイコンがルートイメージの保護を保持する場合は、定義がそのレベルを列挙し（`[isolation]
-  root_protection`: STM32では、`rdp1`は全消去で解除可能、`rdp2`は解除不可能で、セクタの書込保護`wrp`もあります。RP2040には何もなく、ブートROMは常にBOOTSELに従います。ESP32-S3にはセキュアブートとフラッシュの暗号化のeFuseがあります）、`dagon provision`がレベルの設定を提案して解除可能なレベルを明示し、VERSIONが正確なレベルと保護されたセクタを報告します（0x07）。そのためホストは、ルートが置換可能なノード、解除可能な形式で保護されたノード、解除不可能な形式で保護されたノードを明示します。
+- **ルートイメージ**（あればstage0、なければブートローダ）は、準備時にマイコンのROMローダで書込します。ROMローダはDAGONの要素を何も検証しません。ROMローダを実行可能な者はルートを置換可能で、同時に全規則を置換可能です。そのため、この規則が成立するのは、DAGONが提供する全書込経路（リンク、UDSのような置換した転送、コーディネータのリレー）に対してで、ROM経由の物理的な再書込に対してではありません。マイコンがルートイメージの保護を保持する場合は、定義がそのレベルを列挙し（`root_protection`: STM32では、`rdp1`は全消去で解除可能、`rdp2`は解除不可能で、セクタの書込保護`wrp`もあります。RP2040には何もなく、ブートROMは常にBOOTSELに従います。ESP32-S3にはセキュアブートとフラッシュの暗号化のeFuseがあります）、`dagon provision`がレベルの設定を提案して解除可能なレベルを明示し、VERSIONが正確なレベルと保護されたセクタを報告します（0x07）。そのためホストは、ルートが置換可能なノード、解除可能な形式で保護されたノード、解除不可能な形式で保護されたノードを明示します。
 
 ## 5. ボードの値、アクションプログラム、共有の資源、VERSION、モデルで決定する形式
 
@@ -420,7 +413,7 @@ halt = { pattern = "blink", period_ms = 100 }
 power_hold = { pin = "GPIO14", level = "high" }
 
 [[boot.action]]
-on = "watchdog_armed"              # any boot event marked action-capable in CATALOG (never entry or hal_ready)
+on = "watchdog_armed"              # any boot event marked action-capable in CATALOG
 ops = [
   { op = "gpio", pin = "GPIO14", level = "high" },   # the power hold line
   { op = "delay", ms = 2 },

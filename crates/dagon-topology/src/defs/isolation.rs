@@ -360,8 +360,8 @@ pub struct Watchdog {
     /// Boots the boot stage gives a pending image before it rolls back
     /// (the boot core's limit, or the vendor second stage's).
     pub trial_attempts: u8,
-    /// The watchdog-reset flag the lockup fuse needs (retained-formats.md
-    /// 3.4), as a fact: where it comes from, or `none`.
+    /// The watchdog-reset flag the lockup fuse needs (a part the design no
+    /// longer has; the limitations page lists it), as a fact: where it comes from, or `none`.
     pub flag: Fact<WatchdogFlag>,
     /// The periods this MCU's watchdog can run, ms: `trial_ms` and
     /// `confirmed_ms` lie inside it.
@@ -403,8 +403,8 @@ impl WatchdogFlag {
     }
 }
 
-/// How an MCU package draws the boot record's entropy word: the
-/// mechanisms retained-formats.md 2.3 accepts.
+/// How an MCU package draws the boot record's entropy word (a part the
+/// design no longer has; the limitations page lists it).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum EntropySource {
@@ -438,8 +438,8 @@ pub struct Entropy {
     pub min_bits: Fact,
 }
 
-/// Least min-entropy a new record sequence needs (retained-formats.md
-/// 2.3).
+/// Least min-entropy a new boot record sequence needs (a part the design
+/// no longer has).
 pub const ENTROPY_MIN_BITS: u32 = 16;
 
 impl Watchdog {

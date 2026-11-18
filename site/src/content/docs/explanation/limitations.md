@@ -46,7 +46,7 @@ description: "DAGONの設計上の範囲外、利用者の責任範囲、設計�
 - `dagon_events::PORTS`のbootのレイヤー、信頼の方針（`trusted only`など）とサービスの列、`Action`のポート、`Display`の注記（ブート時はサンドボックス内で動作）、`BootRecord`と`Sandbox`の記録。[ライフサイクルイベントと拡張](/explanation/lifecycle-events/)の2.1節の表は、この宣言から生成します。
 - VERSIONの0x07、0x08、0x09、0x11、0x12の定義（`version_id::TABLE`）。5.4節の表はこの定義と同一です。
 - ブート段階の拡張: 状態機械`boot_extensions`（`boot.extension_overran`）、`targets/boot-extension-template`、マニフェストの`trusted`、`stack_bytes`、`ram_bytes`、`dagon-extension`の保護マップの生成と信頼された拡張の検査。
-- マイコン定義の`[isolation]`、`[[peripheral]]`、`[boot.record]`。
+- マイコン定義の`[isolation]`、`[[peripheral]]`、`[boot.record]`。設計の`root_protection`は独立したテーブルです。コードでは`[isolation]`の欄で、コードの変更時に独立したテーブルに移動します。
 - `dagon-retained-model`のブート記録、ロックアップヒューズ、状態ログのキー付記録、リンク診断（DTC）のモデル。
 - `state_machine!`が生成する、ブート記録のリプレイ用の解読`REPLAY`。
 
@@ -77,6 +77,5 @@ description: "DAGONの設計上の範囲外、利用者の責任範囲、設計�
 <!-- generated from site/scripts/architecture.py: python site/scripts/gen.py -->
 - AI Agent Link: `dagon serve`にボード移植の作業は存在しません。`POST /v1/ai/port`の応答は501です。
 - Boot Action Interpreter: コードに存在しません。
-- Coordinator: コーディネータは保存済リリースを実行しません。書込はPCがコーディネータを経由して進行します。
 - Retained Codecs: ファームウェアに保持形式のコーデックは存在しません。構成本体の形式は`dagon-format`の形式（先頭32バイト、ノード32バイト）で、[保持と永続の形式](/explanation/retained-formats/)の形式ではありません。コーディネータの保存先は単一の領域で、2バンクの置換は存在しません。
 <!-- end of generated table -->

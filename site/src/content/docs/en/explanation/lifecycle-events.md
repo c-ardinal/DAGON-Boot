@@ -125,7 +125,7 @@ while fewer than `trial_attempts` starts are counted for it, else the
 confirmed one. A core starts only as a record names it: neither a core no
 record names nor a pending core whose starts ran out starts. It checks that the core's header signature verifies, that
 the header is the one the record names and that its body matches the
-header's digest (4.3) before `core_slot_chosen`, starts the watchdog before a core on trial, and runs
+header's digest (4.3) before it picks the core, starts the watchdog before a core on trial, and runs
 no extension. Stage0 never writes flash. When no core may start (on an MCU
 with one boot loader slot, a new core cut by a power loss or one that
 failed its trial), stage0 starts the app the state log's confirmed APP
@@ -202,24 +202,20 @@ code in the boot stage.
 
 | Event | When | Payload | Action program |
 |---|---|---|---|
-| `boot.entry` | first instruction of DAGON code after reset, HAL not initialised | `stage`, `reset_cause` | no |
-| `boot.hal_ready` | after HAL/clock init | `stage` | no |
 | `boot.watchdog_armed` | watchdog started (4.1); from here the action program runs | `period_ms` | yes |
 | `boot.log_read` | the state log read | `ok`, `pending`, `confirmed`, `attempts` | yes |
 | `boot.before_decision` | `plan` is about to run; the last event before the decision | `pending`, `confirmed`, `attempts` | yes |
 | `boot.decision_planned` | the decision is known, nothing written | `Decision` | yes |
-| `boot.core_slot_chosen` | stage0 picked the boot loader slot | `slot`, `version` | no |
 | `boot.slot_chosen` | image lifecycle `chosen` | `slot`, `trial`, `version`, `entry` | yes |
 | `boot.attempt_recorded`, `boot.rollback`, `boot.no_image` | image lifecycle (1.1) | | yes |
 | `boot.before_jump` | last event before control leaves DAGON | `slot`, `trial` | yes |
 | `boot.recovery` | a recovery path is entered instead of an app | `path` | yes |
 | `boot.halt` | the core halts for good | `code` | yes (boot loader) |
 | `boot.program_step` / `boot.program_skipped` | one boot action ran / the program was not run | `index`, `op`, `ok` / `why` | yes |
-| `boot.step` | diag step reached | `n` | no |
 
-Vendor-stage2 MCUs have no DAGON boot stage: the app emits
-`boot.slot_chosen`, `boot.rollback` and `boot.recovery` with `replayed:
-true` from the selection data at start.
+Vendor-stage2 MCUs have no DAGON boot stage: the app reports
+`app.trial_started` and `app.rolled_back` from the selection data at
+start.
 
 ### 1.3 Agent session
 
@@ -309,7 +305,7 @@ never a half-written one that a reader accepts.
 |---|---|---|---|---|
 | App image slots (headers, bodies) and their selection (state log kind S) | node flash | image lifecycle (1.1) | `erase`, `written`, `pending_set`, `pending_moved`, `attempt`, `confirmed`, `demoted`, `rolled_back` | body first, header last (a slot has an image only once its header reads back and verifies); the state log is append-only records, each with its own CRC, on two faces that alternate: a torn record fails its CRC and is ignored, the previous record stands |
 | Vendor selection (kind V) | node flash | image lifecycle (1.1) | `pending_set`, `attempt`, `confirmed`, `rolled_back` | the vendor's two-sector scheme: a whole entry with sequence and CRC written to the other sector, the newest valid sequence wins |
-| Boot loader slots and their records (the boot loader log, or the state log shared with the APP records where the MCU definition gives both logs the same faces) | node flash (self-boot with a stage0) | boot loader image lifecycle (`core_image`, 1.2) | agent `erase`, `written`, `pending_set`; the new core's `confirmed` / `demoted`; the old core's `rolled_back`; host `provision` (`host.provision.recorded`); stage0 `chosen` (`boot.core_slot_chosen`, no write) | same as the app slots and state log; stage0's start count lives in the trial cell (retained-formats.md 5), not in flash |
+| Boot loader slots and their records (the boot loader log, or the state log shared with the APP records where the MCU definition gives both logs the same faces) | node flash (self-boot with a stage0) | boot loader image lifecycle (`core_image`, 1.2) | agent `erase`, `written`, `pending_set`; the new core's `confirmed` / `demoted`; the old core's `rolled_back`; host `provision` (`host.provision.recorded`); stage0 `chosen` (no write) | same as the app slots and state log; stage0's start count lives in the trial cell (retained-formats.md 5), not in flash |
 | Factory recovery agent (vendor-stage2 MCUs) | node flash, factory partition, header detached | image lifecycle (1.1), `erase` and `written` with target AGENT | agent, only while a confirmed app runs from an OTA slot | body first, header last; while it is written the running app (with its agent) stays the way back |
 | Installed boot image identity (vendor-stage2 MCUs) | provisioning record in the project | host `provision` | `host.provision.recorded` | written to a temporary file and renamed over the old one |
 | Agent consent | `~/.dagon/agent.json` | agent link: `Unlinked → Linked → Unlinked` | `host.agent.linked` / `host.agent.unlinked` | temporary file and rename |
@@ -400,7 +396,6 @@ other record is refused, not guessed.
 
 | Events | Layer | Live | Replay | Host |
 |---|---|---|---|---|
-| `boot.entry`, `hal_ready`, `core_slot_chosen`, `step` | boot | no (before the watchdog, or stage0) | | |
 | `boot.watchdog_armed` and every later boot event, including `halt` and the program events | boot | yes: the boot action program (5.2) | | |
 | `boot.slot_chosen`, `attempt_recorded`, `rollback`, `no_image` | boot | yes | the state log (`app.trial_started`, `app.rolled_back`) | STATUS |
 | `app.*` | app | yes | `trial_started`, `rolled_back` are themselves replays | replies, relay `child_*` |
@@ -819,8 +814,7 @@ The one authentication rule, applied by every verifier
   against every write path DAGON offers (its wire, a replaced transport
   such as UDS, the hub relay) and not against physical reprogramming
   through the ROM. Where the MCU offers protection of the root image,
-  the definition lists it with its levels (`[isolation]
-  root_protection`: for the STM32, `rdp1` is reversible by a mass erase
+  the definition lists it with its levels (`root_protection`: for the STM32, `rdp1` is reversible by a mass erase
   and `rdp2` is irreversible, plus sector write protection `wrp`;
   nothing on the RP2040, whose boot ROM always honours BOOTSEL; secure
   boot and flash encryption eFuses on the ESP32-S3), `dagon provision`
@@ -866,7 +860,7 @@ halt = { pattern = "blink", period_ms = 100 }
 power_hold = { pin = "GPIO14", level = "high" }
 
 [[boot.action]]
-on = "watchdog_armed"              # any boot event marked action-capable in CATALOG (never entry or hal_ready)
+on = "watchdog_armed"              # any boot event marked action-capable in CATALOG
 ops = [
   { op = "gpio", pin = "GPIO14", level = "high" },   # the power hold line
   { op = "delay", ms = 2 },

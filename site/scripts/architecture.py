@@ -102,7 +102,7 @@ COMPONENTS = {
     "Serving Loop": ("リクエストに応答するループ", "The loop that answers requests"),
     "Recovery Entry": ("復旧経路への入口", "Entry to a recovery path"),
     "Relay": ("要求をホップごとに、リンク経由で到達するノードへ中継する", "Forwards requests hop by hop to the nodes its links reach"),
-    "Coordinator": ("保存したリリースをノードに対して実行する", "Runs a stored release across nodes"),
+    "Coordinator": ("PCがコーディネータを経由して書込する", "The PC writes through the coordinator"),
     "Liveness Guard": ("タスクの生存を条件とするキック", "Kicks the watchdog on task liveness"),
     "Reboot Gate": ("返答を優先し、上限付きの遅延を待機した後にリセットする", "Replies first, waits a bounded delay, then resets"),
     "Publisher": ("待機可能な公開状態を出力する", "Writes the waitable published state"),
@@ -170,8 +170,6 @@ NOT_IN_TREE = {
     "AI Agent Link": ("`dagon serve`にボード移植の作業は存在しません。`POST /v1/ai/port`の応答は501です。",
                       "`dagon serve` has no job that ports DAGON to a board: `POST /v1/ai/port` answers 501."),
     "Boot Action Interpreter": ABSENT,
-    "Coordinator": ("コーディネータは保存済リリースを実行しません。書込はPCがコーディネータを経由して進行します。",
-                    "The hub runs no stored release: the PC drives a write through the hub."),
     "Retained Codecs": ("ファームウェアに保持形式のコーデックは存在しません。"
                         "構成本体の形式は`dagon-format`の形式（先頭32バイト、ノード32バイト）で、[保持と永続の形式](/explanation/retained-formats/)"
                         "の形式ではありません。コーディネータの保存先は単一の領域で、2バンクの置換は存在しません。",

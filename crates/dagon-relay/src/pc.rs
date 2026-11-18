@@ -105,7 +105,7 @@ where
             continue;
         };
         // Every request starts with a gated feed, so a flash erase it runs
-        // has a full watchdog period (execution model, section 12, rule 4).
+        // has a full watchdog period (execution model, section 11, rule 4).
         pc.r.watch.progress(task::PC);
         if !link_up {
             link_up = true;

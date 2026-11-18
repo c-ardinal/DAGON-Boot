@@ -52,9 +52,7 @@ What the proofs assume of the hardware and what they inject:
   not the format's writer: a writer of another layout of the same stage,
   or a fault. The model injects random bytes into every region.
 
-One guarantee is probabilistic. Random bytes are accepted as a valid
-entry or record only by coincidence of an 8-bit commit value and a CRC-32
-(at most 2^-40 per slot). Every other guarantee below is
+Every guarantee below is
 structural: it holds for every interruption point, not with a
 probability.
 

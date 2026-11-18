@@ -24,7 +24,8 @@ impl Trust {
     }
 }
 
-/// The kinds of service a sandboxed handler calls (4.2 of the design).
+/// The kinds of service a sandboxed handler calls (the service ABI, a part
+/// the design no longer has; the limitations page lists it).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Service {
     Return,

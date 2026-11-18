@@ -93,7 +93,7 @@ The figure and the table below are DAGON's software design; where the code diffe
 | Serving Loop | The loop that answers requests |
 | Recovery Entry | Entry to a recovery path |
 | Relay | Forwards requests hop by hop to the nodes its links reach |
-| Coordinator | Runs a stored release across nodes |
+| Coordinator | The PC writes through the coordinator |
 | Liveness Guard | Kicks the watchdog on task liveness |
 | Reboot Gate | Replies first, waits a bounded delay, then resets |
 | Publisher | Writes the waitable published state |

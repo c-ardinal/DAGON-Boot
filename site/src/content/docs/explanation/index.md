@@ -92,7 +92,7 @@ DAGONが入出力する形式、プロトコル、APIには、例外なく番号
 | Serving Loop | リクエストに応答するループ |
 | Recovery Entry | 復旧経路への入口 |
 | Relay | 要求をホップごとに、リンク経由で到達するノードへ中継する |
-| Coordinator | 保存したリリースをノードに対して実行する |
+| Coordinator | PCがコーディネータを経由して書込する |
 | Liveness Guard | タスクの生存を条件とするキック |
 | Reboot Gate | 返答を優先し、上限付きの遅延を待機した後にリセットする |
 | Publisher | 待機可能な公開状態を出力する |

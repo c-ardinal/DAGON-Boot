@@ -206,7 +206,7 @@ pass_env = ["MY_AGENT_HOME"]  # optional: more variables the program needs
 
 ## 組み込みのエージェント
 
-dagonに入っているエージェント（`crates/dagon-cli/agents/*.toml`）とそのつなぎ方は、順に[エージェント定義の形式](/reference/agent-definition/#組み込みのエージェント)にあります。最初のエージェントの最初のつなぎ方が既定です。
+dagonに入っているエージェント（`crates/dagon-cli/agents/*.toml`）とそのつなぎ方は、順に[エージェント定義の形式](/reference/agent-definition/#組込のエージェント)にあります。最初のエージェントの最初のつなぎ方が既定です。
 
 ## つなぐと送るもの
 
@@ -214,7 +214,7 @@ dagonに入っているエージェント（`crates/dagon-cli/agents/*.toml`）�
 
 - 構成と定義の事実（ノード・リンク・部品・設定値）
 - 選んだノードやリンク
-- 確認した結果（問題・◇ 制限・書込の記録）
+- 確認した結果（問題・◇ 制限・書き込みの記録）
 
 ### 送らないもの
 

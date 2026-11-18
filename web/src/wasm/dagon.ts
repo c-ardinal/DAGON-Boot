@@ -129,7 +129,8 @@ export interface NodeFailure {
 export interface NodeResult {
   node: number;
   target: Target;
-  outcome: 'done' | 'failed' | 'notStarted';
+  /** `unknown`: a result dagon-host added that this page does not name; the node counts as stopped there. */
+  outcome: 'done' | 'failed' | 'notStarted' | 'needsFirstWrite' | 'unknown';
   version: number | null;
   failure: NodeFailure | null;
 }

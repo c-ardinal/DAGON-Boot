@@ -150,6 +150,8 @@ export const BAND_FOR = {
   M29: (stuck: string) => ({ pair: ['目安', '約 1 分'] as const, sentence: `${stuck}を直すと、残りのノードへ書き込めます。` }),
   /** done when M66 is not true: the nodes that did not answer were not updated. */
   M66some: (n: number) => ({ sentence: `応答しなかった ${n} つのノードは前のままなので、電源と配線を確かめてから書き込んでください。` }),
+  /** done when dagon-host sent nothing to nodes that answered nothing (needsFirstWrite): their first write goes from their card. */
+  M66first: (n: number) => ({ sentence: `無応答のノード${n}件には送信しません。各ノードの「${WRITE.run}」で初回の書込を実行してください。` }),
   /** done after 「前のバージョンに戻す」. */
   /** done when some nodes were already on the package. */
   M66part: (wrote: number, same: number) => ({ sentence: `${wrote} つのノードへ書き込み、${same} つのノードはすでに同じ内容なので、書き込みませんでした。` }),

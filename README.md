@@ -38,8 +38,8 @@ PCに接続した1つのマイコンを経由して、その接続先のマイ�
 ## ドキュメント
 
 - [入門](https://c-ardinal.github.io/DAGON-Boot/doc/getting-started/): 体験、インストール、初回の書込まで
-- [ハウツー](https://c-ardinal.github.io/DAGON-Boot/doc/how-to/): 独自ボード、リンクの交換、AIの支援
-- [解説](https://c-ardinal.github.io/DAGON-Boot/doc/explanation/): 用語の定義、イベントと拡張、バージョンの規則
+- [手順](https://c-ardinal.github.io/DAGON-Boot/doc/how-to/): 独自ボード、リンクの交換、AIの支援
+- [構造](https://c-ardinal.github.io/DAGON-Boot/doc/explanation/): 用語の定義、イベントと拡張、バージョンの規則
 - [リファレンス](https://c-ardinal.github.io/DAGON-Boot/doc/reference/): コマンド、HTTP API、イベント、定義の形式、Rust API
 
 ## 機能

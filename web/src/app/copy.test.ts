@@ -73,11 +73,69 @@ const templates = (v: unknown, path: string): { path: string; out: string[] }[] 
   return v && typeof v === 'object' ? Object.entries(v).flatMap(([k, x]) => templates(x, `${path}.${k}`)) : [];
 };
 
+/**
+ * Every string literal and every static part of a template literal in `src`, with its offset;
+ * comments are skipped. Branches no sample value reaches are read here as written.
+ */
+const literals = (src: string): { at: number; text: string }[] => {
+  const out: { at: number; text: string }[] = [];
+  let i = 0;
+  const quoted = (q: string) => {
+    const at = i++;
+    let s = '';
+    while (i < src.length && src[i] !== q) s += src[i] === '\\' ? src[(i += 2) - 1] : src[i++];
+    i++;
+    out.push({ at, text: s });
+  };
+  const template = () => {
+    let at = i++;
+    let s = '';
+    while (i < src.length && src[i] !== '`') {
+      if (src[i] === '\\') s += src[(i += 2) - 1];
+      else if (src[i] === '$' && src[i + 1] === '{') {
+        out.push({ at, text: s });
+        s = '';
+        i += 2;
+        code(true);
+        at = i;
+      } else s += src[i++];
+    }
+    i++;
+    out.push({ at, text: s });
+  };
+  const code = (inside: boolean) => {
+    let depth = 0;
+    while (i < src.length) {
+      const c = src[i];
+      if (inside && c === '}' && depth === 0) return void i++;
+      if (c === '/' && src[i + 1] === '/') i = src.indexOf('\n', i) < 0 ? src.length : src.indexOf('\n', i);
+      else if (c === '/' && src[i + 1] === '*') i = src.indexOf('*/', i + 2) + 2;
+      else if (c === "'" || c === '"') quoted(c);
+      else if (c === '`') template();
+      else {
+        depth += c === '{' ? 1 : c === '}' ? -1 : 0;
+        i++;
+      }
+    }
+  };
+  code(false);
+  return out.filter((l) => l.text !== '');
+};
+
+const SOURCE = import.meta.glob(['./copy.ts', './agentMock.ts'], { query: '?raw', import: 'default', eager: true }) as Record<string, string>;
+const COPY_SRC = SOURCE['./copy.ts'];
+const EXPORTS = [...COPY_SRC.matchAll(/^export const (\w+)/gm)].map((m) => ({ at: m.index, name: m[1] }));
+/** The literals of copy.ts, each under the export it is written in. */
+const written = literals(COPY_SRC).map((l) => ({ ...l, from: EXPORTS.filter((e) => e.at <= l.at).pop()?.name ?? '' }));
+/** The literals of the agent stand-in, read the same way. */
+const mockWritten = literals(SOURCE['./agentMock.ts']).map((l) => l.text);
+
 const shownExcept = (...skip: string[]) =>
   Object.entries(copy)
     .filter(([k]) => !['FORBIDDEN_WORDS', ...skip].includes(k))
     .flatMap(([k, v]) => [...strings(v), ...templates(v, k).flatMap((t) => t.out)])
-    .concat(filled);
+    .concat(filled)
+    .concat(written.filter((l) => !['FORBIDDEN_WORDS', ...skip].includes(l.from)).map((l) => l.text));
 
 const shown = shownExcept();
 
@@ -88,6 +146,13 @@ describe('the shown strings', () => {
     expect(all.filter((t) => t.path.endsWith('(never called)')).map((t) => t.path)).toEqual([]);
     expect(all.length).toBeGreaterThan(60);
     expect(shown).toContain(copy.BAND_FOR.doneSome(1).sentence);
+  });
+  test('include every literal written in copy.ts, under its export', () => {
+    expect(written.length).toBeGreaterThan(500);
+    // Before the first export only the import paths are written.
+    expect(written.filter((l) => l.from === '').map((l) => l.text)).toEqual(['./machine.ts']);
+    expect(written.find((l) => l.text === ' MiB')?.from).toBe('INSPECT');
+    expect(mockWritten).toContain(MOCK_TEXTS()[0]);
   });
 });
 
@@ -107,7 +172,7 @@ describe('copy', () => {
 
   test('no ASCII ellipsis, no colon in label-value pairs', () => {
     // The pin choice writes the in-use note of a pin choice as 「（使用中: …）」 itself.
-    const notes = new Set([copy.INSPECT.inUse('7セグのリセット'), ...SAMPLES.map((s) => copy.INSPECT.inUse(s as string))]);
+    const notes = new Set([copy.INSPECT.inUse('7セグのリセット'), ...SAMPLES.map((s) => copy.INSPECT.inUse(s as string)), copy.INSPECT.inUse('').slice(0, -1)]);
     expect(shown.filter((s) => !notes.has(s) && (s.includes('...') || s.includes('：') || /\S:\s/.test(s)))).toEqual([]);
   });
 
@@ -189,7 +254,7 @@ describe('the writing vocabulary', () => {
   // 更新 is barred as a word for writing to nodes; the terms of use being updated is not writing.
   const NOT_WRITING = new Set<string>([copy.AGENT.errors.AGENT_CONSENT_VERSION.text]);
   test('no screen text (nor the stand-in agent) says 更新 for writing', () => {
-    expect([...shownExcept(), ...MOCK_TEXTS()].filter((s) => s.includes('更新') && !NOT_WRITING.has(s))).toEqual([]);
+    expect([...shownExcept(), ...MOCK_TEXTS(), ...mockWritten].filter((s) => s.includes('更新') && !NOT_WRITING.has(s))).toEqual([]);
   });
 });
 
@@ -212,7 +277,7 @@ describe('copy keys, screen words and source say what things are', () => {
     copy.HELP.rows[4][1],
   ]);
   test('no shown string states a pending status of DAGON', () => {
-    const texts = [...shown, ...MOCK_TEXTS()];
+    const texts = [...shown, ...MOCK_TEXTS(), ...mockWritten];
     expect(texts.filter((s) => s.includes('未対応') || (s.includes('まだ') && !USER_STATE.has(s)))).toEqual([]);
   });
 

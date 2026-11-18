@@ -170,12 +170,15 @@ mod tests {
         }
     }
 
-    /// The C entry points give the same bytes at any alignment and return
-    /// `dest`; a zero length touches nothing.
+    /// The C entry points give the same bytes at every pair of destination
+    /// and source alignments within a word and return `dest`; a zero
+    /// length touches nothing.
     #[test]
     fn the_c_routines_work_at_any_alignment() {
+        const WORD: usize = core::mem::size_of::<u32>();
         let src: [u8; 24] = core::array::from_fn(|i| i as u8 + 1);
-        for (at, from) in [(0, 0), (1, 0), (3, 1), (2, 3)] {
+        let pairs = (0..WORD).flat_map(|at| (0..WORD).map(move |from| (at, from)));
+        for (at, from) in pairs {
             for n in [0, 1, 7, 16] {
                 let mut d = [0xEEu8; 24];
                 let p = d.as_mut_ptr();

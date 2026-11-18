@@ -61,7 +61,7 @@ DAGON updates the node:
 | failed | `FAIL` for 5 s, then the version |
 | starting, idle | the version |
 
-Features: `slot-b` links for APP-B; `confirm` confirms a version on trial at start-up, without a neighbour toward the PC (the public start's `Confirm::Own`); `no-confirm` makes the self-check fail
+Features: `slot-b` links for APP-B; `confirm` confirms a version on trial at start-up, without a node nearer the PC (the public start's `Confirm::Own`); `no-confirm` makes the self-check fail
 (the trial always rolls back); `conform` is the conformance build (below).
 
 ## Build
@@ -122,7 +122,7 @@ write, CT-07 Ed25519, CT-08 SHA-256), answered through the same I2C mailbox.
   for the whole test, up to about 8 s. The other behaviour is the same as
   the normal app.
 
-Write it with ST-LINK (not through the hub), as a fresh first install:
+Write it with ST-LINK (not through the coordinator), as a fresh first install:
 
 ```sh
 export DAGON_PUBKEY=/path/outside/the/repo/dagon-signing.pub
@@ -141,6 +141,6 @@ probe-rs download --chip STM32F401RETx --binary-format bin --base-address 0x0800
 probe-rs reset --chip STM32F401RETx
 ```
 
-The display shows the version as usual; connect the hub (I2C3 as above)
+The display shows the version as usual; connect the coordinator (I2C3 as above)
 and run the conformance sequence from the PC. Switch `app` back to the
 normal build and provision again to leave the conformance build.

@@ -6,17 +6,17 @@
 nodes = ["seg", "watch", "hub"]
 # The coordinator's node id (dagon status prints it as "hub").
 coordinator = "hub"
-# The hub's USB VID/PID as Windows shows it in the port's PnP device id;
+# The coordinator's USB VID/PID as Windows shows it in the port's PnP device id;
 # the pinned --port must be this device for the whole run.
 hub_usb = "VID_C0DE&PID_CAFE"
 # Cargo feature of each node app that makes its self-check fail (in
-# samples/f401-app, samples/esp32s3-app; `sync` adds it to the hub app).
+# samples/f401-app, samples/esp32s3-app; `sync` adds it to the coordinator app).
 fail_feature = "no-confirm"
-# Longest wait for nodes to settle on a confirmed version: the hub's trial
+# Longest wait for nodes to settle on a confirmed version: the coordinator's trial
 # lasts about 68 s per attempt, 3 attempts before it reverts (~3.5 min).
 settle_timeout_s = 360
 poll_s = 5
-# dagon status attempts while the hub is away (re-enumerating after reset).
+# dagon status attempts while the coordinator is away (re-enumerating after reset).
 status_tries = 6
 # `sync`: the sample each node's package is refreshed from.
 sync = { seg = "f401-app", watch = "esp32s3-app" }

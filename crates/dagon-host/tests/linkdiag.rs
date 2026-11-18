@@ -127,8 +127,8 @@ impl dagon_host::HostClock for Up {
 #[test]
 fn max_resp_for_route() {
     let linked = |max_payload| Target::Linked {
-        link: 1,
-        addr: 0x42,
+        link: EP.link,
+        addr: EP.addr,
         max_payload,
     };
     let smallest = max_payload::SMALLEST;

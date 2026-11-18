@@ -115,7 +115,7 @@ describe('operating mode against the in-memory hub', () => {
     expect(op.state).toBe('ready');
   }, 20_000);
 
-  test('"最初からやり直す" drops the connection and the records and waits at idle', async () => {
+  test('"リスタート" drops the connection and the records and waits at idle', async () => {
     const { op } = session();
     await op.connect();
     op.reset();

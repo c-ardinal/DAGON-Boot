@@ -152,11 +152,11 @@ describe('dagon serve link', () => {
     cli.event({ type: 'job.state', job: job.id, state: 'running' });
     cli.event({ type: 'job.progress', job: job.id, stage: 'gen', percent: 40 });
     cli.event({ type: 'job.log', job: job.id, lines: ['nodes/hub/src/main.rs', 'nodes/seg/src/main.rs'] });
-    cli.event({ type: 'job.question', job: job.id, id: 'q1', text: 'BOOT を押しながら USB をつないでください。' });
+    cli.event({ type: 'job.question', job: job.id, id: 'q1', text: 'BOOTの押下と同時にUSBを接続してください。' });
     expect(cli.jobs[0]).toMatchObject({ state: 'question', percent: 40, question: { id: 'q1' } });
     expect(cli.jobs[0].lines).toHaveLength(2);
-    await cli.answer(cli.jobs[0], 'つないだ');
-    expect(f.calls[f.calls.length - 1]).toMatchObject({ url: `/v1/jobs/${job.id}/answer`, body: JSON.stringify({ answer: 'つないだ' }) });
+    await cli.answer(cli.jobs[0], '接続済');
+    expect(f.calls[f.calls.length - 1]).toMatchObject({ url: `/v1/jobs/${job.id}/answer`, body: JSON.stringify({ answer: '接続済' }) });
     cli.event({ type: 'job.result', job: job.id, data: { files: 6 } });
     cli.event({ type: 'job.state', job: job.id, state: 'succeeded' });
     expect(cli.jobs[0]).toMatchObject({ state: 'succeeded', result: { files: 6 }, ended: 1000 });
@@ -203,7 +203,7 @@ describe('dagon serve link', () => {
     expect(f.calls[f.calls.length - 1].url).toBe('/v1/fs?path=%2Fhome%2Fu%2Fa%20b');
   });
 
-  test('書き込む is offered only for the MCU families serve\'s flash writes', async () => {
+  test('書込 is offered only for the MCU families serve\'s flash writes', async () => {
     const f = fake();
     const cli = new Cli(f.deps);
     await cli.connect();
@@ -249,7 +249,7 @@ describe('dagon serve link', () => {
     }
   });
 
-  test('the layout (呼び名, positions) is read and written whole through serve, only with the layout feature', async () => {
+  test('the layout (名称, positions) is read and written whole through serve, only with the layout feature', async () => {
     const f = fake();
     const cli = new Cli(f.deps);
     await cli.connect();

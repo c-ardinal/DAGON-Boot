@@ -5,7 +5,7 @@
 
 export interface LayoutNode {
   id: string;
-  /** A 親機 roots its tree at depth 0; a 子機 nobody links to sits in the first row under them. */
+  /** A hub roots its tree at depth 0; a node nobody links to sits in the first row under them. */
   hub: boolean;
 }
 

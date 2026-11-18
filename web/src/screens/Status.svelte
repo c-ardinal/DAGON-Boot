@@ -3,10 +3,10 @@
   import Icon from './Icon.svelte';
 
   interface Props {
-    /** The 親機 this page is connected to, or the words for none. */
+    /** The hub this page is connected to, or the words for none. */
     hub: string;
     connected: boolean;
-    /** The lock table's state now (待機, 書き込み中 …), for screen readers. */
+    /** The lock table's state now (待機, 書込中 …), for screen readers. */
     state: string;
     /** How dagon serve stands; the icon opens its sheet. */
     cli: string;
@@ -25,7 +25,7 @@
   let { hub, connected, state, cli, cliReady, oncli, saved, savedOk, sentence, status, alert, nextEl = $bindable() }: Props = $props();
 </script>
 
-<!-- The band: where the 親機 stands, the one sentence where the eye lands after an action, the connection's action at the end. -->
+<!-- The band: where the hub stands, the one sentence where the eye lands after an action, the connection's action at the end. -->
 <footer id="band" class="status" aria-label={STATUS.label}>
   <span class="hub" class:on={connected} title={hub}><Icon name={connected ? 'plug' : 'unplug'} size="var(--i-s)" /><span class="name">{hub}</span></span>
   <p class="sentence" tabindex="-1" bind:this={nextEl}><span class="visually-hidden">{LOCK.stateLabel} {state} </span>{sentence}</p>

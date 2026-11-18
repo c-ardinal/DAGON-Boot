@@ -26,7 +26,7 @@ function stubBrowser(search: string, serial: unknown) {
 
 afterEach(() => vi.unstubAllGlobals());
 
-describe('失敗の理由を聞く', () => {
+describe('失敗理由の質問', () => {
   test('every modal offering it goes through the one path that closes the modal', () => {
     const app = new TextDecoder().decode(readFileSync(new URL('./App.svelte', import.meta.url)));
     expect(app).not.toContain('askDagon(BUILD.askAgent');

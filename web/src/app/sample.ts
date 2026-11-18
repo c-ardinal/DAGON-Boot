@@ -24,15 +24,15 @@ export interface Node {
   /** Hub pins driving reset and boot; null when the node switches itself. */
   reset: string | null;
   boot: string | null;
-  /** Row on the graph: 0 親機, 1 子機, 2 and on deeper. Absent: by role. */
+  /** Row on the graph: 0 hub, 1 node, 2 and on deeper. Absent: by role. */
   depth?: number;
-  /** A 親機's uplink as the 構成 writes it; absent when none is written (USB to the PC) or the 親機 is linked from another node. */
+  /** A hub's uplink as the 構成 writes it; absent when none is written (USB to the PC) or the hub is linked from another node. */
   uplink?: { kind: Kind; host: UplinkHost };
   /** Why updating skips this node (V-23); absent when updating reaches it. */
   skip?: Skip;
 }
 
-/** What drives a 親機 through its uplink. */
+/** What drives a hub through its uplink. */
 export type UplinkHost = 'pc-cli' | 'browser' | 'embedded';
 
 /** dagon_topology::Skip codes: why updating does not reach a node. */

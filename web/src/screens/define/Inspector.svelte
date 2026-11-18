@@ -50,7 +50,7 @@
   const hub = $derived(t.nodes.find((n) => n.role === 'coordinator'));
   /** The bus speeds every node on the selected bus names in its MCU definition: the only ones it may be set to. */
   const hzs = $derived(bus ? i2cHzs(busNodes(t, bus.id)) : []);
-  /** The 親機's own pins: what a bus or a link from it may be set to (the check refuses any other). */
+  /** The hub's own pins: what a bus or a link from it may be set to (the check refuses any other). */
   const hubPins = $derived(definedPins(hub));
   const MAX_ATTEMPTS = [1, 2, 3, 4, 5];
   const nodeLink = $derived(node ? linkIndexOf(t, node.id) : -1);
@@ -59,7 +59,7 @@
   const byId = (id: string) => t.nodes.find((n) => n.id === id);
   const HOSTS: UplinkHost[] = ['pc-cli', 'browser', 'embedded'];
   const kindOption = (k: Kind, ok: boolean) => (ok ? kindChoice(k) : INSPECT.unavailableOption(kindChoice(k)));
-  /** A 親機's uplink: the kinds its MCU definition offers upwards, and the one the 構成 writes when it is not among them. */
+  /** A hub's uplink: the kinds its MCU definition offers upwards, and the one the 構成 writes when it is not among them. */
   const uplinkKinds = (mcu: string, current: Kind): Kind[] => {
     const up: Kind[] = linkKinds(mcu).up;
     return up.includes(current) ? up : [...up, current];
@@ -164,7 +164,7 @@
           {#each t.nodes.filter((x) => x.id !== node.id) as p (p.id)}<option value={p.id}>{name(p.id)}</option>{/each}
         </select></label
       >
-      <!-- A 親機 linked from another node has that node above it (つなぐ先); one nobody links to has its own uplink. -->
+      <!-- A hub linked from another node has that node above it (上位ノード); one nobody links to has its own uplink. -->
       {#if node.role === 'coordinator' && nodeLink < 0}
         {@const up = node.uplink ?? { kind: LinkKind.UsbCdc, host: 'pc-cli' as UplinkHost }}
         <label

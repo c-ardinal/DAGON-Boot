@@ -164,7 +164,7 @@ describe('recovery from the page with dagon-host recover', () => {
     // Both match: nothing stands to be written, and the same app version stays.
     expect(await op.noWrite(both)).toMatchObject({ same: op.fileVersions.seg });
     // The app is what the node runs: it is not written, and the card says only what was.
-    expect(said).toEqual(['→ ブートローダ 1.1.0']);
+    expect(said).toEqual(['→ ブートローダ1.1.0']);
     expect(op.progress.seg).toMatchObject({ stage: 'done', percent: 100 });
     expect(op.percentOf('seg')).toBe(100);
     expect(await op.noWrite(both)).toMatchObject({ coreToo: true });
@@ -201,7 +201,7 @@ describe('recovery from the page with dagon-host recover', () => {
   }, 120_000);
 
   test('the words say the boot loader was the same only when it was compared', async () => {
-    expect(WRITE.alreadyOn('1.1.0', true).detail).toContain('ブートローダも同じ');
+    expect(WRITE.alreadyOn('1.1.0', true).detail).toContain('ブートローダも同一');
     expect(WRITE.alreadyOn('1.1.0', false).detail).not.toContain('ブートローダ');
     const sim = simulator(13)!;
     const op = session(sim.transport, sim.clock);
@@ -263,7 +263,7 @@ describe('recovery from the page with dagon-host recover', () => {
     expect(op.finished).toMatchObject({ kind: 'updated', wrote: 0, same: 3 });
     expect(bandOf(op.state, op.ctx, { finish: op.finished }).sentence).toBe(BAND.doneNone.sentence);
     expect(op.progress.seg).toMatchObject({ stage: 'unchanged', percent: 100 });
-    expect(NODE.unchanged).toContain('書き込み');
+    expect(NODE.unchanged).toContain('書込');
     // One written, the others as they were: the sentence says which is which.
     expect(bandOf('done', op.ctx, { finish: { kind: 'updated', left: 0, wrote: 1, same: 2 } }).sentence).toBe(BAND_FOR.donePart(1, 2).sentence);
   }, 240_000);
@@ -361,10 +361,10 @@ describe('recovery from the page with dagon-host recover', () => {
     expect(op.recoverTarget?.id).toBe('seg');
 
     await op.writeNode();
-    // The node refused again: its reason stays (× 書き込めない), not a generic failure nor 応答なし.
+    // The node refused again: its reason stays (× 書込不可), not a generic failure nor 応答なし.
     expect(op.state).toBe('recoverFailed');
     expect(op.progress.seg).toMatchObject({ stage: 'refused', reason: 'E_FLASH' });
-    expect(NODE.refused[op.progress.seg.reason!]).toBe('× 書き込み失敗');
+    expect(NODE.refused[op.progress.seg.reason!]).toBe('× 書込失敗');
     expect(bandOf(op.state, op.ctx).sentence).toBe(BAND.recoverFailed.sentence);
     expect(op.recoverTarget?.id).toBe('seg');
 
@@ -441,14 +441,14 @@ describe('recovery from the page with dagon-host recover', () => {
     expect(op.status).toBe(ANNOUNCE.fileTopology);
   }, 120_000);
 
-  test('recovery with a published file that is not a release says 形式違い', async () => {
+  test('recovery with a published file that is not a release says 形式不一致', async () => {
     const t = new MockTransport({ quiet: ['i2c:66'] });
     const op = session(t, fastClock(), async (p) => (p === LATEST_RELEASE ? new TextEncoder().encode('not a release') : null));
     await silentNode(op);
     await op.writeNode();
     expect(op.state).toBe('recoverFailed');
     expect(op.progress.seg).toMatchObject({ stage: 'refused', reason: 'format' });
-    expect(NODE.refused.format).toBe('× 形式違い');
+    expect(NODE.refused.format).toBe('× 形式不一致');
     expect(op.status).toBe(ANNOUNCE.fileFormat);
   }, 120_000);
 
@@ -467,7 +467,7 @@ describe('recovery from the page with dagon-host recover', () => {
     expect([op.state, op.alert]).toEqual(['nodesSilent', ANNOUNCE.fileTopology]);
   }, 120_000);
 
-  test('a rollback that gets no answer shows 応答なし; "もう一度直す" rolls back again, it does not install the release', async () => {
+  test('a rollback that gets no answer shows 応答なし; "再試行" rolls back again, it does not install the release', async () => {
     const t = new MockTransport();
     const op = session(t, fastClock());
     await op.connect();
@@ -518,7 +518,7 @@ describe('recovery from the page with dagon-host recover', () => {
     expect([v(t.helloOf('hub').activeVersion), t.helloOf('hub').trial]).toEqual(['1.0.0', false]);
   }, 120_000);
 
-  test('"最新のリリースを使う" takes the project latest release through serve; without one the band says so', async () => {
+  test('"最新リリースの使用" takes the project latest release through serve; without one the band says so', async () => {
     const t = new MockTransport();
     const op = session(t, fastClock());
     await op.connect();

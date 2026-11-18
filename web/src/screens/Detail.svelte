@@ -15,13 +15,13 @@
     act?: boolean;
     /** The trial choice: "このバージョンで確定する". */
     onkeep?: (id: string) => void;
-    /** "前のバージョンに戻す". */
+    /** "前のバージョンへの復元". */
     onback?: (id: string) => void;
     /** Nodes whose first write can be started here (their DAGON does not answer). */
     first?: readonly string[];
     /** Opens the direct writing of the node. */
     onfirst?: (id: string) => void;
-    /** The last recovery, for its figures under 詳しく見る. */
+    /** The last recovery, for its figures under 詳細表示. */
     recovery?: { id: string; result: RecoverResult } | null;
   }
 

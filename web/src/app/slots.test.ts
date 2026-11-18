@@ -16,7 +16,7 @@ const status = (active: number, a: SlotInfo, b: SlotInfo): StatusResp => ({
   logGeneration: 1,
 });
 
-describe('previous version offered by "前のバージョンに戻す"', () => {
+describe('previous version offered by "前のバージョンへの復元"', () => {
   test('the other slot, confirmed or written before the running version', () => {
     expect(previousVersion(status(1, slot(4, V100), slot(4, V110)), AB)).toBe('1.0.0');
     expect(previousVersion(status(1, slot(1, V100), slot(4, V110)), AB)).toBe('1.0.0');

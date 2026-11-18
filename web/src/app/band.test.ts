@@ -37,7 +37,7 @@ describe('how a failed connection is told', () => {
 });
 
 describe('bottom band', () => {
-  // No "見本を置く" beside it: the sample comes from the start screen only.
+  // No sample button beside it: the sample comes from the start screen only.
   test('empty canvas: the connect sentence, find automatically as the main button, nothing beside it', () => {
     const b = bandOf('idle', { hasConfig: false });
     expect(b.sentence).toBe(BAND.choose.sentence);
@@ -45,7 +45,7 @@ describe('bottom band', () => {
     expect(b.secondary).toEqual([]);
   });
 
-  test('simulated: before connecting, the band says no device list appears for the simulated 親機', () => {
+  test('simulated: before connecting, the band says no device list appears for the simulated hub', () => {
     for (const st of ['idle', 'choosing'] as const) {
       expect(bandOf(st, { hasConfig: true }, { sim: true }).sentence).toBe(SIM.connect.sentence);
     }
@@ -79,7 +79,7 @@ describe('bottom band', () => {
     const b = bandOf('nodesSilent', { hasConfig: true, answering: true }, { stuck: 'ウォッチ', responding: 2 });
     expect([b.sentence, b.primary?.label, b.secondary.map((x) => x.label)]).toEqual([
       BAND.nodesSilent.sentence,
-      '応答する 2 つだけ先に書き込む',
+      '応答する2ノードへの優先書込',
       [],
     ]);
     expect(b.sentence).toMatch(/電源と配線/);
@@ -87,7 +87,7 @@ describe('bottom band', () => {
 
   test('no node answers at all: writing it is the main action, nothing to update first', () => {
     const b = bandOf('nodesSilent', { hasConfig: true, answering: false }, { stuck: 'ウォッチ', responding: 0 });
-    expect([b.primary?.label, b.secondary]).toEqual(['ウォッチへ書き込む', []]);
+    expect([b.primary?.label, b.secondary]).toEqual(['ウォッチへの書込', []]);
   });
 
   test.each([
@@ -97,7 +97,7 @@ describe('bottom band', () => {
     for (const unwritten of [0, 2]) {
       const b = bandOf('stopped', { hasConfig: true }, { stuck: '7セグ', unwritten, stopped: stage });
       expect(b.sentence).toBe(words);
-      expect(b.sentence).toContain('バージョンを上げ');
+      expect(b.sentence).toContain('バージョンアップ');
       expect(b.sentence).toContain('ビルド');
     }
   });

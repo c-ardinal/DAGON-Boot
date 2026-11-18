@@ -4,7 +4,7 @@
     chip: string;
     spoken: string;
     silent: boolean;
-    /** A label-value line under the chip ("目安 約 1 分", "自動の再接続 あと 30 s"). */
+    /** A label-value line under the chip ("推定 約1分", "自動再接続 あと30秒"). */
     note?: string;
   }
 
@@ -114,7 +114,7 @@
   const NAME_PX = 14;
   /** Card heights before they are measured (px). */
   const EST_H = { normal: 140, compact: 56 };
-  /** Room above a top 親機 for its uplink card, and around the graph when fitting (px). */
+  /** Room above a top hub for its uplink card, and around the graph when fitting (px). */
   const UPLINK_ROOM = 84;
   const SIDE = 24;
   /** Between a bundle's outer strand and its chip, and the chip's height (px). */
@@ -470,7 +470,7 @@
   );
   const still = $derived(lightsStill(Object.values(states)));
 
-  /** A 親機's own connection line: its uplink as the 構成 writes it, or the link from the node above it. */
+  /** A hub's own connection line: its uplink as the 構成 writes it, or the link from the node above it. */
   function hubVia(n: Node): string {
     if (!n.uplink) return n.via || NODE.usb;
     return NODE.uplinkVia(kindLabel(n.uplink.kind), n.uplink.host);
@@ -479,21 +479,21 @@
   /** The card's one mono line: MCU and how it is reached. */
   const metaOf = (n: Node) => [n.mcu, n.role === 'hub' ? hubVia(n) : n.via].filter(Boolean).join(' · ');
 
-  /** 親機 nobody links to, each with its uplink (what drives it, as the 構成 writes it) above it. */
+  /** Hubs nobody links to, each with its uplink (what drives it, as the 構成 writes it) above it. */
   const tops = $derived((config?.nodes ?? []).filter((n) => n.role === 'hub' && tree.roots.includes(n.id)));
-  /** The 親機 this page connects to: the one updating reaches (the cut's), else the first one the 構成 names. */
+  /** The hub this page connects to: the one updating reaches (the cut's), else the first one the 構成 names. */
   const firstHub = $derived(
     config?.nodes.find((n) => n.role === 'hub' && config.reach.includes(n.id))?.id ?? config?.nodes.find((n) => n.role === 'hub')?.id,
   );
 
-  /** The role on the card: 親機, 子機, 孫機, and below that its row. */
+  /** The role on the card: hub, node, grandchild, and below that its row. */
   function roleOf(n: Node): string {
     if (n.role === 'hub') return NODE.roleHub;
     const d = belowHub(n.id);
     return d <= 1 ? NODE.roleNode : d === 2 ? NODE.roleGrandchild : NODE.roleDeeper(d);
   }
 
-  /** Links from the nearest 親機 above node `id` (1 for a 子機; a node no 親機 reaches counts as a 子機). */
+  /** Links from the nearest hub above node `id` (1 for a node; a node no hub reaches counts as a node). */
   function belowHub(id: string, seen = new Set<string>()): number {
     const up = config?.links.find((l) => l.to === id)?.from;
     const p = config?.nodes.find((x) => x.id === up);

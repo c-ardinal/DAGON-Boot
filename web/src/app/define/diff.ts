@@ -5,7 +5,7 @@ import { DIFF, INSPECT } from '../copy.ts';
 import { kindLabel, LinkKind, linkIndexOf, sides, type TLink, type TNode, type Topo } from './model.ts';
 
 export interface DiffRow {
-  /** The node (呼び名) or link ("メイン → 7セグ") the row is about. */
+  /** The node (名称) or link ("メイン → 7セグ") the row is about. */
   what: string;
   here: string;
   file: string;
@@ -34,7 +34,7 @@ function linkText(t: Topo, l: TLink | undefined): string {
   return [...parts, control && `${INSPECT.reset}/${INSPECT.boot} ${control}`].filter(Boolean).join(' · ');
 }
 
-/** Rows where `file` differs from `here`; `names` are the page's 呼び名. */
+/** Rows where `file` differs from `here`; `names` are the page's 名称. */
 export function topoDiff(here: Topo, file: Topo, names: Record<string, string>): DiffRow[] {
   const name = (id: string) => names[id] ?? id;
   const ids = [...new Set([...here.nodes.map((n) => n.id), ...file.nodes.map((n) => n.id)])];

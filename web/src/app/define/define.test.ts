@@ -83,7 +83,7 @@ describe('define session', () => {
     const before = JSON.stringify(d.doc);
     let asked = 0;
     d.guard = () => (asked++, true);
-    // Enter / double-click in the parts window, the table's 置く, a drop, a port drag, Delete, import, undo.
+    // Enter / double-click in the parts window, the table's 配置, a drop, a port drag, Delete, import, undo.
     d.place('nucleo-f401re', 'NUCLEO-F401RE');
     d.placeMcu('stm32f401re', 'ボード');
     d.placeAt({ board: 'nucleo-f401re' }, 'NUCLEO-F401RE', 'hub');
@@ -125,13 +125,13 @@ describe('define session', () => {
     expect(d.canRedo).toBe(false);
   });
 
-  test('a placed node that is not linked is a problem whose 直す selects it; linking clears it', () => {
+  test('a placed node that is not linked is a problem whose 修正 selects it; linking clears it', () => {
     const d = new Define();
     d.place('waveshare-rp2040-touch-lcd-1.28', 'Waveshare RP2040-Touch-LCD-1.28');
     d.place('nucleo-f401re', 'NUCLEO-F401RE');
     expect(d.selected).toBe('node:nucleo');
     const p = d.problems.find((x) => x.rule === 'V-05')!;
-    expect([p.short, p.select, p.sentence]).toEqual(['つながっていないノード', 'node:nucleo', RULE_FIX['V-05']({ to: 'nucleo', board: 'nucleo-f401re', id: 'nucleo', many: false, max: 32 })]);
+    expect([p.short, p.select, p.sentence]).toEqual(['未接続のノード', 'node:nucleo', RULE_FIX['V-05']({ to: 'nucleo', board: 'nucleo-f401re', id: 'nucleo', many: false, max: 32 })]);
     d.selected = null;
     d.fix(p);
     expect(d.selected).toBe('node:nucleo');
@@ -173,7 +173,7 @@ describe('define session', () => {
     d.apply(setLink(d.doc, 0, 'addr', 0x39));
     expect(d.operable).toBe('problems');
     d.undo();
-    // A second 親機 over CAN: valid, a part updating skips (V-23, information).
+    // A second hub over CAN: valid, a part updating skips (V-23, information).
     const r = placeMcu(d.doc, 'rp2040');
     d.apply(connect(setNode(r.doc, r.id, 'role', 'coordinator'), r.id, 'hub'));
     expect(d.errors).toBe(0);
@@ -182,7 +182,7 @@ describe('define session', () => {
     expect(problemChip(d.problems.find((p) => p.rule === 'V-23')!)).toEqual({ mark: '◇', kind: 'unsupported' });
   });
 
-  test('"最初からやり直す" empties the 構成 and its history; load opens a 構成 without undo past it', () => {
+  test('"リスタート" empties the 構成 and its history; load opens a 構成 without undo past it', () => {
     const d = new Define();
     d.placeSample();
     d.reset();
@@ -216,17 +216,17 @@ describe('define session', () => {
     );
     expect(d.importYaml(espHub)).toBe(true);
     const p = d.problems.find((x) => x.rule === 'V-25')!;
-    expect([p.short, p.sentence]).toEqual(['親機にできないマイコン', 'hubの代わりに、親機にできるマイコンのノードを親機にしてください。']);
+    expect([p.short, p.sentence]).toEqual(['ホスト側ノードに不適合のマイコン', 'hubの代替として、ホスト側ノードに適合するマイコンのノードをホスト側ノードにしてください。']);
   });
 
-  test('by MCU, only an MCU whose definition has [coordinator] becomes the 親機', () => {
+  test('by MCU, only an MCU whose definition has [coordinator] becomes the hub', () => {
     expect(placeMcu(emptyDoc(), 'esp32s3').doc.topo.nodes[0].role).toBe('node');
     expect(placeMcu(emptyDoc(), 'rp2040').doc.topo.nodes[0].role).toBe('coordinator');
   });
 
-  test('a CAN link bundle says its kind, not 「0 本」', () => {
+  test('a CAN link bundle says its kind, not 「0本」', () => {
     expect(LINK.bundle('CAN', 0, 0)).toBe('CAN');
-    expect(LINK.bundle('I2C', 5, 3)).toBe('I2C · 5 本（うち共有 3）');
+    expect(LINK.bundle('I2C', 5, 3)).toBe('I2C · 5本（うち共有3）');
   });
 
   test('an empty file or one that is not a 構成 mapping is refused with its notice, not a crash', () => {

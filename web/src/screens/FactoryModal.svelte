@@ -10,7 +10,7 @@
     how: { label: string; hint: string } | null;
     /** serve can write this MCU itself. */
     canWrite: boolean;
-    /** A 子機: connected directly because the 親機 does not reach it. */
+    /** A node: connected directly because the hub does not reach it. */
     child?: boolean;
     /** The flash job once started. */
     job: Job | null;

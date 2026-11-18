@@ -1,4 +1,4 @@
-// The start screen (始め): make a project, make one from the sample, or
+// The start screen (開始): make a project, make one from the sample, or
 // open one, in a folder chosen from dagon serve's own list (GET /v1/fs). The
 // page sends only a path built from that list; serve confines it to the home
 // folder and refuses key folders.
@@ -79,7 +79,7 @@ export class Start {
     }
   }
 
-  /** "新しく作る" / "見本から新しく作る": a new folder `name` in the folder on the list. */
+  /** "空白から作成" / "サンプルから作成": a new folder `name` in the folder on the list. */
   async make(): Promise<void> {
     const c = this.choice;
     const name = this.name.trim();
@@ -87,7 +87,7 @@ export class Start {
     await this.result(await this.deps.cli.newProject(inside(this.list.path, name), c === 'sample'), true);
   }
 
-  /** "開く" on a project folder, or one with only a 構成 (from the list, or a recent one). */
+  /** "プロジェクトのオープン" on a project folder, or one with only a 構成 (from the list, or a recent one). */
   async open(path: string): Promise<void> {
     this.asking = null;
     const r = await this.deps.cli.openProject(path);
@@ -99,7 +99,7 @@ export class Start {
     await this.result(r, false);
   }
 
-  /** The answer to "このフォルダに dagon.toml を作りますか。": yes makes it and opens the project. */
+  /** The answer to "このフォルダにdagon.tomlを作成しますか。": yes makes it and opens the project. */
   async init(yes: boolean): Promise<void> {
     const path = this.asking;
     this.asking = null;

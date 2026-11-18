@@ -4,11 +4,11 @@
     label: string;
     value: number;
     of?: number;
-    /** Unit after the number ("%", "% 停止"). */
+    /** Unit after the number ("%", "%停止"). */
     unit?: string;
     /** A label-value pair under the number ("リンク 2"). */
     sub?: readonly [string, string | number];
-    /** Pairs after `sub` on the same line ("残り 約 2 分"). */
+    /** Pairs after `sub` on the same line ("残時間 約2分"). */
     more?: readonly (readonly [string, string])[];
     /** The number is a failure count (問題 n > 0): red. */
     alarm?: boolean;

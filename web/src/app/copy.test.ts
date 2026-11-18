@@ -13,9 +13,9 @@ const filled = [
   copy.BUTTON_FOR.updateResponding(2),
   copy.CANVAS.dotRespondingName(3, 3),
   copy.CANVAS.dotFoundName(3),
-  copy.NODE.name({ name: '7セグ', product: 'NUCLEO-F401RE', mcu: 'STM32F401RE', role: '子機', via: '親機と I2C 0x42', state: '応答あり', version: '1.0.0' }),
+  copy.NODE.name({ name: '7セグ', product: 'NUCLEO-F401RE', mcu: 'STM32F401RE', role: '1段目', via: '上位ノードとI2C 0x42', state: '応答あり', version: '1.0.0' }),
   copy.LINK.bundle('I2C', 5, 3),
-  copy.LINK.name('I2C · 5 本（うち共有 3）', 'メイン', '7セグ', '0x42'),
+  copy.LINK.name('I2C · 5本（うち共有3）', 'メイン', '7セグ', '0x42'),
   copy.DETAIL.ms(8),
   copy.ANNOUNCE.found(3),
   copy.ANNOUNCE.responding(2, 3),
@@ -158,15 +158,13 @@ describe('the shown strings', () => {
 
 describe('copy', () => {
   // The list is for the operate mode's guidance and results; the define mode's CLI screens
-  // (CLI 連携, 作業, 署名とリリース, プロジェクト, 書き込み) name signing and the like by design.
+  // (CLI連携, 作業, 署名とリリース, プロジェクト, 書込) name signing and the like by design.
   const DEFINE_CLI = ['CLI_NAV', 'CLI_LINK', 'JOBS', 'FLASH'];
   test.each(copy.FORBIDDEN_WORDS)('no screen text uses %s', (word) => {
     // 確定 is allowed only as a slot value in the slot section.
     // 確定 only as a slot value and in the trial choice; フラッシュ only in V-16's name.
     const operate = shownExcept(...DEFINE_CLI);
-    // ポート only in the define-mode canvas port's hover tip (LINK.portOut), which names the drag handle.
-    const portTips = new Set(SAMPLES.map((s) => copy.LINK.portOut(s as string)));
-    const texts = word === '確定' ? shownExcept('SLOT', 'TRIAL_CHOICE', ...DEFINE_CLI) : word === 'フラッシュ' ? operate.filter((s) => s !== copy.RULE_SHORT['V-16'] && s !== copy.INSPECT.flashSize) : word === 'ポート' ? operate.filter((s) => !portTips.has(s)) : operate;
+    const texts = word === '確定' ? shownExcept('SLOT', 'TRIAL_CHOICE', ...DEFINE_CLI) : word === 'フラッシュ' ? operate.filter((s) => s !== copy.RULE_SHORT['V-16'] && s !== copy.INSPECT.flashSize) : operate;
     expect(texts.filter((s) => s.includes(word))).toEqual([]);
   });
 
@@ -195,7 +193,7 @@ describe('copy', () => {
       copy.CANVAS.empty,
       copy.DETAIL.nothingSelected,
     ];
-    // 困ったとき: each row is the real cause and the next step, two or three polite sentences.
+    // トラブル対処: each row is the real cause and the next step, two or three polite sentences.
     for (const [, s] of copy.HELP.rows) {
       expect(s.match(/。/g)?.length, s).toBeGreaterThanOrEqual(2);
       expect(s.match(/。/g)?.length, s).toBeLessThanOrEqual(3);
@@ -250,7 +248,7 @@ describe('the two modes', () => {
 });
 
 describe('the writing vocabulary', () => {
-  // Writing to nodes is 書き込む / 書き込み中 / 書き込み済み / 書き込めない and the .dgb is the パッケージファイル.
+  // Writing to nodes is 書込 / 書込中 / 書込済 / 書込不可 and the .dgb is the パッケージファイル.
   // 更新 is barred as a word for writing to nodes; the terms of use being updated is not writing.
   const NOT_WRITING = new Set<string>([copy.AGENT.errors.AGENT_CONSENT_VERSION.text]);
   test('no screen text (nor the stand-in agent) says 更新 for writing', () => {
@@ -268,17 +266,10 @@ describe('copy keys, screen words and source say what things are', () => {
     expect(keys(copy).filter((k) => ID_KEY.test(k))).toEqual([]);
   });
 
-  // まだ about the user's own work (nothing built, nothing logged) is a fact about them, not about DAGON.
-  const USER_STATE = new Set<string>([
-    copy.DRAWER.outputNone,
-    copy.MENU.off.noLog,
-    copy.BUILD.noSkeleton.reason,
-    copy.HELP.rows[1][1],
-    copy.HELP.rows[4][1],
-  ]);
+  // The adverb of a pending status is a native word scripts/ja_wording.py refuses in every file under web/.
   test('no shown string states a pending status of DAGON', () => {
     const texts = [...shown, ...MOCK_TEXTS(), ...mockWritten];
-    expect(texts.filter((s) => s.includes('未対応') || (s.includes('まだ') && !USER_STATE.has(s)))).toEqual([]);
+    expect(texts.filter((s) => s.includes('未対応'))).toEqual([]);
   });
 
   const sources = Object.entries(

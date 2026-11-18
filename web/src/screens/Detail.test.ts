@@ -35,7 +35,7 @@ const answered = (portKind: number, version: VersionResp | null | undefined): Li
 const detail = (live: Live) =>
   render(Detail, { props: { config: SAMPLE_CONFIG, live: { seg: live }, selected: 'node:seg', connected: true } }).body;
 
-/** The value of row `key` under 詳しく見る. */
+/** The value of row `key` under 詳細表示. */
 function row(body: string, key: string): string | null {
   const m = body.match(new RegExp(`<dt[^>]*>${key.replace(/[[\]]/g, '\\$&')}</dt>\\s*<dd[^>]*>([^<]*)</dd>`));
   return m ? m[1] : null;
@@ -61,7 +61,7 @@ describe('node detail: the boot loader has its own slots', () => {
   });
 });
 
-describe('node detail: VERSION under 詳しく見る', () => {
+describe('node detail: VERSION under 詳細表示', () => {
   test('stage0 and each boot core slot with the running one', () => {
     const body = detail(answered(PORT_SELF_BOOT, VERSION));
     expect(row(body, 'stage0')).toBe('0.1.0');

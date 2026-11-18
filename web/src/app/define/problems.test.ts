@@ -26,12 +26,12 @@ describe('problem sentences', () => {
     expect(errors(toYaml(setLink(setLink(doc, i, 'node_pins.sda', 'PB4'), i, 'node_pins.scl', 'PA8').topo))).toBe(0);
   });
 
-  test("V-07 names the pins of the pin's own node, not the 親機's by name, and one of them passes", () => {
+  test("V-07 names the pins of the pin's own node, not the hub's by name, and one of them passes", () => {
     const base = fromYaml(SAMPLE_YAML);
     const i = base.topo.links!.findIndex((l) => l.kind === LinkKind.Uart);
     const doc = setLink(base, i, 'pins.tx', 5);
     const p = problems(doc).find((x) => x.rule === 'V-07')!;
-    expect(p.short).not.toContain('親機');
+    expect(p.short).not.toContain('ホスト側ノード');
     expect(p.sentence).toContain('GPIO26');
     expect(errors(toYaml(setLink(doc, i, 'pins.tx', 26).topo))).toBe(0);
   });

@@ -79,13 +79,13 @@ async function open(page: Page) {
 test('a build advances node by node: only the node being built has the light, and it goes when that node is done', async ({ page }) => {
   const s = await serve(page, { buildNodes: ['hub', 'seg', 'watch'] });
   await open(page);
-  await expect(sentence(page)).toContainText('ビルドしてから');
-  await page.getByRole('button', { name: 'ビルドする' }).click();
+  await expect(sentence(page)).toContainText('ビルド後に');
+  await page.getByRole('button', { name: 'ビルド' }).click();
   await expect.poll(() => s.started).toEqual(['build']);
   await taken(page);
   await s.state(1, 'running');
   // Nobody named yet: nobody lit; the band says to wait, not to build.
-  await expect(sentence(page)).toContainText('そのまま待って');
+  await expect(sentence(page)).toContainText('完了まで待機');
   expect(await lit(page)).toEqual([]);
 
   for (const [node, others] of [['hub', 2], ['seg', 2], ['watch', 2]] as const) {
@@ -116,15 +116,15 @@ test('a build advances node by node: only the node being built has the light, an
   await s.state(3, 'succeeded');
 
   // Done: the band says the next true step, no longer the old one.
-  await expect(sentence(page)).toContainText('書込に切り替えて');
-  await expect(sentence(page)).not.toContainText('ビルドしてから');
+  await expect(sentence(page)).toContainText('書込モードへの切替後');
+  await expect(sentence(page)).not.toContainText('ビルド後に');
   expect(await lit(page)).toEqual([]);
 });
 
 test('a job serve has already started when its number arrives still lights its node', async ({ page }) => {
   const s = await serve(page, { buildNodes: ['hub', 'seg', 'watch'], earlyEvents: true });
   await open(page);
-  await page.getByRole('button', { name: 'ビルドする' }).click();
+  await page.getByRole('button', { name: 'ビルド' }).click();
   await expect.poll(() => lit(page)).toEqual(['node:hub']);
   expect(s.started).toEqual(['build']);
 });
@@ -132,7 +132,7 @@ test('a job serve has already started when its number arrives still lights its n
 test('an edit after a build asks for a build again', async ({ page }) => {
   const s = await serve(page, { buildNodes: ['hub', 'seg', 'watch'] });
   await open(page);
-  await page.getByRole('button', { name: 'ビルドする' }).click();
+  await page.getByRole('button', { name: 'ビルド' }).click();
   await expect.poll(() => s.started).toEqual(['build']);
   await taken(page);
   await s.state(1, 'succeeded');
@@ -142,15 +142,15 @@ test('an edit after a build asks for a build again', async ({ page }) => {
   await expect.poll(() => s.started).toEqual(['build', 'sign', 'release']);
   await taken(page);
   await s.state(3, 'succeeded');
-  await expect(sentence(page)).toContainText('書込に切り替えて');
-  await page.locator('#parts-rows [aria-label$="置く"]').first().dblclick();
-  await expect(sentence(page)).not.toContainText('書込に切り替えて');
+  await expect(sentence(page)).toContainText('書込モードへの切替後');
+  await page.locator('#parts-rows [aria-label$="配置"]').first().dblclick();
+  await expect(sentence(page)).not.toContainText('書込モードへの切替後');
 });
 
 test('no [build.*] yet: the band leads to the skeleton', async ({ page }) => {
   await serve(page, { buildNodes: [] });
   await open(page);
-  await expect(sentence(page)).toContainText('雛形を生成する');
+  await expect(sentence(page)).toContainText('テンプレートの事前生成');
 });
 
 for (const [what, layout] of [
@@ -160,7 +160,7 @@ for (const [what, layout] of [
   test(`dragging a card does not write over a layout file not read: ${what}`, async ({ page }) => {
     const s = await serve(page, { buildNodes: [], layout });
     await open(page);
-    await expect(page.locator('.toast')).toContainText('配置を読めない');
+    await expect(page.locator('.toast')).toContainText('配置の読込不可');
     const card = page.locator('.node').nth(1);
     const at = (await card.boundingBox())!;
     await page.mouse.move(at.x + 60, at.y + 12);
@@ -188,9 +188,9 @@ test('a layout read that failed and then recovered through a drag: a later renam
   const layout: { status: number; body: { names?: Record<string, string> } & Record<string, unknown> } = { status: 500, body: { error: 'no' } };
   const s = await serve(page, { buildNodes: [], layout });
   await open(page);
-  await expect(page.locator('.toast')).toContainText('配置を読めない');
+  await expect(page.locator('.toast')).toContainText('配置の読込不可');
   layout.status = 200;
-  layout.body = { format: 1, names: { seg: '保存した7セグ', hub: '保存した親機' }, positions: { hub: { x: 10, y: 20 } } };
+  layout.body = { format: 1, names: { seg: '保存した7セグ', hub: '保存したメイン' }, positions: { hub: { x: 10, y: 20 } } };
   const card = page.locator('.node').nth(1);
   const at = (await card.boundingBox())!;
   await page.mouse.move(at.x + 60, at.y + 12);
@@ -200,11 +200,11 @@ test('a layout read that failed and then recovered through a drag: a later renam
   await expect.poll(() => s.puts.length).toBe(1);
   expect(JSON.parse(s.puts[0]).names).toEqual(layout.body.names);
   // What the file held is on the canvas now.
-  await expect(page.locator('.node', { hasText: '保存した親機' })).toHaveCount(1);
+  await expect(page.locator('.node', { hasText: '保存したメイン' })).toHaveCount(1);
 
   await page.locator('.node', { hasText: '保存した7セグ' }).click();
-  await page.getByLabel('呼び名', { exact: true }).fill('新しい7セグ');
-  await page.getByLabel('呼び名', { exact: true }).press('Tab');
+  await page.getByLabel('名称', { exact: true }).fill('新規の7セグ');
+  await page.getByLabel('名称', { exact: true }).press('Tab');
   await expect.poll(() => s.puts.length).toBe(2);
-  expect(JSON.parse(s.puts[1]).names).toEqual({ seg: '新しい7セグ', hub: '保存した親機' });
+  expect(JSON.parse(s.puts[1]).names).toEqual({ seg: '新規の7セグ', hub: '保存したメイン' });
 });

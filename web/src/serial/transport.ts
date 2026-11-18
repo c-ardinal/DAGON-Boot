@@ -45,13 +45,13 @@ export interface Transport {
   notes?(): ReconnectNote[];
 }
 
-/** What "the same 親機" means: HELLO carries no serial number, so the MCU and release key of the first HELLO. */
+/** What "the same hub" means: HELLO carries no serial number, so the MCU and release key of the first HELLO. */
 export type HubIdentity = Pick<HelloResp, 'mcuId' | 'keyId'>;
 
 /**
  * The one check every path that adopts a port goes through (dagon-host's
  * reopen in hubRestarting, the device reported or chosen in reconnectNeeded, the CLI's hand-back):
- * why the device answering `h` is not the 親機 first seen as `first`, or null.
+ * why the device answering `h` is not the hub first seen as `first`, or null.
  * With `version` it must also be on trial with that version (the one just
  * sent); without it a hub back on its previous version still passes, for
  * CONFIRM to stop there (stopped).

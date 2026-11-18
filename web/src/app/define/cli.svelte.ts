@@ -79,7 +79,7 @@ export type ProjectResult = 'opened' | 'missing' | 'key' | 'busy' | 'exists' | '
 export interface Layout {
   /** The file's format number. */
   format?: number;
-  /** 呼び名 by node id. */
+  /** 名称 by node id. */
   names?: Record<string, string>;
   /** Editor positions by node id. */
   positions?: Record<string, { x: number; y: number }>;
@@ -381,7 +381,7 @@ export class Cli {
     return new Uint8Array(await r.arrayBuffer());
   }
 
-  /** GET /v1/release/latest: the project's latest .dgb ("最新のリリースを使う"); null when there is none. */
+  /** GET /v1/release/latest: the project's latest .dgb ("最新リリースの使用"); null when there is none. */
   async latestRelease(): Promise<Uint8Array | null> {
     if (this.state !== 'ready') return null;
     const r = await this.call('GET /v1/release/latest');
@@ -452,7 +452,7 @@ export class Cli {
     return this.projectCall('POST /v1/project/init', { path }, true);
   }
 
-  /** GET /v1/layout (feature `layout`): the project's 呼び名 and positions; null when there are none yet. */
+  /** GET /v1/layout (feature `layout`): the project's 名称 and positions; null when there are none yet. */
   async loadLayout(): Promise<Layout | null> {
     if (!this.has('layout')) return null;
     const r = await this.call('GET /v1/layout');
@@ -511,7 +511,7 @@ export class Cli {
     if (r?.ok) this.hello = (await r.json()) as Hello;
   }
 
-  /** "最初からやり直す": the jobs this page shows are its records too (serve's files stay). */
+  /** "リスタート": the jobs this page shows are its records too (serve's files stay). */
   clearJobs(): void {
     this.jobs = [];
   }

@@ -67,7 +67,7 @@ export const MACHINE: Record<L, Spec> = {
   portFailed: { step: 1, primary: (c) => (c.failure === 'unavailable' ? 'reload' : 'connect'), on: { connect: 'choosing' } },
   checking: {
     step: 1,
-    // The 構成 is the project's YAML: connecting never asks whether the 親機 holds it.
+    // The 構成 is the project's YAML: connecting never asks whether the hub holds it.
     on: { noAnswer: 'silentHub', helloDiscover: 'scanning', helloConfigured: 'ready', ...leave },
   },
   silentHub: { step: 1, primary: 'reselect', on: { reselect: 'choosing' } },
@@ -77,7 +77,7 @@ export const MACHINE: Record<L, Spec> = {
     step: 4,
     primary: 'chooseFile',
     secondary: ['useLatest'],
-    // rollback: the trial choice's "前のバージョンに戻す" for a node left on trial.
+    // rollback: the trial choice's "前のバージョンへの復元" for a node left on trial.
     on: { recover: 'recovering', watchAlarm: 'nodesSilent', chooseFile: 'reading', useLatest: 'reading', cliClaim: 'cliTurn', rollback: 'recovering', ...leave },
   },
   nodesSilent: {
@@ -92,7 +92,7 @@ export const MACHINE: Record<L, Spec> = {
   otherTopology: {
     step: 4,
     primary: 'otherFile',
-    // The 構成 is replaced in 定義 (ファイルの構成を取り込む), never from here.
+    // The 構成 is replaced in 定義 (ファイルの構成の取込), never from here.
     secondary: ['defineFix'],
     on: { otherFile: 'reading', ...leave },
   },
@@ -149,7 +149,7 @@ export function hubOf(s: L): HubState {
 }
 
 /**
- * States in which the header's つなぐ / 切断 cannot be used:
+ * States in which the header's 接続 / 切断 cannot be used:
  * choosing or scanning, updating, reconnecting, recovering, and the
  * CLI holding the hub.
  */

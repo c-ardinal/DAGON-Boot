@@ -17,7 +17,7 @@ const status = (p: Partial<Parameters<typeof Status>[1]> = {}) =>
       oncli: () => undefined,
       saved: STATUS.saved,
       savedOk: true,
-      sentence: '親機につないでください。',
+      sentence: 'ホスト側ノードに接続してください。',
       status: '',
       alert: '',
       ...p,
@@ -29,16 +29,16 @@ describe('status row', () => {
     expect(status()).not.toMatch(/data-control="connect"/);
   });
 
-  test('where the 親機 stands, the one sentence, then the marks', () => {
+  test('where the hub stands, the one sentence, then the marks', () => {
     const body = status();
     const at = (s: string) => body.indexOf(s);
-    const order = ['未接続', '親機につないでください。', `aria-label="${STATUS.saved}"`, 'aria-label="CLI 0.4.0"'];
+    const order = ['未接続', 'ホスト側ノードに接続してください。', `aria-label="${STATUS.saved}"`, 'aria-label="CLI 0.4.0"'];
     expect(order.map(at)).toEqual([...order.map(at)].sort((a, b) => a - b));
     expect(order.every((s) => at(s) >= 0)).toBe(true);
   });
 
   test('the sentence is shown, not only spoken', () => {
-    expect(status()).toMatch(/<p class="sentence[^>]*>.*親機につないでください。<\/p>/);
+    expect(status()).toMatch(/<p class="sentence[^>]*>.*ホスト側ノードに接続してください。<\/p>/);
   });
 
   test('what shows elsewhere is not repeated in the band', () => {
@@ -68,14 +68,14 @@ describe('drawer', () => {
 });
 
 describe('toast', () => {
-  test('a failure is an alert with a 詳しく見る link', () => {
+  test('a failure is an alert with a 詳細表示 link', () => {
     const html = render(Toast, { props: { notice: { word: '× 送信失敗', error: true }, onmore: () => undefined, ondone: () => undefined } }).body;
     expect(html).toContain('role="alert"');
     expect(html).toContain(NOTICE.more);
   });
 
   test('a confirmation is a status', () => {
-    const html = render(Toast, { props: { notice: { word: '書き込み済み 3 ノード' }, ondone: () => undefined } }).body;
+    const html = render(Toast, { props: { notice: { word: '3ノードの書込完了' }, ondone: () => undefined } }).body;
     expect(html).toContain('role="status"');
   });
 });

@@ -186,7 +186,7 @@ export interface Deps {
   clock?: LinkClock;
   /**
    * The project's latest release through dagon serve (GET /v1/release/latest),
-   * which "最新のリリースを使う" and a recovery without a file take; null when
+   * which "最新リリースの使用" and a recovery without a file take; null when
    * there is none. The page fetches nothing from anywhere else.
    */
   latest?: () => Promise<Uint8Array | null>;
@@ -202,7 +202,7 @@ export interface Deps {
   again?: () => Promise<Transport>;
 }
 
-/** The file name "最新のリリースを使う" shows. */
+/** The file name "最新リリースの使用" shows. */
 export const LATEST_NAME = 'latest.dgb';
 
 /**
@@ -272,15 +272,15 @@ export class Operate {
   recovering = $state<string | null>(null);
   /** How the last recovery got through: the ROM path shows its figures in the detail. */
   recovered = $state<RecoverResult | null>(null);
-  /** The update after a recovery covers the nodes not written yet ("残りのノードへ書き込む"). */
+  /** The update after a recovery covers the nodes not written yet ("未書込ノードへの書込"). */
   rest = $state(false);
   /**
    * The 構成 a release made for another 構成 was made for (otherTopology): shown
-   * as differences, and taken in 定義 by "ファイルの構成を取り込む". Null when
+   * as differences, and taken in 定義 by "ファイルの構成の取込". Null when
    * the file carries none.
    */
   fileTopology = $state<Topo | null>(null);
-  /** "最新のリリースを使う" found no release (BAND.noRelease until the next step). */
+  /** "最新リリースの使用" found no release (BAND.noRelease until the next step). */
   latestMissing = $state(false);
   /** The version the chosen release gives each node (shown as "↑ 1.0.0 → 1.1.0" before the update). */
   fileVersions = $state<Record<string, number>>({});
@@ -290,7 +290,7 @@ export class Operate {
   reconnectNotes = $state<ReconnectNote[]>([]);
   /** Why the device the CLI gave back was not taken (lost shows it); null otherwise. */
   returnRefused = $state<ReconnectNote | null>(null);
-  /** The hub's HELLO when the user connected: what "the same 親機" means after its reboot. */
+  /** The hub's HELLO when the user connected: what "the same hub" means after its reboot. */
   private hubHello: HelloResp | null = null;
   /** Nodes whose card check is off: the next write leaves them out. */
   skip = $state(new Set<string>());
@@ -442,7 +442,7 @@ export class Operate {
 
   /**
    * The header's 切断: the port is closed but its permission is kept (no
-   * forget()), so the CLI or a later つなぐ can open it; the session waits at idle.
+   * forget()), so the CLI or a later 接続 can open it; the session waits at idle.
    */
   async disconnect(): Promise<void> {
     if (HUB_LOCKED.has(this.state) || next(this.state, 'disconnect') === this.state) return;
@@ -456,7 +456,7 @@ export class Operate {
   /**
    * The CLI gave the port back (device.returned): the page opens the device
    * it had again by itself and goes on watching (ready, BAND.cliTurn); when that fails
-   * the user connects again (lost, BAND.lost). It must be the same 親機 as before
+   * the user connects again (lost, BAND.lost). It must be the same hub as before
    * (notThisHub against the first HELLO); otherwise it is closed and the
    * reason goes to the log.
    */
@@ -507,7 +507,7 @@ export class Operate {
   }
 
   /**
-   * "パソコンとつなぐ" / "つないで、自動で見つける" / "選び直す" / "もう一度つなぐ".
+   * "接続" / "ホスト側ノードの探索" / "ホスト側ノードの再選択" / "再接続".
    * With nothing on the canvas, connecting goes on to find the nodes.
    */
   async connect(): Promise<void> {
@@ -553,7 +553,7 @@ export class Operate {
     this.status = FAILURE_BAND[f].chip;
   }
 
-  /** The scan after "つないで、自動で見つける". */
+  /** The scan after "ホスト側ノードの探索". */
   async discover(my = this.session): Promise<void> {
     this.go('helloDiscover');
     this.stopWatching();
@@ -630,7 +630,7 @@ export class Operate {
     }
     if (this.responding !== before) this.status = ANNOUNCE.responding(this.responding, this.reach.length);
     // ready and done move to nodesSilent by themselves while a node does not answer: it stays visible and recoverable
-    // (after "応答する n つだけ先に書き込む" the ones left out are named there).
+    // (after "応答するnノードへの優先書込" the ones left out are named there).
     if ((this.state === 'ready' || this.state === 'done') && this.stuck) this.go('watchAlarm', false);
     else if (this.state === 'nodesSilent' && !this.stuck) this.go('watchOk', false);
   }
@@ -666,8 +666,8 @@ export class Operate {
   }
 
   /**
-   * A release file was chosen ("パッケージファイルを選ぶ", "応答する n つだけ先に
-   * 書き込む", "別のファイルを選ぶ"): dagon-host's release check against the
+   * A release file was chosen ("パッケージファイルの選択", "応答するnノードへの
+   * 優先書込", "別ファイルの選択"): dagon-host's release check against the
    * configuration on the canvas, before anything is sent.
    */
   takeFile(name: string, bytes: Uint8Array): void {
@@ -726,7 +726,7 @@ export class Operate {
     this.targets = this.reach.map((n) => n.id).filter((x) => chosen.has(x));
   }
 
-  /** "n ノードへ書き込む": dagon-host's apply on the checked nodes, children first and the hub last. */
+  /** "nノードへの書込": dagon-host's apply on the checked nodes, children first and the hub last. */
   async update(): Promise<void> {
     const c = this.config;
     const f = this.file;
@@ -919,7 +919,7 @@ export class Operate {
   }
 
   /**
-   * "もう一度つなぐ" while the hub reboots: the user chooses it again. While
+   * "再接続" while the hub reboots: the user chooses it again. While
    * dagon-host still reopens (hubRestarting) the chosen device goes under its next
    * reopen; after that (reconnectNeeded) dagon-host applies the confirm rule to it.
    * `onlyMine` (a device the browser reported connected, nobody chose it):
@@ -961,7 +961,7 @@ export class Operate {
       }
     }).catch(() => null);
     if (!r) {
-      // Never left open while 切断 is held: the dialog stays, with the reason under 詳しく見る.
+      // Never left open while 切断 is held: the dialog stays, with the reason under 詳細表示.
       void t.close().catch(() => undefined);
       this.alert = ANNOUNCE.reconnectTimeout;
       return false;
@@ -972,7 +972,7 @@ export class Operate {
 
   /**
    * Why the device under the link is not the hub the update rebooted, or null.
-   * HELLO carries no serial number, so "the same 親機" is the role, MCU and
+   * HELLO carries no serial number, so "the same hub" is the role, MCU and
    * release key of its first HELLO; `onTrial` (a device nobody chose) also
    * needs it on trial with the version just sent. One the user chose may be
    * back on its previous version: CONFIRM then stops there (stopped).
@@ -1032,7 +1032,7 @@ export class Operate {
     return (await this.deps.latest?.().catch(() => null)) ?? null;
   }
 
-  /** "最新のリリースを使う": the project's latest release, checked like a chosen file. */
+  /** "最新リリースの使用": the project's latest release, checked like a chosen file. */
   async useLatest(): Promise<boolean> {
     const bytes = await this.latest();
     if (!bytes) {
@@ -1045,7 +1045,7 @@ export class Operate {
   }
 
   /**
-   * 「書き込む」 on one node (`id`, else the stuck one): the normal transfer
+   * 「書込」 on one node (`id`, else the stuck one): the normal transfer
    * when it answers; silent, `direct` without a ROM entry and, with one,
    * `confirm` until `confirmed`, nothing touched before that. Takes the
    * release on the screen (else the project's latest) and, for the ROM path,
@@ -1089,14 +1089,14 @@ export class Operate {
     await this.runRecovery(n, 'recover', (h, on) => h.recover(index, bytes, topo, bootcore, stage0, !!o.confirmed, on));
   }
 
-  /** "もう一度試す" (recoverFailed): the operation that failed, again (a rollback stays a rollback). */
+  /** "再試行" (recoverFailed): the operation that failed, again (a rollback stays a rollback). */
   async retry(): Promise<'needFile' | 'direct' | 'confirm' | void> {
     if (this.state !== 'recoverFailed') return;
     if (this.lastKind === 'rollback' && this.recovering) return this.rollback(this.recovering);
     return this.writeNode();
   }
 
-  /** "前のバージョンに戻す" (the detail of a node, and the trial choice): the version in the other slot. */
+  /** "前のバージョンへの復元" (the detail of a node, and the trial choice): the version in the other slot. */
   async rollback(id: string): Promise<void> {
     const reach = this.reach;
     const n = reach.find((x) => x.id === id);
@@ -1120,7 +1120,7 @@ export class Operate {
     await this.refreshStatus(id);
   }
 
-  /** What ran last in recovering, so "もう一度試す" repeats it. */
+  /** What ran last in recovering, so "再試行" repeats it. */
   private lastKind: 'recover' | 'rollback' = 'recover';
 
   private async runRecovery(
@@ -1203,7 +1203,7 @@ export class Operate {
   }
 
   /**
-   * "最初からやり直す": the page's records go (connection, file,
+   * "リスタート": the page's records go (connection, file,
    * progress) and the session waits at idle; the project's files are untouched.
    */
   reset(): void {

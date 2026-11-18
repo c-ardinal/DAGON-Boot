@@ -122,10 +122,10 @@ describe('update from the page with dagon-host apply against the mock hub', () =
     expect(d.doc.topo.links?.[0].ends[1].addr).toBe(0x43);
   }, 20_000);
 
-  test('a second 親機, a 孫機 and a loop of 子機 are skipped with why: the reachable part updates as before', async () => {
+  test('a second hub, a grandchild and a loop of nodes are skipped with why: the reachable part updates as before', async () => {
     const { t, op } = await sentTo();
     const d = new Define();
-    // hub2 and x - y (linked to no 親機) sit between hub and seg in nodes[], so a node's topology index is not its 構成 position.
+    // hub2 and x - y (linked to no hub) sit between hub and seg in nodes[], so a node's topology index is not its 構成 position.
     // On a board with a crystal: a UART end needs a clock of known accuracy (V-26).
     const extra = (id: string, role: string) =>
       `  - id: ${id}\n    mcu: rp2040\n    board: waveshare-rp2040-touch-lcd-1.28\n    role: ${role}\n    port: self-boot\n    tag: ${id}\n`;
@@ -230,7 +230,7 @@ describe('update from the page with dagon-host apply against the mock hub', () =
   }, 60_000);
 
   test.each([
-    [0x07, 'E_FLASH', '× 書き込み失敗'],
+    [0x07, 'E_FLASH', '× 書込失敗'],
     [0x09, 'E_SIGNATURE', '× 配布元不明'],
   ])('a node that refuses (status %i) is shown with its reason, not as not answering', async (status, reason, chip) => {
     const { t, op } = await sentTo({ refuse: { 'i2c:66': status } });
@@ -519,7 +519,7 @@ describe('update from the page with dagon-host apply against the mock hub', () =
     expect(b.sentence).not.toBe(BAND.doneAll.sentence);
   }, 60_000);
 
-  test('done after 「前のバージョンに戻す」: says the node runs its previous version', async () => {
+  test('done after 「前のバージョンへの復元」: says the node runs its previous version', async () => {
     const { op } = await sentTo();
     op.takeFile('sample-1.1.0.dgb', RELEASE);
     await op.update();
@@ -551,7 +551,7 @@ describe('update from the page with dagon-host apply against the mock hub', () =
     expect(op.responding).toBe(3);
   }, 20_000);
 
-  test('the CLI gives back another 親機 than the one connected: closed, lost, the reason in the log', async () => {
+  test('the CLI gives back another hub than the one connected: closed, lost, the reason in the log', async () => {
     const t = new MockTransport();
     const other = new MockTransport({ hello: { ...SAMPLE_HUB_HELLO, mcuId: 9 } });
     const op = new Operate({

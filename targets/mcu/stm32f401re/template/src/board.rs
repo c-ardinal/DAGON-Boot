@@ -1,4 +1,4 @@
-//! Your board, for DAGON: the I2C target that links it to the 親機, and
+//! Your board, for DAGON: the I2C target that links it to the upstream node, and
 //! which peripherals the app gets. Written once by `dagon new` with the
 //! link of this node in the 構成 (its controller and pins); edit it for
 //! your board (dagon gen never rewrites it). The flash size is the one
@@ -24,7 +24,7 @@ bind_interrupts!(struct Irqs {
 
 pub struct Board;
 
-/// The link to the 親機: {{link_i2c}} on {{link_scl}} (SCL) and {{link_sda}} (SDA) with DMA
+/// The link to the upstream node: {{link_i2c}} on {{link_scl}} (SCL) and {{link_sda}} (SDA) with DMA
 /// (the streams `dagon new` took from the MCU definition's DMA request
 /// mapping for this controller).
 pub struct Link {

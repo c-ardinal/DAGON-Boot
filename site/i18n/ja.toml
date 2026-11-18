@@ -69,7 +69,7 @@
 "Per handler call." = "ハンドラの呼び出しごと。"
 "Pins the page wires new links to when this board is the 親機: `i2c = { controller, sda, scl }` (a new I2C bus; `controller` is one of the board's `i2c`) and `pio_uart = { tx, rx }` (a new PIO UART link), numbered GPIOs below the MCU's `gpio_count`. Only on boards whose MCU has `[coordinator]`." = "このボードが親機のときに、ページが新しいリンクを配線するピン: `i2c = { controller, sda, scl }`（新しいI2Cバス。`controller`はボードの`i2c`のどれか）と`pio_uart = { tx, rx }`（新しいPIO UARTリンク）。マイコンの`gpio_count`より小さい番号のGPIOです。マイコンに`[coordinator]`があるボードだけです。"
 "Port contract: what a board provides to DAGON." = "ポートの取り決め: ボードがDAGONに用意するもの。"
-"Porting DAGON to a board: answers 501, this dagon has no porting job." = "DAGONをボードに移植する作業: 501を返します。このdagonに移植の作業はありません。"
+"Porting DAGON to a board: answers 501." = "DAGONのボード移植: 応答は501です。"
 "Ports that exist in every listed layer; a trusted-only port needs `trusted = true`." = "一覧のすべてのレイヤーにあるポート。信頼された拡張だけのポートには`trusted = true`が要ります。"
 "Product name." = "製品名。"
 "ROM I2C bootloader (`stm32-i2c-rom`): `name` (as check messages call it), `addr`, `max_hz`, `erase_sectors`, `pairs = [{ controller, sda, scl }]` it listens on." = "ROMのI2Cブートローダ（`stm32-i2c-rom`）: `name`（確認のメッセージでの呼び名）、`addr`、`max_hz`、`erase_sectors`、待ち受ける`pairs = [{ controller, sda, scl }]`。"

@@ -41,7 +41,7 @@ editUrl: false
 | `POST` | `/v1/conform` | ページがポートを渡した後で、親機を通して`node`に12の適合試験を行います。 |
 | `GET` | `/v1/conform/{node}` | ノードの最後の適合試験の結果（最初の実行の前は404）。 |
 | `POST` | `/v1/ai/topology` | 作業。モデルからの質問はページに届きます。 |
-| `POST` | `/v1/ai/port` | DAGONをボードに移植する作業: 501を返します。このdagonに移植の作業はありません。 |
+| `POST` | `/v1/ai/port` | DAGONのボード移植: 応答は501です。 |
 | `GET` | `/v1/jobs/{id}` | 作業の状態、段階、進み具合、ログの行、質問、結果。 |
 | `POST` | `/v1/jobs/{id}/answer` | 作業の開いている質問への`{answer}`（無ければ409）。 |
 | `POST` | `/v1/jobs/{id}/cancel` | 実行中の作業を止めます。 |

@@ -364,7 +364,7 @@ impl Link {
             wdt.borrow_mut().end_trial();
         }
         publish_startup(&mut store);
-        let mut agent = Agent::new(
+        let mut agent = Node::with_links(
             crate::config(start.mode, crate::target_tag(p.target_tag)),
             Ed25519Compact::new(crate::PUBKEY),
             store,

@@ -10,7 +10,8 @@
 # [[component]] (one entry per long-lived component)
 #   name      The component's name; also its commit scope (feat(<name>):)
 #             and its tag prefix (<name>-v<version>).
-#   version   Its SemVer version. A new component starts at 0.1.0.
+#   version   Its SemVer version: its last release (0.1.0 before its first).
+#             A release raises it; scripts/bump_check.py checks the raise.
 #   paths     The files it owns. A file belongs to the component with the
 #             longest matching path; a file outside every component needs
 #             no release.

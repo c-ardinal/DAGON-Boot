@@ -6,6 +6,8 @@ use dagon_events::{
 };
 use dagon_format::header::{self, image_kind, slot_binding, ImageHeader, HEADER_SIZE};
 use dagon_format::{FormatError, Sha256, SigVerifier};
+use dagon_port::diag::{DiagStore, NoDiag, NoSeed, SeedSource};
+use dagon_proto::diag::LinkDiagResp;
 use dagon_proto::handler::{self, Ceiling, Handler};
 use dagon_proto::payload::{
     self, mode, phase, reboot_mode, target, CapsReq, CapsResp, CmdSet, HelloReq, HelloResp,
@@ -23,11 +25,15 @@ use crate::{
 };
 use core::marker::PhantomData;
 
+mod diag;
+
 /// A transfer with no request for this long returns to idle.
 pub const IDLE_TIMEOUT_MS: u32 = 10_000;
 
-const RESP_BUF: usize = frame_len(1 + StatusResp::MAX_LEN);
-// The largest reply body is STATUS's; VERSION's and HELLO's fit the same buffer.
+/// The longest reply body: LINK_DIAG's; the others fit the same buffer.
+const BODY_MAX: usize = LinkDiagResp::MAX_LEN;
+const RESP_BUF: usize = frame_len(1 + BODY_MAX);
+const _: () = assert!(StatusResp::MAX_LEN <= BODY_MAX);
 const _: () = assert!(VersionResp::MAX_LEN <= StatusResp::MAX_LEN);
 const _: () = assert!(HelloResp::MAX_LEN <= StatusResp::MAX_LEN);
 const _: () = assert!(CapsResp::MAX_LEN <= StatusResp::MAX_LEN);
@@ -104,7 +110,9 @@ impl Requester {
 /// The update session of writer `W` (the app's by default), for a node
 /// whose requests come over `L` links (one by default). The links are
 /// numbered from 0 by the node that serves them ([`Agent::handle_on`]).
-pub struct Agent<S, X, V, W = writer::App, const L: usize = 1> {
+/// The app's session answers the link diagnostics of store `D` with the
+/// seeds of `Q` ([`Agent::with_diag`]); by default it keeps none.
+pub struct Agent<S, X, V, W = writer::App, const L: usize = 1, Q = NoSeed, D = NoDiag> {
     cfg: Config,
     writer: PhantomData<W>,
     verifier: V,
@@ -130,6 +138,10 @@ pub struct Agent<S, X, V, W = writer::App, const L: usize = 1> {
     refusal: [u8; REFUSAL_BUF],
     /// The commands the node serves in front of this session.
     front: CmdSet,
+    seeds: Q,
+    diag: D,
+    /// The seed held for a signed clear, and what was signed under it.
+    auth: diag::Auth,
 }
 
 /// A handled request: the length of the reply's body, and the delay of
@@ -185,11 +197,56 @@ impl<S: SlotStore, X: AppChain, V: SigVerifier, W: Writer, const L: usize> Agent
             xfer_heard_us: 0,
             refusal: [0; REFUSAL_BUF],
             front: CmdSet::EMPTY,
+            seeds: NoSeed,
+            diag: NoDiag,
+            auth: diag::Auth::NONE,
         };
         agent.opened();
         agent
     }
 
+    /// The same session with the link diagnostics of `store`, whose
+    /// signed clears take seeds from `seeds`. Only the app's session
+    /// serves them.
+    pub fn with_diag<Q: SeedSource, D: DiagStore>(
+        self,
+        seeds: Q,
+        store: D,
+    ) -> Agent<S, X, V, W, L, Q, D> {
+        Agent {
+            cfg: self.cfg,
+            writer: PhantomData,
+            verifier: self.verifier,
+            images: self.images,
+            chain: self.chain,
+            session: self.session,
+            requests: self.requests,
+            node: self.node,
+            hdr: self.hdr,
+            links: self.links,
+            on: self.on,
+            xfer_link: self.xfer_link,
+            now_us: self.now_us,
+            xfer_heard_us: self.xfer_heard_us,
+            refusal: self.refusal,
+            front: self.front,
+            seeds,
+            diag: store,
+            auth: diag::Auth::NONE,
+        }
+    }
+}
+
+impl<
+        S: SlotStore,
+        X: AppChain,
+        V: SigVerifier,
+        W: Writer,
+        const L: usize,
+        Q: SeedSource,
+        D: DiagStore,
+    > Agent<S, X, V, W, L, Q, D>
+{
     /// The app started again over the same store and chain, as after a
     /// reset (a simulator, a test bench): what the agent held in RAM is
     /// gone, the slots are read again, and `app.starting`,
@@ -203,6 +260,7 @@ impl<S: SlotStore, X: AppChain, V: SigVerifier, W: Writer, const L: usize> Agent
         self.session = session::Machine::new();
         self.requests = requests::Machine::new();
         self.links = [Requester::NEW; L];
+        self.auth = diag::Auth::NONE;
         self.opened();
     }
 
@@ -421,15 +479,38 @@ impl<S: SlotStore, X: AppChain, V: SigVerifier, W: Writer, const L: usize> Agent
     /// The commands only the app's session serves.
     const APP_ONLY: [Handler<Self, Done>; 1] = [Handler::new(Cmd::Show, |a, r| a.show(r.show()?))];
 
+    /// The link diagnostics the app's session serves with a store.
+    const DIAG: [Handler<Self, Done>; 2] = [
+        Handler::new(Cmd::LinkDiag, |a, r| a.link_diag(r.link_diag()?)),
+        Handler::new(Cmd::LinkDiagClear, |a, r| {
+            a.link_diag_clear(r.link_diag_clear()?)
+        }),
+    ];
+
+    /// The seeds the app's session issues with a store and a seed source.
+    const SEED: [Handler<Self, Done>; 1] = [Handler::new(Cmd::DiagSeed, |a, r| {
+        a.diag_seed(r.diag_seed()?)
+    })];
+
+    /// Whether the session serves [`Self::DIAG`]: the app's, with a
+    /// store; and [`Self::SEED`]: with a seed source too.
+    const SERVES_DIAG: bool = W::APP && D::SERVED;
+    const SERVES_SEED: bool = Self::SERVES_DIAG && Q::SERVED;
+
     /// What this writer's session serves: HELLO's `cmds`, less what the
     /// node serves in front of it.
     const CMDS: CmdSet = {
-        let common = handler::cmds(&Self::COMMON);
+        let mut set = handler::cmds(&Self::COMMON);
         if W::APP {
-            common.union(handler::cmds(&Self::APP_ONLY))
-        } else {
-            common
+            set = set.union(handler::cmds(&Self::APP_ONLY));
         }
+        if Self::SERVES_DIAG {
+            set = set.union(handler::cmds(&Self::DIAG));
+        }
+        if Self::SERVES_SEED {
+            set = set.union(handler::cmds(&Self::SEED));
+        }
+        set
     };
 
     /// What an answer to the requester on the node's link 0 may be at
@@ -452,7 +533,12 @@ impl<S: SlotStore, X: AppChain, V: SigVerifier, W: Writer, const L: usize> Agent
     /// holds its answer against the ceiling; only then its action runs.
     fn dispatch(&mut self, cmd: u8, p: &[u8]) -> Handled {
         let app_only: &[Handler<Self, Done>] = if W::APP { &Self::APP_ONLY } else { &[] };
-        let row = handler::find(&Self::COMMON, cmd).or_else(|| handler::find(app_only, cmd));
+        let diag: &[Handler<Self, Done>] = if Self::SERVES_DIAG { &Self::DIAG } else { &[] };
+        let seed: &[Handler<Self, Done>] = if Self::SERVES_SEED { &Self::SEED } else { &[] };
+        let row = handler::find(&Self::COMMON, cmd)
+            .or_else(|| handler::find(app_only, cmd))
+            .or_else(|| handler::find(diag, cmd))
+            .or_else(|| handler::find(seed, cmd));
         let ceiling = self.ceiling_on(self.on);
         row.ok_or(Status::Unsupported)?.call(self, p, ceiling)
     }

@@ -560,7 +560,8 @@ impl Link {
         };
         let mut flash = EspFlash::new(self.storage);
         let wdt = self.wdt;
-        handle_frame(frame, max, &mut flash, &setup, out, &mut || {
+        let ceiling = self.agent.ceiling().within(max);
+        handle_frame(frame, ceiling, &mut flash, &setup, out, &mut || {
             wdt.borrow_mut().feed()
         })
     }

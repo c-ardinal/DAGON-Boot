@@ -12,8 +12,8 @@
 //! This module is the request side and is tested on the host; the register
 //! work is in `node`, method 2 in the board crate.
 
-use dagon_proto::handler::{self, Handler};
-use dagon_proto::payload::{rom_method, CmdSet, EnterRom};
+use dagon_proto::handler::{self, Ceiling, Handler};
+use dagon_proto::payload::{rom_method, CmdSet};
 use dagon_proto::{flags, Cmd, Frame, Status, HEADER_LEN};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -48,9 +48,9 @@ pub const fn steps(method: Method) -> &'static [Step] {
 }
 
 /// The command this MCU answers in front of the agent. What follows it
-/// runs after the reply has left, so the row hands back the request it
-/// read.
-const TABLE: [Handler<(), EnterRom>; 1] = [Handler::new(Cmd::EnterRom, |_, p| EnterRom::of(p))];
+/// runs after the reply has left, so the row has no action:
+/// [`enter_rom_request`] takes its typed request.
+const TABLE: [Handler<(), ()>; 1] = [Handler::deferred(Cmd::EnterRom)];
 
 /// What [`enter_rom_request`] answers: the node's HELLO names it with its
 /// agent's commands.
@@ -74,7 +74,10 @@ pub fn enter_rom_request(
     if f.flags & (flags::RESP | flags::EVENT) != 0 {
         return None;
     }
-    let (status, method) = match row.read(f.payload).map(|(r, _)| r.method) {
+    let asked = row
+        .request(f.payload, Ceiling::link(max_payload))
+        .and_then(|r| r.enter_rom());
+    let (status, method) = match asked.map(|r| r.method) {
         Ok(rom_method::FORCE_DOWNLOAD_BOOT) => (Status::Ok, Some(Method::ForceDownloadBoot)),
         Ok(rom_method::PMIC) if pmic => (Status::Ok, Some(Method::Pmic)),
         Ok(_) => (Status::Unsupported, None),

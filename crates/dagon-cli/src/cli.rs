@@ -115,12 +115,13 @@ pub enum Command {
     /// Writes out/build/<id>/app-a.elf, and app-b.elf when the node's MCU
     /// definition gives the app slot B.
     Build(BuildArgs),
-    /// Sign firmware images
-    #[command(subcommand)]
-    Image(ImageCmd),
-    /// Build a signed release package (.dgb)
-    #[command(subcommand)]
-    Release(ReleaseCmd),
+    /// Build and sign an image for a topology node
+    ///
+    /// An input that already is a signed image is verified and checked to
+    /// belong to the node, kind and slot instead.
+    Image(ImageSignArgs),
+    /// Check the images, sign the manifest and write the release package
+    Release(ReleaseBuildArgs),
     /// Make the first-install files of a node from [provision.<node>] in dagon.toml
     Provision(ProvisionArgs),
     /// First write of a node, as its MCU definition says
@@ -167,9 +168,8 @@ pub enum Command {
     /// the public key given here (--pubkey, pubkey in dagon.toml, or the
     /// signing key's public half).
     Serve(ServeArgs),
-    /// Run the simulator
-    #[command(subcommand)]
-    Sim(SimCmd),
+    /// Run the simulator scenarios (no hardware)
+    Sim(SimArgs),
     /// Work with an AI agent
     #[command(subcommand)]
     Ai(AiCmd),
@@ -224,19 +224,10 @@ pub struct TopoCompileArgs {
     pub config: Option<String>,
 }
 
-#[derive(Debug, PartialEq, Subcommand)]
-pub enum ImageCmd {
-    /// Build and sign an image for a topology node
-    ///
-    /// An input that already is a signed image is verified and checked to
-    /// belong to the node, kind and slot instead.
-    Sign(ImageSignArgs),
-}
-
 #[derive(Debug, Default, PartialEq, Args)]
 pub struct ImageSignArgs {
     /// ELF or raw binary to sign
-    #[arg(value_name = "ELF|BIN")]
+    #[arg(value_name = "ELF|BIN", value_parser = not_removed_word("image", "sign"))]
     pub input: String,
     /// Node id in the topology
     #[arg(long, value_name = "ID")]
@@ -311,16 +302,14 @@ fn names_help(what: &str, names: &[(&str, u32)]) -> String {
     format!("{what}: {}", list.join(", "))
 }
 
-#[derive(Debug, PartialEq, Subcommand)]
-pub enum ReleaseCmd {
-    /// Check the images, sign the manifest and write the release package
-    Build(ReleaseBuildArgs),
-}
-
 #[derive(Debug, Default, PartialEq, Args)]
 pub struct ReleaseBuildArgs {
     /// Signed images, or folders whose .img files are taken
-    #[arg(value_name = "IMG|DIR", required = true)]
+    #[arg(
+        value_name = "IMG|DIR",
+        required = true,
+        value_parser = not_removed_word("release", "build")
+    )]
     pub inputs: Vec<String>,
     /// Release name in the manifest
     #[arg(long, value_name = "NAME")]
@@ -556,10 +545,40 @@ pub struct ServeArgs {
     pub config: Option<String>,
 }
 
-#[derive(Debug, PartialEq, Subcommand)]
-pub enum SimCmd {
-    /// Run the simulator scenarios (no hardware)
-    Run,
+#[derive(Debug, Default, PartialEq, Args)]
+pub struct SimArgs {
+    #[arg(
+        value_name = "SCENARIO",
+        value_parser = scenario_ids(),
+        help = "Scenario to run [default: every scenario]"
+    )]
+    pub scenario: Option<String>,
+}
+
+/// The scenario IDs `dagon sim` takes: the simulator's own list.
+fn scenario_ids() -> clap::builder::PossibleValuesParser {
+    clap::builder::PossibleValuesParser::new(
+        crate::simrun::scenarios()
+            .map(|(id, title)| clap::builder::PossibleValue::new(id).help(title)),
+    )
+}
+
+/// A value parser that refuses `word` as an argument of `dagon <command>`:
+/// the word was a subcommand until the command took the subcommand's place.
+fn not_removed_word(
+    command: &'static str,
+    word: &'static str,
+) -> impl Fn(&str) -> Result<String, String> + Clone + Send + Sync + 'static {
+    move |s| {
+        if s == word {
+            Err(format!(
+                "`dagon {command} {word}` no longer exists; use `dagon {command}` \
+                 (write ./{word} for a path of that name)"
+            ))
+        } else {
+            Ok(s.to_string())
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Subcommand)]

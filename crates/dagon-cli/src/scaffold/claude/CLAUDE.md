@@ -68,7 +68,7 @@ first write) and `dagon deploy`.
   one in an environment variable, or read it from the store. Do not put
   keys or paths from outside this folder into project files.
 - Signing, building releases and anything that writes to hardware
-  (`image sign`, `release build`, `deploy`, `apply`, `flash`,
+  (`image`, `release`, `deploy`, `apply`, `flash`,
   `provision`, `rollback`) are the developer's steps. Suggest
   the command; run it only when the developer asks.
 - Ask for hardware facts (pins, I2C addresses, flash size, baud rate)

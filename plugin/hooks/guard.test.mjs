@@ -91,7 +91,7 @@ test("DAGON_PORT_SESSION=1 marks a port session", () => {
 
 test("B1 judge: only a bare dagon conform / dagon sim command", () => {
   expectPass(sh("dagon conform --json", judge), offSession);
-  expectPass(sh("dagon sim run s1", judge), offSession);
+  expectPass(sh("dagon sim s1", judge), offSession);
   for (const c of [
     "dagon sim s1 & rm -rf crates/dagon-core",
     "dagon sim $(rm -rf targets)",

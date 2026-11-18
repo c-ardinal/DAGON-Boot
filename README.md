@@ -103,7 +103,7 @@ $env:DAGON_UNINSTALL = "1"; irm https://raw.githubusercontent.com/c-ardinal/DAGO
 #### シミュレータで試す
 
 ```sh
-dagon sim run # シミュレータ上で通しのシナリオを実行します
+dagon sim # シミュレータ上で通しのシナリオを実行します
 ```
 
 ## 自分のプロジェクトを始める

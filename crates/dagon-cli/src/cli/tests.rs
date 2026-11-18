@@ -84,42 +84,42 @@ fn todays_invocations() -> Vec<(&'static str, Command)> {
             })),
         ),
         (
-            "image sign out/watch-good.bin --node watch --version 1.0.0 --out out/watch-good-1.0.0.img",
-            C::Image(ImageCmd::Sign(sign(
+            "image out/watch-good.bin --node watch --version 1.0.0 --out out/watch-good-1.0.0.img",
+            C::Image(sign(
                 "out/watch-good.bin",
                 "watch",
                 "1.0.0",
                 "out/watch-good-1.0.0.img",
-            ))),
+            )),
         ),
         (
-            "image sign app.elf --node seg --version 1.2.0 --slot b --out out/seg-b-1.2.0.img --key k.key",
-            C::Image(ImageCmd::Sign(ImageSignArgs {
+            "image app.elf --node seg --version 1.2.0 --slot b --out out/seg-b-1.2.0.img --key k.key",
+            C::Image(ImageSignArgs {
                 slot: "b".into(),
                 key: s("k.key"),
                 ..sign("app.elf", "seg", "1.2.0", "out/seg-b-1.2.0.img")
-            })),
+            }),
         ),
         (
-            "image sign hub.elf --node hub --version 1.1.0 --slot a --out i/hub-a.img --topology t.yaml --key k.key",
-            C::Image(ImageCmd::Sign(ImageSignArgs {
+            "image hub.elf --node hub --version 1.1.0 --slot a --out i/hub-a.img --topology t.yaml --key k.key",
+            C::Image(ImageSignArgs {
                 topology: s("t.yaml"),
                 key: s("k.key"),
                 ..sign("hub.elf", "hub", "1.1.0", "i/hub-a.img")
-            })),
+            }),
         ),
         (
-            "image sign a.bin --node seg --slot b --version 1.1.0 --config d.toml --key k --out o.img",
-            C::Image(ImageCmd::Sign(ImageSignArgs {
+            "image a.bin --node seg --slot b --version 1.1.0 --config d.toml --key k --out o.img",
+            C::Image(ImageSignArgs {
                 slot: "b".into(),
                 config: s("d.toml"),
                 key: s("k"),
                 ..sign("a.bin", "seg", "1.1.0", "o.img")
-            })),
+            }),
         ),
         (
-            "image sign a.elf --node n --version 1.0.0 --out o --kind bootcore --seq 7 --min-bootcore 1.0.0 --proto 2 --flags debug --caps sig-verifier",
-            C::Image(ImageCmd::Sign(ImageSignArgs {
+            "image a.elf --node n --version 1.0.0 --out o --kind bootcore --seq 7 --min-bootcore 1.0.0 --proto 2 --flags debug --caps sig-verifier",
+            C::Image(ImageSignArgs {
                 kind: "bootcore".into(),
                 seq: "7".into(),
                 min_bootcore: s("1.0.0"),
@@ -127,28 +127,28 @@ fn todays_invocations() -> Vec<(&'static str, Command)> {
                 flags: s("debug"),
                 caps: s("sig-verifier"),
                 ..sign("a.elf", "n", "1.0.0", "o")
-            })),
+            }),
         ),
         (
-            "release build images/1.1 --name release-1.1 --out r.dgb --topology t.yaml --key k",
-            C::Release(ReleaseCmd::Build(ReleaseBuildArgs {
+            "release images/1.1 --name release-1.1 --out r.dgb --topology t.yaml --key k",
+            C::Release(ReleaseBuildArgs {
                 inputs: v(&["images/1.1"]),
                 name: "release-1.1".into(),
                 out: s("r.dgb"),
                 topology: s("t.yaml"),
                 key: s("k"),
                 ..Default::default()
-            })),
+            }),
         ),
         (
-            "release build a.img b.img --name r --topology-bin t.bin --config d.toml",
-            C::Release(ReleaseCmd::Build(ReleaseBuildArgs {
+            "release a.img b.img --name r --topology-bin t.bin --config d.toml",
+            C::Release(ReleaseBuildArgs {
                 inputs: v(&["a.img", "b.img"]),
                 name: "r".into(),
                 topology_bin: s("t.bin"),
                 config: s("d.toml"),
                 ..Default::default()
-            })),
+            }),
         ),
         (
             "provision seg --key /keys/dagon-signing.key",
@@ -375,7 +375,13 @@ fn todays_invocations() -> Vec<(&'static str, Command)> {
                 ..Default::default()
             }),
         ),
-        ("sim run", C::Sim(SimCmd::Run)),
+        ("sim", C::Sim(SimArgs::default())),
+        (
+            "sim S3",
+            C::Sim(SimArgs {
+                scenario: s("S3"),
+            }),
+        ),
         ("ai link", C::Ai(AiCmd::Link(AgentWay::default()))),
         (
             "ai link --way api",
@@ -527,17 +533,30 @@ fn bad_command_lines_are_usage_errors() {
         ("topo check", ErrorKind::MissingRequiredArgument),
         ("topo check a.yaml b.yaml", ErrorKind::UnknownArgument),
         (
-            "image sign a.elf --node n --out o",
+            "image a.elf --node n --out o",
             ErrorKind::MissingRequiredArgument,
         ),
-        ("release build --name r", ErrorKind::MissingRequiredArgument),
+        ("release --name r", ErrorKind::MissingRequiredArgument),
         ("provision", ErrorKind::MissingRequiredArgument),
         // `provision <node>` makes any node's first-install files.
         ("rescue hub", ErrorKind::InvalidSubcommand),
         ("rollback", ErrorKind::MissingRequiredArgument),
         ("flash", ErrorKind::MissingRequiredArgument),
         ("new", ErrorKind::MissingRequiredArgument),
-        ("sim run now", ErrorKind::UnknownArgument),
+        ("sim now", ErrorKind::InvalidValue),
+        // The forms before the single-child groups were flattened are gone.
+        ("sim run", ErrorKind::InvalidValue),
+        ("sim S9", ErrorKind::InvalidValue),
+        ("sim S1 S2", ErrorKind::UnknownArgument),
+        (
+            "image sign a.elf --node n --version 1.0.0 --out o",
+            ErrorKind::UnknownArgument,
+        ),
+        (
+            "image sign --node n --version 1.0.0 --out o",
+            ErrorKind::ValueValidation,
+        ),
+        ("release build x.img --name r", ErrorKind::ValueValidation),
         ("ai link --way", ErrorKind::InvalidValue),
         ("ai ask", ErrorKind::MissingRequiredArgument),
         ("ai unlink now", ErrorKind::UnknownArgument),
@@ -769,7 +788,7 @@ fn conform_help_counts_the_tests_there_are() {
 fn slot_and_kind_help_list_what_the_parser_takes() {
     let mut root = Cli::command();
     root.build();
-    let sign = leaf(&root, &["image".to_string(), "sign".to_string()]);
+    let sign = leaf(&root, &["image".to_string()]);
     let help_of = |id: &str| {
         sign.get_arguments()
             .find(|a| a.get_long() == Some(id))

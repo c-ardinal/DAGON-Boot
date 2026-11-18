@@ -29,8 +29,8 @@ Set up a project:
 Build a release:
   topo       Check or compile a topology
   build      Build each node of [build.<id>] in dagon.toml
-  image      Sign firmware images
-  release    Build a signed release package (.dgb)
+  image      Build and sign an image for a topology node
+  release    Check the images, sign the manifest and write the release package
   provision  Make the first-install files of a node from [provision.<node>] in dagon.toml
 
 Write to a node:
@@ -45,7 +45,7 @@ Check a node:
 
 Tools:
   serve      Start DAGON Console, the browser tool, and its API on 127.0.0.1
-  sim        Run the simulator
+  sim        Run the simulator scenarios (no hardware)
   ai         Work with an AI agent
 
 Help:
@@ -278,27 +278,11 @@ Options:
 ## dagon image
 
 ```text
-Sign firmware images
-
-Usage: dagon image <COMMAND>
-
-Commands:
-  sign  Build and sign an image for a topology node
-  help  Print this message or the help of the given subcommand(s)
-
-Options:
-  -h, --help
-          Print help
-```
-
-## dagon image sign
-
-```text
 Build and sign an image for a topology node
 
 An input that already is a signed image is verified and checked to belong to the node, kind and slot instead.
 
-Usage: dagon image sign [OPTIONS] --node <ID> --version <X.Y.Z> --out <IMG> <ELF|BIN>
+Usage: dagon image [OPTIONS] --node <ID> --version <X.Y.Z> --out <IMG> <ELF|BIN>
 
 Arguments:
   <ELF|BIN>
@@ -359,25 +343,9 @@ Options:
 ## dagon release
 
 ```text
-Build a signed release package (.dgb)
-
-Usage: dagon release <COMMAND>
-
-Commands:
-  build  Check the images, sign the manifest and write the release package
-  help   Print this message or the help of the given subcommand(s)
-
-Options:
-  -h, --help
-          Print help
-```
-
-## dagon release build
-
-```text
 Check the images, sign the manifest and write the release package
 
-Usage: dagon release build [OPTIONS] --name <NAME> <IMG|DIR>...
+Usage: dagon release [OPTIONS] --name <NAME> <IMG|DIR>...
 
 Arguments:
   <IMG|DIR>...
@@ -679,29 +647,23 @@ Options:
 ## dagon sim
 
 ```text
-Run the simulator
-
-Usage: dagon sim <COMMAND>
-
-Commands:
-  run   Run the simulator scenarios (no hardware)
-  help  Print this message or the help of the given subcommand(s)
-
-Options:
-  -h, --help
-          Print help
-```
-
-## dagon sim run
-
-```text
 Run the simulator scenarios (no hardware)
 
-Usage: dagon sim run
+Usage: dagon sim [SCENARIO]
+
+Arguments:
+  [SCENARIO]
+          Scenario to run [default: every scenario]
+
+          Possible values:
+          - S1: update with a power cut
+          - S2: trial app never confirms
+          - S3: tampered release
+          - S4: erased F401 via ROM loader
 
 Options:
   -h, --help
-          Print help
+          Print help (see a summary with '-h')
 ```
 
 ## dagon ai

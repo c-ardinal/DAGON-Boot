@@ -68,3 +68,201 @@ text = "- **書き込む/書き込みモード**: 廃止した用語です。"
 kind = "retired"
 word = "書き込み"
 reason = "The glossary's entry for the retired term names it, pointing at 書込モード."
+
+# Quoted strings and test patterns in the site whose wording another file fixes.
+
+[[allow]]
+path = "site/scripts/test_site.py"
+text = "\"書込み\", \"初回書\", \"書く前\""
+kind = "native"
+word = "書く"
+reason = "A site test's own pattern or input: the words a page check looks for, not text a reader sees."
+
+[[allow]]
+path = "site/scripts/test_site.py"
+text = "未確認|まだ|現在|今は|今後|予定|実測|確かめていません|するまでは|測定で確かめ"
+kind = "native"
+word = "まだ"
+reason = "A site test's own pattern or input: the words a page check looks for, not text a reader sees."
+
+[[allow]]
+path = "site/scripts/test_site.py"
+text = "未確認|まだ|現在|今は|今後|予定|実測|確かめていません|するまでは|測定で確かめ"
+kind = "native"
+word = "確かめ"
+reason = "A site test's own pattern or input: the words a page check looks for, not text a reader sees."
+
+[[allow]]
+path = "site/scripts/test_site.py"
+text = "ケースを開ける必要|ケースを開けることも"
+kind = "native"
+word = "開け"
+reason = "A site test's own pattern or input: the words a page check looks for, not text a reader sees."
+
+[[allow]]
+path = "site/scripts/test_site.py"
+text = "確かめていません|確かめていない|確認済|実機で確かめ|実機で測定|シミュレータでだけ|CIで|ボードごとには|モデルは.*見つけ"
+kind = "native"
+word = "確かめ"
+reason = "A site test's own pattern or input: the words a page check looks for, not text a reader sees."
+
+[[allow]]
+path = "site/scripts/test_site.py"
+text = "確かめていません|確かめていない|確認済|実機で確かめ|実機で測定|シミュレータでだけ|CIで|ボードごとには|モデルは.*見つけ"
+kind = "native"
+word = "見つけ"
+reason = "A site test's own pattern or input: the words a page check looks for, not text a reader sees."
+
+[[allow]]
+path = "site/scripts/test_site.py"
+text = "[\"出典を確かめていない\", \"ボードで確かめていない\", \"グラフを確かめていない\", \"確かめていないと報告\"]"
+kind = "native"
+word = "確かめ"
+reason = "A site test's own pattern or input: the words a page check looks for, not text a reader sees."
+
+[[allow]]
+path = "site/scripts/test_site.py"
+text = "\"---\\ntitle: DAGON を試す\\n---\\n\""
+kind = "native"
+word = "試す"
+reason = "A site test's own pattern or input: the words a page check looks for, not text a reader sees."
+
+[[allow]]
+path = "site/scripts/test_site.py"
+text = "\"### 1.1 名前\", \"| ノード |\", \"- 名前\", \"**名前。** DAGON\""
+kind = "native"
+word = "名前"
+reason = "A site test's own pattern or input: the words a page check looks for, not text a reader sees."
+
+[[allow]]
+path = "site/src/content/docs/how-to/swap-link.md"
+text = "（問題「使えないつながり」）"
+kind = "native"
+word = "使え"
+reason = "Quotes the Console's problem name word for word (web/src/app/copy.ts)."
+
+[[allow]]
+path = "site/src/content/docs/how-to/swap-link.md"
+text = "（問題「使えないつながり」）"
+kind = "native"
+word = "つなが"
+reason = "Quotes the Console's problem name word for word (web/src/app/copy.ts)."
+
+[[allow]]
+path = "site/src/content/docs/en/how-to/swap-link.md"
+text = "(problem 使えないつながり)"
+kind = "native"
+word = "使え"
+reason = "Quotes the Console's problem name word for word (web/src/app/copy.ts)."
+
+[[allow]]
+path = "site/src/content/docs/en/how-to/swap-link.md"
+text = "(problem 使えないつながり)"
+kind = "native"
+word = "つなが"
+reason = "Quotes the Console's problem name word for word (web/src/app/copy.ts)."
+
+[[allow]]
+path = "site/src/content/docs/reference/agent-api.md"
+text = "「提案した構成は確認で誤りが残ったため、出していません。」"
+kind = "native"
+word = "残っ"
+reason = "Quotes the answer dagon ai ask ends with, word for word (crates/dagon-cli/src/ask.rs)."
+
+[[allow]]
+path = "site/src/content/docs/reference/agent-api.md"
+text = "「提案した構成は確認で誤りが残ったため、出していません。」"
+kind = "native"
+word = "出し"
+reason = "Quotes the answer dagon ai ask ends with, word for word (crates/dagon-cli/src/ask.rs)."
+
+[[allow]]
+path = "site/src/content/docs/reference/agent-api.md"
+text = "「この構成にはDAGONに送らなかった値があるため、変更の案は出していません。」"
+kind = "native"
+word = "送ら"
+reason = "Quotes the answer dagon ai ask ends with, word for word (crates/dagon-cli/src/ask.rs)."
+
+[[allow]]
+path = "site/src/content/docs/reference/agent-api.md"
+text = "「この構成にはDAGONに送らなかった値があるため、変更の案は出していません。」"
+kind = "native"
+word = "出し"
+reason = "Quotes the answer dagon ai ask ends with, word for word (crates/dagon-cli/src/ask.rs)."
+
+[[allow]]
+path = "site/src/content/docs/en/reference/agent-api.md"
+text = "「提案した構成は確認で誤りが残ったため、出していません。」"
+kind = "native"
+word = "残っ"
+reason = "Quotes the answer dagon ai ask ends with, word for word (crates/dagon-cli/src/ask.rs)."
+
+[[allow]]
+path = "site/src/content/docs/en/reference/agent-api.md"
+text = "「提案した構成は確認で誤りが残ったため、出していません。」"
+kind = "native"
+word = "出し"
+reason = "Quotes the answer dagon ai ask ends with, word for word (crates/dagon-cli/src/ask.rs)."
+
+[[allow]]
+path = "site/src/content/docs/en/reference/agent-api.md"
+text = "「この構成には DAGON に送らなかった値があるため、変更の案は出していません。」"
+kind = "native"
+word = "送ら"
+reason = "Quotes the answer dagon ai ask ends with, word for word (crates/dagon-cli/src/ask.rs)."
+
+[[allow]]
+path = "site/src/content/docs/en/reference/agent-api.md"
+text = "「この構成には DAGON に送らなかった値があるため、変更の案は出していません。」"
+kind = "native"
+word = "出し"
+reason = "Quotes the answer dagon ai ask ends with, word for word (crates/dagon-cli/src/ask.rs)."
+
+[[allow]]
+path = "site/src/content/docs/reference/agent-api.md"
+text = "- 選んだノードやリンク"
+kind = "native"
+word = "選ん"
+reason = "Quotes the Console's consent list word for word (crates/dagon-cli/src/consent.rs SENDS/NEVER_SENDS; crates/dagon-cli/src/agents/tests.rs compares the English page's list)."
+
+[[allow]]
+path = "site/src/content/docs/reference/agent-api.md"
+text = "- 確認した結果（問題・◇ 制限・書き込みの記録）"
+kind = "retired"
+word = "書き込み"
+reason = "Quotes the Console's consent list word for word (crates/dagon-cli/src/consent.rs SENDS/NEVER_SENDS; crates/dagon-cli/src/agents/tests.rs compares the English page's list)."
+
+[[allow]]
+path = "site/src/content/docs/reference/agent-api.md"
+text = "\n- 鍵\n"
+kind = "native"
+word = "鍵"
+reason = "Quotes the Console's consent list word for word (crates/dagon-cli/src/consent.rs SENDS/NEVER_SENDS; crates/dagon-cli/src/agents/tests.rs compares the English page's list)."
+
+[[allow]]
+path = "site/src/content/docs/en/reference/agent-api.md"
+text = "- 選んだノードやリンク"
+kind = "native"
+word = "選ん"
+reason = "Quotes the Console's consent list word for word (crates/dagon-cli/src/consent.rs SENDS/NEVER_SENDS; crates/dagon-cli/src/agents/tests.rs compares the English page's list)."
+
+[[allow]]
+path = "site/src/content/docs/en/reference/agent-api.md"
+text = "- 確認した結果（問題・◇ 制限・書き込みの記録）"
+kind = "retired"
+word = "書き込み"
+reason = "Quotes the Console's consent list word for word (crates/dagon-cli/src/consent.rs SENDS/NEVER_SENDS; crates/dagon-cli/src/agents/tests.rs compares the English page's list)."
+
+[[allow]]
+path = "site/src/content/docs/en/reference/agent-api.md"
+text = "\n- 鍵\n"
+kind = "native"
+word = "鍵"
+reason = "Quotes the Console's consent list word for word (crates/dagon-cli/src/consent.rs SENDS/NEVER_SENDS; crates/dagon-cli/src/agents/tests.rs compares the English page's list)."
+
+[[allow]]
+path = "site/src/content/docs/reference/definitions.md"
+text = "### 消去と試行の待ち時間"
+kind = "native"
+word = "待ち"
+reason = "The heading is the anchor explanation/lifecycle-events.md links to (#消去と試行の待ち時間); it is renamed together with that link."

@@ -8,7 +8,7 @@ editUrl: false
 `crates/dagon-cli/src/serve/api.rs`から生成しています。直接編集せず、`python site/scripts/gen.py`で再度生成してください。
 :::
 
-どのルートも、`dagon serve`が表示するループバックのアドレスの下にあります。
+どのルートも`dagon serve`が表示するループバックのアドレスの下にあります。
 `/v1/`へのリクエストには、serveが表示したアドレスの合言葉を
 `Authorization: Bearer <passphrase>`で付与します（不在の場合は401）。HostとOriginの確認も実施します（不合格の場合は403）。
 
@@ -26,7 +26,7 @@ editUrl: false
 | `PUT` | `/v1/topology` | `dagon topo check`と同一の確認の後に、構成のYAMLを保存します。 |
 | `GET` | `/v1/nodes/{id}/build` | dagon.tomlにあるノードの`[build.<id>]`テーブル（不在の場合は404）。 |
 | `PUT` | `/v1/nodes/{id}/build` | dagon.tomlの`[build.<id>]`を置換します。ファイルの他の部分は変更しません。 |
-| `POST` | `/v1/build` | `nodes`（省略時は全部）のアプリケーションを作業としてビルドします。応答には、ビルドした各スロットとそのサイズを列挙します。 |
+| `POST` | `/v1/build` | `nodes`（省略時は全部）のアプリケーションを作業としてビルドします。応答にはビルドした各スロットとそのサイズを列挙します。 |
 | `POST` | `/v1/sign` | `nodes`のビルド済のアプリケーションに、CLIのキーで署名します。 |
 | `POST` | `/v1/release` | 全部の署名付きイメージからリリースを作成します。各イメージのバージョンは、ノードのcrateが付与したバージョンです（`version`を指定する場合、全イメージのバージョンと一致する必要があります）。 |
 | `GET` | `/v1/release/latest` | プロジェクトのout/releaseで最新の.dgb。 |

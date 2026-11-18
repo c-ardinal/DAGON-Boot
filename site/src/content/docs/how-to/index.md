@@ -1,16 +1,16 @@
 ---
 title: 手順
-description: 1つの作業ごとの手順です。
+description: 作業1つごとの手順です。
 sidebar:
   order: 0
 ---
 
-1つの作業ごとに手順をまとめています。
-新しいプロジェクトから書込までは[導入から書込まで](/getting-started/first-project/)にあります。
-ここの手順はそこから先の作業です。
+作業1つごとに手順を整理しています。
+新規プロジェクトから書込までの手順は[導入から書込まで](/getting-started/first-project/)にあります。
+このセクションの手順は、それ以降の作業です。
 
-- [自分のボード（マイコンで選ぶ）](/how-to/own-board/): [一覧](/reference/boards/)に無いボードを使う
-- [つながりを差し替える](/how-to/swap-link/): ノードのつながり方を変える
-- [既にあるファームウェアにDAGONを組み込む](/how-to/existing-firmware/): `dagon new`で作成していないファームウェアに足す
-- [マイコンとリンクを足す](/how-to/new-mcu-or-link/): DAGONに新しいマイコンやリンクを足す
-- [プロジェクトでのClaudeの手助け](/how-to/claude-help/): 新しいプロジェクトに入るClaude Codeの指示とスキルを知る
+- [独自のボード（マイコンで選択）](/how-to/own-board/): [一覧](/reference/boards/)にないボードを使用します
+- [リンクの交換](/how-to/swap-link/): ノードの接続方法を変更します
+- [既存のファームウェアへのDAGONの組込](/how-to/existing-firmware/): `dagon new`で作成していないファームウェアにDAGONを追加します
+- [マイコンとリンクの追加](/how-to/new-mcu-or-link/): DAGONに新規のマイコンやリンクを追加します
+- [プロジェクトでのClaudeの支援](/how-to/claude-help/): 新規プロジェクトに付属するClaude Codeの指示とスキルを説明します

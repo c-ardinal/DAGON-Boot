@@ -1,21 +1,21 @@
 ---
-title: "プロジェクトでのClaudeの手助け"
-description: "新しいプロジェクトに入るClaude Codeの指示とスキル、DAGONの移植に使うClaude Codeのプラグインです。"
+title: "プロジェクトでのClaudeの支援"
+description: "新規プロジェクトに付属するClaude Codeの指示とスキル、DAGONの移植に使用するClaude Codeのプラグインです。"
 ---
 
-`dagon new`は、プロジェクトにClaude Codeのファイルも書きます。プロジェクトのフォルダで開いたClaude Codeは、構成のファイル、コマンド、守ることを知った状態で始まります。
+`dagon new`はプロジェクトにClaude Codeのファイルも出力します。プロジェクトのフォルダで起動したClaude Codeは、構成のファイル、コマンド、遵守事項を把握した状態で開始します。
 
-| ファイル | 役目 |
+| ファイル | 役割 |
 |---|---|
-| `CLAUDE.md` | プロジェクトの配置、自分のファイルと生成されるファイルの区別、コマンド、守ること（鍵に触れない、ハードウェアの値は推測せず質問する） |
-| `.claude/skills/fix-a-failing-build/SKILL.md` | `dagon build`が失敗したとき: 原因を探し、`nodes/<id>/src`の自分のコードだけを直して、もう一度ビルドする |
-| `.claude/skills/add-a-board-by-mcu/SKILL.md` | 一覧に無いボードをマイコンで選んで加える。値はボードの資料から出典付きで |
-| `.claude/skills/explain-a-topology-problem/SKILL.md` | 構成の検査が示す問題を分かる言葉で説明し、いちばん小さい直し方を示す |
+| `CLAUDE.md` | プロジェクトの配置、利用者のファイルと生成ファイルの区別、コマンド、遵守事項（キーへのアクセス禁止、ハードウェアの値は推測せずに質問） |
+| `.claude/skills/fix-a-failing-build/SKILL.md` | `dagon build`の失敗時: 原因を調査し、`nodes/<id>/src`の利用者のコードだけを修正して再度ビルド |
+| `.claude/skills/add-a-board-by-mcu/SKILL.md` | 一覧にないボードをマイコンで選択して追加。値はボードの資料から出典付きで記述 |
+| `.claude/skills/explain-a-topology-problem/SKILL.md` | 構成の検査で判明した問題を平易な表現で説明し、最小の修正方法を提示 |
 
-これらのファイルには、鍵も、このPCのパスも入りません。
+これらのファイルには、キーとこのPCのパスの記載はありません。
 
-署名の鍵とClaudeのAPIキーは`dagon`の中にとどまります。Claudeにはそれらを開かないよう指示してあります。署名と実機への書込は開発者が行います。
+署名のキーとClaudeのAPIキーは`dagon`の内部だけで管理します。Claudeにはこれらへのアクセスを禁止する指示があります。署名と実機への書込は開発者が実行します。
 
-## 新しいマイコンへの移植
+## 新規マイコンへの移植
 
-このリポジトリの`plugin/`は、DAGONを新しいマイコンへ移植するためのClaude Codeのプラグイン（`/dagon-port`）です。移植は適合試験（`dagon conform`）で確かめます。
+このリポジトリの`plugin/`は、DAGONを新規マイコンへ移植するためのClaude Codeのプラグイン（`/dagon-port`）です。移植は適合試験（`dagon conform`）で検証します。

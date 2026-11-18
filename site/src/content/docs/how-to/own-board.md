@@ -1,13 +1,13 @@
 ---
-title: "自分のボード（マイコンで選ぶ）"
-description: "一覧に無いボードを、そのボードの定義を書いて使います。"
+title: "独自のボード（マイコンで選択）"
+description: "一覧にないボードを、そのボードの定義の記述によって使用します。"
 ---
 
-[ボードとマイコン](/reference/boards/)の一覧にあるボードは、選ぶだけで使えます。ピン、既定のリンク、付属の部品は、ボードの定義が持っています。
+[ボードとマイコン](/reference/boards/)の一覧にあるボードは、選択だけで使用可能です。ピン、既定のリンク、付属の部品は、ボードの定義に記述済です。
 
-一覧に無いボードは、載っているマイコンを選び、ボードの定義を自分で書きます。
+一覧にないボードは、搭載するマイコンを選択し、ボードの定義を利用者が記述します。
 
-ボードの定義を`dagon.toml`に書きます。表の名前`[board.<ボードのid>]`がボードのidです。欄は[マイコンとボードの定義](/reference/definitions/)のボードの定義と同じで、`id`だけを書きません。
+ボードの定義は`dagon.toml`に記述します。表の名称`[board.<ボードのid>]`がボードのidです。欄は[マイコンとボードの定義](/reference/definitions/)にあるボードの定義と同一で、`id`だけは記述しません。
 
 ```toml
 [board.my-f401]
@@ -20,7 +20,7 @@ drawing = "nucleo-64"
 i2c = [{ controller = "i2c3", sda = "PB4", scl = "PA8" }]
 ```
 
-`topology.yaml`のそのノードの`board:`に、そのボードのidを書きます。
+`topology.yaml`にある該当ノードの`board:`に、そのボードのidを記述します。
 
 ```yaml
   - id: seg
@@ -32,18 +32,18 @@ i2c = [{ controller = "i2c3", sda = "PB4", scl = "PA8" }]
     tag: seg-f401-7seg
 ```
 
-`dagon gen`は、このノードをマイコンのcrateから作成し、`wiring.rs`にボードの`flash_bytes`を書きます。
+`dagon gen`はこのノードをマイコンのcrateから作成し、`wiring.rs`にボードの`flash_bytes`を出力します。
 
-接続先のノード側の端には、そのノードのマイコン定義にある`[[link_port]]`の名前（`port`）を書きます。I2Cで接続する接続先のノードでは、その端にアドレス（`addr`）とピン（`node_pins`）も書きます（[構成のリンク](/reference/topology/)）。
+接続先のノード側の端には、そのノードのマイコン定義にある`[[link_port]]`の名称（`port`）を記述します。I2Cで接続する接続先のノードでは、その端にアドレス（`addr`）とピン（`node_pins`）も記述します（[構成のリンク](/reference/topology/)）。
 
-足りないものは、検査と`dagon gen`が知らせます。
+不足する項目は検査と`dagon gen`が通知します。
 
-Claude Codeと一緒に進めるときは`add-a-board-by-mcu`スキルを使います。
+Claude Codeと共同で作業する場合は`add-a-board-by-mcu`スキルを使用します。
 
-## 一覧にあるボードと一部だけ違うボード
+## 一覧のボードとの部分的な相違
 
-一覧にあるボードと一部だけ違うボード（ピンの割り当てが違う版など）は、ボードの定義を写さずに、違う欄だけを`dagon.toml`の`[board_override.<ボードのid>]`に書きます。書かない欄は一覧のボードの定義のままです。上書きはプロジェクト全体のもので、そのボードを使うすべてのノードに当たります。一部のノードだけが違うときは、`[board.<ボードのid>]`で新しいidのボードを定義します。
+一覧のボードと一部だけ異なるボード（ピンの割当が異なる版など）は、ボードの定義を複製せずに、相違する欄だけを`dagon.toml`の`[board_override.<ボードのid>]`に記述します。記述しない欄は一覧のボードの定義のままです。上書きはプロジェクト全体に適用し、そのボードを使用する全ノードが対象です。一部のノードだけが異なる場合は、`[board.<ボードのid>]`で新規idのボードを定義します。
 
-例: 表示装置とタッチのコントローラのリセットのピンが入れ替わった版の、Waveshare RP2040 Touch LCD 1.28です。`[[board_override."waveshare-rp2040-touch-lcd-1.28".pin]]`のエントリを2つ書きます。1つは`pin = "GPIO22"`と`name = "lcd_rst"`、もう1つは`pin = "GPIO13"`と`name = "touch_rst"`です。`[[pin]]`のエントリは`pin`で見つけ、書いた`name`だけを変えます。
+例は、表示装置とタッチコントローラのリセットピンを交換した版のWaveshare RP2040 Touch LCD 1.28です。`[[board_override."waveshare-rp2040-touch-lcd-1.28".pin]]`のエントリを2つ記述します。1つは`pin = "GPIO22"`と`name = "lcd_rst"`、もう1つは`pin = "GPIO13"`と`name = "touch_rst"`です。`[[pin]]`のエントリは`pin`で検索し、記述した`name`だけを変更します。
 
-`dagon gen`は、上書きを当てたボードの定義を、ノードごとに`boot/<id>/board.toml`に書きます。ボードのcrateとブートローダは、そのファイルからビルドします。上書きを変えたら、`dagon gen`をもう一度実行します。マイコンの定義も同じように`[mcu_override.<マイコンのid>]`で上書きできます。合成の規則、消すこと（`dagon-remove`）、欄を外すこと（`dagon-unset`）、順（`dagon-order`）、変えられない欄は、[マイコンとボードの定義](/reference/definitions/)の「プロジェクトの定義」にあります。
+`dagon gen`は、上書きを適用したボードの定義を、ノードごとに`boot/<id>/board.toml`に出力します。ボードのcrateとブートローダは、そのファイルからビルドします。上書きの変更後は、`dagon gen`を再度実行します。マイコンの定義も同様に`[mcu_override.<マイコンのid>]`で上書き可能です。合成の規則、削除（`dagon-remove`）、欄の解除（`dagon-unset`）、順序（`dagon-order`）、変更不可の欄は、[マイコンとボードの定義](/reference/definitions/)の「プロジェクトの定義」にあります。

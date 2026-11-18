@@ -167,7 +167,7 @@ The figure and the table below are DAGON's software design; where the code diffe
 | dagon-format | Byte layouts of the image header, manifest, state log and topology |
 | dagon-proto | Frames, commands and errors |
 | dagon-events | Events, state machines, extensions |
-| Retained Codecs | Boot record, fuse and topology body formats |
+| Retained Codecs | Boot record, fuse, topology body and state log keyed record formats |
 | dagon-conform | Conformance tests shared by hardware and the simulator |
 | dagon-sim | Simulated flash, links and ROM loader, with fault injection |
 | dagon-retained-model | Executable model of the retained formats |

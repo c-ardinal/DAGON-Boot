@@ -1834,10 +1834,12 @@ build time and validated before it reaches a device (the boot action
 program table, `boot_wiring.rs` constants, the extension protection map), or a
 request/response encoding with no persistence (VERSION's fields,
 the serve JSON messages), or an existing contract this model does not
-change (the image header's signature and digest fields, the state log,
-the vendor selection data, the release bundle). None of them is written
+change (the image header's signature and digest fields, the state log's slot
+records, the vendor selection data, the release bundle). None of them is written
 twice or read back after a fault, so none needs the model; the model's
-harness may still exercise VERSION paging against every link size.
+harness may still exercise VERSION paging against every link size. The state
+log's keyed records and the link diagnostics records they hold are in the
+model: [retained-formats.md](/en/explanation/retained-formats/) section 8.
 
 ## 6. Versioning rules
 

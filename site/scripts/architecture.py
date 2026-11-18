@@ -177,7 +177,8 @@ COMPONENTS = {
     "dagon-format": ("イメージヘッダ、マニフェスト、状態ログ、構成のバイト配置", "Byte layouts of the image header, manifest, state log and topology"),
     "dagon-proto": ("フレーム、コマンド、エラーの定義", "Frames, commands and errors"),
     "dagon-events": ("イベント、状態機械、拡張", "Events, state machines, extensions"),
-    "Retained Codecs": ("ブート記録、ヒューズ、構成の本体の形式", "Boot record, fuse and topology body formats"),
+    "Retained Codecs": ("ブート記録、ヒューズ、構成の本体、状態ログのキー付記録の形式",
+                        "Boot record, fuse, topology body and state log keyed record formats"),
     "dagon-conform": ("実機とシミュレータに共通の適合試験", "Conformance tests shared by hardware and the simulator"),
     "dagon-sim": ("模擬フラッシュ、模擬リンク、模擬ROMローダ、故障注入", "Simulated flash, links and ROM loader, with fault injection"),
     "dagon-retained-model": ("保持の形式の実行可能なモデル", "Executable model of the retained formats"),
@@ -216,12 +217,15 @@ NOT_IN_TREE = {
     "Retained Codecs": ("ファームウェアに保持形式のコーデックは存在しません。ロックアップヒューズの形式の存在箇所は実行可能モデルのみです。"
                         "ブート記録とロックアップヒューズの形式番号（`boot-record`）は`compat.toml`に存在しません。"
                         "構成本体の形式は`dagon-format`の形式（先頭32バイト、ノード32バイト）で、[保持と永続の形式](/explanation/retained-formats/)"
-                        "の形式ではありません。コーディネータの保存先は単一の領域で、2バンクの置換は存在しません。",
+                        "の形式ではありません。コーディネータの保存先は単一の領域で、2バンクの置換は存在しません。"
+                        "状態ログのキー付記録とリンク診断記録も、存在箇所は実行可能モデルのみです。"
+                        "`dagon-core`のログのコンパクションはキー付記録を複写しません。",
                         "The firmware has none of the retained codecs: the lockup fuse's format exists only in the executable model, "
                         "`compat.toml` has no format number (`boot-record`) for the boot record and the fuse, "
                         "and the topology body is `dagon-format`'s (a 32-byte head, 32-byte nodes), not the one in "
                         "[Retained and persistent formats](/en/explanation/retained-formats/). The hub stores it in one region, "
-                        "with no two-bank replacement."),
+                        "with no two-bank replacement. The state log's keyed records and the link diagnostics records "
+                        "exist only in the executable model too: the log's compaction in `dagon-core` does not copy a keyed record."),
 }
 
 

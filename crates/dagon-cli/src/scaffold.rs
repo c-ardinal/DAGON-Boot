@@ -381,8 +381,8 @@ fn kind_variant(k: LinkKind) -> &'static str {
     k.variant()
 }
 
-/// `{{uplink}}` and `{{downlinks}}` of node `n`: its uplink kind (a 親機's
-/// declared one, else USB CDC; a 子機's link from its 親機) and its
+/// `{{uplink}}` and `{{downlinks}}` of node `n`: its uplink kind (an uplink node's
+/// declared one, else USB CDC; a downstream node's link from its uplink node) and its
 /// downlink kinds, as Rust paths into its MCU package. A hop its firmware
 /// does not run is refused here, by name.
 pub fn hop_placeholders(
@@ -441,13 +441,13 @@ pub fn hop_placeholders(
 ///   (`defs::dma::assign`), empty when the MCU lists none for it;
 /// - `{{down_i2c}}`, `{{down_i2c_sda}}`, `{{down_i2c_scl}}`,
 ///   `{{down_i2c_hz}}` and `{{down_uart_tx}}`, `{{down_uart_rx}}`,
-///   `{{down_uart_baud}}`: a 親機's I2C bus and UART link to its 子機
+///   `{{down_uart_baud}}`: an uplink node's I2C bus and UART link to its downstream nodes
 ///   (GPIO numbers; speeds default as in wiring.rs), with `{{if_down_i2c}}`
 ///   / `{{if_down_uart}}` `all()` when it has one, `any()` (the code is
 ///   left out; its names then render as placeholders that still parse)
 ///   when not.
 ///
-/// The template serves one I2C bus and one UART link: a 親機 with more, or
+/// The template serves one I2C bus and one UART link: an uplink node with more, or
 /// an I2C node whose link names no pins the MCU knows, is refused, naming
 /// the links, rather than wiring one of them.
 pub fn wiring_placeholders(

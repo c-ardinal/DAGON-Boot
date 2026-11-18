@@ -310,25 +310,25 @@ fn consent_text(a: &AgentDef, w: &WayDef) -> String {
     let list = |l: &[&str]| l.join("、");
     let key = match &w.transport {
         Transport::Command(c) => format!(
-            "鍵: {} の設定とログインを使います。DAGON は鍵を読みません",
+            "キー: {}の設定とログインを使用します。DAGONはキーを参照しません",
             c.program
         ),
         Transport::MessagesHttp(_) => format!(
-            "鍵: OS の資格情報ストアに置きます（dagon ai key set --agent {} --way {}）。\
-             鍵は画面にも送る文にも出しません",
+            "キー: OSの資格情報ストアに保管します（dagon ai key set --agent {} --way {}）。\
+             キーは画面にも送信テキストにも出力しません",
             a.id, w.id
         ),
     };
     format!(
-        "DAGON と連携する\n\n\
-         DAGON は連携したエージェントに構成について問い合わせて答えます。\
-         送ることへの同意は、この連携のときに一度だけいただきます。\
-         連携したあとの質問は確かめずに送ります。\n\n\
-         送り先: {}　つなぎ方: {}\n\
+        "DAGONとの連携\n\n\
+         DAGONは連携したエージェントへ構成について照会し、回答します。\
+         送信への同意は、この連携の際に1度だけ取得します。\
+         連携後の質問は、確認なしで送信します。\n\n\
+         送信先: {}　接続方式: {}\n\
          {key}\n\
-         送るもの: {}\n\
-         送らないもの: {}\n\n\
-         連携は dagon ai unlink でいつでも外せます。外すと同意も取り消します。",
+         送信内容: {}\n\
+         送信対象外: {}\n\n\
+         連携はdagon ai unlinkで随時解除可能です。解除すると同意も撤回します。",
         a.label(),
         w.name,
         list(&SENDS),
@@ -368,10 +368,7 @@ pub fn link_command(sel: &AgentWay) -> Result<(), String> {
     let (a, w) = chosen(&agents, sel, |_| true)?;
     if let Some((c, _, _)) = linked(&home, &agents) {
         if c.agent == a.id && c.way == w.id {
-            println!(
-                "DAGON はすでに連携しています。同意は {} に記録しました",
-                c.at
-            );
+            println!("DAGONは連携済です。同意は{}に記録しました", c.at);
             return Ok(());
         }
     }
@@ -385,22 +382,25 @@ pub fn link_command(sel: &AgentWay) -> Result<(), String> {
     }
     let c = link(&home, &a.id, &w.id)?;
     println!(
-        "DAGON と連携しました。送り先 {}（{}）と送る中身への同意を {} に記録しました",
+        "DAGONと連携しました。送信先{}（{}）と送信内容への同意を{}に記録しました",
         a.label(),
         w.name,
         c.at
     );
     if !w.available(&a.id, &Keys::system()) {
-        println!("このつなぎ方はまだ使えません。{}", unavailable_hint(a, w));
+        println!(
+            "この接続方式は現時点で使用不可です。{}",
+            unavailable_hint(a, w)
+        );
     }
     Ok(())
 }
 
 fn unavailable_hint(a: &AgentDef, w: &WayDef) -> String {
     match &w.transport {
-        Transport::Command(c) => format!("{} を PATH から使えるようにしてください", c.program),
+        Transport::Command(c) => format!("{}をPATHから実行可能にしてください", c.program),
         Transport::MessagesHttp(_) => format!(
-            "dagon ai key set --agent {} --way {} でキーを登録してください",
+            "dagon ai key set --agent {} --way {}でキーを登録してください",
             a.id, w.id
         ),
     }
@@ -410,10 +410,10 @@ fn unavailable_hint(a: &AgentDef, w: &WayDef) -> String {
 pub fn unlink_command() -> Result<(), String> {
     if unlink(&home()?)? {
         println!(
-            "DAGON との連携を外し、同意を取り消しました。鍵やログインはエージェントの側で消してください"
+            "DAGONとの連携を解除し、同意を撤回しました。キーやログインはエージェント側で削除してください"
         );
     } else {
-        println!("DAGON は連携していません");
+        println!("DAGONは未連携です");
     }
     Ok(())
 }
@@ -710,7 +710,7 @@ mod tests {
         let (a, cc) = agents.way("claude", "claude-code").unwrap();
         let (_, api) = agents.way("claude", "api").unwrap();
         let api_key = "dagon ai key set --agent claude --way api";
-        for (w, key) in [(cc, "claude の設定とログイン"), (api, api_key)] {
+        for (w, key) in [(cc, "claudeの設定とログイン"), (api, api_key)] {
             let t = consent_text(a, w);
             for s in SENDS.iter().chain(&NEVER_SENDS) {
                 assert!(t.contains(s), "{s}");

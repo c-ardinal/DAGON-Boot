@@ -171,7 +171,7 @@
 "target thumbv6m-none-eabi" = "ターゲットthumbv6m-none-eabi"
 "target thumbv7em-none-eabihf" = "ターゲットthumbv7em-none-eabihf"
 "topology source: its `dagon:` key (dagon-topology SCHEMA_VERSION)" = "構成のソース: その`dagon:`キー（dagon-topology SCHEMA_VERSION）"
-"呼び名 and editor positions (an empty layout before the first save)." = "呼び名とエディタの位置（最初の保存の前は空の配置）。"
+"名称 and editor positions (an empty layout before the first save)." = "呼び名とエディタの位置（最初の保存の前は空の配置）。"
 "dagon.toml: its `format` key, required (dagon-topology project::FORMAT)" = "dagon.toml: その`format`キー、必須（dagon-topology project::FORMAT）"
 "the layout file beside the 構成: its `format` (dagon-cli versions::LAYOUT_FORMAT)" = "構成の隣の配置ファイル: その`format`（dagon-cli versions::LAYOUT_FORMAT）"
 "The flash part the board carries, for an MCU whose flash is a board part: `part` (cite its datasheet in a comment) and `erase_regions` in the shape of the MCU's `[execution]` `erase_regions` (`start`, `len`, `unit`, `unit_max_ms`). They replace the MCU's regions whole for nodes on this board; checked with the MCU's watchdog and slot layouts. Left out: the MCU's regions. The node and the host plan every erase from the same regions." = "フラッシュがボードの部品であるマイコンで、ボードが載せるフラッシュの部品: `part`（コメントでデータシートの出典を示します）と、マイコンの`[execution]` `erase_regions`と同じ形の`erase_regions`（`start`、`len`、`unit`、`unit_max_ms`）。このボードのノードでは、マイコンの領域をまるごと置き換えます。マイコンのウォッチドッグとスロットの配置に照らして確かめます。省くと、マイコンの領域です。ノードもホストも、同じ領域からすべての消去を計画します。"

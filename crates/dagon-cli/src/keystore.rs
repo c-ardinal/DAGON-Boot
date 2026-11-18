@@ -210,7 +210,7 @@ pub fn command(cmd: &AiKeyCmd) -> Result<(), String> {
                     "the key is typed in a terminal (without echo); run this in one".into(),
                 );
             }
-            let prompt = format!("{} の {} のキー（表示されません）: ", a.name, w.name);
+            let prompt = format!("{}の{}のキー（表示されません）: ", a.name, w.name);
             let key = rpassword::prompt_password(prompt).map_err(|_| {
                 "the key is read from a terminal (without echo); run this in one".to_string()
             })?;

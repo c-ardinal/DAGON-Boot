@@ -311,7 +311,7 @@ fn a_command_that_hangs_fails_or_is_missing_gives_a_plain_error() {
 fn an_agent_defined_only_in_a_toml_file_answers_through_command() {
     let h = tmp_home("fake");
     let answer = h.join("answer.json");
-    std::fs::write(&answer, r#"{"answer":"偽のエージェントです。"}"#).unwrap();
+    std::fs::write(&answer, r#"{"answer":"ダミーのエージェントです。"}"#).unwrap();
     let (program, args) = printer(&answer);
     let def = format!(
         "dagon_agent = 1\nid = \"fake\"\nname = \"Fake\"\nprovider = \"Test\"\n\
@@ -330,7 +330,7 @@ fn an_agent_defined_only_in_a_toml_file_answers_through_command() {
     let text = call(&h, &keys, &prompt("s", "u"), T).unwrap();
     assert_eq!(
         reply_json(&text).unwrap()["answer"],
-        "偽のエージェントです。"
+        "ダミーのエージェントです。"
     );
 
     let q = crate::ask::parse(&serde_json::json!({ "question": "次は？" })).unwrap();
@@ -341,7 +341,7 @@ fn an_agent_defined_only_in_a_toml_file_answers_through_command() {
     };
     let mut api = |p: &Prompt| call(&h, &keys, p, T);
     let r = crate::ask::ask(&q, &facts, &mut api).unwrap();
-    assert_eq!(r.answer, "偽のエージェントです。");
+    assert_eq!(r.answer, "ダミーのエージェントです。");
     // Unlinked: the same agent is not called again.
     crate::consent::unlink(&h).unwrap();
     assert_eq!(

@@ -108,7 +108,7 @@ fn flash_with(
         // The page shows this question (its own wording, with はい / いいえ);
         // the plan is in the log above.
         let question = format!(
-            "{node} を {}（{}）に書き込みます。よろしいですか。",
+            "{node}を{}（{}）へ書込します。実行しますか。",
             c.label, c.id
         );
         if !confirmed(&job.ask(ASK, &question)?) {

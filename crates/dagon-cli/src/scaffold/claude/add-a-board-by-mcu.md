@@ -16,7 +16,7 @@ given).
   cannot be used; say so instead of continuing.
 - A board definition in `dagon.toml`, `[board.<board id>]`: the board
   schema without `id` (the table name is the board id, never a node id).
-  It needs `product`, `mcu`, `flash_bytes` and `drawing`; an I2C 子機's
+  It needs `product`, `mcu`, `flash_bytes` and `drawing`; an I2C downstream node's
   board also gives `i2c_target = true` and its `i2c` pairs. The fields are
   on the MCU and board definitions page of DAGON's documentation
   (Reference).
@@ -30,21 +30,21 @@ given).
 - The board's clock input, when a crystal or an oscillator drives it:
   `clock = { source = { crystal_hz = <Hz> } }` (or `external_hz`), from the
   schematic or the datasheet. Left out, the node runs on its MCU's
-  internal oscillator; an RP2040 then has no USB clock, so a 親機 on it
+  internal oscillator; an RP2040 then has no USB clock, so an uplink node on it
   does not build.
 - The node in `topology.yaml` with `mcu:` and `board: <board id>`, its
-  `role` (`coordinator` for the 親機, `node` for a 子機), `port`
+  `role` (`coordinator` for the uplink node, `node` for a downstream node), `port`
   (`self-boot`; `vendor-stage2` for `esp32s3`), a `tag`, and a link from
-  the 親機. Copy the shape of an existing node in the file.
+  the uplink node. Copy the shape of an existing node in the file.
 - On the link, each end's `port`: a `[[link_port]]` name of that node's MCU.
-  For an I2C 子機: its end's address and `node_pins` (SDA and SCL on the
-  node's MCU). For a UART 子機: the baud rate and the 親機's pins on the
-  親機's end.
+  For an I2C downstream node: its end's address and `node_pins` (SDA and SCL on the
+  node's MCU). For a UART downstream node: the baud rate and the uplink node's pins on the
+  uplink node's end.
 
 ## Steps
 
 1. **Collect facts** from the documents the developer gave: flash size,
-   the pins wired to the 親機, reset and boot lines if wired, and the
+   the pins wired to the uplink node, reset and boot lines if wired, and the
    crystal on the MCU's clock input if there is one. Write down the
    document and page for each value.
 2. **Ask, don't guess.** Everything not in a document is asked in one

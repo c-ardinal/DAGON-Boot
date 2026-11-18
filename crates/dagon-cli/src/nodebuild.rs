@@ -112,7 +112,7 @@ pub fn build_nodes_keyed(
     } else {
         nodes.to_vec()
     };
-    // Before any build: 中止 of 雛形を生成 leaves tables for crates not made yet.
+    // Before any build: 中止 of テンプレート生成 leaves tables for crates not made yet.
     let missing: Vec<&str> = ids
         .iter()
         .filter(|id| {
@@ -128,7 +128,7 @@ pub fn build_nodes_keyed(
         .collect();
     if !missing.is_empty() {
         return Err(format!(
-            "no crate yet for {}; make them again with 雛形を生成 (dagon gen)",
+            "no crate yet for {}; make them again with テンプレート生成 (dagon gen)",
             missing.join(", ")
         ));
     }
@@ -844,7 +844,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&base);
     }
 
-    /// 中止 of 雛形を生成 leaves tables for crates not made yet.
+    /// 中止 of テンプレート生成 leaves tables for crates not made yet.
     #[test]
     fn a_build_names_every_crate_not_made_yet_before_building_any() {
         let base =
@@ -875,7 +875,7 @@ mod tests {
         )
         .unwrap_err();
         assert!(
-            e.contains("seg") && e.contains("watch") && e.contains("雛形を生成"),
+            e.contains("seg") && e.contains("watch") && e.contains("テンプレート生成"),
             "{e}"
         );
         assert!(log.is_empty(), "{log:?}");

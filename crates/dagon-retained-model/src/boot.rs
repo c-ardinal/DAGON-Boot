@@ -167,7 +167,8 @@ pub fn call(m: &Manifest, b: Behaviour, _p: &mut Protected) -> (Outcome, u32) {
     }
 }
 
-/// A trusted replacement of the image verifier (4.7).
+/// A trusted replacement of the image verifier (a part the design no longer
+/// has).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct VerifierReplacement {
     /// Its id is listed in the project's trusted list.

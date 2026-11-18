@@ -13,15 +13,15 @@ COLOURS = (INK, LAYER1, LAYER2, LAYER3, PAPER, MUTED, HAIR, ACCENT, WATER, ATTEN
 FONT = "'Zen Kaku Gothic New','Hiragino Sans','Yu Gothic UI','Noto Sans JP',system-ui,sans-serif"
 
 W = 1400
-COLUMNS = ("Boot", "Image and Storage", "Update and Comms", "Hub", "Trust", "Liveness", "Isolation", "Observability")
+COLUMNS = ("Boot", "Image and Storage", "Update and Comms", "Hub", "Trust", "Liveness", "Observability")
 HUB = 3
 
 PC_ROWS = (
     ("PC Front Ends", "full", ("dagon CLI", "dagon serve", "DAGON Console", "Claude Code Plugin")),
-    ("PC Host Extensions", "full", ("Host Extension Chain", "Action Definitions", "Agent Definitions")),
-    ("PC Host Services", "cols", (("Project Generator", "Definition Registry", "Topology Check"), ("Node Build",), ("Operations",), ("Host Machines",),
-                                  ("Release Builder",), ("AI Agent Link",), ("Protection Planner",), ("Event Stream", "Catalog"))),
-    ("PC Host Ports", "cols", ((), ("BuildRunner",), ("Transport",), ("confirm_plan",), ("Signer", "KeyStore"), ("Agent",), (), ("Action",))),
+    ("PC Host Extensions", "full", ("Agent Definitions",)),
+    ("PC Host Services", "cols", (("Project Generator", "Definition Registry", "Topology Check"), ("Node Build",), ("Operations",), (),
+                                  ("Release Builder",), ("AI Agent Link",), (), ("Event Stream", "Catalog"))),
+    ("PC Host Ports", "cols", ((), ("BuildRunner",), ("Transport",), ("confirm_plan",), ("Signer", "KeyStore"), ("Agent",), (), ())),
     ("PC Host Adapters", "cols", ((), ("Cargo Runner",), ("Serial", "Web Serial", "Simulator Link"), ("ROM Writers",), ("File Key Pair",), (), (), ())),
 )
 PC_COLS = 8
@@ -33,23 +33,22 @@ DEVICE_TOP = (
 DEVICE_COLS = (
     ("Layer Services", {0: ("Stage0 Sequence", "Boot Sequence", "Boot Action Interpreter"), 1: ("Image Lifecycle",),
                         2: ("Update Session", "Wire Protocol", "Serving Loop", "Recovery Entry"),
-                        3: ("Relay", "Coordinator", "Release Store", "Node Recovery", "Bus Guardian"),
+                        3: ("Relay", "Coordinator"),
                         5: ("Liveness Guard", "Reboot Gate"),
-                        6: ("Entry Gate", "Service ABI", "Operation Cancellation", "Fault Unwind", "Lockup Fuse", "Reset Cleanup"),
-                        7: ("Publisher", "Boot Record Writer", "Boot Replay", "VERSION Responder")}),
-    ("Core Logic", {0: ("Boot Decision", "Core Chooser"), 1: ("State Log Fold",), 3: ("Delivery Plan", "Recovery Policy", "Constraint Evaluator"),
+                        6: ("Publisher", "VERSION Responder")}),
+    ("Core Logic", {0: ("Boot Decision", "Core Chooser"), 1: ("State Log Fold",), 3: ("Constraint Evaluator",),
                     4: ("Trust Rule",), 5: ("Deadline Book",)}),
     ("Replaceable Ports", {0: ("DecisionPolicy", "BoardBringUp"), 1: ("SlotStore", "LogStorage", "SelfCheck"), 2: ("UpdateTransport", "UpdateProtocol", "Recovery"),
-                           3: ("NodeLink",), 4: ("ImageVerifier", "Digest", "CryptoProvider"), 5: ("WatchdogDriver",), 7: ("Diagnostics", "Display", "LogSink")}),
-    ("Driver Contract", {0: ("BootSelect",), 1: ("Flash",), 3: ("I2cBus", "StreamPort", "SubControl"), 5: ("Reset",), 6: ("SandboxArch",)}),
+                           3: ("NodeLink",), 4: ("ImageVerifier", "Digest", "CryptoProvider"), 5: ("WatchdogDriver",), 6: ("Diagnostics", "Display", "LogSink")}),
+    ("Driver Contract", {0: ("BootSelect",), 1: ("Flash",), 3: ("I2cBus", "StreamPort", "SubControl"), 5: ("Reset",)}),
 )
 BOARD = ("Board Definition", "Board Bring-Up", "Board Extension", "Boot Action Program", "Shared Bus")
-MCU = {0: ("Reset and Jump",), 1: ("Flash Driver", "Slot Store Driver"), 2: ("Link Drivers",), 5: ("Watchdog Driver", "Clock", "Execution Setup"), 6: ("Architecture Kind",)}
+MCU = {0: ("Reset and Jump",), 1: ("Flash Driver", "Slot Store Driver"), 2: ("Link Drivers",), 5: ("Watchdog Driver", "Clock", "Execution Setup")}
 MCU_STRIP = "MCU Definition"
-SILICON = ("ROM Loader", "boot2", "Vendor 2nd Stage", "Protection Unit", "Peripherals")
+SILICON = ("ROM Loader", "boot2", "Vendor 2nd Stage", "Peripherals")
 LIBRARIES = ("dagon-format", "dagon-proto", "dagon-events", "Retained Codecs")
 PROOF = ("dagon-conform", "dagon-sim", "dagon-retained-model")
-DIRECT = ("ROM Loader Client", "Trusted Extension")
+DIRECT = ("ROM Loader Client",)
 
 PORT_ROWS = ("PC Host Ports", "Replaceable Ports", "Driver Contract")
 
@@ -59,18 +58,14 @@ COMPONENTS = {
     "dagon serve": ("DAGON Consoleのためのローカルのサーバ", "The local server for DAGON Console"),
     "DAGON Console": ("ブラウザのUI", "The browser UI"),
     "Claude Code Plugin": ("移植と構成の生成のスキル、サブエージェント、フック", "Porting and topology skills, subagents and hooks"),
-    "Host Extension Chain": ("ホストの拡張を順番に呼出するチェーン", "The chain of host extensions, in order"),
-    "Action Definitions": ("イベント後に実行するアクションのデータ", "Data for actions run after an event"),
     "Agent Definitions": ("エージェントとその接続方法のデータ", "Data for agents and their ways"),
     "Project Generator": ("構成からプロジェクトを作成する（`dagon new`、`dagon gen`）", "Renders a project from the topology (`dagon new`, `dagon gen`)"),
     "Definition Registry": ("ボードとマイコンの定義を保持", "Holds the definitions of boards and MCUs"),
     "Topology Check": ("構成のYAMLを読込し、検証規則を適用する", "Reads the topology YAML and applies the validation rules"),
     "Node Build": ("dagon.tomlの`[build.<id>]`に従ってノードごとにcargo buildする", "Runs cargo build per node from `[build.<id>]` in dagon.toml"),
     "Operations": ("apply、status、recoverの手順", "The apply, status and recover procedures"),
-    "Host Machines": ("ホストの操作の状態機械", "State machines of host operations"),
     "Release Builder": ("検査後にマニフェストに署名し、パッケージファイル（.dgb）を作成する", "Signs the manifest after its checks and makes the package file (.dgb)"),
     "AI Agent Link": ("dagon aiのコマンド", "The dagon ai commands"),
-    "Protection Planner": ("拡張の保護マップの計画と確認", "Plans and checks extensions' protection maps"),
     "Event Stream": ("ホストのイベントの配信", "Delivers host events"),
     "Catalog": ("全イベントと全ポートの一覧", "Lists every event and port"),
     "BuildRunner": ("ビルドを実行するポート", "Port that runs builds"),
@@ -79,7 +74,6 @@ COMPONENTS = {
     "Signer": ("署名のポート", "Port that signs"),
     "KeyStore": ("利用者が選択した格納先（環境変数、OSのキーストア、1Passwordなど）から署名のキーを受信するポート", "Port that receives the signing key from where the user chose to keep it (an environment variable, the OS key store, 1Password and so on)"),
     "Agent": ("エージェントのポート", "Port for an agent"),
-    "Action": ("アクションのポート", "Port for an action"),
     "Cargo Runner": ("cargoで実行するビルド", "Builds through cargo"),
     "Serial": ("CLIのシリアルポートのTransport", "The CLI's serial port Transport"),
     "Web Serial": ("dagon-wasmのWeb SerialのTransport", "dagon-wasm's Web Serial Transport"),
@@ -108,27 +102,14 @@ COMPONENTS = {
     "Serving Loop": ("リクエストに応答するループ", "The loop that answers requests"),
     "Recovery Entry": ("復旧経路への入口", "Entry to a recovery path"),
     "Relay": ("要求をホップごとに、リンク経由で到達するノードへ中継する", "Forwards requests hop by hop to the nodes its links reach"),
-    "Coordinator": ("保存したリリースをノードに対して実行する", "Runs a stored release across nodes"),
-    "Release Store": ("リリースの面N/Pとその昇格を保持する", "Holds the release faces N/P and their promotion"),
-    "Node Recovery": ("ノードごとの復旧の段階と、回数に上限のある再試行", "Per-node recovery tiers with bounded retries"),
-    "Bus Guardian": ("共有バスを直列化し、バスの固着と切離を処理する", "Serialises a shared bus; handles a stuck bus and isolation"),
+    "Coordinator": ("PCがコーディネータを経由して書込する", "The PC writes through the coordinator"),
     "Liveness Guard": ("タスクの生存を条件とするキック", "Kicks the watchdog on task liveness"),
     "Reboot Gate": ("返答を優先し、上限付きの遅延を待機した後にリセットする", "Replies first, waits a bounded delay, then resets"),
-    "Entry Gate": ("拡張の呼出の入口", "Entry to an extension call"),
-    "Service ABI": ("拡張からDAGONへの唯一の呼出", "An extension's only call into DAGON"),
-    "Operation Cancellation": ("実行途中の特権操作の取消", "Cancels a privileged operation part-way"),
-    "Fault Unwind": ("フォールトと超過からの復帰", "Returns from a fault or overrun"),
-    "Lockup Fuse": ("ロックアップした拡張の記録", "Records an extension that locked up"),
-    "Reset Cleanup": ("リセット後のペリフェラルの初期化", "Reinitialises peripherals after a reset"),
     "Publisher": ("待機可能な公開状態を出力する", "Writes the waitable published state"),
-    "Boot Record Writer": ("ブートのイベントを保持メモリに保存する", "Writes boot events to retained memory"),
-    "Boot Replay": ("起動時にブートのイベントを再発行する", "Re-emits boot events at start"),
     "VERSION Responder": ("VERSIONに応答する", "Answers VERSION"),
     "Boot Decision": ("どのスロットを起動するかの判断", "Decides which slot starts"),
     "Core Chooser": ("stage0がブートローダのスロットを選択する", "stage0 picks the boot loader slot"),
     "State Log Fold": ("記録から状態を集約する", "Folds records into state"),
-    "Delivery Plan": ("順序、試行の時間枠、昇格の判断", "Order, trial window, promotion judgement"),
-    "Recovery Policy": ("状態と失敗の回数から復旧の段階を選択する", "Chooses a recovery tier from state and failure counts"),
     "Constraint Evaluator": ("マニフェストの制約を検証する", "Checks manifest constraints"),
     "Trust Rule": ("署名とキーについての唯一の認証規則", "The one rule for signatures and keys"),
     "Deadline Book": ("ガードの後ろの純粋な期限の計算", "Pure deadline accounting behind the guard"),
@@ -154,7 +135,6 @@ COMPONENTS = {
     "StreamPort": ("コーディネータのバイト列", "The hub's byte stream"),
     "SubControl": ("接続先のノードの制御線", "A child's control lines"),
     "Reset": ("システムのリセット", "System reset"),
-    "SandboxArch": ("1つのアーキテクチャの特権の入口とアンワインドのレジスタ", "Privilege entry and unwind registers for one architecture"),
     "Board Definition": ("ボードのデータ", "The board's data"),
     "Board Bring-Up": ("ボードの電源、ピン、バスの準備", "Prepares the board's power, pins and buses"),
     "Board Extension": ("ボード固有の拡張", "The board's own extension"),
@@ -167,65 +147,36 @@ COMPONENTS = {
     "Watchdog Driver": ("ウォッチドッグのドライバ", "The watchdog driver"),
     "Clock": ("DAGON自身のマイクロ秒の時計（dagon-eventsの`Clock`）。マイコンのcrateが用意する", "DAGON's own microsecond clock (`Clock` of dagon-events), provided by the MCU package"),
     "Execution Setup": ("実行モデルに従うエグゼキュータの優先度", "Executor priorities per the execution model"),
-    "Architecture Kind": ("保護ハードウェアの種類ごとの実装", "Implementation per protection kind"),
     "MCU Definition": ("マイコンのデータ", "The MCU's data"),
     "ROM Loader": ("マイコンのROMのローダ", "The MCU's ROM loader"),
     "boot2": ("RP2040のブートROMの直後に動作する256バイト", "The 256 bytes after the RP2040's boot ROM"),
     "Vendor 2nd Stage": ("ベンダーの2nd stage", "The vendor's 2nd stage"),
-    "Protection Unit": ("メモリの保護ハードウェア", "Memory protection hardware"),
     "Peripherals": ("マイコンのペリフェラル", "The MCU's peripherals"),
     "dagon-format": ("イメージヘッダ、マニフェスト、状態ログ、構成のバイト配置", "Byte layouts of the image header, manifest, state log and topology"),
     "dagon-proto": ("フレーム、コマンド、エラーの定義", "Frames, commands and errors"),
     "dagon-events": ("イベント、状態機械、拡張", "Events, state machines, extensions"),
-    "Retained Codecs": ("ブート記録、ヒューズ、構成の本体、状態ログのキー付記録の形式",
-                        "Boot record, fuse, topology body and state log keyed record formats"),
+    "Retained Codecs": ("構成の本体の形式", "Topology body format"),
     "dagon-conform": ("実機とシミュレータに共通の適合試験", "Conformance tests shared by hardware and the simulator"),
     "dagon-sim": ("模擬フラッシュ、模擬リンク、模擬ROMローダ、故障注入", "Simulated flash, links and ROM loader, with fault injection"),
     "dagon-retained-model": ("保持の形式の実行可能なモデル", "Executable model of the retained formats"),
     "ROM Loader Client": ("別のマイコンのROMローダを駆動する", "Drives another MCU's ROM loader"),
-    "Trusted Extension": ("特権で動作する拡張", "An extension that runs privileged"),
 }
 
 ABSENT = ("コードに存在しません。", "Not in the code.")
 # The components above that this tree lacks, in whole or in part: the gap each (Japanese, English), which the
-# limitations page lists. A port's gap, and the sandbox's, is in its dagon_events::PORTS record; a component that
-# is part of such a record names it here instead, and a port is not listed here at all.
+# limitations page lists. A port's gap is in its dagon_events::PORTS record; a component that is part of such a
+# record names it here instead, and a port is not listed here at all.
 NOT_IN_TREE = {
-    "Host Extension Chain": ABSENT,
-    "Action Definitions": ("コードに存在しません。アクションのファイルの形式番号（`action-defs`）も`compat.toml`に存在しません。",
-                           "Not in the code; nor is the action file's format number (`action-defs`) in `compat.toml`."),
-    "Host Machines": ABSENT,
     "AI Agent Link": ("`dagon serve`にボード移植の作業は存在しません。`POST /v1/ai/port`の応答は501です。",
                       "`dagon serve` has no job that ports DAGON to a board: `POST /v1/ai/port` answers 501."),
     "Boot Action Interpreter": ABSENT,
-    "Coordinator": ("コーディネータは保存済リリースを実行しません。書込はPCがコーディネータを経由して進行します。",
-                    "The hub runs no stored release: the PC drives a write through the hub."),
-    "Release Store": ABSENT,
-    "Node Recovery": ("回数上限付きの再試行は存在しません。", "There is no bounded retry."),
-    "Bus Guardian": ABSENT,
-    "Entry Gate": "Sandbox",
-    "Service ABI": "Sandbox",
-    "Operation Cancellation": "Sandbox",
-    "Fault Unwind": "Sandbox",
-    "Lockup Fuse": "Sandbox",
-    "Reset Cleanup": "Sandbox",
-    "Boot Record Writer": "BootRecord",
-    "Delivery Plan": ("試行の時間枠と昇格の判定はコードに存在しません。",
-                      "The trial window and the promotion judgement are not in the code."),
-    "Recovery Policy": ("復旧段階の自動選択は存在しません。", "No recovery tier is chosen automatically."),
-    "SandboxArch": "Sandbox",
-    "Retained Codecs": ("ファームウェアに保持形式のコーデックは存在しません。ロックアップヒューズの形式の存在箇所は実行可能モデルのみです。"
-                        "ブート記録とロックアップヒューズの形式番号（`boot-record`）は`compat.toml`に存在しません。"
+    "Retained Codecs": ("ファームウェアに保持形式のコーデックは存在しません。"
                         "構成本体の形式は`dagon-format`の形式（先頭32バイト、ノード32バイト）で、[保持と永続の形式](/explanation/retained-formats/)"
-                        "の形式ではありません。コーディネータの保存先は単一の領域で、2バンクの置換は存在しません。"
-                        "状態ログのキー付記録とリンク診断記録も、存在箇所は実行可能モデルのみです。"
-                        "`dagon-core`のログのコンパクションはキー付記録を複写しません。",
-                        "The firmware has none of the retained codecs: the lockup fuse's format exists only in the executable model, "
-                        "`compat.toml` has no format number (`boot-record`) for the boot record and the fuse, "
-                        "and the topology body is `dagon-format`'s (a 32-byte head, 32-byte nodes), not the one in "
+                        "の形式ではありません。コーディネータの保存先は単一の領域で、2バンクの置換は存在しません。",
+                        "The firmware has none of the retained codecs: "
+                        "the topology body is `dagon-format`'s (a 32-byte head, 32-byte nodes), not the one in "
                         "[Retained and persistent formats](/en/explanation/retained-formats/). The hub stores it in one region, "
-                        "with no two-bank replacement. The state log's keyed records and the link diagnostics records "
-                        "exist only in the executable model too: the log's compaction in `dagon-core` does not copy a keyed record."),
+                        "with no two-bank replacement."),
 }
 
 

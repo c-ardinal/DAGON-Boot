@@ -7,7 +7,7 @@
 //! MCUs run it: by the started boot core and again by the app. Both MCUs
 //! store word 0, then word 1. New cores are set
 //! pending, good or broken (a broken core passes stage0's image check but
-//! fails its own). Properties C1..C3 of retained-formats.md 7, after every
+//! fails its own). Properties C1..C3 of retained-formats.md 5, after every
 //! operation:
 //!
 //! - C1: between two power losses a pending core is started on trial at

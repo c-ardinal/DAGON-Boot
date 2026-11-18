@@ -25,7 +25,7 @@ description: "DAGONの設計上の範囲外、利用者の責任範囲、設計�
 ## 利用者の責任
 
 - 署名キーの保護方法の選択は利用者の責任です。DAGONは保護方法を規定しません。ハードウェアの信頼の起点（セキュアブートのヒューズやハードウェアでのキー保管）の使用可否も、その選択の一部です。
-- 信頼された拡張（`trusted = true`）は特権で動作し、サンドボックスの保護範囲外です。拡張の内容、依存するレジストリのcrate、拡張フォルダ外から取込むソースの審査は利用者の責任です（[ライフサイクルイベントと拡張](/explanation/lifecycle-events/)の4.7節）。
+- 拡張は利用者自身の信頼されたコードで、アプリとホストでだけ動作します。DAGONは拡張を隔離しません。拡張の内容、依存するcrate、取込むソースの審査は利用者の責任です。
 - AIエージェント（serve APIに接続するcommandのエージェント）は利用者の権限で動作します。DAGONはエージェントにサンドボックスを適用しません。OSのサンドボックスの適用は利用者の責任です（[エージェントとの接続方法: serve API](/reference/agent-api/)）。
 - USBのVID:PID `c0de:cafe`は試験用IDで、コードに固定されています。割当済のIDではありません。製品での使用可否の判断は利用者の責任です。
 - 一部のUSBハブでは、PCとUSB接続したノードが自身の新版の書込後に再起動した際、PCがそのノードを再認識しない場合があります。そのノードは、PCのUSBポートに直接接続してください。
@@ -41,10 +41,14 @@ description: "DAGONの設計上の範囲外、利用者の責任範囲、設計�
 - DAGON同梱のマイコンについて、stage0の最悪検証時間の実測値は記録していません。[stage0のクロックと検証時間](/explanation/lifecycle-events/)の値はCortex-M0+のエミュレータによる推定値で、STM32F401のCortex-M4の推定値はありません。
 - RP2040のstage0、ブートローダ、アプリは、クロックを水晶かリングオシレータから取得します。XINに入力する外部クロックは使用しません。
 
-拡張の隔離:
+設計から削除済で、コードに残存する構成要素:
 
-- ESP32-S3の隔離のレベルは`none`です。PMSとWCLのレジスタをプログラムするコードがありません。
-- 保護マップを生成可能な種類は`armv6m-mpu`と`armv7m-mpu`だけです。
+- `dagon_events::PORTS`のbootのレイヤー、信頼の方針（`trusted only`など）とサービスの列、`Action`のポート、`Display`の注記（ブート時はサンドボックス内で動作）、`BootRecord`と`Sandbox`の記録。[ライフサイクルイベントと拡張](/explanation/lifecycle-events/)の2.1節の表は、この宣言から生成します。
+- VERSIONの0x07、0x08、0x09、0x11、0x12の定義（`version_id::TABLE`）。5.4節の表はこの定義と同一です。
+- ブート段階の拡張: 状態機械`boot_extensions`（`boot.extension_overran`）、`targets/boot-extension-template`、マニフェストの`trusted`、`stack_bytes`、`ram_bytes`、`dagon-extension`の保護マップの生成と信頼された拡張の検査。
+- マイコン定義の`[isolation]`、`[[peripheral]]`、`[boot.record]`。設計の`root_protection`は独立したテーブルです。コードでは`[isolation]`の欄で、コードの変更時に独立したテーブルに移動します。
+- `dagon-retained-model`のブート記録、ロックアップヒューズ、状態ログのキー付記録、リンク診断（DTC）のモデル。
+- `state_machine!`が生成する、ブート記録のリプレイ用の解読`REPLAY`。
 
 リンク:
 
@@ -60,7 +64,7 @@ description: "DAGONの設計上の範囲外、利用者の責任範囲、設計�
 値:
 
 - DAGONのマイコン定義には、`unverified`とマークした値があります。
-- 実行モデルの上限（[12節](/explanation/lifecycle-events/#12-実行モデル)）は、12.3の手順で決定した値ではありません。
+- 実行モデルの上限（[11節](/explanation/lifecycle-events/#11-実行モデル)）は、11.3の手順で決定した値ではありません。
 
 設計の構成要素のうち、コードとの差異があるもの:
 
@@ -71,16 +75,7 @@ description: "DAGONの設計上の範囲外、利用者の責任範囲、設計�
 - `Sandbox`: 実行時のサンドボックスは存在しません（Service ABI、Entry Gate、Operation Cancellation、Fault Unwind、Lockup Fuse、Reset Cleanup、SandboxArch）。定義の検査と保護マップの生成は実装済みです。
 <!-- end of generated list -->
 <!-- generated from site/scripts/architecture.py: python site/scripts/gen.py -->
-- Host Extension Chain: コードに存在しません。
-- Action Definitions: コードに存在しません。アクションのファイルの形式番号（`action-defs`）も`compat.toml`に存在しません。
-- Host Machines: コードに存在しません。
 - AI Agent Link: `dagon serve`にボード移植の作業は存在しません。`POST /v1/ai/port`の応答は501です。
 - Boot Action Interpreter: コードに存在しません。
-- Coordinator: コーディネータは保存済リリースを実行しません。書込はPCがコーディネータを経由して進行します。
-- Release Store: コードに存在しません。
-- Node Recovery: 回数上限付きの再試行は存在しません。
-- Bus Guardian: コードに存在しません。
-- Delivery Plan: 試行の時間枠と昇格の判定はコードに存在しません。
-- Recovery Policy: 復旧段階の自動選択は存在しません。
-- Retained Codecs: ファームウェアに保持形式のコーデックは存在しません。ロックアップヒューズの形式の存在箇所は実行可能モデルのみです。ブート記録とロックアップヒューズの形式番号（`boot-record`）は`compat.toml`に存在しません。構成本体の形式は`dagon-format`の形式（先頭32バイト、ノード32バイト）で、[保持と永続の形式](/explanation/retained-formats/)の形式ではありません。コーディネータの保存先は単一の領域で、2バンクの置換は存在しません。状態ログのキー付記録とリンク診断記録も、存在箇所は実行可能モデルのみです。`dagon-core`のログのコンパクションはキー付記録を複写しません。
+- Retained Codecs: ファームウェアに保持形式のコーデックは存在しません。構成本体の形式は`dagon-format`の形式（先頭32バイト、ノード32バイト）で、[保持と永続の形式](/explanation/retained-formats/)の形式ではありません。コーディネータの保存先は単一の領域で、2バンクの置換は存在しません。
 <!-- end of generated table -->

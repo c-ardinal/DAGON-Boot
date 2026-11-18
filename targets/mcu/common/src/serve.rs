@@ -23,7 +23,7 @@ pub trait ServeHost<S: SlotStore, X: AppChain, V: SigVerifier, W: Writer = App> 
     /// A request is being handled.
     fn busy(&mut self);
     /// A gated feed of the watchdog: every request starts with one, so a
-    /// flash erase it runs has a full period (execution model, section 12,
+    /// flash erase it runs has a full period (execution model, section 11,
     /// rule 4).
     fn feed(&mut self);
     /// A request arrived, before it is handled (e.g. a gated feed so an

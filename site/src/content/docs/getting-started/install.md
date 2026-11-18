@@ -108,6 +108,6 @@ STM32F401REのノードがある場合、`dagon doctor`はST-LINKの接続状態
 - ビルド時にcargoが取得します。
 - `dagon flash`は、ブートローダ、stage0、factoryエージェントを、cargoが取得したそのタグのコピーからビルドします。
 
-そのため、初回はネットワークが必要です。
+そのため初回はネットワークが必要です。
 
 DAGON自体の開発については[リポジトリ](/explanation/repository/)を参照してください。

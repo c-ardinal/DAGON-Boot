@@ -19,7 +19,7 @@ description: "ノードの接続方法を変更します。"
 
 `uplink`の記述がない場合は、PCのdagonへの`usb-cdc`です。
 
-上りのリンクはコンパイルした構成の対象外です。そのため、既存の構成とそのパッケージは変化しません。
+上りのリンクはコンパイルした構成の対象外です。そのため既存の構成とそのパッケージは変化しません。
 
 ## DAGON Consoleでの選択
 
@@ -30,6 +30,6 @@ description: "ノードの接続方法を変更します。"
 リンクの一端のファームウェアが未実装の種類には「（使用不可）」を表示します。
 
 - 構成には記述可能です（問題「使えないつながり」）。
-- `dagon gen`は、その接続の名称を表示して拒否します（`uplink of hub over ble: the firmware of rp2040 does not run this link kind`）。
+`dagon gen`はその接続の名称を表示して拒否します（`uplink of hub over ble: the firmware of rp2040 does not run this link kind`）。
 
 ファームウェアが対応する種類は、[ボードとマイコン](/reference/boards/)の「上りリンク」と「下りリンク」の列にあります。上りはPCやコーディネータへのリンク、下りは接続先のノードへのリンクです。元データは各マイコンの定義の`[links]`です。

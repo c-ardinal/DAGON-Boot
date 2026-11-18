@@ -18,7 +18,7 @@ description: "DAGONに新規のマイコンやリンクを追加する場合の�
 7. `compat.toml`に部品を追加します（[バージョンとリリース](/explanation/versioning/)）。
 8. `dagon sim`で確認し、`dagon conform`をPC接続ノード経由で実行します。
 
-`plugin/skills/dagon-port/SKILL.md`は、同一の手順をClaude Codeで実行します。
+`plugin/skills/dagon-port/SKILL.md`は同一の手順をClaude Codeで実行します。
 
 ## リンクの追加
 

@@ -3,7 +3,7 @@ title: "拡張のマニフェスト"
 description: "dagon-extension.toml、dagon.tomlの拡張のキー、そのキーからdagon genが出力するファイルです。"
 ---
 
-拡張は`Cargo.toml`と同一のフォルダに`dagon-extension.toml`があるRustのcrateです。マニフェストは拡張の置換対象、観測対象、応答対象、必要なものを提示します。`dagon gen`は、マニフェストをポートのカタログ（[ports.md](/reference/ports/)）、イベントのカタログ（[events.md](/reference/events/)）、ノードのマイコンとボードの定義（[マイコンとボードの定義](/reference/definitions/)）と照合して検証し、ノードの保護のファイルを出力します。
+拡張は`Cargo.toml`と同一のフォルダに`dagon-extension.toml`があるRustのcrateです。マニフェストは拡張の置換対象、観測対象、応答対象、必要なものを提示します。`dagon gen`はマニフェストをポートのカタログ（[ports.md](/reference/ports/)）、イベントのカタログ（[events.md](/reference/events/)）、ノードのマイコンとボードの定義（[マイコンとボードの定義](/reference/definitions/)）と照合して検証し、ノードの保護のファイルを出力します。
 
 ## dagon-extension.toml（`extension-manifest`形式1）
 
@@ -72,11 +72,11 @@ app = ["uds-transport"]              # the app's chain (a hub's relay too)
 trusted = [{ id = "hsm-verify", sha256 = "<source SHA-256, 64 hex digits>" }]
 ```
 
-`sha256`は、拡張のcrateのフォルダにあるソースのハッシュです。フォルダ内の全ファイルをパス（`/`区切り）の順序に整列し、ファイルごとにパス、ゼロのバイト、バイト長（リトルエンディアンのu64）、バイト列（CRLFはLFとして読込）を連結したもののSHA-256です。フォルダ内に除外対象はありません（コンパイラは`include!`や`#[path]`で任意のファイルを読込可能なため）。そのため、拡張のフォルダ内でcargoを実行すると、そこに`target/`と`Cargo.lock`を出力し、ハッシュが変化します。`dagon gen`はこのハッシュを検証し、不一致の場合は検出したハッシュを表示します。拡張自身が依存するレジストリのcrateは、このハッシュではなく、ブート用crateの`Cargo.lock`で固定します。
+`sha256`は拡張のcrateのフォルダにあるソースのハッシュです。フォルダ内の全ファイルをパス（`/`区切り）の順序に整列し、ファイルごとにパス、ゼロのバイト、バイト長（リトルエンディアンのu64）、バイト列（CRLFはLFとして読込）を連結したもののSHA-256です。フォルダ内に除外対象はありません（コンパイラは`include!`や`#[path]`で任意のファイルを読込可能なため）。そのため拡張のフォルダ内でcargoを実行すると、そこに`target/`と`Cargo.lock`を出力し、ハッシュが変化します。`dagon gen`はこのハッシュを検証し、不一致の場合は検出したハッシュを表示します。拡張自身が依存するレジストリのcrateは、このハッシュではなく、ブート用crateの`Cargo.lock`で固定します。
 
 `packages`はプロジェクト内のフォルダです。外部のフォルダは`dagon gen`が拒否します。DAGONのソースツリーにある拡張（後述のテンプレートや`samples/`配下のサンプル）を使用する場合は、そのフォルダをプロジェクトにコピーし、`path = "../../..."`の依存先を、プロジェクトの`[dagon] path`が指定するDAGONのチェックアウトに変更してください。コピーのハッシュはこれらのパスで変化するため、プロジェクトごとに異なります。最初の`dagon gen`がそのハッシュを表示して拒否します。
 
-`dagon gen`は、ノードごとに以下のものを、拡張の名称と理由を表示して拒否します。
+`dagon gen`はノードごとに以下のものを、拡張の名称と理由を表示して拒否します。
 
 - 拡張に該当レイヤーがないイメージに列挙した拡張
 - 1つのチェーンで2度提供するポート
@@ -108,13 +108,13 @@ trusted = [{ id = "hsm-verify", sha256 = "<source SHA-256, 64 hex digits>" }]
 
 ## ブート拡張
 
-DAGONのブート段階があるマイコン（RP2040、STM32F401RE）では、`dagon gen`はノードのブート用crateもプロジェクトの`boot/<id>/`に出力します。生成元はマイコンの定義にあるブートローダのテンプレート（`bootcore/template/`。`[package.metadata.dagon] bootcore = "<mcu id>"`で検出します）です。出力対象は`Cargo.toml`（ブートローダのライブラリ、`dagon-events`、各ブート拡張のcrate、そして`[package.metadata.dagon.boot]`配下のノード、マイコン、ボード、信頼された拡張）、`boot.rs`（ブートローダの`main`。`nodes/<id>/dagon/boot_wiring.rs`から生成）、`graph.stamp`（後述）、`.cargo/config.toml`（ターゲット、`DAGON_BOOT_CRATE`、ノードの`DAGON_TARGET_TAG`）です。全マイコンで、全ノードの`boot/<id>/mcu.toml`も出力します。これはノードのファームウェアのビルドが読込するマイコンの定義です（[マイコンとボードの定義](/reference/definitions/)）。独立したフォルダにする理由は、cargoがcrateより上位の全フォルダの`.cargo/config.toml`を統合して読込し、ノードのアプリのcrateにはアプリ用の設定があるためです。`boot/<id>/`には、`nodes/<id>/dagon/`と同様に、最後の`dagon gen`の出力だけがあります。そのフォルダのcargoの`target/`と`Cargo.lock`は変更しません。利用者が決定する欄が1つあります。`boot/<id>/Cargo.toml`の`[package]`配下の`version`、つまりブートローダのバージョンです。`dagon gen`はテンプレートの値を1度だけ出力し、以後は利用者の値を維持します。ブートローダのリリースごとに値を増加してください（ノードは、動作中のものとバージョンが異なるブートローダを書込します）。`dagon gen`とビルドは、`Cargo.lock`にあるそのcrate自身の項目をこの値に統一し、ロックの他の部分は変更しません。そのファイルの読込か解析に失敗した場合、`dagon gen`は理由を表示して停止し、ファイルは無変更です。ノードの処理を省略する場合は、他のブート用crateのファイルは削除しますが、このファイルは残存させます。ビルドはそのフォルダで`cargo build --release`を実行します（`DAGON_PUBKEY`は全イメージで同一です）。
+DAGONのブート段階があるマイコン（RP2040、STM32F401RE）では、`dagon gen`はノードのブート用crateもプロジェクトの`boot/<id>/`に出力します。生成元はマイコンの定義にあるブートローダのテンプレート（`bootcore/template/`。`[package.metadata.dagon] bootcore = "<mcu id>"`で検出します）です。出力対象は`Cargo.toml`（ブートローダのライブラリ、`dagon-events`、各ブート拡張のcrate、そして`[package.metadata.dagon.boot]`配下のノード、マイコン、ボード、信頼された拡張）、`boot.rs`（ブートローダの`main`。`nodes/<id>/dagon/boot_wiring.rs`から生成）、`graph.stamp`（後述）、`.cargo/config.toml`（ターゲット、`DAGON_BOOT_CRATE`、ノードの`DAGON_TARGET_TAG`）です。全マイコンで、全ノードの`boot/<id>/mcu.toml`も出力します。これはノードのファームウェアのビルドが読込するマイコンの定義です（[マイコンとボードの定義](/reference/definitions/)）。独立したフォルダにする理由は、cargoがcrateより上位の全フォルダの`.cargo/config.toml`を統合して読込し、ノードのアプリのcrateにはアプリ用の設定があるためです。`boot/<id>/`には`nodes/<id>/dagon/`と同様に、最後の`dagon gen`の出力だけがあります。そのフォルダのcargoの`target/`と`Cargo.lock`は変更しません。利用者が決定する欄が1つあります。`boot/<id>/Cargo.toml`の`[package]`配下の`version`、つまりブートローダのバージョンです。`dagon gen`はテンプレートの値を1度だけ出力し、以後は利用者の値を維持します。ブートローダのリリースごとに値を増加してください（ノードは、動作中のものとバージョンが異なるブートローダを書込します）。`dagon gen`とビルドは`Cargo.lock`にあるそのcrate自身の項目をこの値に統一し、ロックの他の部分は変更しません。そのファイルの読込か解析に失敗した場合、`dagon gen`は理由を表示して停止し、ファイルは無変更です。ノードの処理を省略する場合は、他のブート用crateのファイルは削除しますが、このファイルは残存させます。ビルドはそのフォルダで`cargo build --release`を実行します（`DAGON_PUBKEY`は全イメージで同一です）。
 
-ブートローダは拡張を特権で実行するため、信頼された拡張（マニフェストが`trusted = true`で、`[extensions.nodes.<id>] trusted`にソースのハッシュと共に列挙したもの）だけを実行します。`boot.watchdog_armed`から`boot.before_jump`または`boot.halt`までの各ブートイベント（[イベント](/reference/events/)、レイヤー`boot`）は、そのイベントを`observes`に列挙した拡張に、チェーンの順序で到達します。呼出ごとに`max_run_us`と照合して時間を計測します。超過した呼出は停止しません。ただし、ブートローダはその後に`boot.extension_overran`（拡張、その割当時間、所要時間）を、その種類を観測する拡張に通知し、処理を継続します。ブート拡張の処理内容に関係なく、ブートローダが起動するスロットは不変です。呼出の合計が試行用ウォッチドッグ周期の4分の1を超過する可能性がある組合せは、`dagon gen`が拒否します。計上するのは、観測するブートイベントごとに1回の呼出と、`boot.extension_overran`を観測する拡張では、いずれかのブート拡張の呼出ごとに追加の1回です。
+ブートローダは拡張を特権で実行するため、信頼された拡張（マニフェストが`trusted = true`で、`[extensions.nodes.<id>] trusted`にソースのハッシュと共に列挙したもの）だけを実行します。`boot.watchdog_armed`から`boot.before_jump`または`boot.halt`までの各ブートイベント（[イベント](/reference/events/)、レイヤー`boot`）は、そのイベントを`observes`に列挙した拡張に、チェーンの順序で到達します。呼出ごとに`max_run_us`と照合して時間を計測します。超過した呼出は停止しません。ただしブートローダはその後に`boot.extension_overran`（拡張、その割当時間、所要時間）を、その種類を観測する拡張に通知し、処理を継続します。ブート拡張の処理内容に関係なく、ブートローダが起動するスロットは不変です。呼出の合計が試行用ウォッチドッグ周期の4分の1を超過する可能性がある組合せは、`dagon gen`が拒否します。計上するのは観測するブートイベントごとに1回の呼出と、`boot.extension_overran`を観測する拡張では、いずれかのブート拡張の呼出ごとに追加の1回です。
 
-`dagon gen`は、ブート用crateの解決済の依存グラフもcargoで検証します（全フィーチャ、全ターゲット）。組込対象の全crateは、DAGONのcrate、宣言済の信頼された拡張のフォルダ内のcrate、またはブート用crateの`Cargo.lock`にチェックサムがあるレジストリのcrateのいずれかである必要があります。その後に、ブート用crateの`Cargo.toml`、`Cargo.lock`、信頼されたソースの最新の内容に対して`boot/<id>/graph.stamp`を出力します。このスタンプが不在の場合と、出力後にいずれかが変化した場合は、ブートローダのビルドは実行しません（`dagon gen`を再度実行してください）。ブートに判断点はありません。ブートローダが起動するスロットはDAGONだけが決定するため、拡張による変更は不可能です。呼出はブートローダのフラッシュの上限とウォッチドッグを共有します。復帰しない呼出があると、ウォッチドッグがチップをリセットします。
+`dagon gen`はブート用crateの解決済の依存グラフもcargoで検証します（全フィーチャ、全ターゲット）。組込対象の全crateは、DAGONのcrate、宣言済の信頼された拡張のフォルダ内のcrate、またはブート用crateの`Cargo.lock`にチェックサムがあるレジストリのcrateのいずれかである必要があります。その後に、ブート用crateの`Cargo.toml`、`Cargo.lock`、信頼されたソースの最新の内容に対して`boot/<id>/graph.stamp`を出力します。このスタンプが不在の場合と、出力後にいずれかが変化した場合は、ブートローダのビルドは実行しません（`dagon gen`を再度実行してください）。ブートに判断点はありません。ブートローダが起動するスロットはDAGONだけが決定するため、拡張による変更は不可能です。呼出はブートローダのフラッシュの上限とウォッチドッグを共有します。復帰しない呼出があると、ウォッチドッグがチップをリセットします。
 
-`boot/<id>/Cargo.lock`の作成後は`dagon gen`がグラフを`--locked`で解決します。そのため、拡張の追加後はロックの段階で停止します。`boot/<id>/`で`cargo metadata --offline --format-version 1`を1度実行し（ロックに新規のcrateを追加します）、その後に`dagon gen`を再度実行してください。拡張なしでブートローダをビルドする場合は、ノードの`boot`と`trusted`の一覧からその拡張を除外し、`dagon gen`を再度実行します。
+`boot/<id>/Cargo.lock`の作成後は`dagon gen`がグラフを`--locked`で解決します。そのため拡張の追加後はロックの段階で停止します。`boot/<id>/`で`cargo metadata --offline --format-version 1`を1度実行し（ロックに新規のcrateを追加します）、その後に`dagon gen`を再度実行してください。拡張なしでブートローダをビルドする場合は、ノードの`boot`と`trusted`の一覧からその拡張を除外し、`dagon gen`を再度実行します。
 
 ブートのイベントは、ブートローダの処理と同一の速度で到来します。`boot.watchdog_armed`、`boot.log_read`、`boot.before_decision`は、間に状態ログのフラッシュの読出だけを挟んで連続します。`boot.slot_chosen`または`boot.no_image`はイメージの検査後に発生し、`boot.before_jump`はアプリが起動してチップを引継ぐ直前に到来します。拡張の表示内容はその時点までしか残存せず、ハンドラ内の待機は全部ブートの時間に加算します。
 

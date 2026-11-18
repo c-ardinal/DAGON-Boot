@@ -44,6 +44,6 @@ Claude Codeと共同で作業する場合は`add-a-board-by-mcu`スキルを使�
 
 一覧のボードと一部だけ異なるボード（ピンの割当が異なる版など）は、ボードの定義を複製せずに、相違する欄だけを`dagon.toml`の`[board_override.<ボードのid>]`に記述します。記述しない欄は一覧のボードの定義のままです。上書きはプロジェクト全体に適用し、そのボードを使用する全ノードが対象です。一部のノードだけが異なる場合は、`[board.<ボードのid>]`で新規idのボードを定義します。
 
-例は、表示装置とタッチコントローラのリセットピンを交換した版のWaveshare RP2040 Touch LCD 1.28です。`[[board_override."waveshare-rp2040-touch-lcd-1.28".pin]]`のエントリを2つ記述します。1つは`pin = "GPIO22"`と`name = "lcd_rst"`、もう1つは`pin = "GPIO13"`と`name = "touch_rst"`です。`[[pin]]`のエントリは`pin`で検索し、記述した`name`だけを変更します。
+例は表示装置とタッチコントローラのリセットピンを交換した版のWaveshare RP2040 Touch LCD 1.28です。`[[board_override."waveshare-rp2040-touch-lcd-1.28".pin]]`のエントリを2つ記述します。1つは`pin = "GPIO22"`と`name = "lcd_rst"`、もう1つは`pin = "GPIO13"`と`name = "touch_rst"`です。`[[pin]]`のエントリは`pin`で検索し、記述した`name`だけを変更します。
 
-`dagon gen`は、上書きを適用したボードの定義を、ノードごとに`boot/<id>/board.toml`に出力します。ボードのcrateとブートローダは、そのファイルからビルドします。上書きの変更後は、`dagon gen`を再度実行します。マイコンの定義も同様に`[mcu_override.<マイコンのid>]`で上書き可能です。合成の規則、削除（`dagon-remove`）、欄の解除（`dagon-unset`）、順序（`dagon-order`）、変更不可の欄は、[マイコンとボードの定義](/reference/definitions/)の「プロジェクトの定義」にあります。
+`dagon gen`は上書きを適用したボードの定義を、ノードごとに`boot/<id>/board.toml`に出力します。ボードのcrateとブートローダは、そのファイルからビルドします。上書きの変更後は、`dagon gen`を再度実行します。マイコンの定義も同様に`[mcu_override.<マイコンのid>]`で上書き可能です。合成の規則、削除（`dagon-remove`）、欄の解除（`dagon-unset`）、順序（`dagon-order`）、変更不可の欄は、[マイコンとボードの定義](/reference/definitions/)の「プロジェクトの定義」にあります。

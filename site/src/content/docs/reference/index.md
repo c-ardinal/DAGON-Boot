@@ -18,7 +18,7 @@ sidebar:
 - [マイコンごとのツール](/reference/tools/): `dagon doctor`がマイコンごとに確認するツール
 - [Rust API](/reference/rust-api/): ワークスペースのcrateとそのrustdoc
 
-以下は手動で記述したページです。ページ内の一覧は、生成するかテストで検証しています。
+以下は手動で記述したページです。ページ内の一覧は生成するかテストで検証しています。
 
 - [エージェントとの接続方法: serve API](/reference/agent-api/): DAGONとエージェントの接続方法、質問、キー
 - [拡張のマニフェスト](/reference/extension-manifest/)と[マイコンとボードの定義](/reference/definitions/): キーの表はDAGONがファイルの読込に使用する型から生成しています

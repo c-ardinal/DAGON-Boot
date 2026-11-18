@@ -98,7 +98,7 @@ curl -fsSL https://raw.githubusercontent.com/c-ardinal/DAGON-Boot/main/setup.sh 
 $env:DAGON_UNINSTALL = "1"; irm https://raw.githubusercontent.com/c-ardinal/DAGON-Boot/main/setup.ps1 | iex
 ```
 
-両スクリプトとも、環境変数`DAGON_UNINSTALL=1`の設定でもアンインストールを実行します。PowerShellのスクリプトは実行後にこの変数を削除します。
+両スクリプトとも環境変数`DAGON_UNINSTALL=1`の設定でもアンインストールを実行します。PowerShellのスクリプトは実行後にこの変数を削除します。
 
 #### シミュレータでの体験
 
@@ -117,7 +117,7 @@ dagon doctor        # 構成に準拠したビルドが可能な状態か検査
 
 `dagon doctor`はその構成のマイコンに必要なツール（[一覧](https://c-ardinal.github.io/DAGON-Boot/doc/reference/tools/)）を確認します。`dagon doctor --fix`は管理者権限が不要なツールを自動で導入します。
 
-ビルドから初回の書込までは[初回の書込まで](https://c-ardinal.github.io/DAGON-Boot/doc/getting-started/first-project/)を参照してください。
+ビルドから初回の書込までは[導入から書込まで](https://c-ardinal.github.io/DAGON-Boot/doc/getting-started/first-project/)を参照してください。
 
 既存のファームウェアへのDAGONの組込も可能です（[手順](https://c-ardinal.github.io/DAGON-Boot/doc/how-to/existing-firmware/)）。
 
@@ -154,7 +154,7 @@ DAGONの設計上の対象外事項、利用者の責任範囲、設計と実装
 
 | 目的               | 編集対象                                                             | 手順                                                                                        |
 | ------------------ | -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| アプリの実装       | `nodes/<id>/src/app.rs`                                              | [初回の書込まで](https://c-ardinal.github.io/DAGON-Boot/doc/getting-started/first-project/) |
+| アプリの実装       | `nodes/<id>/src/app.rs`                                              | [導入から書込まで](https://c-ardinal.github.io/DAGON-Boot/doc/getting-started/first-project/) |
 | 拡張の追加         | `extensions/<id>/dagon-extension.toml`、`dagon.toml`の`[extensions]` | [拡張のマニフェスト](https://c-ardinal.github.io/DAGON-Boot/doc/reference/extension-manifest/)   |
 | エージェントの追加 | `~/.dagon/agents/*.toml`                                             | [エージェント定義の形式](https://c-ardinal.github.io/DAGON-Boot/doc/reference/agent-definition/) |
 
@@ -162,7 +162,7 @@ DAGONの設計上の対象外事項、利用者の責任範囲、設計と実装
 
 | 目的               | 編集対象                                                                                        | 手順                                                                                          |
 | ------------------ | ----------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
-| ボードの追加       | `targets/boards/*/dagon-board.toml`                                                             | [独自ボード](https://c-ardinal.github.io/DAGON-Boot/doc/how-to/own-board/)                    |
+| ボードの追加       | `targets/boards/*/dagon-board.toml`                                                             | [独自のボード（マイコンで選択）](https://c-ardinal.github.io/DAGON-Boot/doc/how-to/own-board/) |
 | マイコンの追加     | `targets/mcu/<id>/`                                                                             | [マイコンとリンクの追加](https://c-ardinal.github.io/DAGON-Boot/doc/how-to/new-mcu-or-link/) |
 | リンクや転送の追加 | `crates/dagon-format/src/link.rs`、`targets/mcu/*/src/links.rs`、`crates/dagon-host/src/lib.rs` | [マイコンとリンクの追加](https://c-ardinal.github.io/DAGON-Boot/doc/how-to/new-mcu-or-link/) |
 

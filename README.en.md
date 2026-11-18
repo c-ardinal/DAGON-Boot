@@ -162,7 +162,7 @@ What DAGON does not do by design, what the user is responsible for, and where th
 
 | To do this | Touch | Steps |
 | --- | --- | --- |
-| Add a board | `targets/boards/*/dagon-board.toml` | [Your own board](https://c-ardinal.github.io/DAGON-Boot/doc/en/how-to/own-board/) |
+| Add a board | `targets/boards/*/dagon-board.toml` | [Your own board (chosen by MCU)](https://c-ardinal.github.io/DAGON-Boot/doc/en/how-to/own-board/) |
 | Add an MCU | `targets/mcu/<id>/` | [Adding an MCU or a link](https://c-ardinal.github.io/DAGON-Boot/doc/en/how-to/new-mcu-or-link/) |
 | Add a link or transport | `crates/dagon-format/src/link.rs`, `targets/mcu/*/src/links.rs`, `crates/dagon-host/src/lib.rs` | [Adding an MCU or a link](https://c-ardinal.github.io/DAGON-Boot/doc/en/how-to/new-mcu-or-link/) |
 

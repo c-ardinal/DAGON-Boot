@@ -693,10 +693,7 @@ mod tests {
 
     #[test]
     fn the_consent_lists_say_writing_and_the_consent_format_stays() {
-        assert!(
-            SENDS.iter().any(|s| s.contains("書込の記録")),
-            "{SENDS:?}"
-        );
+        assert!(SENDS.iter().any(|s| s.contains("書込の記録")), "{SENDS:?}");
         for s in SENDS.iter().chain(&NEVER_SENDS) {
             assert!(!s.contains("更新"), "{s}");
         }

@@ -162,7 +162,7 @@ DAGONの設計上の対象外事項、利用者の責任範囲、設計と実装
 
 | 目的               | 編集対象                                                                                        | 手順                                                                                          |
 | ------------------ | ----------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
-| ボードの追加       | `targets/boards/*/dagon-board.toml`                                                             | [独自のボード](https://c-ardinal.github.io/DAGON-Boot/doc/how-to/own-board/)                  |
+| ボードの追加       | `targets/boards/*/dagon-board.toml`                                                             | [独自のボード（マイコンで選択）](https://c-ardinal.github.io/DAGON-Boot/doc/how-to/own-board/) |
 | マイコンの追加     | `targets/mcu/<id>/`                                                                             | [マイコンとリンクの追加](https://c-ardinal.github.io/DAGON-Boot/doc/how-to/new-mcu-or-link/) |
 | リンクや転送の追加 | `crates/dagon-format/src/link.rs`、`targets/mcu/*/src/links.rs`、`crates/dagon-host/src/lib.rs` | [マイコンとリンクの追加](https://c-ardinal.github.io/DAGON-Boot/doc/how-to/new-mcu-or-link/) |
 

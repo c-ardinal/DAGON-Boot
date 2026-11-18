@@ -207,8 +207,8 @@ mod node_links {
     impl Link for UsbCdc {
         /// The UART's limit, not `max_payload::USB`: this port shares the
         /// UART's receive path (`Rx`, frames up to `MAX_UART_FRAME`). Only
-        /// the usb-cdc of a node with a PC link carries `max_payload::USB` (dagon-host's serial
-        /// Transport); the ESP32-S3 cannot have the PC link (no `[coordinator]` in
+        /// a coordinator's usb-cdc carries `max_payload::USB` (dagon-host's serial
+        /// Transport); the ESP32-S3 cannot be the coordinator (no `[coordinator]` in
         /// its definition), so nothing sends it frames that large.
         fn max_payload(&self) -> usize {
             dagon_proto::max_payload::UART

@@ -205,6 +205,18 @@ index = 6
 name = "usart6"
 kind = "uart"
 
+# What the wire codec (dagon_proto) may take in each boot core
+# (scripts/codec_budget.py): the largest figure of the images measured
+# with the pinned Rust, plus 1/16 of it rounded up (the margin the stage0
+# size check leaves), for a toolchain's or a dependency's small changes.
+# The Nucleo board's boot core 2_500 / 256 / 0 bytes of flash / stack /
+# RAM; the one without a board receives nothing and links no codec. The
+# codec keeps no static data.
+[codec.bootcore]
+flash_bytes = 2_657
+stack_bytes = 272
+ram_bytes = 0
+
 # Both periods cover two of the slowest erase (a 128 KiB sector), as the
 # definition check requires: the watchdog is fed between flash operations.
 [watchdog]

@@ -255,6 +255,23 @@ max_payload = 1024
 [relay]
 ram_bytes = 19_456
 
+# What the wire codec (dagon_proto) may take in each image
+# (scripts/codec_budget.py): the largest figure of the images measured
+# with the pinned Rust, plus 1/16 of it rounded up (the margin the stage0
+# size check leaves), for a toolchain's or a dependency's small changes.
+# Boot cores (no board 2_714 / 260 / 0, the Waveshare board 2_740 / 260 /
+# 0 bytes of flash / stack / RAM): the codec keeps no static data.
+[codec.bootcore]
+flash_bytes = 2_912
+stack_bytes = 277
+ram_bytes = 0
+
+# The relay firmware: 9_402 / 528 / 0.
+[codec.relay]
+flash_bytes = 9_990
+stack_bytes = 561
+ram_bytes = 0
+
 [watchdog]
 kind = "rp-watchdog"
 trial_ms = 8_000

@@ -188,8 +188,8 @@ class Wording(unittest.TestCase):
         for p in pages:
             rel = p.relative_to(ROOT).as_posix()
             for n, line in enumerate(p.read_text(encoding="utf-8").splitlines(), 1):
-                # The README's opening calls what is written after the first time 更新用イメージ: a kind of image, not the act.
-                if "更新" in (line.replace("更新用イメージ", "") if p.name == "README.md" else line):
+                # The README's opening, and the landing page that repeats it, call what is written after the first time 更新用イメージ: a kind of image, not the act.
+                if "更新" in (line.replace("更新用イメージ", "") if p.name in ("README.md", "index.mdx") else line):
                     found.append(f"{rel}:{n}")
         self.assertEqual(found, [])
 

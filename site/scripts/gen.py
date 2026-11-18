@@ -152,7 +152,7 @@ def serve_api(lang="en"):
     table = "\n".join(rows)
     if lang == "ja":
         body = f"""
-どのルートも、`dagon serve`が表示するループバックのアドレスの下にあります。
+どのルートも`dagon serve`が表示するループバックのアドレスの下にあります。
 `/v1/`へのリクエストには、serveが表示したアドレスの合言葉を
 `Authorization: Bearer <passphrase>`で付与します（不在の場合は401）。HostとOriginの確認も実施します（不合格の場合は403）。
 

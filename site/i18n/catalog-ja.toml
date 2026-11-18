@@ -76,7 +76,7 @@
 "an additional recovery path: a service window for a transport, a vendor download mode" = "追加の復旧経路: 転送用のサービスの時間枠、ベンダーのダウンロードモード"
 "an external agent the CLI and the page hand requests to" = "CLIとページがリクエストを委託する外部のエージェント"
 "ask" = "照会"
-"at boot it runs in the sandbox with the declared pins and buses" = "ブート時は、宣言済のピンとバスを使用してサンドボックス内で動作します"
+"at boot it runs in the sandbox with the declared pins and buses" = "ブート時は宣言済のピンとバスを使用してサンドボックス内で動作します"
 "attempt limit, which slot wins" = "試行の上限、優先するスロット"
 "board package, libraries, user (first answer wins)" = "ボードの定義、ライブラリ、利用者（最初の応答が優先）"
 "body hash" = "本体のハッシュ"

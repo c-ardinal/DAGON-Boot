@@ -31,6 +31,9 @@ the size checks measure are not these. From that ELF:
   recursion each fail the image: the figure is then not a bound. What a
   handler row's action takes is the node's, not the codec's.
 
+Any function of the image that calls itself, or branches back to its own
+prologue, fails it too, codec or not.
+
 A symbol is the codec's when the outermost crate of its Rust (v0) symbol
 name is `dagon_proto`: its own functions, their generic copies and the
 closures in them, not a function of another crate the codec calls.
@@ -304,6 +307,14 @@ def reenters(f: Function, kind: str) -> bool:
     return kind == "call" or h & 0xFE00 == 0xB400 or h == 0xE92D
 
 
+def self_calls(funcs: dict[int, Function]) -> list[Function]:
+    """Every function of the image, codec or not, that calls itself or
+    branches back to its own prologue. None may: an `__aeabi_mem*` helper
+    that calls `memcpy` by name is lowered to a call to itself."""
+    return [f for f in funcs.values()
+            if any(t == f.start and reenters(f, k) for k, t, _ in transfers(f))]
+
+
 def is_codec(name: str) -> bool:
     return crate(name) == CRATE
 
@@ -395,7 +406,9 @@ def measure(elf: bytes) -> tuple[dict[str, int], str, list[str]]:
             ram += size
         else:
             flash += size
-    depth, root, why = deepest(functions(elf), frames(elf))
+    funcs = functions(elf)
+    depth, root, why = deepest(funcs, frames(elf))
+    why += [f"{f.name}: calls itself" for f in self_calls(funcs)]
     return {"flash_bytes": flash, "stack_bytes": depth, "ram_bytes": ram}, root, why
 
 

@@ -168,6 +168,17 @@ class Stack(unittest.TestCase):
         _, _, why = self.measure(chain(extra_b=[back, NOP]))
         self.assertTrue(any(w.startswith("recursion at") for w in why), why)
 
+    def test_any_function_of_the_image_that_calls_itself_fails(self):
+        # The codec does not reach it: a memory helper lowered to a call to
+        # itself, and one branching back to its PUSH.
+        helper, tail = TEXT + 4, TEXT + 12
+        code = [(codec("a"), [PUSH_R7_LR, POP_R7_PC], 8),
+                ("__aeabi_memcpy", [PUSH_R7_LR, *bl(helper + 2, helper), POP_R7_PC], 8),
+                ("__aeabi_memset", [PUSH_R7_LR, 0xE000 | (((tail - (tail + 2 + 4)) >> 1) & 0x7FF),
+                                    NOP], None)]
+        _, _, why = self.measure(image(code))
+        self.assertEqual(why, ["__aeabi_memcpy: calls itself", "__aeabi_memset: calls itself"])
+
     def test_a_loop_to_the_start_of_a_leaf_without_a_prologue_is_a_loop(self):
         # subs r0, #1; bne <start>; bx lr
         leaf = [0x3801, 0xD000 | ((-3) & 0xFF), BX_LR]

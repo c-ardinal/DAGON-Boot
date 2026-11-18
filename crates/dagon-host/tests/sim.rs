@@ -1071,7 +1071,7 @@ fn an_answering_node_takes_the_normal_transfer_without_a_confirmation() {
     assert_eq!(path, RecoverPath::Retransfer);
 }
 
-/// A 構成 at the limit: the uplink node and a downstream node for every node left, all on I2C.
+/// A 構成 at the limit: the coordinator and every other node linked to it over I2C.
 fn yaml_at_the_limit() -> String {
     let children = dagon_format::topology::MAX_NODES - 1;
     let mut nodes = String::new();

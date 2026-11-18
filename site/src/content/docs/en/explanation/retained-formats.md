@@ -257,12 +257,12 @@ is a loss of the entries in between.
 
 ### 2.8 VERSION
 
-0x20 (boot record summary): `layout u8, boots u8, flags u8` (bit 0: some
+0x11 (boot record summary): `layout u8, boots u8, flags u8` (bit 0: some
 boot is uncertain; bit 1: a loss is stated, i.e. some writer has a gap or
 a window whose oldest entry is not an `epoch` start), then for the newest
 boot `opener u8, boot u32 LE, boot tag u32 LE, count u8` and per writer
 of that boot its last entry as `writer u8, format u8, kind u8,
-payload[3]`. 0x21 serves the region raw, `offset u16` plus at most
+payload[3]`. 0x12 serves the region raw, `offset u16` plus at most
 `RECORD_PAGE(link)` bytes; the host joins the pages and decodes them with
 this reader.
 
@@ -439,7 +439,7 @@ fixed cases in `tests/fixed.rs` name the property they guard.
 | P7 | An append lost before any replay is covered by a window or gap: at once when its own writer overwrote it, when other bytes destroyed it, once an entry the writer appended later is held. |
 | P8 | `plan`, `commit` and `confirm` take only the state log (compile-time). |
 | P9 | A reader never accepts entries of another layout (in P2's lookup). |
-| P10 | Region ≤ `RECORD_MAX`; paged reads at every link size reassemble the region; the 0x20 summary fits one page. |
+| P10 | Region ≤ `RECORD_MAX`; paged reads at every link size reassemble the region; the 0x11 summary fits one page. |
 | P11 | A consumer de-duplicating `(layout, writer, tag, eseq)` against its previous replay never meets one identity with two contents (outside 2.7). |
 | P12 | Identity is a pure function of the id; collisions refused at every carrier width; unknown never matched. |
 | P14 | A call past its budget is abandoned; the boot reaches the decision the state log gives. |

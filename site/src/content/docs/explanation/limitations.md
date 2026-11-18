@@ -64,7 +64,7 @@ description: "設計との違いと、DAGONがしないことです。仕様上�
 <!-- end of generated list -->
 <!-- generated from site/scripts/architecture.py: python site/scripts/gen.py -->
 - Host Extension Chain: コードに存在しません。
-- Action Definitions: コードに存在しません。
+- Action Definitions: コードに存在しません。アクションのファイルの形式番号（`action-defs`）も`compat.toml`に存在しません。
 - Host Machines: コードに存在しません。
 - AI Agent Link: `dagon serve`にボード移植の作業は存在しません。`POST /v1/ai/port`の応答は501です。
 - Boot Action Interpreter: コードに存在しません。
@@ -74,5 +74,5 @@ description: "設計との違いと、DAGONがしないことです。仕様上�
 - Bus Guardian: コードに存在しません。
 - Delivery Plan: 試行の時間枠と昇格の判定はコードに存在しません。
 - Recovery Policy: 復旧段階の自動選択は存在しません。
-- Retained Codecs: ファームウェアに保持形式のコーデックは存在しません。ロックアップヒューズの形式の存在箇所は実行可能モデルのみです。構成本体の形式は`dagon-format`の形式（先頭32バイト、ノード32バイト）で、[保持と永続の形式](/explanation/retained-formats/)の形式ではありません。親機の保存先は単一の領域で、2バンクの置換は存在しません。
+- Retained Codecs: ファームウェアに保持形式のコーデックは存在しません。ロックアップヒューズの形式の存在箇所は実行可能モデルのみです。ブート記録とロックアップヒューズの形式番号（`boot-record`）は`compat.toml`に存在しません。構成本体の形式は`dagon-format`の形式（先頭32バイト、ノード32バイト）で、[保持と永続の形式](/explanation/retained-formats/)の形式ではありません。親機の保存先は単一の領域で、2バンクの置換は存在しません。
 <!-- end of generated table -->

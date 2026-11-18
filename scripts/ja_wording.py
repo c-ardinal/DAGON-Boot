@@ -38,20 +38,29 @@ MARKDOWN = (".md", ".mdx")
 _PHRASE = "[^\\sぁ-ゖ、。，．,.:：;；「」『』（）()\\[\\]【】<>\"'|/]{1,15}"
 NO_CHAIN = re.compile(f"(?:{_PHRASE}の){{3,}}{_PHRASE}")
 POLITE_END = re.compile("(?:です|ます|ません|でした|ました|ましょう|でしょう|ください)$")
-CLOSE_OPEN = {"）": "（", ")": "("}
+OPENING, CLOSING = "（(", "）)"
 NO_AREA = "(none)"
+TABLE_ROW = re.compile(r"^\s*\|")
+# A list item, or a label line (**名称**: …, 名称: …): a noun ending there closes a fragment, not a sentence.
+FRAGMENT_LINE = re.compile(r"^\s*(?:[-*+]|\d+\.)\s|^\s*(?:\*\*[^*]+\*\*|[^\s。:：]{1,30})[:：]\s")
+HIRAGANA = re.compile("[ぁ-ゖ]$")
+ALLOW_KEYS = ("path", "text", "kind", "word", "reason")
 
 
 class Rule(NamedTuple):
     kind: str
     regex: re.Pattern
+    lemma: str
     suggest: str
 
 
 class Hit(NamedTuple):
     line: int
+    start: int
+    end: int
     kind: str
     word: str
+    lemma: str
     suggest: str
     source: str
 
@@ -63,15 +72,15 @@ def load_lexicon(path: Path) -> list[Rule]:
     for kind in ("retired", "native", "joint"):
         for e in data[kind]:
             pattern = e["pattern"] if e.get("raw") else NOT_AFTER_KANJI + "(?:" + e["pattern"] + ")"
-            rules.append(Rule(kind, re.compile(pattern), f"{e['word']} -> {e['suggest']}"))
+            rules.append(Rule(kind, re.compile(pattern), e["word"], e["suggest"]))
     return rules
 
 
 def load_allow(path: Path) -> list[dict]:
-    """The allow-list; ValueError when an entry lacks its path, text or reason."""
+    """The allow-list; ValueError when an entry lacks one of ALLOW_KEYS."""
     entries = tomllib.loads(Path(path).read_text(encoding="utf-8")).get("allow", [])
     for n, e in enumerate(entries, 1):
-        for key in ("path", "text", "reason"):
+        for key in ALLOW_KEYS:
             if not str(e.get(key, "")).strip():
                 raise ValueError(f"{path}: allow entry {n} has no {key}")
     return entries
@@ -93,47 +102,68 @@ def area_of(path: str, scopes: dict) -> str:
     return next((a["name"] for a in scopes["area"] if matches(path, a["paths"])), NO_AREA)
 
 
-def _lexicon_hits(line: str, rules: list[Rule]) -> list[tuple[str, int, int, str]]:
+def _lexicon_hits(line: str, rules: list[Rule]) -> list[tuple[str, int, int, str, str]]:
+    """The longest match wins a stretch of text (a compound verb over its last part); on equal
+    length, the earlier rule."""
+    candidates = [
+        (-(m.end() - m.start()), order, m.start(), m.end(), rule)
+        for order, rule in enumerate(rules)
+        for m in rule.regex.finditer(line)
+        if m.end() > m.start()
+    ]
     used = [False] * len(line)
     found = []
-    for rule in rules:
-        for m in rule.regex.finditer(line):
-            a, b = m.span()
-            if a == b or any(used[a:b]):
-                continue
+    for _, _, a, b, rule in sorted(candidates):
+        if not any(used[a:b]):
             used[a:b] = [True] * (b - a)
-            found.append((rule.kind, a, b, rule.suggest))
-    return found
+            found.append((rule.kind, a, b, rule.lemma, rule.suggest))
+    return sorted(found, key=lambda f: f[1])
 
 
-def _without_trailing_note(sentence: str) -> str | None:
-    """The sentence without a closing parenthetical (実行します（詳細） -> 実行します);
-    None when the parenthetical opened on an earlier line, so the ending is not on this one."""
-    sentence = sentence.rstrip("*_ ")
-    while sentence and sentence[-1] in CLOSE_OPEN:
-        start = sentence.rfind(CLOSE_OPEN[sentence[-1]])
-        if start < 0:
-            return None
-        sentence = sentence[:start].rstrip("*_ ")
-    return sentence
+def _outside_parentheses(line: str) -> list[bool]:
+    """Per character, whether it stands outside every parenthetical. A closing parenthesis
+    with no opening one on the line closes one opened on an earlier line."""
+    outside, depth = [], 0
+    for c in line:
+        if c in OPENING:
+            depth += 1
+        elif c in CLOSING and depth == 0:
+            outside = [False] * len(outside)
+        elif c in CLOSING:
+            depth -= 1
+        outside.append(depth == 0 and c not in OPENING + CLOSING)
+    return outside
 
 
 def _plain_endings(line: str) -> list[tuple[int, int]]:
-    found = []
-    for m in re.finditer("。", line):
-        if line.startswith("**", m.end()):
-            continue  # a bold lead-in (**概要。**) is a heading, not a sentence
-        sentence = _without_trailing_note(line[: m.start()])
-        if sentence and JA.search(sentence) and not POLITE_END.search(sentence):
-            found.append((max(0, len(sentence) - 4), m.end()))
+    """Sentences that end in the plain style: table rows, parentheticals, bold lead-ins
+    (**概要。**) and noun-ending list items or labels are not sentences."""
+    if TABLE_ROW.match(line):
+        return []
+    outside = _outside_parentheses(line)
+    fragment = bool(FRAGMENT_LINE.match(line))
+    found, start = [], 0
+    for i, c in enumerate(line):
+        if c != "。" or not outside[i]:
+            continue
+        kept = [k for k in range(start, i) if outside[k]]
+        while kept and line[kept[-1]] in "*_ ":
+            kept.pop()
+        sentence = "".join(line[k] for k in kept)
+        start = i + 1
+        if line.startswith("**", i + 1) or not JA.search(sentence) or POLITE_END.search(sentence):
+            continue
+        if fragment and not HIRAGANA.search(sentence):
+            continue
+        found.append((kept[max(0, len(kept) - 4)], kept[-1] + 1))  # the sentence's last 4 characters
     return found
 
 
-def _line_hits(line: str, rules: list[Rule], polite: bool) -> list[tuple[str, int, int, str]]:
+def _line_hits(line: str, rules: list[Rule], polite: bool) -> list[tuple[str, int, int, str, str]]:
     found = _lexicon_hits(line, rules)
-    found += [("no-chain", *m.span(), "split the chain of three or more の") for m in NO_CHAIN.finditer(line)]
+    found += [("no-chain", *m.span(), "", "split the chain of three or more の") for m in NO_CHAIN.finditer(line)]
     if polite:
-        found += [("plain", a, b, "polite style: 〜です/〜します") for a, b in _plain_endings(line)]
+        found += [("plain", a, b, "", "polite style: 〜です/〜します") for a, b in _plain_endings(line)]
     return found
 
 
@@ -145,13 +175,26 @@ def hits_in(path: str, text: str, rules: list[Rule], polite: bool) -> list[Hit]:
     for n, (line, source) in enumerate(zip(masked.split("\n"), text.split("\n")), 1):
         if JA.search(line):
             hits += [
-                Hit(n, kind, source[a:b], suggest, source) for kind, a, b, suggest in _line_hits(line, rules, polite)
+                Hit(n, a, b, kind, source[a:b], lemma, sug, source)
+                for kind, a, b, lemma, sug in _line_hits(line, rules, polite)
             ]
     return hits
 
 
+def _covers(entry: dict, path: str, hit: Hit) -> bool:
+    """Whether the entry names this finding: its path, kind and word, inside the entry's text."""
+    if not fnmatch.fnmatchcase(path, entry["path"]) or (entry["kind"], entry["word"]) != (hit.kind, hit.word):
+        return False
+    at = hit.source.find(entry["text"])
+    while at >= 0:
+        if at <= hit.start and hit.end <= at + len(entry["text"]):
+            return True
+        at = hit.source.find(entry["text"], at + 1)
+    return False
+
+
 def unallowed(path: str, hits: list[Hit], allow: list[dict]) -> list[Hit]:
-    return [h for h in hits if not any(fnmatch.fnmatchcase(path, e["path"]) and e["text"] in h.source for e in allow)]
+    return [h for h in hits if not any(_covers(e, path, h) for e in allow)]
 
 
 def tracked(root: Path) -> list[str]:
@@ -195,7 +238,7 @@ def main(argv: list[str] | None = None) -> int:
             continue
         hits = unallowed(path, hits_in(path, text, rules, is_polite(path, scopes["polite"])), allow)
         for h in hits:
-            print(f"{path}:{h.line}: {h.kind}: {h.word} ({h.suggest})")
+            print(f"{path}:{h.line}: {h.kind}: {h.word} ({h.lemma + ' -> ' if h.lemma else ''}{h.suggest})")
         counts[area] += len(hits)
     if args.all:
         for area, n in sorted(counts.items()):

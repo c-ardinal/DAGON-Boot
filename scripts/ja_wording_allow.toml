@@ -1,15 +1,34 @@
-# Lines scripts/ja_wording.py leaves alone. Each entry needs all three keys:
-# path (a glob, as in ja_wording_scopes.toml), text (the line holds it) and
-# reason (why the wording rule does not apply there). An entry without a
-# reason fails the check.
+# Findings scripts/ja_wording.py leaves alone. An entry names one finding: path (a
+# glob, as in ja_wording_scopes.toml), text (the words around it on the line), kind
+# and word (as the report prints them), and reason (why the wording rule does not
+# apply). Only a finding of that kind and word inside that text is left alone; any
+# other finding on the line still fails. An entry missing a key fails the check.
 
-# The alpha notice's first sentence has no finding; its second has 行われる and 有る.
+# The alpha notice's second sentence (its first has no finding).
 [[allow]]
 path = "README.md"
 text = "正式リリースまでに破壊的変更が行われるリスクが有ることをご理解下さい。"
+kind = "native"
+word = "行わ"
+reason = "The alpha notice is quoted word for word (scripts/test_markers.py NOTICE_JA_LINES)."
+
+[[allow]]
+path = "README.md"
+text = "正式リリースまでに破壊的変更が行われるリスクが有ることをご理解下さい。"
+kind = "plain"
+word = "解下さい"
 reason = "The alpha notice is quoted word for word (scripts/test_markers.py NOTICE_JA_LINES)."
 
 [[allow]]
 path = "site/src/content/docs/index.mdx"
 text = "正式リリースまでに破壊的変更が行われるリスクが有ることをご理解下さい。"
+kind = "native"
+word = "行わ"
+reason = "The alpha notice is quoted word for word (scripts/test_markers.py NOTICE_FILES)."
+
+[[allow]]
+path = "site/src/content/docs/index.mdx"
+text = "正式リリースまでに破壊的変更が行われるリスクが有ることをご理解下さい。"
+kind = "plain"
+word = "解下さい"
 reason = "The alpha notice is quoted word for word (scripts/test_markers.py NOTICE_FILES)."

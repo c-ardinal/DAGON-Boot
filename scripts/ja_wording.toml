@@ -8,9 +8,9 @@
 # word: the dictionary form shown in the report.
 # suggest: the Sino-Japanese compound or katakana word to use instead.
 #
-# Retired terms come first, then native words, then conjunctions. Entries are tried in order and a
-# character is reported once, so a longer entry (書き換える) comes before a
-# shorter one it contains (書く).
+# A character is reported once: where entries overlap, the longest match wins
+# (書き換える over 書く); on equal length, retired terms, then native words, then
+# conjunctions, each in file order. scripts/test_ja_wording.py counts the entries.
 
 # Terms the wording rule replaces by a defined term.
 retired = [
@@ -216,4 +216,5 @@ native = [
   { pattern = '(?<![ぁ-ん])わか[るりっ]', word = "わかる", suggest = "理解/判明", raw = true },
   { pattern = 'やり直[さしすせそ]', word = "やり直す", suggest = "再実行/再試行", raw = true },
   { pattern = '(?<![ぁ-ん])やめ[るたま]', word = "やめる", suggest = "中止", raw = true },
+  { pattern = '(?:でき|出来)(?=[るなまずたれ])', word = "できる", suggest = "可能", raw = true },
 ]

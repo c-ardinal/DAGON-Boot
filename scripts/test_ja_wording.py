@@ -13,6 +13,19 @@ from test_markers import NOTICE_FILES  # noqa: E402
 RULES = ja_wording.load_lexicon(ja_wording.LEXICON)
 DOC = "site/src/content/docs/how-to/a.md"
 CODE = "crates/x/src/lib.rs"
+# The audited seed (lex1-5 and the Console's lexicon) plus できる; a change here is a lexicon change.
+INVENTORY = {"retired": 3, "joint": 3, "native": 189}
+PLANTED = {
+    "更新できます": "できる",
+    "使います": "使う",
+    "書き込みます": "書き込む",
+    "子機": "親機/子機/孫機",
+    "フォルダを作ります": "作る",
+    "表示しながら": "ながら",
+    "名前": "名前",
+    "すべて": "すべて",
+    "確かめます": "確かめる",
+}
 
 
 def kinds(path, text):
@@ -20,6 +33,10 @@ def kinds(path, text):
         (h.kind, h.word)
         for h in ja_wording.hits_in(path, text, RULES, ja_wording.is_polite(path, ["site/src/content/docs/*"]))
     ]
+
+
+def lemmas(path, text):
+    return [h.lemma for h in ja_wording.hits_in(path, text, RULES, False)]
 
 
 class Rules(unittest.TestCase):
@@ -51,6 +68,19 @@ class Rules(unittest.TestCase):
         self.assertEqual(kinds(DOC, "設定は有効です。実行します（詳細は[参照](x.md)）。"), [])
         self.assertEqual(kinds(CODE, "// 設定は有効だ。"), [])
 
+    def test_plain_style_counts_sentences_not_fragments(self):
+        self.assertEqual(kinds(DOC, "| `a` | 説明（既定値。）。 |"), [])
+        self.assertEqual([k for k, _ in kinds(DOC, "説明（既定値。）。")], ["plain"])
+        self.assertEqual(kinds(DOC, "- 説明（既定値。）。"), [])
+        self.assertEqual(kinds(DOC, "**遷移**: 前後の状態。"), [])
+        self.assertEqual([k for k, _ in kinds(DOC, "- 設定は有効だ。")], ["plain"])
+        self.assertEqual(kinds(DOC, "設定です（既定値。範囲は（1から8。）です）。"), [])
+
+    def test_the_longest_match_wins(self):
+        self.assertEqual(lemmas(CODE, "// やり直します"), ["やり直す"])
+        self.assertEqual(lemmas(CODE, "// 食い違います"), ["食い違う"])
+        self.assertEqual(lemmas(CODE, "// 置き換えます"), ["置き換える"])
+
     def test_a_bold_lead_in_is_a_heading_not_a_sentence(self):
         self.assertEqual(kinds(DOC, "**stage0の上限。** 上限を記録します。"), [])
 
@@ -76,17 +106,21 @@ class AllowList(unittest.TestCase):
         p.write_text(text, encoding="utf-8")
         return p
 
-    def test_an_allow_listed_line_passes(self):
-        allow = ja_wording.load_allow(
-            self.write('[[allow]]\npath = "a.rs"\ntext = "使います"\nreason = "quoted name"\n')
-        )
-        hits = ja_wording.hits_in("a.rs", "// 使います\n// 送ります\n", RULES, False)
-        self.assertEqual([h.word for h in ja_wording.unallowed("a.rs", hits, allow)], ["送り"])
+    ENTRY = '[[allow]]\npath = "a.rs"\ntext = "「使い方」"\nkind = "native"\nword = "使い"\n'
+
+    def test_an_allow_entry_covers_only_its_own_finding(self):
+        allow = ja_wording.load_allow(self.write(self.ENTRY + 'reason = "quoted title"\n'))
+        hits = ja_wording.hits_in("a.rs", "// 「使い方」を参照して使います\n// 「使い方」\n", RULES, False)
+        left = ja_wording.unallowed("a.rs", hits, allow)
+        self.assertEqual([(h.line, h.word) for h in left], [(1, "使い")])
+        self.assertEqual(left[0].start, len("// 「使い方」を参照して"))
 
     def test_an_entry_without_a_reason_fails(self):
         with self.assertRaises(ValueError):
-            ja_wording.load_allow(self.write('[[allow]]\npath = "a.rs"\ntext = "使います"\nreason = " "\n'))
-        bad = self.write('[[allow]]\npath = "a.rs"\ntext = "x"\n')
+            ja_wording.load_allow(self.write(self.ENTRY + 'reason = " "\n'))
+        with self.assertRaises(ValueError):
+            ja_wording.load_allow(self.write('[[allow]]\npath = "a.rs"\ntext = "x"\nreason = "r"\n'))
+        bad = self.write(self.ENTRY)
         d = self.tmp()
         (Path(d) / "a.rs").write_text("// 設定\n", encoding="utf-8")
         self.assertEqual(ja_wording.main(["--root", d, "--allow", str(bad), "a.rs"]), 1)
@@ -105,6 +139,21 @@ class Data(unittest.TestCase):
         ja_wording.load_allow(ja_wording.ALLOW)
         areas = ja_wording.load_scopes(ja_wording.SCOPES)["area"]
         self.assertEqual(len({a["name"] for a in areas}), len(areas))
+
+    def test_the_seeded_inventory(self):
+        data = ja_wording.load_scopes(ja_wording.LEXICON)
+        self.assertEqual({k: len(data[k]) for k in ("retired", "joint", "native")}, INVENTORY)
+        for text, lemma in PLANTED.items():
+            self.assertEqual(lemmas(CODE, "// " + text)[:1], [lemma], text)
+
+    def test_every_entry_wins_over_the_entries_inside_it(self):
+        for rule in RULES:
+            for form in rule.lemma.split("（")[0].split("/"):
+                own = [m.group() for m in rule.regex.finditer("// " + form) if m.group()]
+                if own:
+                    hits = ja_wording.hits_in(CODE, "// " + form, RULES, False)
+                    longest = max(len(h.word) for h in hits)
+                    self.assertGreaterEqual(longest, max(map(len, own)), form)
 
     def test_the_alpha_notice_passes_word_for_word(self):
         allow = ja_wording.load_allow(ja_wording.ALLOW)

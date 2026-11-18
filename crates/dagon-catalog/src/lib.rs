@@ -276,7 +276,7 @@ fn machine_md(s: &mut String, m: &Catalog, lang: Lang<'_>) {
     let (machine, initial, states_word, head) = match lang {
         Lang::Ja(_) => (
             "状態機械",
-            "最初の状態",
+            "初期状態",
             "状態",
             "| 種類 | コード | 遷移 | ペイロード | 受信側 | 備考 | 説明 |",
         ),

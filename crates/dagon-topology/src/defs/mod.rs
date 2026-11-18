@@ -447,7 +447,7 @@ impl McuDef {
     }
 }
 
-/// The pins a board wires new links to when it is the 親機 (numbered
+/// The pins a board wires new links to when it is the coordinator (numbered
 /// GPIOs, as the topology's `buses[]` and `links[].pins` take them).
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -554,7 +554,7 @@ pub enum AddressingSpec {
     Fixed(u8),
 }
 
-/// Link kinds by direction: `up` towards the PC or the 親機, `down` to 子機.
+/// Link kinds by direction: `up` towards the PC or the node nearer the PC, `down` to the node at the other end of the link.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Links {

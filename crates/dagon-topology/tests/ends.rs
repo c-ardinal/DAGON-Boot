@@ -230,7 +230,7 @@ fn a_node_below_a_child_is_skipped_whichever_end_is_listed_first() {
 
 #[test]
 fn the_coordinators_own_pins_are_checked_whichever_end_it_is() {
-    // GPIO 40 is no RP2040 header pin: V-07 on the 親機's end, listed first or second.
+    // GPIO 40 is no RP2040 header pin: V-07 on the coordinator's end, listed first or second.
     assert_error(
         &mutate(
             SAMPLE,

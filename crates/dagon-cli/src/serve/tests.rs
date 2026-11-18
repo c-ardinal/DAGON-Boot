@@ -732,7 +732,7 @@ fn the_page_built_into_dagon_is_served_with_the_release_key() {
     assert!(super::api::page_file(&server, "/fonts/OFL-Doto.txt").is_some());
 }
 
-/// sim-pair with the F401 as a second 親機: only what updating skips (V-23).
+/// sim-pair with the F401 as a second coordinator: only what updating skips (V-23).
 fn two_hubs() -> String {
     YAML.replacen("role: node", "role: coordinator", 1)
 }
@@ -755,7 +755,7 @@ fn a_shape_not_updatable_yet_is_saved_and_its_updatable_part_compiled() {
         std::fs::read_to_string(a.dir.join("topology/t.yaml")).unwrap(),
         y
     );
-    // The second 親機 is skipped: the compiled topology is the 親機 alone.
+    // The second coordinator is skipped: the compiled topology is the coordinator alone.
     let t = dagon_topology::parse_str(&y).unwrap();
     let (sub, _) = dagon_topology::updatable(&t);
     assert_eq!(
@@ -973,7 +973,7 @@ fn gen_is_a_job_and_listed_in_hello() {
         hello.contains("\"flash\"") && hello.contains("\"doctor\""),
         "{hello}"
     );
-    // The page offers 書き込む only for these.
+    // The page offers 書込 only for these.
     let v: serde_json::Value = serde_json::from_str(&hello).unwrap();
     assert_eq!(
         v["flash_mcus"],
@@ -1936,7 +1936,7 @@ fn dagon_answers_with_the_projects_facts_and_a_checked_proposal() {
         log.lock()
             .unwrap()
             .push(format!("{}\n{}", p.system, p.user));
-        Ok(said("試す回数を 2 回に減らす案です。", Some(&reply)))
+        Ok(said("試行回数を2回に削減する案です。", Some(&reply)))
     });
     let (a, home) = linked_with("agent-ask", fake);
     let q = serde_json::json!({
@@ -1946,7 +1946,7 @@ fn dagon_answers_with_the_projects_facts_and_a_checked_proposal() {
     let (st, body) = post(&a, "/v1/agent/ask", q);
     assert_eq!(st, 200, "{body}");
     let v: serde_json::Value = serde_json::from_str(&body).unwrap();
-    assert_eq!(v["answer"], "試す回数を 2 回に減らす案です。");
+    assert_eq!(v["answer"], "試行回数を2回に削減する案です。");
     assert_eq!(v["proposal"]["topology"], better.as_str());
     assert!(v["proposal"]["yaml_diff"]
         .as_str()
@@ -2083,7 +2083,7 @@ fn an_agent_defined_only_as_data_answers_the_page() {
     let answer = home.join("answer.json");
     std::fs::write(
         &answer,
-        r#"{"answer":"データだけで足したエージェントです。"}"#,
+        r#"{"answer":"データのみで追加したエージェントです。"}"#,
     )
     .unwrap();
     let (program, args) = if cfg!(windows) {
@@ -2116,7 +2116,7 @@ fn an_agent_defined_only_as_data_answers_the_page() {
     );
     assert_eq!(st, 200, "{body}");
     let r: serde_json::Value = serde_json::from_str(&body).unwrap();
-    assert_eq!(r["answer"], "データだけで足したエージェントです。");
+    assert_eq!(r["answer"], "データのみで追加したエージェントです。");
 }
 
 fn counting(
@@ -2254,7 +2254,10 @@ fn a_rollback_record_in_the_request_reaches_the_agent() {
     let log = sent.clone();
     let fake: Arc<super::jobs::AgentApi> = Arc::new(move |p: &crate::agents::Prompt| {
         log.lock().unwrap().push(p.user.clone());
-        Ok(said("試したバージョンが確認されないまま戻りました。", None))
+        Ok(said(
+            "試験起動したバージョンが未確定のままロールバックしました。",
+            None,
+        ))
     });
     let (a, _) = linked_with("ask-rollback", fake);
     let record = serde_json::json!({
@@ -2264,7 +2267,7 @@ fn a_rollback_record_in_the_request_reaches_the_agent() {
         "reason": "ROLLED BACK",
         "node_state": { "trial": false, "last_reason": 3 },
     });
-    let q = serde_json::json!({ "question": "失敗の理由を聞く", "kind": "failure", "rollback": record });
+    let q = serde_json::json!({ "question": "失敗の理由を質問", "kind": "failure", "rollback": record });
     let (st, body) = post(&a, "/v1/agent/ask", q);
     assert_eq!(st, 200, "{body}");
     let (st, _) = post(

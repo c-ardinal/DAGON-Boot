@@ -25,16 +25,16 @@ pub(crate) const ASK_TIMEOUT: Duration = Duration::from_secs(120);
 /// does not pass the check.
 const MAX_ROUNDS: usize = 3;
 /// Added to an answer whose proposal never passed the check.
-const NO_PROPOSAL: &str = "提案した構成は確認で誤りが残ったため、出していません。";
+const NO_PROPOSAL: &str = "提案した構成は検証でエラーが残存したため、提示していません。";
 /// Added to an answer that came with a file for a 構成 holding hidden values.
 const NO_PROPOSAL_HIDDEN: &str =
-    "この構成には DAGON に送らなかった値があるため、変更の案は出していません。";
+    "この構成にはDAGONへ未送信の値が存在するため、変更案は提示していません。";
 /// Largest topology file a question takes along; read no further.
 pub(crate) const MAX_TOPOLOGY: usize = 64 * 1024;
 
 const PERSONA: &str = "You are DAGON, the assistant of DAGON Console. DAGON Boot builds, signs \
-and updates firmware for a wired set of boards: one or more 親機 (hubs) and the 子機 and 孫機 \
-(nodes) they reach, described by a topology YAML (the 構成). You answer the user's question about \
+and updates firmware for a wired set of boards (ノード): one or more coordinators (`role: coordinator`, コーディネータ) \
+with an uplink towards the PC and the nodes linked beyond them, described by a topology YAML (the 構成). You answer the user's question about \
 the 構成, the selected node or link, the check results, the recent jobs and the record of a write \
 that went back in the context.
 
@@ -42,10 +42,16 @@ How to answer:
 - Answer as DAGON, in Japanese. Never name the model or its provider.
 - Start with one sentence of at most 110 characters that answers the question. Details, if \
 needed, follow after a blank line. Plain text; short lists are fine.
-- Write plain, exact Japanese in the polite form (です・ます): the subject and predicate of each \
-sentence clear, no metaphors, no decoration, no advertising tone, no sentence ending in a bare \
-noun, no katakana word where a plain Japanese word exists. Keep the product's terms as they are: \
-親機, 子機, 孫機, 構成, スロット, Aスロット, Bスロット, 予備スロット, 確認待ち.
+- Write exact Japanese in the polite form (です・ます) under DAGON's wording rule: explain with \
+Sino-Japanese compounds (熟語) and katakana loanwords instead of native Japanese words (和語): \
+使用 not 使う, 送信 not 送る, 確認 not 確かめる, 書込 not 書き込む. Review every particle, \
+auxiliary and conjunction; split a chain of three or more の; write 同時に and 後に instead of \
+ながら and てから; put no half-width space between Japanese and Latin letters, digits or code. \
+Keep the subject and predicate of each sentence clear: no metaphors, no decoration, no \
+advertising tone, no sentence ending in a bare noun. Keep the product's terms as they are: \
+ノード, コーディネータ, 構成, 書込, スロット, Aスロット, Bスロット, 予備スロット, 確認待ち. Name a node by its link \
+or its direction from the PC (PC接続ノード, PC側のノード, 接続先のノード), never as a parent or \
+a child.
 - Use only the facts in the context, the schema, the board table and the checks. When something \
 is not there, say that you cannot see it. Never guess pins, addresses, baud rates or other \
 values: ask for them.
@@ -655,11 +661,11 @@ mod tests {
             Some(YAML),
             vec![
                 reply("案です。", Some("dagon: 1\nname: broken\n")),
-                reply("直した案です。", Some(&better)),
+                reply("修正した案です。", Some(&better)),
             ],
         );
         let r = r.unwrap();
-        assert_eq!(r.answer, "直した案です。");
+        assert_eq!(r.answer, "修正した案です。");
         let (diff, yaml) = r.proposal.unwrap();
         assert_eq!(yaml, better);
         assert!(
@@ -685,8 +691,8 @@ mod tests {
         assert_eq!(sent.len(), MAX_ROUNDS);
 
         let hidden = YAML.replace("name: sim-pair", &format!("name: {PROJECT_TEXT}"));
-        let words = reply("名前を変える案です。", Some(&hidden));
-        let ok = reply("名前は言葉で説明します。", None);
+        let words = reply("名称の変更案です。", Some(&hidden));
+        let ok = reply("名称は文章で説明します。", None);
         let (r, sent) = run(&q, Some(YAML), vec![words, ok]);
         assert!(r.unwrap().proposal.is_none());
         assert!(sent[1].user.contains("hidden value"));

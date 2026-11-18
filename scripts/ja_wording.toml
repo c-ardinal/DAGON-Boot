@@ -104,6 +104,8 @@ native = [
   { stem = '直', conj = "godan_sa", word = "直す", suggest = "修正" },
   { stem = '始め', conj = "ichidan", word = "始める", suggest = "開始" },
   { stem = '始ま', conj = "godan_ra", word = "始まる", suggest = "開始" },
+  { stem = '止め', conj = "ichidan", word = "止める", suggest = "停止" },
+  { stem = '止ま', conj = "godan_ra", word = "止まる", suggest = "停止" },
   { stem = '閉じ', conj = "ichidan", word = "閉じる", suggest = "クローズ/閉鎖" },
   { stem = '開', conj = "godan_ka", word = "開く", suggest = "オープン/起動" },
   { stem = '来', conj = "kuru", word = "来る", suggest = "由来/到来" },
@@ -175,7 +177,7 @@ native = [
   { stem = '(?<![ぁ-ん])わか', conj = "godan_ra", word = "わかる", suggest = "理解/判明", raw = true },
   { stem = 'やり直', conj = "godan_sa", word = "やり直す", suggest = "再実行/再試行", raw = true },
   { stem = '(?<![ぁ-ん])やめ', conj = "ichidan", word = "やめる", suggest = "中止", raw = true },
-  { stem = 'でき|出来', conj = "ichidan", word = "できる", suggest = "可能", raw = true },
+  { stem = 'でき|出来', conj = "ichidan_kanji", word = "できる", suggest = "可能", raw = true },
   # Adjectives.
   { stem = '新し', conj = "adjective", word = "新しい", suggest = "新規" },
   { stem = '無', conj = "adjective", word = "無い", suggest = "不在/なし（未〜）" },
@@ -260,7 +262,8 @@ godan_ra = "[らりるれろっ]"
 godan_wa = "[わいうえおっ]"
 # A stem that ends in kana (確かめ) starts every form and its noun use (答え).
 ichidan = ""
-# A one-kanji stem (出る, 見る) needs one of its endings after it, or 出力 would match.
+# A stem that ends in a kanji or can start a noun (出る, 見る, できる) needs one of its
+# endings after it, or 出力, 出来事 and できごと would match.
 ichidan_kanji = "(?=[るれよろたてなまずさそら])"
 kuru = "(?=[るれよいたてなまずさそら])"
 adjective = "[いくかけさそ]"

@@ -15,7 +15,7 @@ DOC = "site/src/content/docs/how-to/a.md"
 CODE = "crates/x/src/lib.rs"
 # The audited seed (lex1-5 and the Console's lexicon) plus できる, one entry per verb and
 # conjugation class; a change here is a lexicon change.
-INVENTORY = {"retired": 3, "joint": 3, "native": 211}
+INVENTORY = {"retired": 3, "joint": 3, "native": 213}
 PLANTED = {
     "更新できます": "できる",
     "使います": "使う",
@@ -27,6 +27,28 @@ PLANTED = {
     "すべて": "すべて",
     "確かめます": "確かめる",
 }
+
+# Every dictionary form the lexicon held at 0da0fa07 (git show 0da0fa07:scripts/ja_wording.toml),
+# before entries moved to the conjugation table; each must still be found, or be listed in
+# REMOVED_SINCE_0DA0FA07 with the reason.
+FORMS_AT_0DA0FA07 = (
+    "書き込む 親機 子機 孫機 作る 書き出す 書き換える 書く 読み込む 読む 受け付ける 受け取る 受け入れる 受ける "
+    "呼び出す 呼ぶ 同じ 新しい 確かめる 取り消す 取り込む 取り出す 取り除く 取り決め 取る 置き換える 置き場所 "
+    "置く 無い 持つ 割り当てる 付ける 付く 示す 動く 動かす 使う 大きさ 大きい 小さい 古い 返す 通す 通る "
+    "丸ごと 変える 変わる 待つ 照らす 答える 切り替える 切る 切れる 省く 知る 届く 届ける 足す 渡す 決める "
+    "決まる 入れる 入る 換える 拒む 終わる 選ぶ 繰り返す 合わせる 合う 消す 要る 立ち上がる 挙げる 残す 残る "
+    "引き継ぐ 違い 違う 直す 進み 印 止まる 止める 閉じる 開く 来る 続く 続ける 見つける 見る 見える 測る "
+    "始める 始まる 数える 飛ばす 尋ねる 壊れる 収まる 求める 当てる 試す 送る 並ぶ 並べる 保つ 除く 増える "
+    "増やす 減る 戻す 戻る 正しい 短い 長い 長さ 触れる 生 一緒に 少なく 守る 分ける 分かる 出す 出る 得る "
+    "探す 済み 仕組み やり方 はじめに 畳み込む つなぐ 話す とどまる 含む 超える 行う 基づく 与える 組む "
+    "組み込む 自ら 前もって すべて いま まだ あとで ほか とき ところ まず もう一度 まとめる そのまま すぐ "
+    "いくつか 次の 前に 手 元 足りない 見本 食い違う 外す 押す 挿す 抜く 抜ける 困る 聞く 呼び名 手元 進む "
+    "加える 捨てる 降りる 移る 現れる 描く 揃える 調べる 隠す 中身 具合 場所 名前 雛形 鍵 窓 目安 代わり 先 "
+    "空 詳しい 速い 多い すでに このまま どうし まもなく わかる やり直す やめる できる ながら てから でから "
+)
+REMOVED_SINCE_0DA0FA07: dict[str, str] = {}
+# A form found only after what it attaches to.
+PROBE = {"でから": "読込んでから"}
 
 
 def kinds(path, text):
@@ -105,6 +127,26 @@ class Rules(unittest.TestCase):
     def test_a_chain_of_no_spans_a_line_break(self):
         self.assertIn("no-chain", [k for k, _ in kinds(DOC, "ノードの\n設定の一覧の項目")])
 
+    def test_a_chain_across_lines_is_reported_on_one_line(self):
+        self.assertIn(("no-chain", "ノードの設定の一覧の項目"), kinds(CODE, "ノードの\n  設定の一覧の項目"))
+
+    def test_stop_verbs_are_caught(self):
+        for form in ["処理を止めます", "止めて", "止めない", "止まります", "止まった", "止まらない"]:
+            self.assertTrue({"止まる", "止める"} & set(lemmas(CODE, "// " + form)), form)
+
+    def test_compounds_of_short_stems_are_not_caught(self):
+        compounds = {
+            "godan, one kanji": ["書類", "書式", "使用", "取得", "読者", "送信", "止血"],
+            "ichidan, one kanji": ["出力", "見積", "得意"],
+            "kuru": ["来年", "来歴"],
+            "adjective, one kanji": ["多数", "長期", "古代", "速度", "短縮"],
+            "ichidan, kana stem": ["受付", "付録", "決定"],
+            "できる": ["出来事", "出来高", "できごと"],
+        }
+        for cls, words in compounds.items():
+            for word in words:
+                self.assertEqual(lemmas(CODE, "// " + word), [], f"{cls}: {word}")
+
     def test_the_longest_match_wins(self):
         self.assertEqual(lemmas(CODE, "// やり直します"), ["やり直す"])
         self.assertEqual(lemmas(CODE, "// 食い違います"), ["食い違う"])
@@ -144,6 +186,13 @@ class AllowList(unittest.TestCase):
         self.assertEqual([(h.line, h.word) for h in left], [(1, "使い")])
         self.assertEqual(left[0].start, len("// 「使い方」を参照して"))
 
+    def test_an_allow_entry_covers_a_finding_across_lines(self):
+        entry = '[[allow]]\npath = "a.md"\ntext = "Aの\\nBのCのD"\nkind = "no-chain"\nword = "AのBのCのD"\n'
+        allow = ja_wording.load_allow(self.write(entry + 'reason = "a heading path"\n'))
+        hits = ja_wording.hits_in("a.md", "Aの\nBのCのD\n", RULES, False)
+        self.assertEqual([h.kind for h in hits], ["no-chain"])
+        self.assertEqual(ja_wording.unallowed("a.md", hits, allow), [])
+
     def test_an_entry_without_a_reason_fails(self):
         with self.assertRaises(ValueError):
             ja_wording.load_allow(self.write(self.ENTRY + 'reason = " "\n'))
@@ -174,6 +223,16 @@ class Data(unittest.TestCase):
         self.assertEqual({k: len(data[k]) for k in ("retired", "joint", "native")}, INVENTORY)
         for text, lemma in PLANTED.items():
             self.assertEqual(lemmas(CODE, "// " + text)[:1], [lemma], text)
+
+    def test_no_entry_was_lost_since_0da0fa07(self):
+        for form in FORMS_AT_0DA0FA07.split():
+            if form in REMOVED_SINCE_0DA0FA07:
+                continue
+            probe = PROBE.get(form, form)
+            text = "// " + probe + "の"
+            at = len("// ") + probe.index(form)
+            hits = ja_wording.hits_in(CODE, text, RULES, False)
+            self.assertTrue(any(h.start <= at < h.end for h in hits), form)
 
     def test_every_entry_wins_over_the_entries_inside_it(self):
         for rule in RULES:

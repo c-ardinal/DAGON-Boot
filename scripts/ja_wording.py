@@ -47,6 +47,7 @@ TABLE_ROW = re.compile(r"^\s*\|")
 # A list item, or a label line (**名称**: …, 名称: …): a noun ending there closes a fragment, not a sentence.
 FRAGMENT_LINE = re.compile(r"^\s*(?:[-*+]|\d+\.)\s|^\s*(?:\*\*[^*]+\*\*|[^\s。:：]{1,30})[:：]\s")
 HIRAGANA = re.compile("[ぁ-ゖ]$")
+LINE_BREAK = re.compile(r"\n[ \t]*")
 ALLOW_KEYS = ("path", "text", "kind", "word", "reason")
 
 
@@ -65,7 +66,8 @@ class Hit(NamedTuple):
     word: str
     lemma: str
     suggest: str
-    source: str
+    text: str
+    at: int
 
 
 def _pattern(entry: dict, conjugation: dict) -> str:
@@ -190,28 +192,30 @@ def _findings(text: str, rules: list[Rule], polite: bool) -> list[tuple[str, int
 
 
 def hits_in(path: str, text: str, rules: list[Rule], polite: bool) -> list[Hit]:
-    """Every finding in one file's text, on the line where it starts; code in Markdown is
-    left out (masking keeps every character's position, so the reported word is cut from
-    the source)."""
+    """Every finding in one file's text, on the line where it starts, its word joined onto
+    one line; code in Markdown is left out (masking keeps every character's position, so
+    the reported word is cut from the source)."""
     masked = mask_code(text) if path.endswith(MARKDOWN) else text
     starts = [0] + [i + 1 for i, c in enumerate(text) if c == "\n"]
-    sources = text.split("\n")
     hits = []
     for kind, a, b, lemma, sug in sorted(_findings(masked, rules, polite), key=lambda f: f[1]):
         n = bisect.bisect_right(starts, a) - 1
-        hits.append(Hit(n + 1, a - starts[n], b - starts[n], kind, text[a:b], lemma, sug, sources[n]))
+        word = LINE_BREAK.sub("", text[a:b])
+        hits.append(Hit(n + 1, a - starts[n], b - starts[n], kind, word, lemma, sug, text, a))
     return hits
 
 
 def _covers(entry: dict, path: str, hit: Hit) -> bool:
-    """Whether the entry names this finding: its path, kind and word, inside the entry's text."""
+    """Whether the entry names this finding: its path, kind and word, inside the entry's text
+    (searched in the whole file, so a finding across lines is named like any other)."""
     if not fnmatch.fnmatchcase(path, entry["path"]) or (entry["kind"], entry["word"]) != (hit.kind, hit.word):
         return False
-    at = hit.source.find(entry["text"])
+    end = hit.at + hit.end - hit.start
+    at = hit.text.find(entry["text"])
     while at >= 0:
-        if at <= hit.start and hit.end <= at + len(entry["text"]):
+        if at <= hit.at and end <= at + len(entry["text"]):
             return True
-        at = hit.source.find(entry["text"], at + 1)
+        at = hit.text.find(entry["text"], at + 1)
     return False
 
 

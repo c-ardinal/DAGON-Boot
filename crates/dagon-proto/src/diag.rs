@@ -501,6 +501,41 @@ impl<'a> LinkDiagResp<'a> {
             && self.info.store & store::RETENTION <= store::RETENTION_POWER_CUT
     }
 
+    /// Whether this is a well-formed page of the answer to `q`: readable,
+    /// its elements of `q`'s report and all asked for, their keys rising
+    /// and above `q`'s cursor, and NEXT, when present, the key of its last
+    /// element. `Status::Arg` for anything else, so a reader never takes a
+    /// malformed page for the end of the records.
+    pub fn page_of(&self, q: &LinkDiagReq) -> Result<(), Status> {
+        if !self.readable() {
+            return Err(Status::Arg);
+        }
+        let (mut last, mut n) = (q.cursor, 0);
+        let mut step = |k: Key, wanted: bool| {
+            let rising = last.is_none_or(|l| k > l);
+            last = Some(k);
+            n += 1;
+            wanted && rising
+        };
+        let avail = self.info.availability;
+        let elements = match (self.elements, q.report) {
+            (Elements::None, _) => true,
+            (Elements::Entries(_), Report::Dtcs { .. }) => {
+                (self.elements.entries()).all(|e| step(e.key(), q.wants_entry(&e, avail)))
+            }
+            (Elements::Peers(_), Report::Peers) => {
+                (self.elements.peers()).all(|p| step(p.key(), q.wants_peer(&p)))
+            }
+            _ => false,
+        };
+        let next = self.next.is_none_or(|k| n > 0 && Some(k) == last);
+        if elements && next {
+            Ok(())
+        } else {
+            Err(Status::Arg)
+        }
+    }
+
     pub fn parse(b: &'a [u8]) -> Result<Self, Status> {
         let format = *b.first().ok_or(Status::Arg)?;
         if format != link_diag::FORMAT {

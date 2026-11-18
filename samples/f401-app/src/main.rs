@@ -1,5 +1,5 @@
 //! NUCLEO-F401RE demo app with DAGON: DAGON starts through the board
-//! package's public `start` (the I2C target link to the upstream node, update
+//! package's public `start` (the I2C target link to the neighbour toward the PC, update
 //! receiver, trial and confirm), and the app shows its own version on the
 //! X-NUCLEO-53L0A1's 4-digit 7-segment display (`110` for 1.1.0: the
 //! shield has no points), stacked on the board's Arduino I2C. While DAGON
@@ -17,7 +17,7 @@
 //! rolled back.
 //!
 //! `confirm`: the start confirms a version on trial itself (bench use
-//! without an upstream node), through the public start's `Confirm::Own`.
+//! without a neighbour toward the PC), through the public start's `Confirm::Own`.
 //! `no-confirm`: the self-check always fails, so CONFIRM is refused and the
 //! trial rolls back (hardware tests).
 #![no_std]
@@ -50,7 +50,7 @@ const TICK: Duration = Duration::from_millis(250);
 const DISPLAY_TASK: usize = node::APP_TASKS;
 const TASKS: usize = DISPLAY_TASK + 1;
 
-/// A version on trial is never fed: unless the upstream node confirms it, the
+/// A version on trial is never fed: unless the neighbour toward the PC confirms it, the
 /// watchdog resets the chip and the boot core goes back to the previous
 /// version.
 static GUARD: Guard<TASKS> = Guard::new(node::levels::<TASKS>(), Trial::NeverFeed, now_ms);
@@ -60,7 +60,7 @@ fn self_check() -> bool {
     !cfg!(feature = "no-confirm")
 }
 
-/// Who confirms a version on trial: the upstream node, or this app at start with
+/// Who confirms a version on trial: the neighbour toward the PC, or this app at start with
 /// `confirm`.
 const CONFIRM: Confirm = if cfg!(feature = "confirm") {
     Confirm::Own

@@ -5,7 +5,7 @@ each step. This tests DAGON together with the sample apps on this one setup
 configuration; it is a sample, not part of DAGON. Python 3.11+ standard
 library only; Windows (the hub identity check uses PowerShell).
 
-The setup: the node linked to the PC is a Waveshare RP2040-Touch-LCD-1.28 on USB (`hub`), NUCLEO-F401RE
+The setup: a Waveshare RP2040-Touch-LCD-1.28 on USB (`hub`), NUCLEO-F401RE
 + X-NUCLEO-53L0A1 on I2C 0x42 (`seg`), M5StopWatch on UART (`watch`), all
 connected; a DAGON project for it (`topology.yaml` as
 `topology/sample.yaml`, `dagon.toml` with `[build.hub]`, `[build.seg]`,

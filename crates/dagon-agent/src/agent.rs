@@ -121,6 +121,10 @@ pub struct Agent<S, X, V, W = writer::App, const L: usize = 1> {
     /// The link the transfer in progress was begun over: its chunks and
     /// its end are taken from that link only.
     xfer_link: usize,
+    /// The node's clock at its last [`Agent::tick`], and when the link of
+    /// the transfer last brought a request ([`IDLE_TIMEOUT_MS`] runs from it).
+    now_ms: u64,
+    xfer_heard_ms: u64,
     /// Kept apart from a link's reply, which a repeated request is
     /// answered from.
     refusal: [u8; REFUSAL_BUF],
@@ -177,6 +181,8 @@ impl<S: SlotStore, X: AppChain, V: SigVerifier, W: Writer, const L: usize> Agent
             links: [Requester::NEW; L],
             on: 0,
             xfer_link: 0,
+            now_ms: 0,
+            xfer_heard_ms: 0,
             refusal: [0; REFUSAL_BUF],
             front: CmdSet::EMPTY,
         };
@@ -260,10 +266,14 @@ impl<S: SlotStore, X: AppChain, V: SigVerifier, W: Writer, const L: usize> Agent
     /// The node's link `on`, of kind `link`, stopped carrying frames
     /// (`app.link_down`). Whoever asks over it next is another requester:
     /// what the session kept of this one (the payload its HELLO named, its
-    /// last reply) is dropped. The other links keep theirs.
+    /// last reply) is dropped, and so is the transfer it began. The other
+    /// links keep theirs.
     pub fn link_down_on(&mut self, on: usize, link: u8, addr: u8) {
         if let Some(requester) = self.links.get_mut(on) {
             *requester = Requester::NEW;
+        }
+        if on == self.xfer_link {
+            self.end_session(AbortCause::Timeout);
         }
         noted(self.node.link_down(&mut self.chain, link, addr));
     }
@@ -305,6 +315,19 @@ impl<S: SlotStore, X: AppChain, V: SigVerifier, W: Writer, const L: usize> Agent
     /// Drops any transfer in progress (call after [`IDLE_TIMEOUT_MS`] of silence).
     pub fn abort(&mut self) {
         self.end_session(AbortCause::Timeout);
+    }
+
+    /// The node's clock reads `now_ms` (milliseconds, monotonic): a
+    /// transfer whose own link brought no request for [`IDLE_TIMEOUT_MS`]
+    /// is dropped; requests over the node's other links do not keep it.
+    /// A node that serves more than one link calls this at every wake and
+    /// before every request it hands to [`Agent::handle_on`]; a node that
+    /// never does keeps its own timer and calls [`Agent::abort`].
+    pub fn tick(&mut self, now_ms: u64) {
+        self.now_ms = now_ms;
+        if now_ms.saturating_sub(self.xfer_heard_ms) >= u64::from(IDLE_TIMEOUT_MS) {
+            self.end_session(AbortCause::Timeout);
+        }
     }
 
     /// The reply to a reboot has left: `app.before_reboot`. Call right
@@ -365,6 +388,9 @@ impl<S: SlotStore, X: AppChain, V: SigVerifier, W: Writer, const L: usize> Agent
                     .expect("response fits RESP_BUF");
             link.resp_reboot = reboot;
             link.last = Some((frame.seq, frame.cmd));
+        }
+        if on == self.xfer_link {
+            self.xfer_heard_ms = self.now_ms;
         }
         let link = &self.links[on];
         Some(Reply {

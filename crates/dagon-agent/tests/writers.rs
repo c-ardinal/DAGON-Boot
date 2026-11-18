@@ -914,6 +914,62 @@ fn each_link_has_its_own_requester() {
     assert!(n.agent.handle_on(2, &buf[..len]).is_none());
 }
 
+/// A transfer's idle deadline belongs to the link it was begun over:
+/// another link's requests never extend it, and its own link going down
+/// ends it. The node's clock is what `tick` is given.
+#[test]
+fn a_transfer_times_out_on_its_own_link_only() {
+    let idle = u64::from(dagon_agent::IDLE_TIMEOUT_MS);
+    let begin = begin(target::APP, 1, HEADER_SIZE as u16);
+    let chunk = |offset: u32| {
+        wire(|p| {
+            XferChunk {
+                offset,
+                data: &[0; 100],
+            }
+            .encode(p)
+        })
+    };
+    let at = |n: &mut TwoLinks, ms: u64, on: usize, seq: u8, cmd: Cmd, p: &[u8]| {
+        n.agent.tick(ms);
+        n.ask(on, seq, cmd, p).0
+    };
+
+    // UART begins; USB keeps asking past UART's deadline: UART's next
+    // chunk finds the transfer gone.
+    let mut n = TwoLinks::new();
+    assert_eq!(at(&mut n, 0, UART, 1, Cmd::XferBegin, &begin), Status::Ok);
+    for (i, ms) in (1..=4).map(|i| (i, i * idle / 3)) {
+        assert_eq!(at(&mut n, ms, USB, i as u8, Cmd::Status, &[]), Status::Ok);
+    }
+    let late = at(&mut n, 4 * idle / 3, UART, 2, Cmd::XferHdr, &chunk(0));
+    assert_eq!(late, Status::State, "USB traffic kept UART's transfer");
+
+    // UART's own requests keep it, however long the whole takes.
+    let mut n = TwoLinks::new();
+    assert_eq!(at(&mut n, 0, UART, 1, Cmd::XferBegin, &begin), Status::Ok);
+    let t = idle - 1;
+    assert_eq!(at(&mut n, t, UART, 2, Cmd::XferHdr, &chunk(0)), Status::Ok);
+    assert_eq!(
+        at(&mut n, 2 * t, UART, 3, Cmd::XferHdr, &chunk(100)),
+        Status::Ok
+    );
+    // A tick alone, at the deadline, ends it.
+    n.agent.tick(3 * t + 1);
+    assert_eq!(n.ask(UART, 4, Cmd::XferHdr, &chunk(200)).0, Status::State);
+
+    // The other link going down leaves it; its own link going down ends it.
+    let mut n = TwoLinks::new();
+    assert_eq!(at(&mut n, 0, UART, 1, Cmd::XferBegin, &begin), Status::Ok);
+    n.agent.link_down_on(USB, 0, 0);
+    assert_eq!(at(&mut n, 1, UART, 2, Cmd::XferHdr, &chunk(0)), Status::Ok);
+    n.agent.link_down_on(UART, 0, 0);
+    assert_eq!(
+        at(&mut n, 2, UART, 3, Cmd::XferHdr, &chunk(100)),
+        Status::State
+    );
+}
+
 #[test]
 fn the_app_answers_within_what_the_requester_takes() {
     answers_fit_what_the_requester_takes::<writer::App>();

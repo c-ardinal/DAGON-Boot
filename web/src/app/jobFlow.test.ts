@@ -135,7 +135,7 @@ describe('the first write of a node, while connected', () => {
 });
 
 describe('the first write of a node', () => {
-  const nodes = [{ id: 'hub' }, { id: 'seg' }, { id: 'garden', notYet: 'no link' }];
+  const nodes = [{ id: 'hub' }, { id: 'seg' }, { id: 'garden', skip: 'no link' }];
 
   test('with nothing connected every writable node can be started; one writing cannot reach, not', () => {
     expect(firstWriteNodes(nodes, {}, false, 'idle')).toEqual(['hub', 'seg']);

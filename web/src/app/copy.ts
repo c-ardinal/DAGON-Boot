@@ -1,6 +1,6 @@
 // Every visible and announced string of the page. Chips and labels use the
 // "label value" / "symbol + word" form; sentences appear only where the user
-// acts, one sentence each. Comments name the copy-table ids.
+// acts, one sentence each.
 import type { Action, HubState, Step } from './machine.ts';
 
 export const PRODUCT = 'DAGON Console';
@@ -21,7 +21,7 @@ export const STEP = {
   of3: (s: Step): 1 | 2 | 3 | 'recover' => (s === 'recover' ? s : s <= 3 ? 1 : s === 4 ? 2 : 3),
 } as const;
 
-/** M48: hub connection in the header (no node counts here). */
+/** Hub connection in the header (no node counts here). */
 export const HUB = {
   idle: '○ 未接続',
   checking: '… 親機 確認中',
@@ -50,7 +50,7 @@ export const BUTTON = {
 export const BUTTON_FOR = {
   recover: (name: string) => `${name}へ書き込む`,
   updateResponding: (n: number) => `応答する ${n} つだけ先に書き込む`,
-  /** M50: the update after a recovery, over the nodes not written yet. */
+  /** The update after a recovery, over the nodes not written yet. */
   updateRest: '残りのノードへ書き込む',
 } as const;
 
@@ -64,46 +64,46 @@ export interface BandCopy {
 
 /** Bottom band: the cause chip and the one sentence beside the buttons. */
 export const BAND = {
-  M03: { sentence: '次に出る一覧で「DAGON hub」を選び、『接続』を押してください。' },
-  M04: { chip: '× 未検出', sentence: 'USB ケーブルを挿し直してから、もう一度押してください。' },
-  M05: { chip: '× 使用中', sentence: '親機を使っているタブやアプリ（dagon CLI を含む）を閉じてから、もう一度押してください。' },
-  M06: { chip: '× 許可なし', sentence: 'ターミナルに表示されたアドレスから開き直してください。' },
-  M08: { chip: '× 応答なし', sentence: '一覧から「DAGON hub」を選び直してください。' },
-  M13: { sentence: 'パッケージファイルをこの画面に置くか、選んでください。' },
+  choose: { sentence: '次に出る一覧で「DAGON hub」を選び、『接続』を押してください。' },
+  notFound: { chip: '× 未検出', sentence: 'USB ケーブルを挿し直してから、もう一度押してください。' },
+  portBusy: { chip: '× 使用中', sentence: '親機を使っているタブやアプリ（dagon CLI を含む）を閉じてから、もう一度押してください。' },
+  denied: { chip: '× 許可なし', sentence: 'ターミナルに表示されたアドレスから開き直してください。' },
+  noResponse: { chip: '× 応答なし', sentence: '一覧から「DAGON hub」を選び直してください。' },
+  ready: { sentence: 'パッケージファイルをこの画面に置くか、選んでください。' },
   /** ready with a build to write: the main action writes it. */
-  M13built: { sentence: '書き込むノードにチェックを入れて、『書き込む』を押してください。' },
-  /** M14 / M15 / M28: label-value pair, no sentence. */
-  M14: { pair: ['目安', '約 1 分'] },
-  M18: { sentence: '何も書いていないので、準備でもう一度ビルドするか、正しいファイルを選んでください。' },
-  M18b: { sentence: '何も書いていないので、別のファイルを選んでください。' },
-  M19: { sentence: '何も書いていないので、別のファイルを選んでください。' },
-  M20: { sentence: '何も書いていないので、この構成向けのファイルを選んでください。' },
-  M22: { sentence: '終わるまで電源と USB を抜かず、このページを開いたままにしてください。途中で止まっても、ノードはもう一度書き込める状態で動きます。' },
-  M33: { sentence: '基板どうしの配線が抜けていないか確かめてから、もう一度試してください。' },
-  M34: { sentence: 'USB ケーブルを挿し直してから、もう一度つないでください。' },
-  M35: { chip: '× 作成失敗', sentence: 'そのフォルダに書き込めるか確かめてから、もう一度選んでください。' },
-  /** M58: "最新のリリースを使う" found no release in the project. */
-  M58: { chip: '× ビルドなし', sentence: '準備でビルドするか、パッケージファイルを選んでください。' },
-  /** M57: part of the page (dagon-wasm) did not load. */
-  M57: { chip: '× 読み込み失敗', sentence: 'このページの一部を読み込めませんでした。ページを開き直してください。' },
-  /** M26: reconnectNeeded (the dialog's sentence, and the band's once the dialog is closed). */
-  M26: { sentence: '『もう一度つなぐ』を押して、同じ機器を選んでください。' },
-  M59: { sentence: 'そのまま待ってください（数秒で終わります）。' },
-  M60: { sentence: '見つかったノードが降りてくるまで、そのまま待ってください。' },
+  readyBuilt: { sentence: '書き込むノードにチェックを入れて、『書き込む』を押してください。' },
+  /** Label-value pair, no sentence. */
+  estimate: { pair: ['目安', '約 1 分'] },
+  sourceRefused: { sentence: '何も書いていないので、準備でもう一度ビルドするか、正しいファイルを選んでください。' },
+  keyRefused: { sentence: '何も書いていないので、別のファイルを選んでください。' },
+  formatRefused: { sentence: '何も書いていないので、別のファイルを選んでください。' },
+  topologyRefused: { sentence: '何も書いていないので、この構成向けのファイルを選んでください。' },
+  writing: { sentence: '終わるまで電源と USB を抜かず、このページを開いたままにしてください。途中で止まっても、ノードはもう一度書き込める状態で動きます。' },
+  recoverFailed: { sentence: '基板どうしの配線が抜けていないか確かめてから、もう一度試してください。' },
+  lost: { sentence: 'USB ケーブルを挿し直してから、もう一度つないでください。' },
+  folderFailed: { chip: '× 作成失敗', sentence: 'そのフォルダに書き込めるか確かめてから、もう一度選んでください。' },
+  /** "最新のリリースを使う" found no release in the project. */
+  noRelease: { chip: '× ビルドなし', sentence: '準備でビルドするか、パッケージファイルを選んでください。' },
+  /** Part of the page (dagon-wasm) did not load. */
+  pageLoadFailed: { chip: '× 読み込み失敗', sentence: 'このページの一部を読み込めませんでした。ページを開き直してください。' },
+  /** reconnectNeeded (the dialog's sentence, and the band's once the dialog is closed). */
+  reconnectNeeded: { sentence: '『もう一度つなぐ』を押して、同じ機器を選んでください。' },
+  checking: { sentence: 'そのまま待ってください（数秒で終わります）。' },
+  scanning: { sentence: '見つかったノードが降りてくるまで、そのまま待ってください。' },
   /**
    * The answering nodes are updated first, a silent one from its card:
    * nodesSilent, with a power and wiring hint for the silent ones.
    */
-  M62b: { sentence: '応答しないノードは電源と配線を確かめ、応答するノードから先に書き込んでください。' },
-  /** M62: nodesSilent when the answering nodes need nothing more (already updated, or after 「応答する n つだけ先に書き込む」). */
-  M62: { pair: ['目安', '約 1 分'], sentence: '印の付いたノードは、書き込むと元どおりに動きます。' },
-  M63: { sentence: '確かめ終わるまで、そのまま待ってください。' },
-  M64: { sentence: '親機が再起動したら自動でつなぎ直すので、そのまま待ってください。' },
-  M65: { pair: ['目安', '約 1 分'], sentence: '止まったノードへ書き込むと、新しいバージョンで動きます。' },
-  M66: { sentence: 'すべてのノードへ書き込みました。' },
-  M66checked: { sentence: 'チェックしたノードへ書き込みました。' },
-  M66none: { sentence: 'チェックしたノードはすでにこのパッケージの内容なので、書き込みませんでした。' },
-  M67: { sentence: 'CLI の作業が終わると、自動でつなぎ直します。' },
+  nodesSilent: { sentence: '応答しないノードは電源と配線を確かめ、応答するノードから先に書き込んでください。' },
+  /** nodesSilent when the answering nodes need nothing more (already updated, or after 「応答する n つだけ先に書き込む」). */
+  silentLeft: { pair: ['目安', '約 1 分'], sentence: '印の付いたノードは、書き込むと元どおりに動きます。' },
+  verifying: { sentence: '確かめ終わるまで、そのまま待ってください。' },
+  hubRestarting: { sentence: '親機が再起動したら自動でつなぎ直すので、そのまま待ってください。' },
+  stopped: { pair: ['目安', '約 1 分'], sentence: '止まったノードへ書き込むと、新しいバージョンで動きます。' },
+  doneAll: { sentence: 'すべてのノードへ書き込みました。' },
+  doneChecked: { sentence: 'チェックしたノードへ書き込みました。' },
+  doneNone: { sentence: 'チェックしたノードはすでにこのパッケージの内容なので、書き込みませんでした。' },
+  cliTurn: { sentence: 'CLI の作業が終わると、自動でつなぎ直します。' },
 } as const satisfies Record<string, BandCopy>;
 
 /**
@@ -145,20 +145,20 @@ export const BAND_CHIP = {
   silent: '× 応答なし',
 } as const;
 
-/** M29: beside the recover button when nodes after the stopped one are not written yet. */
+/** Beside the recover button when nodes after the stopped one are not written yet. */
 export const BAND_FOR = {
-  M29: (stuck: string) => ({ pair: ['目安', '約 1 分'] as const, sentence: `${stuck}を直すと、残りのノードへ書き込めます。` }),
-  /** done when M66 is not true: the nodes that did not answer were not updated. */
-  M66some: (n: number) => ({ sentence: `応答しなかった ${n} つのノードは前のままなので、電源と配線を確かめてから書き込んでください。` }),
+  stoppedAt: (stuck: string) => ({ pair: ['目安', '約 1 分'] as const, sentence: `${stuck}を直すと、残りのノードへ書き込めます。` }),
+  /** done when doneAll is not true: the nodes that did not answer were not updated. */
+  doneSome: (n: number) => ({ sentence: `応答しなかった ${n} つのノードは前のままなので、電源と配線を確かめてから書き込んでください。` }),
   /** done after 「前のバージョンに戻す」. */
   /** done when some nodes were already on the package. */
-  M66part: (wrote: number, same: number) => ({ sentence: `${wrote} つのノードへ書き込み、${same} つのノードはすでに同じ内容なので、書き込みませんでした。` }),
-  M66back: (name: string, version: string) => ({ sentence: `${name}は前のバージョン ${version} で動いています。` }),
+  donePart: (wrote: number, same: number) => ({ sentence: `${wrote} つのノードへ書き込み、${same} つのノードはすでに同じ内容なので、書き込みませんでした。` }),
+  doneBack: (name: string, version: string) => ({ sentence: `${name}は前のバージョン ${version} で動いています。` }),
   /** done after a recovery with nothing left to update. */
-  M66fixed: (name: string, version: string) => ({ sentence: `${name}は直り、${version} で動いています。` }),
+  doneFixed: (name: string, version: string) => ({ sentence: `${name}は直り、${version} で動いています。` }),
 } as const;
 
-/** M01: browser without Web Serial. */
+/** Browser without Web Serial. */
 export const UNSUPPORTED = {
   heading: '非対応のブラウザ',
   supportLabel: '対応',
@@ -475,23 +475,23 @@ export const CANVAS = {
   pc: 'このパソコン（ブラウザ）',
   /** Uplink card by each 親機's uplink host as the 構成 writes it (none written: dagon on a PC). */
   pcBy: { 'pc-cli': 'パソコン（dagon）', browser: 'ブラウザ（パソコン・スマホ）', embedded: '組込み機器' } as Record<string, string>,
-  /** C02 */
+  /** The empty canvas. */
   empty: '親機を USB でパソコンにつないでから、『つないで、自動で見つける』を押してください。',
   /** After the uplink card of a 親機 this page is not connected to. */
   notThisPc: '未接続',
-  /** S17: canvas description for screen readers. */
+  /** Canvas description for screen readers. */
   describe: '矢印でノードを移り、Enter で選びます。ほかのキーは「困ったとき」の「キー操作」にあります。',
-  /** M49 dot-number labels. */
+  /** Dot-number labels. */
   dotResponding: '応答',
   dotFound: '発見',
-  /** M49 during an update, and after it stopped. */
+  /** Dot number during an update, and after it stopped. */
   dotProgress: '全ノードの進み具合',
   dotPercent: '%',
   dotStopped: '% 停止',
   dotProgressName: (n: number, stopped: boolean) => `全ノードの進み具合 ${n}%${stopped ? '、停止' : ''}`,
   dotRespondingName: (n: number, of: number) => `応答 ${n}/${of}、${of} つのノードのうち ${n} つが応答`,
   dotFoundName: (n: number) => `発見 ${n}`,
-  /** S19 */
+  /** The link to the wiring table. */
   wiringLink: '配線表を見る',
 } as const;
 
@@ -499,7 +499,7 @@ export const CANVAS = {
 export const NODE = {
   roleHub: '親機',
   roleNode: '子機',
-  /** A node under a 子機 (TOPO2), and the rows below that. */
+  /** A node under a 子機, and the rows below that. */
   roleGrandchild: '孫機',
   roleDeeper: (d: number) => `孫機の下（${d} 段目）`,
   mcu: 'MCU',
@@ -507,15 +507,15 @@ export const NODE = {
   usb: 'USB（パソコン）',
   uplinkVia: (kind: string, host: string) =>
     `${kind}（${({ 'pc-cli': 'パソコン', browser: 'ブラウザ', embedded: '組込み機器' } as Record<string, string>)[host] ?? 'パソコン'}）`,
-  /** S03 pin headings and the no-wire value. */
+  /** Pin headings and the no-wire value. */
   reset: 'リセット',
   boot: '起動',
   noWire: 'なし（本体側で切替）',
-  /** S04 / S38 */
+  /** Node state chips. */
   responding: '● 応答あり',
   silent: '× 応答なし',
   trial: '● 確認待ち',
-  /** S04 / S38 during an update. */
+  /** Node state chips during an update. */
   writing: '▼▼ 書き込み中',
   waiting: '… 待ち',
   done: '✓ 完了',
@@ -541,10 +541,10 @@ export const NODE = {
     format: '× 形式違い',
   } as Record<string, string>,
   refusedOther: '× 受付拒否',
-  /** S04 during a recovery. */
+  /** Node state chips during a recovery. */
   lastResort: '◎ 最後の手段',
   cannotFix: '× 書き込めず',
-  /** W7: full spoken state of a chip. */
+  /** Full spoken state of a chip. */
   respondingName: '応答あり',
   silentName: '応答なし、2 回続けて返事がない',
   trialName: '確認待ち',
@@ -552,16 +552,16 @@ export const NODE = {
   name: (p: { name: string; product: string; mcu: string; role: string; via: string; state: string; version: string }) =>
     [p.name, `${p.product} · ${p.mcu}`, p.role, p.via, p.state, p.version && `バージョン ${p.version}`].filter(Boolean).join('、'),
   viaName: (via: string) => `親機と ${via}`,
-  /** A node updating does not reach yet: a calm note, not a fault. */
-  notYet: '◇ 書き込めない',
-  notYetWhy: {
+  /** A node updating skips: a calm note, not a fault. */
+  skipped: '◇ 書き込めない',
+  skippedWhy: {
     'second-hub': '2 つ目の親機の側にあるため',
     deep: '子機の先にあるため',
     'link-kind': 'このつながりの種類では、書き込みが届かないため',
     unreachable: 'どの親機からもリンクがたどれないため',
     'cut-invalid': '書き込みが届く部分だけでは確認を通らないため（dagon topo check で理由を見られます）',
   } as Record<string, string>,
-  notYetName: (why: string) => `書き込めない、${why}`,
+  skippedName: (why: string) => `書き込めない、${why}`,
 } as const;
 
 /** Link chip and its spoken name. */
@@ -586,14 +586,14 @@ export const LINK_WHY = {
 
 /** Right column. */
 export const DETAIL = {
-  /** M40 */
+  /** Nothing selected. */
   nothingSelected: 'ノードを選ぶと、ここに詳細が出ます。',
-  /** M42 */
+  /** The first steps, before anything is selected. */
   introHeading: 'はじめに',
-  /** M42: the same three steps as the header. */
+  /** The same three steps as the header. */
   introSteps: ['つなぐ', 'ファイル', '書き込み'],
   introNote: '止まっても 書き直せる',
-  /** S36 */
+  /** Link figures of the node. */
   rtt: '往復',
   lastSeen: '最後の応答',
   attempts: '試した回数',
@@ -607,7 +607,7 @@ export const DETAIL = {
   details: '詳しく見る',
 } as const;
 
-/** M38: a node on trial that this page did not apply (the detail, above its buttons). */
+/** A node on trial that this page did not apply (the detail, above its buttons). */
 export const TRIAL_CHOICE = {
   sentence: 'このバージョンのままにするか、前のバージョンがあればそこへ戻すかを選んでください。',
   keep: 'このバージョンのままにする',
@@ -616,7 +616,7 @@ export const TRIAL_CHOICE = {
 
 /** The detail's actions and the recovery figures under 詳しく見る. */
 export const NODE_ACTION = {
-  /** UC-O10, shown when the other slot holds a version to go back to. */
+  /** Going back to the previous version, shown when the other slot holds a version to go back to. */
   back: (version: string) => `前のバージョン（${version}）に戻す`,
   /** 詳しく見る: how the last recovery got through. */
   path: '経路',
@@ -640,7 +640,7 @@ export const SLOT = {
   present: 'あり',
 } as const;
 
-/** S20 wiring table. */
+/** Wiring table. */
 export const WIRING = {
   heading: '配線表',
   cols: ['信号', '親機', '子機', '共有'],
@@ -666,10 +666,10 @@ export const FILE = {
   notRelease: '× 形式違い',
 } as const;
 
-/** The hub reconnect dialog, and M27 beside the hub while the page reconnects by itself (hubRestarting). */
+/** The hub reconnect dialog, and the countdown beside the hub while the page reconnects by itself (hubRestarting). */
 export const RECONNECT = {
   heading: '親機の再接続',
-  sentence: BAND.M26.sentence,
+  sentence: BAND.reconnectNeeded.sentence,
   auto: '自動の再接続',
   left: (s: number) => `あと ${s} s`,
   /** why the page could not reconnect by itself (the diagnostic log under 詳しく見る). */
@@ -719,32 +719,32 @@ export const HELP = {
 
 /** Visually hidden announcements (role="status" / alert). */
 export const ANNOUNCE = {
-  A05: '親機 接続、ノード確認中',
-  A06: (n: number) => `発見 ${n}`,
-  A08: (n: number, of: number) => `応答 ${n}/${of}`,
-  A21silent: (name: string) => `${name} 応答なし`,
-  A21lost: '親機 切断',
-  A01: (product: string, hub: boolean) => `${product} 配置、${hub ? '親機' : '子機'}`,
-  A03: (name: string) => `${name} 削除、Ctrl+Z で戻せる`,
-  A04: (errors: number, warnings: number) => `問題 ${errors}、注意 ${warnings}`,
-  A22: (define: boolean) => (define ? '準備モード' : '書込モード'),
-  A09: (name: string, size: string) => `${name} ${size}、確認中`,
-  A10ok: (n: number, skipped = 0) => `配布元 確認済み、構成 一致、対象 ${n}${skipped ? `、書き込めない ${skipped} つは飛ばす` : ''}`,
-  A10source: '配布元 確認できない',
-  A10topology: '構成 不一致',
-  A10format: 'パッケージファイルではない',
-  A11: (name: string) => `${name} 書き込み`,
-  A11percent: (n: number) => `進み具合 ${n}%`,
-  A12: '親機 再起動中、自動で再接続',
-  A13: (name: string) => `書き込み 停止、${name}`,
-  A13core: (name: string) => `${name} 新しいブートローダは使われず`,
-  A13previous: (name: string) => `${name} 前のバージョン`,
-  A14: (version: string) => `完了、${version}`,
-  A21timeout: '親機 再接続 時間切れ',
-  A15: (name: string, version: string) => `${name} ${version} に戻した`,
-  A16: (name: string, rest: number) => `${name} 書き込み済み、残り ${rest}`,
+  hubConnected: '親機 接続、ノード確認中',
+  found: (n: number) => `発見 ${n}`,
+  responding: (n: number, of: number) => `応答 ${n}/${of}`,
+  nodeSilent: (name: string) => `${name} 応答なし`,
+  hubLost: '親機 切断',
+  placed: (product: string, hub: boolean) => `${product} 配置、${hub ? '親機' : '子機'}`,
+  removed: (name: string) => `${name} 削除、Ctrl+Z で戻せる`,
+  problems: (errors: number, warnings: number) => `問題 ${errors}、注意 ${warnings}`,
+  mode: (define: boolean) => (define ? '準備モード' : '書込モード'),
+  fileChecking: (name: string, size: string) => `${name} ${size}、確認中`,
+  fileOk: (n: number, skipped = 0) => `配布元 確認済み、構成 一致、対象 ${n}${skipped ? `、書き込めない ${skipped} つは飛ばす` : ''}`,
+  fileSource: '配布元 確認できない',
+  fileTopology: '構成 不一致',
+  fileFormat: 'パッケージファイルではない',
+  writing: (name: string) => `${name} 書き込み`,
+  progress: (n: number) => `進み具合 ${n}%`,
+  hubRestarting: '親機 再起動中、自動で再接続',
+  stopped: (name: string) => `書き込み 停止、${name}`,
+  coreBack: (name: string) => `${name} 新しいブートローダは使われず`,
+  previous: (name: string) => `${name} 前のバージョン`,
+  done: (version: string) => `完了、${version}`,
+  reconnectTimeout: '親機 再接続 時間切れ',
+  rolledBack: (name: string, version: string) => `${name} ${version} に戻した`,
+  recovered: (name: string, rest: number) => `${name} 書き込み済み、残り ${rest}`,
   /** "最新のリリースを使う" found no release in the project. */
-  A22latest: 'リリース なし',
+  noRelease: 'リリース なし',
 } as const;
 
 /** Words that never appear in operating-mode guidance, chips or results. */
@@ -755,7 +755,7 @@ export const FORBIDDEN_WORDS = [
   '巻き戻り', '不正', '致命的', '無効', '復旧の層', 'ブートコア',
 ] as const;
 
-/** S07: short names of the check rules (problem chips and the problem list). */
+/** Short names of the check rules (problem chips and the problem list). */
 export const RULE_SHORT: Record<string, string> = {
   'V-01': 'ファイルの形式',
   'V-02': '名前の重なりとノードの数',
@@ -824,11 +824,11 @@ export const RULE_FIX: Record<string, (w: FixWords) => string> = {
   'V-20': (w) => `共有の 2 本線（I2C）の速さを、つながるノードの定義にあるもの（${w.hzs ?? '定義の速さ'}）のどれかにしてください。`,
   'V-21': (w) => `${w.to}は UART でつないでください。`,
   'V-22': (w) => `最後の手段で復旧するには、『直す』で ${w.to}のリセット・起動の配線を設定してください（このままでも書き込めます）。`,
-  'V-23': () => 'この構成のままで正しく使えます。いまの書き込みはこの部分に届かないため、書き込みではこの部分を飛ばします。',
+  'V-23': () => 'この構成のままで正常に使用できます。書き込みはこの部分に到達しないため、この部分をスキップします。',
   'V-24': (w) =>
     w.skipped
       ? `${w.to}のつながりは、使えない種類です。${w.to}は書き込みで飛ばすので、このままで使えます。`
-      : `${w.to ? `${w.to}の` : ''}つながりは、まだ使えない種類です。プロジェクトを作るには、使える種類を選んでください（このままでも保存できます）。`,
+      : `${w.to ? `${w.to}の` : ''}接続は、使用できない種類です。プロジェクトを作るには、使用できる種類を選択してください（このままでも保存できます）。`,
   'V-25': (w) => `${w.to}の代わりに、親機にできるマイコンのノードを親機にしてください。`,
   'V-26': () => 'UART の速さを、つなぐ両方のマイコンで誤差が 2 % 以内になる値にしてください。',
   'V-27': () => 'リンクの端のつなぐ口を、そのマイコンの定義にある、リンクと同じ種類のものにしてください。',
@@ -843,7 +843,7 @@ export const MODE = {
   offWhy: { locked: '書き込みが終わるまで、モードは変えられません', operate: '構成を作り、問題を直すと、書込を使えます' },
   /** 書込 pressed while the 構成 is not in the project's YAML. */
   lockedUnsaved: { sentence: '構成を保存すると、書込を使えます。' },
-  /** M69: 書込 pressed with no 構成 or one with problems. */
+  /** 書込 pressed with no 構成 or one with problems. */
   lockedProblems: { sentence: '構成を作り、問題を直すと、書込を使えます。' },
 } as const;
 
@@ -874,21 +874,21 @@ export const DEFINE = {
   importYaml: '読み込む',
   zoomIn: '大きく',
   zoomOut: '小さく',
-  /** M49 dot numbers in define mode. */
+  /** Dot numbers in define mode. */
   dotNodes: 'ノード',
   dotLinks: 'リンク',
   dotNodesName: (n: number, l: number) => `ノード ${n}、リンク ${l}`,
   dotProblems: '問題',
-  dotNotYet: '◇ 未対応',
+  dotSkipped: '◇ 書き込めない',
   dotProblemsName: (p: number, n: number, l: number) => `問題 ${p}、ノード ${n}、リンク ${l}`,
-  /** S25: nothing selected and nothing to fix. */
+  /** Nothing selected and nothing to fix. */
   nothingSelected: 'ノードかリンクを選ぶと、ここで直せます。',
   /** The problem list. */
   problems: (n: number) => `! 問題 ${n}`,
   problemsNone: '問題 0',
   cautions: (m: number) => `▲ 注意 ${m}`,
-  /** S45: parts not updatable yet or links not usable yet, after the cautions. */
-  unsupported: (k: number) => `◇ まだ ${k}`,
+  /** Parts updating skips and links of a kind the firmware does not run, after the cautions. */
+  unsupported: (k: number) => `◇ 制限 ${k}`,
   fix: '直す',
   ruleId: '規則 ID',
   yamlPath: 'YAML の場所',
@@ -896,7 +896,7 @@ export const DEFINE = {
   problemName: (short: string, rule: string, sentence: string) => `${short}、規則 ${rule}、${sentence}`,
   /** Bottom band. */
   emptySentence: '親機を USB でパソコンにつないでから、『つないで、自動で見つける』を押してください。',
-  /** E5: 書込 from 準備. */
+  /** 書込 from 準備. */
   toOperate: '書込へ',
   /** Writes the 構成 back to the project's YAML through dagon serve. */
   save: '保存',
@@ -906,7 +906,7 @@ export const DEFINE = {
   builtSentence: '書込に切り替えて、ノードへ書き込みます。',
   skeletonFirst: '先に雛形を生成すると、ビルドできます。',
   /** Nodes updating skips; the 構成 is valid as it is. */
-  notYetSentence: (k: number) => `書き込めないノードが ${k} つあります。構成はこのままで使え、書き込みではそのノードを飛ばします。`,
+  skippedSentence: (k: number) => `書き込めないノードが ${k} つあります。構成はこのままで使え、書き込みではそのノードを飛ばします。`,
   /** The 構成 of the release file chosen in 書込 replaces this one (undoable, saved to the YAML). */
   importFileTopology: 'ファイルの構成を取り込む',
   unreadableChip: '× 形式違い',
@@ -967,9 +967,9 @@ export const INSPECT = {
   uplink: '接続元',
   uplinkHost: '接続元の機器',
   hosts: { 'pc-cli': 'パソコンの dagon', browser: 'ブラウザ', embedded: '組込み機器' } as Record<string, string>,
-  /** On a kind the firmware does not implement yet. */
-  notYet: '未対応',
-  notYetOption: (label: string) => `${label}（未対応）`,
+  /** On a kind the MCU firmware at an end does not run. */
+  unavailable: '使用不可',
+  unavailableOption: (label: string) => `${label}（使用不可）`,
 } as const;
 
 /**
@@ -1089,8 +1089,8 @@ export const FLASH = {
   hubFirst: '親機がないと子機を確かめられないので、親機から順に書き込みます。',
   /** the confirmation before serve writes the board (its job question). */
   confirm: (name: string) => `${name} に書き込みます。よろしいですか。`,
-  /** a family serve's flash does not write yet (ESP32-S3). */
-  otherTools: 'このマイコンは、今は ESP のツールで書き込んでください。',
+  /** A family serve's flash does not write (ESP32-S3). */
+  otherTools: 'このマイコンは、ESP のツールで書き込んでください。',
   yes: 'はい',
   no: 'いいえ',
   done: '✓ 書き込み済み',
@@ -1164,14 +1164,14 @@ export const START = {
   /** The folder of a project (it holds dagon.toml). */
   project: '● プロジェクト',
   /**
-   * Why serve did not open or make it: 404 / 422 / 409 / 403. A folder that cannot be written is M35.
+   * Why serve did not open or make it: 404 / 422 / 409 / 403. A folder that cannot be written is BAND.folderFailed.
    */
   missing: { chip: '× フォルダ違い', sentence: 'dagon.toml のあるフォルダを選んでください。' },
   key: { chip: '× 鍵エラー', sentence: 'dagon serve のターミナルで鍵の理由を確かめてから、もう一度選んでください。' },
   busy: { chip: '… 作業中', sentence: '作業が終わってから、もう一度選んでください。' },
   refused: { chip: '× 範囲外', sentence: 'ホームフォルダの中のフォルダを選んでください。' },
   exists: { chip: '× 名前の重複', sentence: '使われていないフォルダの名前を入れてください。' },
-  /** S46: a folder with a 構成 but no dagon.toml. */
+  /** A folder with a 構成 but no dagon.toml. */
   initAsk: 'このフォルダに dagon.toml を作りますか。',
 } as const;
 

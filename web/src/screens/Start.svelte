@@ -19,11 +19,11 @@
   let modal = $state<'how' | 'where' | 'open' | null>(null);
   let how = $state<'new' | 'sample'>('new');
 
-  /** A folder that cannot be written or made is M35; the others are their own. */
+  /** A folder that cannot be written or made is BAND.folderFailed; the others are their own. */
   const fail = $derived.by(() => {
     const f = s.failed;
     if (!f) return null;
-    if (f === 'failed') return s.making ? BAND.M35 : START.missing;
+    if (f === 'failed') return s.making ? BAND.folderFailed : START.missing;
     return f === 'refused' && s.making ? { chip: START.cantMake, sentence: START.refused.sentence } : START[f];
   });
 

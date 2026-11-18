@@ -1960,7 +1960,7 @@ fn templates_get_the_hops_and_gen_refuses_one_not_available_yet() {
     )
     .unwrap_err();
     assert!(
-        e.contains("uplink of hub over ble: not available yet on rp2040"),
+        e.contains("uplink of hub over ble: the firmware of rp2040 does not run this link kind"),
         "{e}"
     );
     // A link a 子機 cannot do: named by its two ends.
@@ -1980,7 +1980,7 @@ fn templates_get_the_hops_and_gen_refuses_one_not_available_yet() {
     )
     .unwrap_err();
     assert!(
-        e.contains("link between 'hub' and 'seg' over wifi-tcp: not available yet"),
+        e.contains("link between 'hub' and 'seg' over wifi-tcp: the firmware of"),
         "{e}"
     );
 }

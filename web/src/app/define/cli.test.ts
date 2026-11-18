@@ -125,7 +125,7 @@ describe('dagon serve link', () => {
     expect(cli.defsFailed).toBe(false);
   });
 
-  test('a public page (no passphrase) stays K0; a wrong passphrase is K0 with its notice; a dead CLI is K3', async () => {
+  test('a public page (no passphrase) stays none; a wrong passphrase is denied with its notice; a dead CLI is stopped', async () => {
     const none = new Cli(fake({ hash: '' }).deps);
     await none.connect();
     expect(none.state).toBe('none');

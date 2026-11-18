@@ -58,7 +58,7 @@
   const name = (id: string) => d.doc.names[id] ?? id;
   const byId = (id: string) => t.nodes.find((n) => n.id === id);
   const HOSTS: UplinkHost[] = ['pc-cli', 'browser', 'embedded'];
-  const kindOption = (k: Kind, ok: boolean) => (ok ? kindChoice(k) : INSPECT.notYetOption(kindChoice(k)));
+  const kindOption = (k: Kind, ok: boolean) => (ok ? kindChoice(k) : INSPECT.unavailableOption(kindChoice(k)));
   /** A 親機's uplink: the kinds its MCU definition offers upwards, and the one the 構成 writes when it is not among them. */
   const uplinkKinds = (mcu: string, current: Kind): Kind[] => {
     const up: Kind[] = linkKinds(mcu).up;
@@ -71,7 +71,7 @@
     return d.problems.filter((p) => p.select === d.selected && (p.field === field || p.field.startsWith(`${field}.`)));
   }
 
-  /** Who else uses hub GPIO `n` (S20's in-use note). */
+  /** Who else uses hub GPIO `n` (the wiring table's in-use note). */
   function usedBy(n: number, self: string): string | null {
     for (const l of (t.links ?? []).map((x) => linkView(t, x))) {
       if (`${l.to}.nrst` !== self && l.nrst === n) return `${name(l.to)}の${INSPECT.reset}`;

@@ -29,13 +29,13 @@ export interface Node {
   /** A 親機's uplink as the 構成 writes it; absent when none is written (USB to the PC) or the 親機 is linked from another node. */
   uplink?: { kind: Kind; host: UplinkHost };
   /** Why updating skips this node (V-23); absent when updating reaches it. */
-  notYet?: Skip;
+  skip?: Skip;
 }
 
 /** What drives a 親機 through its uplink. */
 export type UplinkHost = 'pc-cli' | 'browser' | 'embedded';
 
-/** dagon_topology::Skip codes: why updating does not reach a node yet. */
+/** dagon_topology::Skip codes: why updating does not reach a node. */
 export type Skip = 'second-hub' | 'deep' | 'link-kind' | 'unreachable' | 'cut-invalid';
 
 export interface Wire {
@@ -64,7 +64,7 @@ export interface Config {
   /**
    * Ids of the nodes updating reaches, in the compiled topology's order
    * (dagon_topology::cut_with through dagon-wasm): dagon-host's node index
-   * is the place here. Every other node carries `notYet`.
+   * is the place here. Every other node carries `skip`.
    */
   reach: string[];
 }

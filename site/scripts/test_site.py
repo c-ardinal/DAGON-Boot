@@ -225,8 +225,6 @@ class Wording(unittest.TestCase):
     # What the status words may still appear in, and why.
     STATUS_QUOTES = [
         *NOTICE_LINES,  # the alpha notice, word for word
-        "まだ使えない",  # how-to/swap-link quotes the Console's label and problem name
-        "not available yet on rp2040",  # how-to/swap-link quotes dagon gen's refusal
     ]
 
     def test_status_words_only_on_the_limitations_page(self):

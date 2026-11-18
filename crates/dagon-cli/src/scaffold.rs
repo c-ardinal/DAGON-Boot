@@ -384,7 +384,7 @@ fn kind_variant(k: LinkKind) -> &'static str {
 /// `{{uplink}}` and `{{downlinks}}` of node `n`: its uplink kind (a 親機's
 /// declared one, else USB CDC; a 子機's link from its 親機) and its
 /// downlink kinds, as Rust paths into its MCU package. A hop its firmware
-/// does not implement yet is refused here, by name.
+/// does not run is refused here, by name.
 pub fn hop_placeholders(
     reg: &Registry,
     t: &Topology,
@@ -395,7 +395,7 @@ pub fn hop_placeholders(
     let path = |k: LinkKind| format!("{krate}::links::Kind::{}", kind_variant(k));
     let refuse = |hop: String, k: LinkKind| {
         format!(
-            "{hop} over {}: not available yet on {} (choose another kind in the 構成)",
+            "{hop} over {}: the firmware of {} does not run this link kind (choose another kind in the 構成)",
             k.name(),
             n.mcu
         )
@@ -840,7 +840,7 @@ fn node_files(
     let f = find_for(&root, &want).ok_or_else(|| {
         format!(
             "no board support package for {want:?} in {} (looked for {} or a \
-             package declaring it); it may not exist yet",
+             package declaring it)",
             root.display(),
             conventional_name(&want)
         )
@@ -848,8 +848,7 @@ fn node_files(
     let name = f.name;
     let hops = hop_placeholders(reg, t, n)?;
     let wiring = wiring_placeholders(reg, t, n);
-    let files =
-        template_for(&f.dir).ok_or_else(|| format!("{name} has no project template yet"))?;
+    let files = template_for(&f.dir).ok_or_else(|| format!("{name} has no project template"))?;
     files
         .into_iter()
         .map(|(rel, text)| Ok((rel, render(&text, n, &hops, &wiring, src, base)?)))
@@ -879,7 +878,7 @@ pub fn gen(
         if !only.is_empty() && !only.contains(&n.id) {
             continue;
         }
-        // A hop its firmware cannot do yet stops gen, by name.
+        // A hop its firmware does not run stops gen, by name.
         hop_placeholders(reg, t, n)?;
         // A node folder reached through a link is the user's: refused, as
         // for the generated protection files (the node is reported skipped).

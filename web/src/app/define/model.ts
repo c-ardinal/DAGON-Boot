@@ -156,7 +156,7 @@ export const topoFromNames = (t: Topo): Topo => withKinds(t, codeOf);
 /** The 構成 with its kinds by name, as its YAML writes them and the check reads them. */
 export const topoWithNames = (t: Topo): Topo => withKinds(t, (k) => (typeof k === 'number' ? nameOf(k) : k));
 
-/** Kinds `mcu`'s firmware implements up (to the PC or the 親機) and down (to 子機); the rest are not available yet. */
+/** Kinds `mcu`'s firmware implements up (to the PC or the 親機) and down (to 子機); the rest are not available. */
 export function linkKinds(mcu: string): { up: LinkKind[]; down: LinkKind[] } {
   return link_kinds(mcu) as { up: LinkKind[]; down: LinkKind[] };
 }
@@ -366,7 +366,7 @@ export function place(doc: Doc, board: string, name?: string): { doc: Doc; id: s
   return { doc: { topo, names: name ? { ...doc.names, [id]: name } : doc.names }, id };
 }
 
-/** "置く" by MCU: a node without a board (P1); its flash is the MCU's own, from the MCU definition. */
+/** "置く" by MCU: a node without a board; its flash is the MCU's own, from the MCU definition. */
 export function placeMcu(doc: Doc, mcu: string): { doc: Doc; id: string } {
   const m = mcus().find((x) => x.id === mcu);
   if (!m || doc.topo.nodes.length >= maxNodes()) return { doc, id: '' };
@@ -666,7 +666,7 @@ export function toConfig(doc: Doc, boards: Board[]): Config {
       boot: gpio(s?.up.boot),
       depth: depth(n.id),
       ...(n.role === 'coordinator' && n.uplink && !l ? { uplink: { kind: n.uplink.kind, host: n.uplink.host ?? 'pc-cli' } } : {}),
-      ...(skipped[n.id] ? { notYet: skipped[n.id] } : {}),
+      ...(skipped[n.id] ? { skip: skipped[n.id] } : {}),
     };
   });
   const glinks: GLink[] = links.map((l, k) => {

@@ -17,26 +17,26 @@ const filled = [
   copy.LINK.bundle('I2C', 5, 3),
   copy.LINK.name('I2C · 5 本（うち共有 3）', 'メイン', '7セグ', '0x42'),
   copy.DETAIL.ms(8),
-  copy.ANNOUNCE.A06(3),
-  copy.ANNOUNCE.A08(2, 3),
-  copy.ANNOUNCE.A21silent('ウォッチ'),
-  copy.BAND_FOR.M29('7セグ').sentence,
+  copy.ANNOUNCE.found(3),
+  copy.ANNOUNCE.responding(2, 3),
+  copy.ANNOUNCE.nodeSilent('ウォッチ'),
+  copy.BAND_FOR.stoppedAt('7セグ').sentence,
   copy.CANVAS.dotProgressName(64, true),
   copy.FILE.size(8416),
   copy.RECONNECT.left(30),
-  copy.ANNOUNCE.A09('release-1.1.dgb', '595 KB'),
-  copy.ANNOUNCE.A10ok(3),
-  copy.ANNOUNCE.A11('7セグ'),
-  copy.ANNOUNCE.A11percent(50),
-  copy.ANNOUNCE.A13('7セグ'),
-  copy.ANNOUNCE.A13previous('メイン'),
-  copy.ANNOUNCE.A14('1.1.0'),
-  copy.ANNOUNCE.A15('7セグ', '1.0.0'),
-  copy.ANNOUNCE.A16('7セグ', 2),
+  copy.ANNOUNCE.fileChecking('release-1.1.dgb', '595 KB'),
+  copy.ANNOUNCE.fileOk(3),
+  copy.ANNOUNCE.writing('7セグ'),
+  copy.ANNOUNCE.progress(50),
+  copy.ANNOUNCE.stopped('7セグ'),
+  copy.ANNOUNCE.previous('メイン'),
+  copy.ANNOUNCE.done('1.1.0'),
+  copy.ANNOUNCE.rolledBack('7セグ', '1.0.0'),
+  copy.ANNOUNCE.recovered('7セグ', 2),
   copy.NODE_ACTION.back('1.0.0'),
-  copy.ANNOUNCE.A01('NUCLEO-F401RE', false),
-  copy.ANNOUNCE.A03('ウォッチ'),
-  copy.ANNOUNCE.A04(2, 1),
+  copy.ANNOUNCE.placed('NUCLEO-F401RE', false),
+  copy.ANNOUNCE.removed('ウォッチ'),
+  copy.ANNOUNCE.problems(2, 1),
   copy.DEFINE.dotNodesName(3, 2),
   copy.DEFINE.problems(2),
   copy.DEFINE.cautions(1),
@@ -44,13 +44,117 @@ const filled = [
   ...Object.values(copy.RULE_FIX).map((f) => f({ to: '7セグ', board: 'NUCLEO-F401RE', id: 'seg', many: false, max: 32 })),
 ];
 
+/**
+ * Any argument a template reads: text, a number, a field of an object, a call. With the falsy
+ * values beside it, every branch of a template's ternaries shows its fixed words.
+ */
+const ANY: unknown = new Proxy(function any() {}, {
+  get: (_, k) => (k === Symbol.toPrimitive ? (hint: string) => (hint === 'number' ? 2 : 'x') : typeof k === 'symbol' ? undefined : ANY),
+  apply: () => ANY,
+});
+const SAMPLES: unknown[] = [ANY, 0, '', false, true, 1, 'x'];
+const ARGS = 4;
+
+/** Every template under `v` (by path), called with each sample value in every argument. */
+const templates = (v: unknown, path: string): { path: string; out: string[] }[] => {
+  if (typeof v === 'function') {
+    const out: string[] = [];
+    let called = false;
+    for (const s of SAMPLES) {
+      try {
+        out.push(...strings((v as (...a: unknown[]) => unknown)(...Array<unknown>(ARGS).fill(s))));
+        called = true;
+      } catch {
+        // A sample this template cannot take; another one fills it.
+      }
+    }
+    return called ? [{ path, out }] : [{ path, out: [] }, { path: `${path} (never called)`, out: [] }];
+  }
+  return v && typeof v === 'object' ? Object.entries(v).flatMap(([k, x]) => templates(x, `${path}.${k}`)) : [];
+};
+
+/**
+ * Every string literal and every static part of a template literal in `src`, with its offset;
+ * comments are skipped. Branches no sample value reaches are read here as written.
+ */
+const literals = (src: string): { at: number; text: string }[] => {
+  const out: { at: number; text: string }[] = [];
+  let i = 0;
+  const quoted = (q: string) => {
+    const at = i++;
+    let s = '';
+    while (i < src.length && src[i] !== q) s += src[i] === '\\' ? src[(i += 2) - 1] : src[i++];
+    i++;
+    out.push({ at, text: s });
+  };
+  const template = () => {
+    let at = i++;
+    let s = '';
+    while (i < src.length && src[i] !== '`') {
+      if (src[i] === '\\') s += src[(i += 2) - 1];
+      else if (src[i] === '$' && src[i + 1] === '{') {
+        out.push({ at, text: s });
+        s = '';
+        i += 2;
+        code(true);
+        at = i;
+      } else s += src[i++];
+    }
+    i++;
+    out.push({ at, text: s });
+  };
+  const code = (inside: boolean) => {
+    let depth = 0;
+    while (i < src.length) {
+      const c = src[i];
+      if (inside && c === '}' && depth === 0) return void i++;
+      if (c === '/' && src[i + 1] === '/') i = src.indexOf('\n', i) < 0 ? src.length : src.indexOf('\n', i);
+      else if (c === '/' && src[i + 1] === '*') i = src.indexOf('*/', i + 2) + 2;
+      else if (c === "'" || c === '"') quoted(c);
+      else if (c === '`') template();
+      else {
+        depth += c === '{' ? 1 : c === '}' ? -1 : 0;
+        i++;
+      }
+    }
+  };
+  code(false);
+  return out.filter((l) => l.text !== '');
+};
+
+const SOURCE = import.meta.glob(['./copy.ts', './agentMock.ts'], { query: '?raw', import: 'default', eager: true }) as Record<string, string>;
+const COPY_SRC = SOURCE['./copy.ts'];
+const EXPORTS = [...COPY_SRC.matchAll(/^export const (\w+)/gm)].map((m) => ({ at: m.index, name: m[1] }));
+/** The literals of copy.ts, each under the export it is written in. */
+const written = literals(COPY_SRC).map((l) => ({ ...l, from: EXPORTS.filter((e) => e.at <= l.at).pop()?.name ?? '' }));
+/** The literals of the agent stand-in, read the same way. */
+const mockWritten = literals(SOURCE['./agentMock.ts']).map((l) => l.text);
+
 const shownExcept = (...skip: string[]) =>
   Object.entries(copy)
     .filter(([k]) => !['FORBIDDEN_WORDS', ...skip].includes(k))
-    .flatMap(([, v]) => strings(v))
-    .concat(filled);
+    .flatMap(([k, v]) => [...strings(v), ...templates(v, k).flatMap((t) => t.out)])
+    .concat(filled)
+    .concat(written.filter((l) => !['FORBIDDEN_WORDS', ...skip].includes(l.from)).map((l) => l.text));
 
 const shown = shownExcept();
+
+describe('the shown strings', () => {
+  // Every guard below reads `shown`: a template it never calls would hide its fixed words from all of them.
+  test('include every exported template, called', () => {
+    const all = templates(copy, 'copy');
+    expect(all.filter((t) => t.path.endsWith('(never called)')).map((t) => t.path)).toEqual([]);
+    expect(all.length).toBeGreaterThan(60);
+    expect(shown).toContain(copy.BAND_FOR.doneSome(1).sentence);
+  });
+  test('include every literal written in copy.ts, under its export', () => {
+    expect(written.length).toBeGreaterThan(500);
+    // Before the first export only the import paths are written.
+    expect(written.filter((l) => l.from === '').map((l) => l.text)).toEqual(['./machine.ts']);
+    expect(written.find((l) => l.text === ' MiB')?.from).toBe('INSPECT');
+    expect(mockWritten).toContain(MOCK_TEXTS()[0]);
+  });
+});
 
 describe('copy', () => {
   // The list is for the operate mode's guidance and results; the define mode's CLI screens
@@ -58,15 +162,17 @@ describe('copy', () => {
   const DEFINE_CLI = ['CLI_NAV', 'CLI_LINK', 'JOBS', 'FLASH'];
   test.each(copy.FORBIDDEN_WORDS)('no screen text uses %s', (word) => {
     // 確定 is allowed only as a slot value in the slot section.
-    // 確定 only as a slot value and in M38; フラッシュ only in V-16's name.
+    // 確定 only as a slot value and in the trial choice; フラッシュ only in V-16's name.
     const operate = shownExcept(...DEFINE_CLI);
-    const texts = word === '確定' ? shownExcept('SLOT', 'TRIAL_CHOICE', ...DEFINE_CLI) : word === 'フラッシュ' ? operate.filter((s) => s !== copy.RULE_SHORT['V-16'] && s !== copy.INSPECT.flashSize) : operate;
+    // ポート only in the define-mode canvas port's hover tip (LINK.portOut), which names the drag handle.
+    const portTips = new Set(SAMPLES.map((s) => copy.LINK.portOut(s as string)));
+    const texts = word === '確定' ? shownExcept('SLOT', 'TRIAL_CHOICE', ...DEFINE_CLI) : word === 'フラッシュ' ? operate.filter((s) => s !== copy.RULE_SHORT['V-16'] && s !== copy.INSPECT.flashSize) : word === 'ポート' ? operate.filter((s) => !portTips.has(s)) : operate;
     expect(texts.filter((s) => s.includes(word))).toEqual([]);
   });
 
   test('no ASCII ellipsis, no colon in label-value pairs', () => {
     // The pin choice writes the in-use note of a pin choice as 「（使用中: …）」 itself.
-    const notes = new Set([copy.INSPECT.inUse('7セグのリセット')]);
+    const notes = new Set([copy.INSPECT.inUse('7セグのリセット'), ...SAMPLES.map((s) => copy.INSPECT.inUse(s as string)), copy.INSPECT.inUse('').slice(0, -1)]);
     expect(shown.filter((s) => !notes.has(s) && (s.includes('...') || s.includes('：') || /\S:\s/.test(s)))).toEqual([]);
   });
 
@@ -85,7 +191,7 @@ describe('copy', () => {
       copy.UNSUPPORTED.sentence,
       copy.RECONNECT.sentence,
       copy.TRIAL_CHOICE.sentence,
-      copy.BAND_FOR.M29('7セグ').sentence,
+      copy.BAND_FOR.stoppedAt('7セグ').sentence,
       copy.CANVAS.empty,
       copy.DETAIL.nothingSelected,
     ];
@@ -96,8 +202,8 @@ describe('copy', () => {
       expect(s.endsWith('。'), s).toBe(true);
       expect(s, s).not.toMatch(/[!！]/);
     }
-    // M57's two sentences are the copy table's own: the cause, then the step. M22's reason left its brackets.
-    const twoSentences: string[] = [copy.BAND.M57.sentence, copy.BAND.M22.sentence];
+    // pageLoadFailed says the cause, then the step; writing's reason left its brackets.
+    const twoSentences: string[] = [copy.BAND.pageLoadFailed.sentence, copy.BAND.writing.sentence];
     for (const s of sentences) {
       expect(s.match(/。/g)?.length, s).toBe(twoSentences.includes(s) ? 2 : 1);
       expect(s.endsWith('。'), s).toBe(true);
@@ -148,7 +254,44 @@ describe('the writing vocabulary', () => {
   // 更新 is barred as a word for writing to nodes; the terms of use being updated is not writing.
   const NOT_WRITING = new Set<string>([copy.AGENT.errors.AGENT_CONSENT_VERSION.text]);
   test('no screen text (nor the stand-in agent) says 更新 for writing', () => {
-    expect([...shownExcept(), ...MOCK_TEXTS()].filter((s) => s.includes('更新') && !NOT_WRITING.has(s))).toEqual([]);
+    expect([...shownExcept(), ...MOCK_TEXTS(), ...mockWritten].filter((s) => s.includes('更新') && !NOT_WRITING.has(s))).toEqual([]);
+  });
+});
+
+describe('copy keys, screen words and source say what things are', () => {
+  // Keys and comments are read by contributors; screen words state what DAGON does. Limits live
+  // on the limitations page, not as a pending status on the screen.
+  const ID_KEY = /^[A-Z]{1,2}\d{2}[a-z]*$/;
+  const keys = (v: unknown): string[] =>
+    v && typeof v === 'object' ? Object.entries(v).flatMap(([k, x]) => [k, ...keys(x)]) : [];
+  test('no copy key is shaped like a table id (the V-NN rule codes are product codes)', () => {
+    expect(keys(copy).filter((k) => ID_KEY.test(k))).toEqual([]);
+  });
+
+  // まだ about the user's own work (nothing built, nothing logged) is a fact about them, not about DAGON.
+  const USER_STATE = new Set<string>([
+    copy.DRAWER.outputNone,
+    copy.MENU.off.noLog,
+    copy.BUILD.noSkeleton.reason,
+    copy.HELP.rows[1][1],
+    copy.HELP.rows[4][1],
+  ]);
+  test('no shown string states a pending status of DAGON', () => {
+    const texts = [...shown, ...MOCK_TEXTS(), ...mockWritten];
+    expect(texts.filter((s) => s.includes('未対応') || (s.includes('まだ') && !USER_STATE.has(s)))).toEqual([]);
+  });
+
+  const sources = Object.entries(
+    import.meta.glob(['../**/*.{ts,svelte}', '!../**/*.test.ts', '!../wasm/pkg/**'], { query: '?raw', import: 'default', eager: true }) as Record<string, string>,
+  );
+  const comments = (src: string) => src.match(/\/\*[\s\S]*?\*\/|(?<![:'"\w])\/\/[^\n]*|<!--[\s\S]*?-->/g) ?? [];
+  const ID_CITED = /(?<![\w-])[A-Z]{1,2}\d{2}[a-z]*(?!\w)|\bUC-[A-Z]\d+/;
+  test('the sources are found', () => {
+    expect(sources.length).toBeGreaterThan(20);
+  });
+  test('no identifier says notYet and no comment cites a table id', () => {
+    expect(sources.filter(([, s]) => /notYet|NotYet/.test(s)).map(([p]) => p)).toEqual([]);
+    expect(sources.flatMap(([p, s]) => comments(s).filter((c) => ID_CITED.test(c)).map((c) => `${p}: ${c}`))).toEqual([]);
   });
 });
 

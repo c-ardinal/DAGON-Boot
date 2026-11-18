@@ -732,7 +732,7 @@ fn the_page_built_into_dagon_is_served_with_the_release_key() {
     assert!(super::api::page_file(&server, "/fonts/OFL-Doto.txt").is_some());
 }
 
-/// sim-pair with the F401 as a second 親機: only "not updatable yet".
+/// sim-pair with the F401 as a second 親機: only what updating skips (V-23).
 fn two_hubs() -> String {
     YAML.replacen("role: node", "role: coordinator", 1)
 }

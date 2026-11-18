@@ -99,6 +99,10 @@ pub trait OwnAgent {
     /// reaches this agent: its HELLO and CAPS name them with its own
     /// (`dagon_agent::Agent::also_serves`).
     fn also_serves(&mut self, front: dagon_proto::payload::CmdSet);
+    /// What the requester's HELLO named as the payload it takes
+    /// (`dagon_agent::Agent::ceiling`); the relay holds it over its own
+    /// uplink.
+    fn ceiling(&self) -> dagon_proto::handler::Ceiling;
 }
 
 /// The guard tasks of the relay. All of them run preempting the app's

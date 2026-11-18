@@ -22,8 +22,7 @@ use dagon_port::{
 };
 use dagon_port::{Addressing, RelayLinkDef};
 use dagon_proto::payload::{
-    boot0, encode_caps_req, nrst, CapsResp, CmdSet, HelloResp, I2cRaw, Relay as RelayReq, Show,
-    SubCtl,
+    boot0, nrst, CapsReq, CapsResp, CmdSet, HelloResp, I2cRaw, Relay as RelayReq, Show, SubCtl,
 };
 use dagon_proto::{finish, frame_len, max_payload, plant, split_status, Cmd, Frame, Status};
 use dagon_relay::{
@@ -298,6 +297,9 @@ impl OwnAgent for NodeAgent {
     }
     fn also_serves(&mut self, front: dagon_proto::payload::CmdSet) {
         self.0.also_serves(front)
+    }
+    fn ceiling(&self) -> dagon_proto::handler::Ceiling {
+        self.0.ceiling()
     }
 }
 
@@ -802,12 +804,36 @@ fn the_relay_says_what_it_serves_and_reads_before_it_acts() {
             assert_eq!(reached.get(), 0, "{n:#x} {plant:?}");
         }
 
-        // CAPS about a command of the relay's own.
-        let mut p = [0u8; 4];
-        let n = encode_caps_req(Relay as u8, &mut p).unwrap();
-        let (st, body) = pc.ask(Caps, &p[..n]).await;
+        // CAPS about RELAY is the relay's: its fields, and for a link of
+        // the node the tunnel over it for this requester (USB to the bus:
+        // one frame of the bus). About another command it is the agent's.
+        let caps = |cmd: Cmd, link: Option<u8>| {
+            let mut p = [0u8; 8];
+            let n = CapsReq {
+                cmd: cmd as u8,
+                link,
+            }
+            .encode(&mut p)
+            .unwrap();
+            p[..n].to_vec()
+        };
+        let (st, body) = pc.ask(Caps, &caps(Relay, None)).await;
         assert_eq!(st, dagon_proto::Status::Ok);
         assert_eq!(CapsResp::parse(&body), Ok(CapsResp::of(Relay)));
+        let (st, body) = pc.ask(Caps, &caps(Relay, Some(BUS))).await;
+        assert_eq!(st, dagon_proto::Status::Ok);
+        let tunnel = RelayReq::tunnel_mtu(max_payload::USB, max_payload::I2C);
+        assert_eq!(tunnel, frame_len(max_payload::I2C));
+        assert_eq!(
+            CapsResp::parse(&body).unwrap().tunnel_mtu,
+            Some(tunnel as u16)
+        );
+        let no_such = pc.ask(Caps, &caps(Relay, Some(SPARE))).await.0;
+        assert_eq!(no_such, dagon_proto::Status::Arg, "not a link of the node");
+        let (st, body) = pc.ask(Caps, &caps(Status, None)).await;
+        assert_eq!(st, dagon_proto::Status::Ok);
+        assert_eq!(CapsResp::parse(&body), Ok(CapsResp::of(Status)));
+        assert_eq!(reached.get(), 0);
 
         // What is well formed does reach them.
         assert_eq!(pc.lines(true, nrst::RELEASE).await, dagon_proto::Status::Ok);
@@ -817,6 +843,44 @@ fn the_relay_says_what_it_serves_and_reads_before_it_acts() {
         );
         assert_eq!(pc.rom_get().await.0, dagon_proto::Status::Timeout);
         assert_eq!(reached.get(), 3);
+
+        // The requester says in its HELLO that it takes the smallest
+        // payload a link offers. From then on an answer that would not fit
+        // it is refused before a link is used: I2C_RAW by the bytes it
+        // asks to read, RELAY by the tunnel, which CAPS now says smaller.
+        let floor = max_payload::SMALLEST;
+        let n = hello_request(floor, 2, &mut req).unwrap();
+        let (f, _) = Frame::decode(&req[..n], max_payload::USB).unwrap();
+        assert_eq!(pc.ask(Hello, f.payload).await.0, dagon_proto::Status::Ok);
+        let (_, body) = pc.ask(Caps, &caps(Relay, Some(BUS))).await;
+        let tunnel = RelayReq::tunnel_mtu(floor, max_payload::I2C);
+        assert_eq!(tunnel, floor - RelayReq::OVERHEAD_MAX);
+        assert_eq!(
+            CapsResp::parse(&body).unwrap().tunnel_mtu,
+            Some(tunnel as u16)
+        );
+        // Status, delimiter and the bytes read: 62 fit 64, 63 do not.
+        let most = (floor - 2) as u16;
+        assert_eq!(pc.raw(most + 1, &[]).await.0, dagon_proto::Status::Arg);
+        let inner = |len: usize| {
+            let mut f = vec![0u8; len];
+            finish(&mut f, 0, 0x5A, 0x7F, len - frame_len(0)).unwrap();
+            f
+        };
+        assert_eq!(
+            pc.relay(BUS, NODE_I2C_ADDR, 300, &inner(tunnel + 1))
+                .await
+                .0,
+            dagon_proto::Status::Arg
+        );
+        assert_eq!(reached.get(), 3, "neither reached the link");
+        // At the ceiling both go out.
+        assert_eq!(pc.raw(most, &[]).await.0, dagon_proto::Status::Timeout);
+        assert_eq!(
+            pc.relay(BUS, NODE_I2C_ADDR, 300, &inner(tunnel)).await.0,
+            dagon_proto::Status::Timeout
+        );
+        assert_eq!(reached.get(), 5);
     };
     let serving = async move {
         serve(relay, up).await;

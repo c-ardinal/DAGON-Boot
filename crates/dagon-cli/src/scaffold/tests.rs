@@ -1835,7 +1835,7 @@ fn mcu_templates_wire_the_links_the_topology_names() {
         .find(|l| l.kind == LinkKind::Uart)
         .unwrap()
         .clone();
-    // The same links to other nodes, listed with the uplink node's end second.
+    // The same links to other nodes, listed with the end nearer the PC second.
     let to = |mut l: dagon_topology::schema::Link, node: &str| {
         l.ends.reverse();
         l.ends[0].node = node.into();
@@ -1963,7 +1963,7 @@ fn templates_get_the_hops_and_gen_refuses_one_not_available_yet() {
         read(&base, "nodes/seg/src/main.rs"),
         "const UPLINK: Kind = dagon_mcu_stm32f401re::links::Kind::I2c;\nconst DOWNLINKS: &[Kind] = &[];\n"
     );
-    // The uplink node over BLE: gen stops, naming the hop.
+    // The coordinator over BLE: gen stops, naming the hop.
     let ble = dagon_topology::parse_str(&SAMPLE.replacen(
         "    tag: hub-rp2040-lcd\n",
         "    tag: hub-rp2040-lcd\n    uplink: { kind: ble, host: browser }\n",
@@ -1983,7 +1983,7 @@ fn templates_get_the_hops_and_gen_refuses_one_not_available_yet() {
         e.contains("uplink of hub over ble: the firmware of rp2040 does not run this link kind"),
         "{e}"
     );
-    // A link a downstream node cannot do: named by its two ends.
+    // A link a node cannot do: named by its two ends.
     let wifi = dagon_topology::parse_str(&SAMPLE.replacen(
         "  - kind: i2c\n    bus: ",
         "  - kind: wifi-tcp\n    bus: ",

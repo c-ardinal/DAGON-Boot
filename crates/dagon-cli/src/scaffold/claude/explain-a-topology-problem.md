@@ -15,8 +15,9 @@ if empty, explain every problem).
    Each issue has a severity (error or warning), a rule id, a path in the
    YAML (such as `links[0].addr`) and a message.
 2. **Place it.** Open `topology.yaml` at that path and name the node or
-   link it is about, using ノード and 構成; name a node by its link or its
-   direction from the PC, never as a parent or a child.
+   link it is about, using ノード, コーディネータ (the role `coordinator`) and 構成;
+   name any other relation by its link or its direction from the PC,
+   never as a parent or a child.
 3. **Explain** in two or three sentences: what the rule protects (for
    example, two nodes on one I2C bus cannot share an address; a pin must
    exist on the header of the node at that end), what in this 構成 breaks it, and what

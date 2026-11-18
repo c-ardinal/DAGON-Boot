@@ -732,7 +732,7 @@ fn the_page_built_into_dagon_is_served_with_the_release_key() {
     assert!(super::api::page_file(&server, "/fonts/OFL-Doto.txt").is_some());
 }
 
-/// sim-pair with the F401 as a second uplink node: only what updating skips (V-23).
+/// sim-pair with the F401 as a second coordinator: only what updating skips (V-23).
 fn two_hubs() -> String {
     YAML.replacen("role: node", "role: coordinator", 1)
 }
@@ -755,7 +755,7 @@ fn a_shape_not_updatable_yet_is_saved_and_its_updatable_part_compiled() {
         std::fs::read_to_string(a.dir.join("topology/t.yaml")).unwrap(),
         y
     );
-    // The second uplink node is skipped: the compiled topology is the uplink node alone.
+    // The second coordinator is skipped: the compiled topology is the coordinator alone.
     let t = dagon_topology::parse_str(&y).unwrap();
     let (sub, _) = dagon_topology::updatable(&t);
     assert_eq!(

@@ -1,6 +1,6 @@
 ---
 title: "リポジトリ"
-description: "リポジトリにあるもの、その場所、DAGONそのものを開発するときのことです。"
+description: "リポジトリの内容と配置、DAGON自体の開発手順です。"
 ---
 
 対象読者はDAGON貢献者です。
@@ -10,39 +10,39 @@ description: "リポジトリにあるもの、その場所、DAGONそのもの�
 | パス | 内容 |
 |---|---|
 | `crates/` | DAGONのcrate。一覧は[Rust API](/reference/rust-api/)にあります |
-| `targets/` | MCUごと（`targets/mcu/*`）とボードごと（`targets/boards/*`）の定義。リレーそのものはマイコンに依存しない`crates/dagon-relay`にあり、リレーできるマイコンは定義の`[coordinator]`で決まります。ノードは定義の`[[relay_link]]`が並べるリンクで中継し、その先は構成が決めます |
-| `samples/` | 定義を使うサンプルのアプリ（DAGONの一部ではない） |
-| `web/` | DAGON Console（Svelte、Vite、TypeScript）。できることは`web/README.md`にあります |
+| `targets/` | MCUごと（`targets/mcu/*`）とボードごと（`targets/boards/*`）の定義。リレー本体はマイコン非依存の`crates/dagon-relay`にあり、リレー可能なマイコンは定義の`[coordinator]`で決定します。ノードは定義の`[[relay_link]]`が列挙するリンクで中継し、中継先は構成が決定します |
+| `samples/` | 定義を使用するサンプルアプリ（DAGONの一部ではない） |
+| `web/` | DAGON Console（Svelte、Vite、TypeScript）。機能の一覧は`web/README.md`に記載しています |
 | `topology/` | 構成の例 |
-| `plugin/` | 新しいマイコンへの移植に使うClaude Codeのプラグイン（エージェント、スキル、フック） |
-| `scripts/licences.py` | [ライセンス](/reference/licenses/)の依存ライブラリの表を生成する |
+| `plugin/` | 新規マイコンへの移植に使用するClaude Codeのプラグイン（エージェント、スキル、フック） |
+| `scripts/licences.py` | [ライセンス](/reference/licenses/)に記載した依存ライブラリ表の生成 |
 
-## DAGONそのものを開発するとき
+## DAGON自体の開発
 
-### 要るもの
+### 必要な環境
 
-- [入れる](/getting-started/install/)のツールのすべて
-- `wasm32-unknown-unknown`のターゲット（ターゲットはすべて`rust-toolchain.toml`にあります）
-- `crates/dagon-wasm`用の`wasm-pack` 0.15.1（対応する`wasm-bindgen`と`wasm-opt`はこのツールが自分で取得します）
+- [インストール](/getting-started/install/)に記載した全ツール
+- `wasm32-unknown-unknown`のターゲット（全ターゲットは`rust-toolchain.toml`に記載しています）
+- `crates/dagon-wasm`用の`wasm-pack` 0.15.1（対応する`wasm-bindgen`と`wasm-opt`はこのツールが自動で取得します）
 - `web/`用のNode.jsとnpm
-- ESP32-S3の2nd stageを`targets/esp32s3-2ndstage`からビルドし直すときはESP-IDF v6.1。ビルド済みの無改変のものを`targets/mcu/esp32s3/vendor/bootloader.bin`として同梱しています（`vendor/PROVENANCE.md`）。
+- ESP32-S3の2nd stageを`targets/esp32s3-2ndstage`から再ビルドする場合はESP-IDF v6.1。ビルド済で無改変のバイナリを`targets/mcu/esp32s3/vendor/bootloader.bin`として同梱しています（`vendor/PROVENANCE.md`）。
 
-### クローンを使う
+### クローンの使用
 
-`python scripts/page.py build`でDAGON Consoleのページを`crates/dagon-cli/page`にビルドしてから、`cargo install --path crates/dagon-cli`で、クローンから`dagon`コマンドを入れます。`dagon`はビルドのときにそのページを組み込みます。ページはビルドの成果物なので、gitには入れません。`web/`を変えたら、ページをビルドし直します。
+最初に`python scripts/page.py build`でDAGON Consoleのページを`crates/dagon-cli/page`にビルドします。その後に`cargo install --path crates/dagon-cli`でクローンから`dagon`コマンドをインストールします。`dagon`はビルド時にそのページを組込みます。ページはビルドの成果物なので、gitには格納しません。`web/`の変更後はページを再ビルドします。
 
-プロジェクトは`dagon new --dagon-path <クローン>`（または`DAGON_HOME`を設定）でそのクローンを使います。`dagon.toml`には`[dagon] path`が書かれます。
+プロジェクトは`dagon new --dagon-path <クローン>`（または`DAGON_HOME`を設定）でそのクローンを使用します。`dagon.toml`には`[dagon] path`を記録します。
 
 ### リリースのアーカイブを作成する
 
-`python scripts/release.py [--target <triple>]`が、そのツリーからページをビルドし、ページを組み込んだ`out/release/dagon-cli-<version>-<target>.*`を作成します。組み込むページがないときは、ビルドが止まります。
+`python scripts/release.py [--target <triple>]`はそのツリーからページをビルドし、ページを組込んだ`out/release/dagon-cli-<version>-<target>.*`を作成します。組込対象のページがない場合はビルドが停止します。
 
-`.github/workflows/release.yml`は、`cli-v*`のタグがpushされたときに同じことを各プラットフォームで行います。
+`.github/workflows/release.yml`は、`cli-v*`のタグのpush時に同一の処理を各プラットフォームで実行します。
 
-1. コミットが求める上げ幅にバージョンが足りているかを`scripts/bump_check.py`で確かめます。
+1. コミットが要求する上げ幅をバージョンが満たすかを`scripts/bump_check.py`で確認します。
 2. 各システムのアーカイブと`.sha256`を作成します。
-3. すべてのビルドが通ると、GitHubのリリースを公開します。リリースは各システムのアーカイブと`.sha256`を持ちます。
+3. 全ビルドの成功後、GitHubのリリースを公開します。リリースには各システムのアーカイブと`.sha256`を添付します。
 
-ビルドが1つでも失敗すると、公開しません。手で動かしたときも公開しません。
+ビルドが1件でも失敗した場合は公開しません。手動実行の場合も公開しません。
 
-バージョンの決まりは[バージョンとリリース](/explanation/versioning/)にあります。
+バージョンの規則は[バージョンとリリース](/explanation/versioning/)に記載しています。

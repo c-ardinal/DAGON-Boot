@@ -215,7 +215,7 @@ pub fn command(cmd: &AiKeyCmd) -> Result<(), String> {
                 "the key is read from a terminal (without echo); run this in one".to_string()
             })?;
             keys.set(&a.id, &w.id, &key)?;
-            println!("{}/{}: 登録済み", a.id, w.id);
+            println!("{}/{}: 登録済", a.id, w.id);
             Ok(())
         }
         AiKeyCmd::Delete(sel) => {
@@ -233,7 +233,7 @@ pub fn command(cmd: &AiKeyCmd) -> Result<(), String> {
             for a in &agents.list {
                 for w in a.ways.iter().filter(|w| w.transport.takes_key()) {
                     let state = match keys.get(&a.id, &w.id) {
-                        Ok(Some(_)) => "登録済み".to_string(),
+                        Ok(Some(_)) => "登録済".to_string(),
                         Ok(None) => "未登録".to_string(),
                         Err(e) => format!("未登録 ({e})"),
                     };

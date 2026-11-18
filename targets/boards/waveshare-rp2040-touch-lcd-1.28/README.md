@@ -12,9 +12,9 @@ and `take!`.
 |---|---|---|
 | Display SPI1 (CLK, MOSI) at 20 MHz; CS, DC, RST, backlight | bus `lcd`; pins `lcd_cs`, `lcd_dc`, `lcd_rst`, `backlight` | GPIO10, 11; 9, 8, 13, 25 |
 | Touch controller reset (held high) | pin `touch_rst` | GPIO22 |
-| DAGON's I2C0 to sub nodes (SDA, SCL), 400 kHz | bus `child-i2c` (`dagon = true`) | GPIO16, 17 |
-| DAGON's PIO0 UART to sub nodes (TX, RX), 8N1 at the topology link's `baud` (built outside dagon: the bus's `baud`) | bus `child-uart` (`dagon = true`) | GPIO26, 27 |
-| Sub-node NRST (open drain), BOOT0 | pins `child_nrst`, `child_boot0` | GPIO18, 28 |
+| DAGON's I2C0 to other nodes (SDA, SCL), 400 kHz | bus `child-i2c` (`dagon = true`) | GPIO16, 17 |
+| DAGON's PIO0 UART to other nodes (TX, RX), 8N1 at the topology link's `baud` (built outside dagon: the bus's `baud`) | bus `child-uart` (`dagon = true`) | GPIO26, 27 |
+| NRST of an STM32 node (open drain), BOOT0 | pins `child_nrst`, `child_boot0` | GPIO18, 28 |
 | Boot LED and diagnostic blink codes (1 Hz halt) | `[boot] led`, `halt` | GPIO25 (backlight) |
 
 - `Board::split` gives DAGON the flash, the watchdog and USB, and the app
@@ -47,5 +47,5 @@ pins are wired on the board itself:
 | GPIO29 | battery voltage (ADC3, through a divider) |
 
 Features: `relay` (default), `slot-b`, `diag-panic` (forwarded to the MCU
-package). `template/` is the project `dagon new` generates for a node with a PC link on
+package). `template/` is the project `dagon new` generates for a coordinator on
 this board. See `../../mcu/rp2040/README.md` for a complete app.

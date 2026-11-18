@@ -1,4 +1,4 @@
-//! Your application on a node with a PC link. DAGON relays updates to the nodes away from the PC,
+//! Your application on the coordinator. DAGON relays updates to the nodes at the other end of its links,
 //! updates this board too, runs a new version on trial and confirms it;
 //! dagon gen never rewrites this file.
 

@@ -308,7 +308,7 @@ impl Display {
     }
 }
 
-/// DAGON's I2C to sub nodes (bus `child-i2c`).
+/// DAGON's I2C to other nodes (bus `child-i2c`).
 pub struct SubI2c {
     pub bus: Peri<'static, ChildI2c>,
     pub sda: Peri<'static, ChildI2cSda>,
@@ -330,7 +330,7 @@ impl SubI2c {
     }
 }
 
-/// DAGON's UART to sub nodes (bus `child-uart`), on a PIO (state machines
+/// DAGON's UART to other nodes (bus `child-uart`), on a PIO (state machines
 /// 0 and 1).
 pub struct SubUart {
     pub pio: Peri<'static, ChildUart>,
@@ -360,7 +360,7 @@ impl SubUart {
     }
 }
 
-/// Reset and boot-mode lines of an STM32 sub node (ROM recovery path).
+/// Reset and boot-mode lines of an STM32 node (ROM recovery path).
 pub struct SubCtl {
     pub nrst: Peri<'static, ChildNrst>,
     pub boot0: Peri<'static, ChildBoot0>,

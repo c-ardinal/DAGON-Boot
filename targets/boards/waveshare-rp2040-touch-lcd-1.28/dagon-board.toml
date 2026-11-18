@@ -23,7 +23,7 @@ header = [
 # I2C1 is used on the board itself (GPIO6/7).
 i2c = [{ controller = "i2c0", sda = "GPIO16", scl = "GPIO17" }]
 
-# With a PC link: a new I2C bus is i2c0 on GPIO16/17 and a new PIO UART link
+# As the coordinator: a new I2C bus is i2c0 on GPIO16/17 and a new PIO UART link
 # GPIO26 (TX) / GPIO27 (RX), DAGON's link buses below.
 [coordinator]
 i2c = { controller = "i2c0", sda = 16, scl = 17 }
@@ -62,7 +62,7 @@ name = "lcd_rst"
 pin = "GPIO22"
 name = "touch_rst"
 
-# Reset (open drain) and BOOT0 of an STM32 node away from the PC: its ROM recovery path.
+# Reset (open drain) and BOOT0 of an STM32 node: its ROM recovery path.
 [[pin]]
 pin = "GPIO18"
 name = "child_nrst"
@@ -79,7 +79,7 @@ sck = "GPIO10"
 mosi = "GPIO11"
 hz = 20_000_000
 
-# DAGON's links to nodes away from the PC.
+# DAGON's links to the other nodes.
 [[bus]]
 id = "child-i2c"
 kind = "i2c"

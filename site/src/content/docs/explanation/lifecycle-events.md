@@ -155,7 +155,7 @@ len, next }`です。プロトコルのリクエストはどれも遷移です�
 | `host.node.discovered` | 検出 | `target`、識別 |
 | `host.node.step` | ノードの各段階（TRANSFER、VERIFY、REBOOT、CONFIRM、REJECTED、FAILED、ROM） | `node`、`target`、`phase`、`percent`、`version` |
 | `host.node.reconnecting` | 再起動後のバージョンを待っている | `node`、`elapsed_ms`、`other_version?` |
-| `host.node.result` | | `node`、`Done(v) \| Failed(reason, status?) \| NotStarted` |
+| `host.node.result` | | `node`、`Done(v) \| Failed(reason, status?) \| NotStarted \| NeedsFirstWrite`（`NeedsFirstWrite`: 親機の報告で無応答のノード。このノードへの送信はなく、他ノードへの書き込みは継続。このノードには直接の書き込みが必要） |
 | `host.confirm.result` | | `Confirmed \| NotOnTrial \| NeedsChoice` |
 | `host.rollback.*`、`host.recover.*` | deployと同じ形 | |
 | `host.provision.started` / `host.provision.recorded` | ROMを通した最初のインストール。インストールしたブートイメージの識別を記録した | `node`、`boot_sha256` |

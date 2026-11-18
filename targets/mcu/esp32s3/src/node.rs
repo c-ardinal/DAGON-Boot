@@ -417,7 +417,7 @@ impl Link {
             )
             .await;
             // The transfer's idle deadline runs on its own link only.
-            self.agent.tick(Instant::now().as_millis());
+            self.agent.tick(Instant::now().as_micros());
             let (n, via) = match ev {
                 Either3::First(Ok(f)) => (copy(&mut req, f), Via::Uart),
                 Either3::Second(Ok(f)) => (copy(&mut req, f), Via::Usb),

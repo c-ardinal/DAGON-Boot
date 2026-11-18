@@ -916,7 +916,7 @@ fn each_link_has_its_own_requester() {
 
 /// A transfer's idle deadline belongs to the link it was begun over:
 /// another link's requests never extend it, and its own link going down
-/// ends it. The node's clock is what `tick` is given.
+/// ends it. The node's clock is what `tick` is given (in microseconds).
 #[test]
 fn a_transfer_times_out_on_its_own_link_only() {
     let idle = u64::from(dagon_agent::IDLE_TIMEOUT_MS);
@@ -931,7 +931,7 @@ fn a_transfer_times_out_on_its_own_link_only() {
         })
     };
     let at = |n: &mut TwoLinks, ms: u64, on: usize, seq: u8, cmd: Cmd, p: &[u8]| {
-        n.agent.tick(ms);
+        n.agent.tick(ms * 1_000);
         n.ask(on, seq, cmd, p).0
     };
 
@@ -955,7 +955,7 @@ fn a_transfer_times_out_on_its_own_link_only() {
         Status::Ok
     );
     // A tick alone, at the deadline, ends it.
-    n.agent.tick(3 * t + 1);
+    n.agent.tick((3 * t + 1) * 1_000);
     assert_eq!(n.ask(UART, 4, Cmd::XferHdr, &chunk(200)).0, Status::State);
 
     // The other link going down leaves it; its own link going down ends it.
@@ -968,6 +968,22 @@ fn a_transfer_times_out_on_its_own_link_only() {
         at(&mut n, 2, UART, 3, Cmd::XferHdr, &chunk(100)),
         Status::State
     );
+
+    // Refused requests on its own link, and their repeats, do not keep it.
+    let mut n = TwoLinks::new();
+    assert_eq!(at(&mut n, 0, UART, 1, Cmd::XferBegin, &begin), Status::Ok);
+    let tunnel = caps_req(Cmd::Status as u8, Some(0));
+    let refused: [(u8, Cmd, &[u8], Status); 3] = [
+        (2, Cmd::Relay, &[], Status::Unsupported),
+        (3, Cmd::Caps, &tunnel, Status::Arg),
+        (3, Cmd::Caps, &tunnel, Status::Arg),
+    ];
+    for (i, (seq, cmd, p, st)) in refused.into_iter().enumerate() {
+        let ms = (i as u64 + 1) * idle / 3;
+        assert_eq!(at(&mut n, ms, UART, seq, cmd, p), st, "{cmd:?}");
+    }
+    let late = at(&mut n, 4 * idle / 3, UART, 5, Cmd::XferHdr, &chunk(0));
+    assert_eq!(late, Status::State, "refused requests kept the transfer");
 }
 
 #[test]

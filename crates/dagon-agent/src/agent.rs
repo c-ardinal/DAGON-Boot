@@ -123,8 +123,8 @@ pub struct Agent<S, X, V, W = writer::App, const L: usize = 1> {
     xfer_link: usize,
     /// The node's clock at its last [`Agent::tick`], and when the link of
     /// the transfer last brought a request ([`IDLE_TIMEOUT_MS`] runs from it).
-    now_ms: u64,
-    xfer_heard_ms: u64,
+    now_us: u64,
+    xfer_heard_us: u64,
     /// Kept apart from a link's reply, which a repeated request is
     /// answered from.
     refusal: [u8; REFUSAL_BUF],
@@ -181,8 +181,8 @@ impl<S: SlotStore, X: AppChain, V: SigVerifier, W: Writer, const L: usize> Agent
             links: [Requester::NEW; L],
             on: 0,
             xfer_link: 0,
-            now_ms: 0,
-            xfer_heard_ms: 0,
+            now_us: 0,
+            xfer_heard_us: 0,
             refusal: [0; REFUSAL_BUF],
             front: CmdSet::EMPTY,
         };
@@ -317,15 +317,16 @@ impl<S: SlotStore, X: AppChain, V: SigVerifier, W: Writer, const L: usize> Agent
         self.end_session(AbortCause::Timeout);
     }
 
-    /// The node's clock reads `now_ms` (milliseconds, monotonic): a
-    /// transfer whose own link brought no request for [`IDLE_TIMEOUT_MS`]
-    /// is dropped; requests over the node's other links do not keep it.
+    /// The node's clock reads `now_us` (microseconds, monotonic): a
+    /// transfer whose own link had no request served (answered OK, or a
+    /// repeat of one) for [`IDLE_TIMEOUT_MS`] is dropped; refused requests
+    /// and requests over the node's other links do not keep it.
     /// A node that serves more than one link calls this at every wake and
     /// before every request it hands to [`Agent::handle_on`]; a node that
     /// never does keeps its own timer and calls [`Agent::abort`].
-    pub fn tick(&mut self, now_ms: u64) {
-        self.now_ms = now_ms;
-        if now_ms.saturating_sub(self.xfer_heard_ms) >= u64::from(IDLE_TIMEOUT_MS) {
+    pub fn tick(&mut self, now_us: u64) {
+        self.now_us = now_us;
+        if now_us.saturating_sub(self.xfer_heard_us) >= u64::from(IDLE_TIMEOUT_MS) * 1_000 {
             self.end_session(AbortCause::Timeout);
         }
     }
@@ -389,10 +390,11 @@ impl<S: SlotStore, X: AppChain, V: SigVerifier, W: Writer, const L: usize> Agent
             link.resp_reboot = reboot;
             link.last = Some((frame.seq, frame.cmd));
         }
-        if on == self.xfer_link {
-            self.xfer_heard_ms = self.now_ms;
-        }
         let link = &self.links[on];
+        // Only a request served (or its repeat) keeps the transfer going.
+        if on == self.xfer_link && link.resp[HEADER_LEN] == Status::Ok as u8 {
+            self.xfer_heard_us = self.now_us;
+        }
         Some(Reply {
             frame: &link.resp[..link.resp_len],
             reboot: link.resp_reboot.is_some(),

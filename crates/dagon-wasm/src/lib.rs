@@ -171,6 +171,7 @@ pub struct Hello {
     pub trial: bool,
     key_id: [u8; 8],
     pub max_payload: u16,
+    cmds: dagon_proto::payload::CmdSet,
 }
 
 #[wasm_bindgen]
@@ -178,6 +179,13 @@ impl Hello {
     #[wasm_bindgen(getter)]
     pub fn key_id(&self) -> Vec<u8> {
         self.key_id.to_vec()
+    }
+
+    /// The commands the node serves, as dagon-proto packs them; empty for
+    /// a node that does not say.
+    #[wasm_bindgen(getter)]
+    pub fn cmds(&self) -> Vec<u8> {
+        self.cmds.as_bytes().to_vec()
     }
 }
 
@@ -218,6 +226,7 @@ fn decode(body: &[u8]) -> Option<Hello> {
         trial: h.trial,
         key_id: h.key_id,
         max_payload: h.max_payload,
+        cmds: h.cmds,
     })
 }
 

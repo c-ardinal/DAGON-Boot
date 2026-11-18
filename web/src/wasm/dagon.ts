@@ -4,6 +4,7 @@
 import init, {
   FrameCutter,
   hello_response_body,
+  node_cmds,
   request_read,
   response_digest,
   response_next_offset,
@@ -293,9 +294,9 @@ export interface WireRequest {
   bulk: Uint8Array;
 }
 
-/** Reads a request for the in-memory hub: malformed, an unknown must field and an unserved command come back as `refusal`. */
-export function readRequest(cmd: number, payload: Uint8Array): WireRequest {
-  const r = request_read(cmd, payload);
+/** Reads a request for a node of the in-memory hub (`relays`: the one that relays): malformed, an unknown must field and an unserved command come back as `refusal`. */
+export function readRequest(cmd: number, payload: Uint8Array, relays: boolean): WireRequest {
+  const r = request_read(cmd, payload, relays);
   try {
     const refusal = r.refusal;
     return { refusal: refusal.length ? refusal : null, target: r.target, slot: r.slot, offset: r.offset, link: r.link, addr: r.addr, bulk: r.bulk };
@@ -304,11 +305,16 @@ export function readRequest(cmd: number, payload: Uint8Array): WireRequest {
   }
 }
 
+/** The commands a node of the in-memory hub serves (`relays`: the one that relays), as its HELLO carries them. */
+export function servedCmds(relays: boolean): Uint8Array {
+  return node_cmds(relays);
+}
+
 /** Response payloads for the in-memory hub, written by dagon-proto's writer. */
 export const respond = {
   status: (status: number): Uint8Array => response_status(status),
   helloBody: (h: HelloResp): Uint8Array =>
-    hello_response_body(h.protoVer, h.role, h.portKind, h.mcuId, h.mode, h.activeVersion, h.trial, h.keyId, h.maxPayload),
+    hello_response_body(h.protoVer, h.role, h.portKind, h.mcuId, h.mode, h.activeVersion, h.trial, h.keyId, h.maxPayload, h.cmds ?? new Uint8Array()),
   slots: (
     slots: { state: number; version: number; digest16: Uint8Array }[],
     rest: { active: number; confirmed: number; attempts: number; lastReason: number; logGeneration: number },
@@ -453,6 +459,7 @@ export function encodeHelloReq(r: HelloReq): Uint8Array {
 export function decodeHelloResp(body: Uint8Array): HelloResp {
   const h = hello_decode(body);
   try {
+    const cmds = h.cmds;
     return {
       protoVer: h.proto_ver,
       role: h.role,
@@ -463,6 +470,7 @@ export function decodeHelloResp(body: Uint8Array): HelloResp {
       trial: h.trial,
       keyId: h.key_id,
       maxPayload: h.max_payload,
+      ...(cmds.length ? { cmds } : {}),
     };
   } finally {
     h.free();

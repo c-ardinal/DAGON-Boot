@@ -17,7 +17,7 @@ use std::collections::VecDeque;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use dagon_agent::update_mode::{listen, serve, Exit, Port, EXIT_IDLE_MS};
+use dagon_agent::update_mode::{listen, serve, Exit, Port, Stay, EXIT_IDLE_MS};
 use dagon_agent::writer::BootCore;
 use dagon_agent::{Agent, Config};
 use dagon_core::boot::{decide, BootConfig, Decision};
@@ -76,7 +76,7 @@ impl Hub {
 }
 
 impl Port for Hub {
-    fn poll(&mut self) -> Option<&[u8]> {
+    fn poll(&mut self) -> Option<(usize, &[u8])> {
         self.polls += 1;
         self.read_reply();
         let at = self.due.front()?.0;
@@ -85,7 +85,7 @@ impl Port for Hub {
         }
         self.rx = self.due.pop_front().unwrap().1;
         self.mailbox.request();
-        Some(&self.rx)
+        Some((0, &self.rx))
     }
 
     fn reply(&mut self, frame: Option<&[u8]>, reboot: bool) {
@@ -313,7 +313,7 @@ fn update_mode_answers_stay_and_hello_with_its_mode() {
         &mut clock(&now),
         FEED_EVERY_MS,
         &mut || {},
-        Some(&stay(1)),
+        Stay::read(0, &stay(1)).as_ref(),
     );
     assert_eq!(exit, Exit::Idle);
     let answers: Vec<_> = hub
@@ -426,7 +426,7 @@ fn a_write_through_update_mode_is_tried_at_the_next_start() {
             &mut clock(&now),
             FEED_EVERY_MS,
             &mut || {},
-            Some(&stay(1)),
+            Stay::read(0, &stay(1)).as_ref(),
         );
         assert_eq!(exit, Exit::Reboot, "slot {slot}");
         for r in &hub.replies {

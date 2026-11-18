@@ -10,4 +10,6 @@ description = "Executable model of DAGON's retained and persistent formats under
 # The boot core trial cell's codec and stage0/boot core rules (world_trial).
 dagon-core = { path = "../dagon-core" }
 dagon-format = { path = "../dagon-format" }
+# The flash port `dagon_core::log::Log` runs on: the reference of world_diag.
+dagon-port = { path = "../dagon-port" }
 dagon-proto = { path = "../dagon-proto" }

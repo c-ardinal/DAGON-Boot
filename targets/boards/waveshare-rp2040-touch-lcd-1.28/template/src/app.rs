@@ -1,4 +1,4 @@
-//! Your application on the 親機. DAGON relays updates to the 子機,
+//! Your application on the node linked to the PC. DAGON relays updates to the downstream nodes,
 //! updates this board too, runs a new version on trial and confirms it;
 //! dagon gen never rewrites this file.
 
@@ -24,7 +24,7 @@ pub fn self_check() -> bool {
 /// `static EXTS: StaticCell<..>`) to observe every update event (transfer,
 /// written, trial, confirmed, rolled back) and answer the decision points;
 /// `confirm: Confirm::Own` confirms a version on trial at start, without
-/// the 親機. The start returns the node's events for your display or log
+/// the PC. The start returns the node's events for your display or log
 /// tasks.
 pub fn dagon() -> App {
     App::new(self_check)

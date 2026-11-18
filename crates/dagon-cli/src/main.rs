@@ -42,8 +42,11 @@ use std::process::ExitCode;
 use cli::{AiCmd, Cli, Command, ImageCmd, KeyCmd, ReleaseCmd, SimCmd, TopoCmd};
 
 fn main() -> ExitCode {
-    use clap::{CommandFactory, Parser};
-    let cli = match Cli::try_parse() {
+    use clap::FromArgMatches;
+    let cli = match cli::command()
+        .try_get_matches()
+        .and_then(|m| Cli::from_arg_matches(&m))
+    {
         Ok(c) => c,
         // --help (exit 0) or a usage error (exit 2), as clap prints them.
         Err(e) => {
@@ -61,7 +64,7 @@ fn main() -> ExitCode {
         _ if cli.version => Command::Version,
         Some(c) => c,
         None => {
-            let _ = Cli::command().print_long_help();
+            let _ = cli::command().print_long_help();
             return ExitCode::SUCCESS;
         }
     };

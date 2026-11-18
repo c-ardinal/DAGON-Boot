@@ -10,7 +10,7 @@ sidebar:
 The [DAGON Console demo](~/demo/) runs in the browser, against a simulated node connected to the PC and two nodes linked to it.
 
 1. Make a 構成 from the sample.
-2. Switch to 書込 (write) and press 接続する (connect).
+2. Switch to 書込 (write) and press 接続 (connect).
 3. Press 書込 (write) to write the prepared new version to the nodes.
 
 The demo reads and writes no files, connects to no device and holds no keys. Those controls say why when you point at them.

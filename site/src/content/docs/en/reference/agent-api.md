@@ -21,7 +21,7 @@ route: Host and Origin checks (403), `Authorization: Bearer <passphrase>` (401).
     { "id": "claude", "name": "Claude", "provider": "Anthropic",
       "ways": [
         { "id": "claude-code", "name": "Claude Code", "kind": "command", "available": true, "key": null },
-        { "id": "api", "name": "API キー", "kind": "messages-http", "available": false, "key": false }
+        { "id": "api", "name": "APIキー", "kind": "messages-http", "available": false, "key": false }
       ] }
   ],
   "default": { "agent": "claude", "way": "claude-code" },
@@ -214,7 +214,7 @@ Body:
   `topology` text; nothing is changed before that.
 - A proposal is whole-file: the current file's comments are not in it. When the
   agent's proposal does not pass the check after 3 calls, the answer comes
-  without it and ends with 「提案した構成は確認で誤りが残ったため、出していません。」.
+  without it and ends with 「提案した構成は検証でエラーが残存したため、提示していません。」.
 
 Errors (all `{ "error": "...", "code": "..." }` except the 400s):
 
@@ -244,7 +244,7 @@ the user's words are data in it). The system text tells the agent to explain a
 write that went back from that record only and to say what it cannot see, never
 inventing a reason. Never: keys, file paths, commands, logs, job
 errors. A topology with any hidden value gets no file proposal (the answer
-then ends with 「この構成には DAGON に送らなかった値があるため、変更の案は出していません。」 and
+then ends with 「この構成にはDAGONへ未送信の値が存在するため、変更案は提示していません。」 and
 no repair call is made); a proposal that contains `project-text` is refused
 too.
 

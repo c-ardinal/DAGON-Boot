@@ -29,7 +29,7 @@ In 準備 (define), the inspector offers each kind for a link and, on the coordi
 
 A kind the firmware of either end does not implement is marked （使用不可）.
 
-- The 構成 may still name it (problem 使えないつながり).
+- The 構成 may still name it (problem 使用不可の接続).
 - `dagon gen` refuses it and names the link (`uplink of hub over ble: the firmware of rp2040 does not run this link kind`).
 
 The kinds the firmware offers are in the Up links and Down links columns of [Boards and MCUs](/en/reference/boards/). Up is towards the PC or the coordinator, and down is to the nodes at the other end of the link. The data comes from each MCU definition's `[links]`.

@@ -228,7 +228,7 @@ The single steps are `dagon build`, `dagon image`, `dagon release` and `dagon ap
 
 ### In DAGON Console
 
-1. In 準備, press 「ビルドする」. It builds every node, signs and makes the package.
+1. In 準備, press 「ビルド」. It builds every node, signs and makes the package.
 2. In 書込, check the nodes to write on their cards.
 3. Pick the version in the header: the latest build, or a kept one to go back.
 4. Press 「書込」. It writes over Web Serial.

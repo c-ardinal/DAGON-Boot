@@ -32,9 +32,9 @@ i2c = [{ controller = "i2c3", sda = "PB4", scl = "PA8" }]
     tag: seg-f401-7seg
 ```
 
-`dagon gen`は、このノードをマイコンのcrateから作り、`wiring.rs`にボードの`flash_bytes`を書きます。
+`dagon gen`は、このノードをマイコンのcrateから作成し、`wiring.rs`にボードの`flash_bytes`を書きます。
 
-リンクの子機の端には、その子機のマイコンの`[[link_port]]`の名前（`port`）を書きます。I2Cの子機では、その端にアドレス（`addr`）とピン（`node_pins`）も書きます（[構成のリンク](/reference/topology/)）。
+接続先のノード側の端には、そのノードのマイコン定義にある`[[link_port]]`の名前（`port`）を書きます。I2Cで接続する接続先のノードでは、その端にアドレス（`addr`）とピン（`node_pins`）も書きます（[構成のリンク](/reference/topology/)）。
 
 足りないものは、検査と`dagon gen`が知らせます。
 

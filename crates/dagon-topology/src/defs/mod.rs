@@ -1003,7 +1003,7 @@ pub struct BoardDef {
     /// `cooperative`), `rom_entry` (`force-download-boot`, `m5pm1`, `stm32-i2c-rom`). Left out for
     /// the coordinator.
     pub default_link: Option<DefaultLink>,
-    /// Pins the page wires new links to when this board is the 親機: `i2c = { controller, sda, scl }`
+    /// Pins the page wires new links to when this board is the coordinator: `i2c = { controller, sda, scl }`
     /// (a new I2C bus; `controller` is one of the board's `i2c`) and `pio_uart = { tx, rx }` (a new
     /// PIO UART link), numbered GPIOs below the MCU's `gpio_count`. Only on boards whose MCU has
     /// `[coordinator]`.

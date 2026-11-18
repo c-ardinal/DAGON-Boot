@@ -32,3 +32,39 @@ text = "正式リリースまでに破壊的変更が行われるリスクが有
 kind = "plain"
 word = "解下さい"
 reason = "The alpha notice is quoted word for word (scripts/test_markers.py NOTICE_FILES)."
+
+# The glossary names each retired term once, to point a reader who meets it at the term that replaces it.
+[[allow]]
+path = "site/src/content/docs/explanation/words.md"
+text = "- **親機/子機/孫機**: 廃止した用語です。"
+kind = "retired"
+word = "親機"
+reason = "The glossary's entry for the retired term names it, pointing at ノード."
+
+[[allow]]
+path = "site/src/content/docs/explanation/words.md"
+text = "- **親機/子機/孫機**: 廃止した用語です。"
+kind = "retired"
+word = "子機"
+reason = "The glossary's entry for the retired term names it, pointing at ノード."
+
+[[allow]]
+path = "site/src/content/docs/explanation/words.md"
+text = "- **親機/子機/孫機**: 廃止した用語です。"
+kind = "retired"
+word = "孫機"
+reason = "The glossary's entry for the retired term names it, pointing at ノード."
+
+[[allow]]
+path = "site/src/content/docs/explanation/words.md"
+text = "- **書き込む/書き込みモード**: 廃止した用語です。"
+kind = "retired"
+word = "書き込む"
+reason = "The glossary's entry for the retired term names it, pointing at 書込."
+
+[[allow]]
+path = "site/src/content/docs/explanation/words.md"
+text = "- **書き込む/書き込みモード**: 廃止した用語です。"
+kind = "retired"
+word = "書き込み"
+reason = "The glossary's entry for the retired term names it, pointing at 書込モード."

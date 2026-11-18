@@ -195,7 +195,7 @@ class Wording(unittest.TestCase):
 
     # Words the Japanese pages do not use for DAGON's own things.
     NOT_SAID = ["ブートコア", "給餌", "見守り", "武装", "運び手", "開始者", "トライアル", "将来の", "マイコンのパッケージ", "ボードのパッケージ", "MCUのパッケージ", "ルールます", "破損していないの記録",
-                # パッケージ is the .dgb file and nothing else; the verb is 書き込む, in full.
+                # パッケージ is the .dgb file and nothing else; the verb is 書込する, in full.
                 "npmパッケージ", "Cargoパッケージ", "書込み", "初回書", "書く前",
                 # One word for one thing.
                 "クレート",
@@ -418,7 +418,7 @@ class JapaneseSpacing(unittest.TestCase):
     def test_what_the_rule_finds_and_leaves(self):
         for text in ("DAGON とは", "1 か所", "`dagon new` と", "は `x`", "[Rust](https://rustup.rs) だけ", "**DAGON** は", "---\ntitle: DAGON を試す\n---\n"):
             self.assertTrue(spaces(text), text)
-        for text in ("DAGON Console", "`a の b`", "```\nDAGON を\n```\n", "### 1.1 名前", "| 親機 |", "- 名前", "**名前。** DAGON", "**`x`** の", "50 ms"):
+        for text in ("DAGON Console", "`a の b`", "```\nDAGON を\n```\n", "### 1.1 名前", "| ノード |", "- 名前", "**名前。** DAGON", "**`x`** の", "50 ms"):
             self.assertEqual(spaces(text), [], text)
 
 
@@ -482,7 +482,7 @@ class GeneratedJapanese(unittest.TestCase):
 
     def test_the_japanese_pages_say_what_stays_english(self):
         for rel, words in (("reference/cli.md", "コマンドの説明"), ("reference/rust-api.md", "rustdocの本文")):
-            self.assertIn(f"{words}は元のソースのままで、英語です。", (llms.DOCS / rel).read_text(encoding="utf-8"))
+            self.assertIn(f"{words}はソースの原文のままで、英語です。", (llms.DOCS / rel).read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":

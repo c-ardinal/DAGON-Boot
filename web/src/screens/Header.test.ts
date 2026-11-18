@@ -33,7 +33,7 @@ describe('header (TopBar)', () => {
   test("the mode's actions sit right of the toggle", () => {
     const actions = createRawSnippet(() => ({ render: () => `<button class="button-primary-header"><span>${WRITE.run}</span></button>` }));
     const body = head({ actions });
-    expect(body.indexOf('radiogroup')).toBeLessThan(body.indexOf(WRITE.run));
+    expect(body.indexOf('radiogroup')).toBeLessThan(body.indexOf('button-primary-header'));
   });
 
   test('what every sequence needs is in the bar: undo, redo, the view toggle, then the actions, then the connection, then the menu', () => {
@@ -41,12 +41,12 @@ describe('header (TopBar)', () => {
     const edit = { canUndo: true, canRedo: false, onundo: () => undefined, onredo: () => undefined, view: 'graph' as const, onview: () => undefined };
     const body = head({ actions, edit, hub: { connected: false, locked: null, onpress: () => undefined } });
     const at = (s: string) => body.indexOf(s);
-    const order = [`aria-label="${DEFINE.undo}"`, `aria-label="${DEFINE.redo}"`, `aria-label="${DEFINE.table}"`, WRITE.run, HUB_TOGGLE.connect, `aria-label="${MENU.button}"`];
+    const order = [`aria-label="${DEFINE.undo}"`, `aria-label="${DEFINE.redo}"`, `aria-label="${DEFINE.table}"`, 'button-primary-header', HUB_TOGGLE.connect, `aria-label="${MENU.button}"`];
     expect(order.map(at)).toEqual([...order.map(at)].sort((a, b) => a - b));
     expect(order.every((s) => at(s) >= 0)).toBe(true);
     // A held connection stays focusable and says why.
-    const held = head({ hub: { connected: true, locked: '書き込みが終わるまで、切断できません。', onpress: () => undefined } });
-    expect(held).toContain('data-control="connect" title="書き込みが終わるまで、切断できません。" aria-disabled="true"');
+    const held = head({ hub: { connected: true, locked: '書込の完了まで切断は不可です。', onpress: () => undefined } });
+    expect(held).toContain('data-control="connect" title="書込の完了まで切断は不可です。" aria-disabled="true"');
     expect(held).toContain(HUB_TOGGLE.disconnect);
   });
 });

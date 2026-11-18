@@ -4,10 +4,10 @@ import { openSample } from './console.ts';
 /** `?demo`: what the demo page is; `agent=linked`: the worst case, an agent that says it is linked. */
 const DEMO = 'sim&demo&agent=linked';
 const MARK = '.dagon .mark';
-const BUBBLE = 'デモでは会話できません。dagon serve で連携すると相談できます。';
+const BUBBLE = 'デモでは会話は不可です。dagon serveで連携すると相談が可能です。';
 
 async function group(p: Page, name: string) {
-  await p.getByRole('button', { name: 'メニューを開く' }).click();
+  await p.getByRole('button', { name: 'メニューの表示' }).click();
   await p.locator('.panel').first().getByRole('button', { name, exact: true }).click();
   return p.locator('.panel').last();
 }
@@ -30,11 +30,11 @@ const nothingOpened = async (p: Page) => {
 
 /** Every opener of linking, talking, keys and the CLI sheet (src/demoOpeners.test.ts fails when the code has one this list does not). */
 const OPENERS: Record<string, (p: Page) => Promise<void>> = {
-  '☰ DAGON と連携する': (p) => closedItem(p, 'DAGON と連携する'),
-  '☰ CLI の接続と API キーを見る': (p) => closedItem(p, 'CLI の接続と API キーを見る'),
-  '☰ DAGON と話す': (p) => absentItem(p, 'DAGON と話す'),
-  '☰ DAGON の案を反映する': (p) => absentItem(p, 'DAGON の案を反映する'),
-  '☰ DAGON との連携を外す': (p) => absentItem(p, 'DAGON との連携を外す'),
+  '☰ DAGONとの連携': (p) => closedItem(p, 'DAGONとの連携'),
+  '☰ CLIの接続とAPIキーの表示': (p) => closedItem(p, 'CLIの接続とAPIキーの表示'),
+  '☰ DAGONとの対話': (p) => absentItem(p, 'DAGONとの対話'),
+  '☰ DAGONの案の反映': (p) => absentItem(p, 'DAGONの案の反映'),
+  '☰ DAGONとの連携解除': (p) => absentItem(p, 'DAGONとの連携解除'),
   'the status band\'s console icon': (p) => expect(p.locator('.dock button.mark')).toHaveCount(0),
   'the drawer\'s 会話 tab': (p) => expect(p.getByRole('tab', { name: '会話' })).toHaveCount(0),
   'the bubble\'s questions and field': async (p) => {
@@ -122,5 +122,5 @@ test('outside the demo the same openers are there', async ({ page }) => {
   await expect(page.getByRole('tab', { name: '会話' })).toHaveCount(1);
   await expect(page.locator('.dock button.mark')).toHaveCount(1);
   const dagon = await group(page, 'DAGON');
-  await expect(dagon.locator('button:has(span:text-is("DAGON と話す"))')).toHaveCount(1);
+  await expect(dagon.locator('button:has(span:text-is("DAGONとの対話"))')).toHaveCount(1);
 });

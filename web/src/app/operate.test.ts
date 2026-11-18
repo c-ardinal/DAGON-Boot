@@ -32,8 +32,8 @@ describe('the reconnect wait', () => {
   });
 });
 
-// dagon-host (through dagon-wasm) against the in-memory hub.
-describe('operating mode against the in-memory hub', () => {
+// dagon-host (through dagon-wasm) against the in-memory PC-connected node.
+describe('operating mode against the in-memory PC-connected node', () => {
   test('find automatically → found → watching, with every node answering', async () => {
     const { op } = session();
     await op.connect();
@@ -94,7 +94,7 @@ describe('operating mode against the in-memory hub', () => {
     expect(op.live.watch.rttMs).not.toBeNull();
   }, 20_000);
 
-  test('the page’s ?mock hub answers inside dagon-host’s request time', async () => {
+  test('the page’s ?mock PC-connected node answers inside dagon-host’s request time', async () => {
     const op = new Operate({
       open: async () => {
         const t = devHub(new URLSearchParams('mock'))!.transport;
@@ -115,7 +115,7 @@ describe('operating mode against the in-memory hub', () => {
     expect(op.state).toBe('ready');
   }, 20_000);
 
-  test('"最初からやり直す" drops the connection and the records and waits at idle', async () => {
+  test('"リスタート" drops the connection and the records and waits at idle', async () => {
     const { op } = session();
     await op.connect();
     op.reset();

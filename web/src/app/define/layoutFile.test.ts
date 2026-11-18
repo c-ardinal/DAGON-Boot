@@ -2,7 +2,7 @@ import { describe, expect, test } from 'vitest';
 import type { Layout } from './cli.svelte.ts';
 import { LayoutFile, type LayoutPort } from './layoutFile.ts';
 
-const SAVED: Layout = { format: 1, names: { seg: '7セグ', hub: '親機' }, positions: { seg: { x: 1, y: 2 } } };
+const SAVED: Layout = { format: 1, names: { seg: '7セグ', hub: 'メイン' }, positions: { seg: { x: 1, y: 2 } } };
 
 /** A serve whose GET answers what `answer` says at that moment. */
 function port(answer: () => Layout | null | 'refused' | 'unreachable') {
@@ -65,7 +65,7 @@ describe('the layout file is never written over unread', () => {
     expect(e.names).toEqual(SAVED.names);
     e.names = { ...e.names, seg: 'A' };
     await f.change(() => ({ names: e.names }));
-    expect(puts[1].names).toEqual({ seg: 'A', hub: '親機' });
+    expect(puts[1].names).toEqual({ seg: 'A', hub: 'メイン' });
     expect(puts[1].positions).toEqual({ seg: { x: 1, y: 2 }, hub: { x: 9, y: 9 } });
   });
 
@@ -79,7 +79,7 @@ describe('the layout file is never written over unread', () => {
     const drag = f.change(() => ({ positions: e.positions }));
     const rename = f.change(() => ({ names: { ...e.names, seg: 'A' } }));
     await Promise.all([drag, rename]);
-    expect(puts[1].names).toEqual({ seg: 'A', hub: '親機' });
+    expect(puts[1].names).toEqual({ seg: 'A', hub: 'メイン' });
   });
 
   test('a file that was read is written whole, as the page has it', async () => {

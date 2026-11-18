@@ -28,12 +28,12 @@ type SimulatorClass = new (seed: number) => SimHub;
 export interface SimLink {
   transport: Transport;
   clock: LinkClock;
-  /** The simulated hub, made on first use (dagon-wasm must be loaded by then). */
+  /** The simulated PC-connected node, made on first use (dagon-wasm must be loaded by then). */
   hub: () => SimHub;
 }
 
 /**
- * A simulator, or null in builds without it. `prepare` runs once on the new hub. With `pace`
+ * A simulator, or null in builds without it. `prepare` runs once on the new PC-connected node. With `pace`
  * (simulated ms per wall ms) waiting takes wall time too, so a write runs about as long as on
  * hardware; without it the simulator's clock jumps ahead at once (tests).
  */

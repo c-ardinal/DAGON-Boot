@@ -8,7 +8,7 @@
     status: AgentStatus;
     /** 『同意して連携』: records the consent for the chosen agent and way through serve. */
     onagree: (choice: AgentChoice) => void;
-    /** 『やめる』 or Escape: nothing is recorded. */
+    /** 『キャンセル』 or Escape: nothing is recorded. */
     oncancel: () => void;
   }
 

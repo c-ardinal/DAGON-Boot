@@ -12,7 +12,7 @@
     target?: string;
     /** Closing is offered (the × at the top-right); absent while closing is not possible. */
     onclose?: () => void;
-    /** 詳しく見る at the footer's left: the record behind the notice. */
+    /** 詳細表示 at the footer's left: the record behind the notice. */
     onmore?: () => void;
     children: Snippet;
     /** The footer's actions, primary last. */

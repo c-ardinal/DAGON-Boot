@@ -24,7 +24,7 @@ describe('lock table', () => {
   test('several states: the leftmost one gives the reason', () => {
     const s = states({ disconnected: true, updating: true });
     expect(lockOf('update', s)).toBe(LOCK.states.updating.why.update);
-    expect(stateName(s)).toBe('書き込み中');
+    expect(stateName(s)).toBe('書込中');
   });
 
   test('保存中 keeps editing open and waits for the save before the CLI operations', () => {
@@ -48,7 +48,7 @@ describe('lock table', () => {
     expect(stateName(s)).toBe('待機');
   });
 
-  test('返事待ち stops asking again and applying, nothing else', () => {
+  test('DAGONの回答待機 stops asking again and applying, nothing else', () => {
     const s = states({ thinking: true });
     expect(all.filter((c) => lockOf(c, s))).toEqual(['ask', 'apply']);
   });

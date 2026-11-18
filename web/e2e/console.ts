@@ -3,9 +3,9 @@ import type { Page } from '@playwright/test';
 /** Opens the development simulator's Console on the sample 構成, in 準備. */
 export async function openSample(page: Page, query = 'sim'): Promise<void> {
   await page.goto(`/?${query}`);
-  await page.getByRole('button', { name: 'プロジェクトを作る' }).click();
-  await page.getByRole('radio', { name: '見本から作る' }).click();
-  await page.getByRole('button', { name: '名前と場所を決める' }).click();
+  await page.getByRole('button', { name: 'プロジェクト作成' }).click();
+  await page.getByRole('radio', { name: 'サンプルから作成' }).click();
+  await page.getByRole('button', { name: '名称と保存先の決定' }).click();
   await page.locator('.node').first().waitFor();
   await settled(page);
 }

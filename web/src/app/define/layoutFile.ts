@@ -1,4 +1,4 @@
-// The project's layout file (呼び名 and card places) as the page keeps it. PUT /v1/layout replaces the file whole, so a
+// The project's layout file (表示名 and card places) as the page keeps it. PUT /v1/layout replaces the file whole, so a
 // file not read (a newer format, damage, a failed request) is never written over: every change first tries to read it
 // again, and once it can be read the editor takes what it holds before anything is written.
 import { LAYOUT_FORMAT, type Layout } from './cli.svelte.ts';

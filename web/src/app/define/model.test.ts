@@ -56,7 +56,7 @@ describe('define document', () => {
     const r = check(toYaml(doc.topo));
     expect([r.ok, r.errors]).toEqual([true, 0]);
     expect(doc.topo.update.order).toEqual(['nucleo', 'm5stopwatch', 'hub']);
-    // The same board again: a second one of it; a board with no link of its own is a second 親機.
+    // The same board again: a second one of it; a board with no link of its own is a second coordinator.
     expect(canPlace(doc, 'nucleo-f401re')).toBe(true);
     const two = place(doc, 'waveshare-rp2040-touch-lcd-1.28');
     expect(two.doc.topo.nodes.find((n) => n.id === two.id)?.role).toBe('coordinator');
@@ -64,7 +64,7 @@ describe('define document', () => {
     expect(check(toYaml(two.doc.topo)).errors).toBe(0);
   });
 
-  test("the hub's new I2C bus and PIO UART link take its board's [coordinator] pins", () => {
+  test("the coordinator's new I2C bus and PIO UART link take its board's [coordinator] pins", () => {
     let doc = emptyDoc();
     for (const b of ['waveshare-rp2040-touch-lcd-1.28', 'nucleo-f401re', 'm5stopwatch']) doc = place(doc, b).doc;
     doc = connect(connect(doc, 'nucleo'), 'm5stopwatch');
@@ -121,7 +121,7 @@ describe('define document', () => {
     expect(ownFlash(fromYaml(SAMPLE_YAML), 'hub')).toBeNull();
   });
 
-  test('any shape: a second 親機 over CAN and a grandchild are drawn in rows and told as skipped by updating (V-23)', () => {
+  test('any shape: a second coordinator over CAN and a node two links from the coordinator are drawn in rows and told as skipped by updating (V-23)', () => {
     let doc = fromYaml(SAMPLE_YAML);
     doc = placeMcu(doc, 'rp2040').doc;
     const hub2 = doc.topo.nodes[doc.topo.nodes.length - 1].id;
@@ -138,10 +138,10 @@ describe('define document', () => {
     expect(v23[0].sentence).not.toContain('してください');
     // The CAN hop to it is not available either, told as skipped, not as a thing to fix.
     const v24 = problems(doc).find((p) => p.rule === 'V-24' && p.select === `link:${hub2}`)!;
-    expect(v24.sentence).toContain('飛ばす');
+    expect(v24.sentence).toContain('スキップ');
     expect(v24.sentence).not.toContain('してください');
     const c = toConfig(doc, supportedBoards());
-    // Linked from the first 親機, the second one sits below it, skipped as a second 親機's tree.
+    // Linked from the first coordinator, the second one sits below it, skipped as a second coordinator's tree.
     expect(c.nodes.find((n) => n.id === hub2)).toMatchObject({ depth: 1, skip: 'second-hub' });
     expect(c.nodes.filter((n) => n.skip).map((n) => n.id)).toEqual([hub2]);
     expect(topo_compile(toYaml(doc.topo))).toEqual(topo_compile(SAMPLE_YAML));
@@ -149,22 +149,22 @@ describe('define document', () => {
     let deep = removeNode(fromYaml(SAMPLE_YAML), 'watch');
     deep = place(deep, 'm5stopwatch').doc;
     deep = connect(deep, 'm5stopwatch', 'seg');
-    // No [coordinator] on the F401: the first UART0 pins the 親機's definitions allow together (its MCU's pairs on its board's header).
+    // No [coordinator] on the F401: the first UART0 pins the coordinator's definitions allow together (its MCU's pairs on its board's header).
     expect(deep.topo.links!.map((l) => linkView(deep.topo, l)).find((l) => l.from === 'seg')).toMatchObject({ iface: 'hw-uart0', pins: { tx: 16, rx: 17 } });
     const cfg = toConfig(deep, supportedBoards());
     expect(cfg.nodes.map((n) => [n.id, n.depth, n.skip])).toEqual([['hub', 0, undefined], ['seg', 1, undefined], ['m5stopwatch', 2, 'deep']]);
-    // Any depth: a node below the 孫機 is placed and connected too.
+    // Any depth: a node at the other end of a link from that node is placed and connected too.
     const deeper = connect(place(deep, 'nucleo-f401re').doc, 'nucleo', 'm5stopwatch');
     expect(problems(deeper).filter((p) => p.severity === 'error')).toEqual([]);
     const dc = toConfig(deeper, supportedBoards());
     expect(dc.nodes.find((n) => n.id === 'nucleo')).toMatchObject({ depth: 3, skip: 'deep' });
     expect(problems(deep).map((p) => p.rule)).toContain('V-23');
-    // Valid as placed: the 孫機's link carries its board's way into its loader, so nothing is an error.
+    // Valid as placed: that node's link carries its board's way into its loader, so nothing is an error.
     expect(problems(deep).filter((p) => p.severity === 'error')).toEqual([]);
     expect(topo_check(toYaml(deep.topo))).toContain('V-23');
   });
 
-  test('the 親機 uplink: set, written to the YAML (same compiled topology), and drawn as its L0', () => {
+  test('the coordinator uplink: set, written to the YAML (same compiled topology), and drawn as its L0', () => {
     const doc = setUplink(fromYaml(SAMPLE_YAML), 'hub', { kind: LinkKind.WifiTcp, host: 'browser' });
     const yaml = toYaml(doc.topo);
     expect(yaml).toContain('uplink');
@@ -176,7 +176,7 @@ describe('define document', () => {
     expect(setUplink(doc, 'hub', null).topo.nodes.find((n) => n.id === 'hub')?.uplink).toBeUndefined();
   });
 
-  test('hops the firmware does not run are known, and reported as 使えないつながり (◇)', () => {
+  test('hops the firmware does not run are known, and reported as 使用不可の接続 (◇)', () => {
     expect(linkKinds('rp2040')).toEqual({ up: [LinkKind.UsbCdc], down: [LinkKind.I2c, LinkKind.Uart] });
     const doc = fromYaml(SAMPLE_YAML);
     const [hub, seg] = ['hub', 'seg'].map((id) => doc.topo.nodes.find((n) => n.id === id));

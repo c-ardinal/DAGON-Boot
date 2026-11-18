@@ -19,7 +19,7 @@ export const REAL_CLOCK: LinkClock = {
   sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
 };
 
-/** A HostLink whose device can be replaced (the hub chosen again after its reboot). */
+/** A HostLink whose device can be replaced (the node connected to the PC chosen again after its reboot). */
 export interface SwapLink extends HostLink {
   use(t: Transport): void;
 }

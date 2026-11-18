@@ -73,7 +73,7 @@ export function fade(_el: Element, { dur = '--dur-ui' }: Timing = {}): Transitio
   return { ...eased(dur), css: (t) => `opacity: ${t}` };
 }
 
-/** A link appearing or leaving: it is drawn from the parent down to the child. */
+/** A link appearing or leaving: it is drawn from the node nearer the PC down to the node at the other end of the link. */
 export function draw(_el: Element): TransitionConfig {
   const move = Number(token('--move'));
   return { ...eased('--dur-line'), css: (t, u) => `opacity: ${t}; clip-path: inset(0 0 ${u * 100 * move}% 0) stroke-box` };

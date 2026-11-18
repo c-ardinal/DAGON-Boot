@@ -4,7 +4,7 @@
 
   interface Props {
     onconfirm: () => void;
-    /** "やめる" or Escape: back to the menu's "最初からやり直す". */
+    /** "キャンセル" or Escape: back to the menu's "リスタート". */
     oncancel: () => void;
   }
 

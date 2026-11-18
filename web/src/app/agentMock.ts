@@ -6,12 +6,12 @@ import type { AgentApi, AgentStatus } from './agent.svelte.ts';
 
 export const MOCK_TEXTS = (): string[] => [...SENDS, ...NEVER, ...Object.values(ANSWERS)];
 
-const SENDS = ['構成と定義の事実（ノード・リンク・部品・設定値）', '選んだノードやリンク', '確認した結果（問題・◇ 制限・書き込みの記録）'];
-const NEVER = ['鍵', 'コマンドとその出力の全文', 'ファイルのパス'];
+const SENDS = ['構成と定義の事実（ノード・リンク・部品・設定値）', '選択したノードやリンク', '確認の結果（問題・◇ 制限・書込の記録）'];
+const NEVER = ['キー', 'コマンドとその出力の全文', 'ファイルのパス'];
 const ANSWERS: Record<string, string> = {
-  problem: 'このノードに問題はありません。\n\n確かめた結果と書き込みの記録のどちらにも、このノードの問題は出ていません。',
-  next: '親機とつないで、パッケージファイルを選んでください。\n\n構成に問題はなく、このパソコンにつながる親機とその直下の子機へ書き込めます。',
-  propose: 'ウォッチの UART の速さを 230400 にする案です。\n\n速さを上げると、書き込みの時間が短くなります。',
+  problem: 'このノードに問題はありません。\n\n確認の結果と書込の記録のどちらにもこのノードの問題は存在しません。',
+  next: 'PC接続ノードと接続し、パッケージファイルを選択してください。\n\n構成に問題はなく、このパソコンに接続したPC接続ノードとその接続先のノードへの書込が可能です。',
+  propose: 'ウォッチのUARTの速度を230400にする案です。\n\n速度の向上で、書込の時間が短縮します。',
   failure: '失敗した記録はありません。',
 };
 
@@ -27,7 +27,7 @@ export function agentMock(q: URLSearchParams, yaml: () => string, wait = (ms: nu
         provider: 'Anthropic',
         ways: [
           { id: 'claude-code', name: 'Claude Code', kind: 'command', available: true },
-          { id: 'api', name: 'API キー', kind: 'messages-http', available: false },
+          { id: 'api', name: 'APIキー', kind: 'messages-http', available: false },
         ],
       },
     ],
@@ -56,7 +56,7 @@ export function agentMock(q: URLSearchParams, yaml: () => string, wait = (ms: nu
       await wait(1200);
       const kind = String((body as { kind?: string }).kind ?? 'free');
       const proposal = kind === 'propose' ? { yaml_diff: '   - kind: uart\n     iface: pio-uart\n-    baud: 115200\n+    baud: 230400', topology: yaml().replace('baud: 115200', 'baud: 230400') } : null;
-      return json({ answer: ANSWERS[kind] ?? 'その質問には、構成の事実からは答えられません。', proposal });
+      return json({ answer: ANSWERS[kind] ?? 'その質問には構成の事実からの回答は不可です。', proposal });
     }
     return json({ error: 'not found' }, 404);
   };

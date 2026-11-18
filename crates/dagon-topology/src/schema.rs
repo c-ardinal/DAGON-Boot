@@ -162,7 +162,7 @@ impl End {
 }
 
 /// The kind of one hop. A 構成 may name any; which ones an MCU's firmware
-/// implements is in [`crate::links`] (the rest are "not available yet").
+/// implements is in [`crate::links`] (the rest are "not available").
 /// Generates [`LinkKind`] from the one list of link kinds
 /// (`dagon_format::with_link_kinds!`).
 macro_rules! link_kind_enum {

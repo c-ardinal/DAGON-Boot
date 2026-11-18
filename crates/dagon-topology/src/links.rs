@@ -1,7 +1,7 @@
 //! Which link kinds each MCU's firmware implements, up (towards the PC or
 //! the 親機) and down (to its 子機), from the MCU definitions' `[links]`
 //! (kept equal to the MCU packages' `LINK_KINDS` by a test): a kind missing
-//! there is accepted in a 構成 but reported as not available yet (V-24),
+//! there is accepted in a 構成 but reported as not available (V-24),
 //! and `dagon gen` refuses to generate it.
 
 use crate::defs::Registry;

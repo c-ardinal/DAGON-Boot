@@ -251,8 +251,8 @@ impl<'a> Ctx<'a> {
         });
     }
 
-    /// Hops whose kind the MCU firmware at either end does not implement
-    /// yet (まだ使えないつながり): accepted and drawn, reported by name;
+    /// Hops whose kind the MCU firmware at either end does not run
+    /// (使えないつながり): accepted and drawn, reported by name;
     /// `dagon gen` refuses them. An uplink on a 子機 is an error.
     fn v24(&mut self) {
         for (i, n) in self.t.nodes.iter().enumerate() {
@@ -273,7 +273,7 @@ impl<'a> Ctx<'a> {
                     "V-24",
                     format!("nodes[{i}].uplink.kind"),
                     format!(
-                        "uplink of '{}' over {}: not available yet on {}",
+                        "uplink of '{}' over {}: the firmware of {} does not run this link kind",
                         n.id,
                         up.kind.name(),
                         n.mcu
@@ -305,7 +305,7 @@ impl<'a> Ctx<'a> {
                     "V-24",
                     format!("{}.kind", link_path(i)),
                     format!(
-                        "link between {} over {}: not available yet on {}",
+                        "link between {} over {}: the firmware of {} does not run this link kind",
                         pair(&a.id, &b.id),
                         l.kind.name(),
                         missing.join(", ")
@@ -467,7 +467,7 @@ impl<'a> Ctx<'a> {
                         );
                     }
                 }
-                // Described only; V-23 says they are not updatable yet.
+                // Described only; V-23 says updating skips them.
                 LinkKind::Can
                 | LinkKind::Ethernet
                 | LinkKind::UsbCdc
@@ -518,7 +518,7 @@ impl<'a> Ctx<'a> {
             .iter()
             .filter(|n| n.role == Role::Coordinator)
             .count();
-        // Several coordinators are a shape that is not updatable yet (V-23).
+        // Updating skips the trees of the coordinators after the first (V-23).
         if count == 0 {
             self.err("V-03", "nodes", "need a coordinator, got none");
         }
@@ -545,7 +545,7 @@ impl<'a> Ctx<'a> {
         });
     }
 
-    /// Valid shapes that updating does not reach yet, told as information
+    /// Valid shapes that updating does not reach, told as information
     /// (never errors): more than one coordinator and their trees, nodes
     /// below a 子機 and links of a kind the compiled topology cannot carry.
     /// Updating covers one 親機 with its direct 子機
@@ -578,7 +578,7 @@ impl<'a> Ctx<'a> {
                     "V-23",
                     format!("{p}.kind"),
                     format!(
-                        "{} link between {}: not updatable yet, updating skips it",
+                        "{} link between {}: updating uses I2C and UART links only and skips it",
                         l.kind.name(),
                         pair(a, b)
                     ),
@@ -593,16 +593,16 @@ impl<'a> Ctx<'a> {
                 // Unknown nodes are V-04's.
                 _ if role(a).is_none() || role(b).is_none() => None,
                 (Some(f), [_, _]) => Some(format!(
-                    "'{}' is a 親機 linked to the 親機 '{f}': not updatable yet, updating skips it",
+                    "'{}' is a 親機 linked to the 親機 '{f}': updating reaches the first 親機's tree only and skips it",
                     if a == f { b } else { a }
                 )),
                 (Some(_), _) => None,
                 (None, []) => Some(format!(
-                    "the link between the 子機 {} is below a 子機: not updatable yet, updating skips it",
+                    "the link between the 子機 {} is below a 子機: updating reaches the 親機's direct 子機 only and skips it",
                     pair(a, b)
                 )),
                 (None, [h, ..]) => Some(format!(
-                    "the link between {} is under the second 親機 '{h}': not updatable yet, updating skips it",
+                    "the link between {} is under the second 親機 '{h}': updating reaches the first 親機's tree only and skips it",
                     pair(a, b)
                 )),
             };
@@ -614,7 +614,7 @@ impl<'a> Ctx<'a> {
 
     /// The coordinator's MCU must define what it offers as one (its
     /// `[coordinator]` section). Only the first coordinator, the one the hub
-    /// rules check: further ones are a shape not updatable yet (V-23).
+    /// rules check: updating skips the further ones (V-23).
     /// Unknown MCUs are V-06's.
     fn v25(&mut self) {
         let first = self

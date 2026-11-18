@@ -45,7 +45,7 @@ impl Skip {
                 "it is in a second 親機's tree; updating reaches the first 親機 only"
             }
             Skip::Deep => "it is below a 子機; updating reaches the 親機's direct 子機 only",
-            Skip::LinkKind => "its link kind is not one updating can use yet (I2C or UART)",
+            Skip::LinkKind => "its link is of a kind updating does not use (I2C and UART only)",
             Skip::Unreachable => "no chain of links leads to it from the first 親機",
             Skip::CutInvalid => {
                 "the part updating would reach does not pass `dagon topo check` on its own"

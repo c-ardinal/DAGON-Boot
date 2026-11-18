@@ -256,7 +256,9 @@ fn link(reg: &Registry, t: &Topology, l: &Link) -> Result<TopoLink, CompileError
         | LinkKind::Ble
         | LinkKind::WifiTcp => {
             // updatable() leaves these out; reaching here is a caller's bug.
-            return Err(bad(format!("link {named} is not updatable yet (V-23)")));
+            return Err(bad(format!(
+                "link {named}: updating uses I2C and UART links only (V-23)"
+            )));
         }
     };
     let mut ends = [end(reg, t, &l.ends[0])?, end(reg, t, &l.ends[1])?];

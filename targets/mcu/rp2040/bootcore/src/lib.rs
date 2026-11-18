@@ -1,9 +1,9 @@
-//! Hub boot core: dagon-core's kind S decision over the hub layout. A
+//! Coordinator boot core: dagon-core's kind S decision over the coordinator layout. A
 //! pending app slot is tried (BOOT_ATTEMPT before the jump) until the
 //! attempts run out, then rolled back; otherwise the confirmed slot starts.
 //! Either slot starts only after its signature and SHA-256 check, one
 //! signature check per started slot at every boot. dagon-core also requires
-//! each header's `load_addr` to be its slot body (the hub's `Flash` speaks
+//! each header's `load_addr` to be its slot body (the coordinator's `Flash` speaks
 //! XIP addresses). Every start arms the watchdog for 8 s before the log is
 //! read, and feeds it at every step of a signature check (seconds on the
 //! ring oscillator of a board without a crystal); the app keeps feeding

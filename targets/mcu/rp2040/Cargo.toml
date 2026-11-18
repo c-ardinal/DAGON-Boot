@@ -18,7 +18,7 @@ lint = { target = "thumbv6m-none-eabi", features = [""] }
 
 [features]
 # The relay by default: a generated node names this package without
-# features (an RP2040 node always has the PC link).
+# features (RP2040 nodes are coordinators).
 default = ["relay"]
 # The embassy-rp parts: flash port, watchdog guard, slot store, link
 # drivers, sub-MCU control lines, and the verifying key from DAGON_PUBKEY.

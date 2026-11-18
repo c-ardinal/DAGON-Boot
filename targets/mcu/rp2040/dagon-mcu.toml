@@ -159,7 +159,7 @@ sub = "stage0"
 name = "bootcore"
 sub = "bootcore"
 
-# What the coordinator (hub) rules check on this MCU.
+# What the coordinator rules check on this MCU.
 [coordinator]
 pio_state_machines = 8
 pio_uart_state_machines = 2

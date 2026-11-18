@@ -1,5 +1,5 @@
 //! Start-up written by `dagon new`: your board (board.rs), the DAGON node
-//! (PC link, relaying to the nodes away from the PC) and your application in app.rs. You do
+//! (PC link, relaying to the other nodes) and your application in app.rs. You do
 //! not need to change this file.
 //!
 //! DAGON's relay runs on a high-priority interrupt executor; your tasks in

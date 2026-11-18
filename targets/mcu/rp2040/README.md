@@ -20,7 +20,7 @@ extension), which every MCU package shares, and [`BoardDef`]
 needs only its own `BoardCore` and `BoardDef` and links (see
 `template/src/board.rs`).
 
-## A node with a PC link and your own task
+## A coordinator with your own task
 
 This is what `dagon new` generates for the Waveshare board
 (`../../boards/waveshare-rp2040-touch-lcd-1.28/template`, its manifest kept
@@ -149,7 +149,7 @@ kinds this package offers (`links::LINK_KINDS`):
 | `ethernet` | NotYet | NotYet |
 | `can` | NotYet | NotYet |
 
-- Up `usb-cdc`: the PC link of the node (`links::UsbCdc`, the USB CDC
+- Up `usb-cdc`: the PC link of the coordinator (`links::UsbCdc`, the USB CDC
   device; `Reconnect::Reenumerates`).
 - Down `i2c`: I2C0 controller with the DAGON mailbox (`links::I2c`), and
   down `uart`: a PIO UART (`links::Uart`); the board package names the
@@ -279,7 +279,7 @@ without a board has none). Builds without `DAGON_BOOT_CRATE` fail, and a
 boot crate that links anything else than DAGON's packages and its
 trusted extensions with the source hash dagon.toml declares does not
 build. The boot core build takes `--features diag` for step blink codes
-(see the hub README). Stage0 checks a boot core's signature under the key
+(see the RP2040 README). Stage0 checks a boot core's signature under the key
 built into its own flash and starts no core whose signature does not
 verify; with neither a core nor a confirmed app to start, it blinks the reason's code on the board's
 `[boot] led` (a node without a board, or a board without the LED or with

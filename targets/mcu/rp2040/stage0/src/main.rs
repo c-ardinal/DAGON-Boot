@@ -1,4 +1,4 @@
-//! Hub stage0 (never updated): picks the boot core slot from the boot core
+//! Coordinator stage0 (never updated): picks the boot core slot from the boot core
 //! log and the trial cell (`dagon_mcu_rp2040::bl::choose`, the shared
 //! `dagon_core::bootcore::decide`): the pending core on trial while its
 //! starts last, else the confirmed one; never a core no record names.

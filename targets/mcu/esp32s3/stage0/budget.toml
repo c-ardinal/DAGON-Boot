@@ -1,8 +1,8 @@
 # The ESP32-S3 stage0 and the most bytes each part of it may take
 # (scripts/stage0_size.py). The ROM copies this stage0 into RAM from flash
-# 0x0, so it has no flash region in the definition yet (C-559 U2): its
+# 0x0, so it has no flash region in the definition yet: its
 # limit is [image] max_bytes, 30 KiB of the 32 KiB below the partition
-# table at 0x8000 (C-559), against the bytes of its loadable segments,
+# table at 0x8000, against the bytes of its loadable segments,
 # less 1/16 as every stage0 leaves free. The parts come from the symbol
 # table (`nm`, Rust paths): a symbol belongs to the first part one of
 # whose `match` prefixes starts its path; the rest, the literal pools and

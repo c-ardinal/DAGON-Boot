@@ -21,7 +21,7 @@ that panics rolls back. The firmware modules (`flash`, `boot`, `sys`,
 `link`, `node`, `links`' uplinks) need the `hal` feature, also on by
 default; stage0 builds without it and uses the pure modules only.
 
-### Stage0 (in progress, C-559)
+### Stage0 (in progress)
 
 `stage0/` is DAGON's own first stage for this MCU, the image the ROM loads
 from flash 0x0 in place of the ESP-IDF 2nd stage: it checks the boot core

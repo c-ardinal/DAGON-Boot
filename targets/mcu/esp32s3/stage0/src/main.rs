@@ -26,14 +26,14 @@
 //! diagnostic output (the board gives none to stage0).
 //!
 //! The layout comes from `qemu_layout` until the ESP32-S3 definition gives
-//! stage0's (C-559 U2, U4): without the `qemu-layout` feature it does not
+//! stage0's: without the `qemu-layout` feature it does not
 //! build.
 #![no_std]
 #![no_main]
 
 #[cfg(not(feature = "qemu-layout"))]
 compile_error!(
-    "the ESP32-S3 definition gives no stage0 layout yet (C-559 U2, U4): \
+    "the ESP32-S3 definition gives no stage0 layout yet: \
      build with the `qemu-layout` feature for the emulator test"
 );
 

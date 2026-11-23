@@ -1,7 +1,7 @@
 //! The provisional layout of the QEMU test (feature `qemu-layout`): what
-//! the ESP32-S3 definition does not give yet. C-559 U2 adds stage0's
-//! definition (the boot core slot, the two logs) and U4 the retained
-//! cell's place, after the hardware run U0b shows which RTC words an app
+//! the ESP32-S3 definition does not give yet. Stage0's definition (the
+//! boot core slot, the two logs) and the retained cell's place come
+//! after the hardware run shows which RTC words an app
 //! leaves alone and the RTC slow clock's rate. Until then these values
 //! serve the emulator only, and stage0 builds with no other layout.
 

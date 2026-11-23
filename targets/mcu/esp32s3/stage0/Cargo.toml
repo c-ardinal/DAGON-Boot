@@ -26,8 +26,8 @@ dagon-port = { path = "../../../../crates/dagon-port" }
 [features]
 # The provisional layout for the QEMU test (src/qemu_layout.rs): the
 # retained cell's place, the boot core and app logs and the RTC slow
-# clock. The definition gives none of them until C-559 U2 and U4, which
-# take the hardware measurement (U0b); without this feature stage0 does
+# clock. The definition gives none of them until stage0's definition
+# lands after the hardware measurement; without this feature stage0 does
 # not build, so no image with these values reaches a node.
 qemu-layout = []
 

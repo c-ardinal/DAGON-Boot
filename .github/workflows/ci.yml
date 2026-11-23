@@ -351,7 +351,7 @@ jobs:
       - name: Stage0 verifier cycles on a Cortex-M0+ (emulated)
         run: cargo test -p dagon-ed25519 --test m0_cycles --locked -- --include-ignored --nocapture
 
-  # The ESP32-S3 stage0 booted in Espressif's QEMU (C-559 U3), built as the
+  # The ESP32-S3 stage0 booted in Espressif's QEMU, built as the
   # emulator test takes it (the provisional `qemu-layout`, the RFC 8032 test
   # key, the node tag the test signs for), with a test boot core and a test
   # app (targets/mcu/esp32s3/stage0-qemu): a good app mapped from flash

@@ -30,8 +30,8 @@
 //! are bounded; the loop bodies are the same for every iteration, so the
 //! bound does not hide a path.
 
-use crate::bootcore::{self, Apps, Boot, Diag, Plan, Settle, Stage0, CLEARED, MAX_COUNT};
 use crate::boot::Place;
+use crate::bootcore::{self, Apps, Boot, Diag, Plan, Settle, Stage0, CLEARED, MAX_COUNT};
 use crate::log::{LogLayout, LogState, SlotRef};
 use dagon_format::header::HEADER_SIZE;
 use dagon_format::statelog::{FACE_HEADER_SIZE, RECORD_SIZE};
@@ -203,8 +203,15 @@ fn the_cell_values_never_read_as_each_other() {
     assert_eq!(bootcore::tried(res, &p), 0);
     assert_eq!(bootcore::result(bootcore::START_APP), None);
     assert_eq!(bootcore::result(res), Some(refusal));
-    // One word of a result still counts it; one word of a request does not.
-    assert_eq!(bootcore::result([res[0], other]), Some(refusal));
+    // One word of a result still counts it (the other word holding no
+    // result, or this one); one word of a request does not.
+    let codes = [bootcore::Refusal::NoImage, bootcore::Refusal::Rejected];
+    if codes
+        .iter()
+        .all(|&r| r == refusal || bootcore::app_result(r)[0] != other)
+    {
+        assert_eq!(bootcore::result([res[0], other]), Some(refusal));
+    }
     kani::assume(other != bootcore::START_APP[0]);
     let cut = [bootcore::START_APP[0], other];
     assert_eq!(

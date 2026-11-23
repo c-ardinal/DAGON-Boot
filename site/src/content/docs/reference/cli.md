@@ -364,6 +364,9 @@ Options:
       --topology-bin <BIN>
           Topology binary to package [default: compiled from the topology]
 
+      --checked-facts
+          Refuse the release while a node is built with a definition fact not checked against its source ({ unverified = N } or "unmeasured") [default: list them as warnings]
+
       --key <FILE>
           Secret signing key file, outside any git work tree [default: $DAGON_SIGNING_KEY]
 

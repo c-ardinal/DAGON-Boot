@@ -1120,7 +1120,15 @@ fn release_from(
         images.len(),
         r.bundle.len()
     ));
-    Ok(json!({ "release": name, "topology_sha256": sha, "bytes": r.bundle.len() }))
+    let warning = crate::commands::open_facts_warning(&r.open_facts);
+    warning.lines().for_each(&mut *log);
+    let open: Vec<String> = r.open_facts.iter().map(|f| f.to_string()).collect();
+    Ok(json!({
+        "release": name,
+        "topology_sha256": sha,
+        "bytes": r.bundle.len(),
+        "open_facts": open,
+    }))
 }
 
 /// A release of the project's out/release by name, once it verifies with the project's key.

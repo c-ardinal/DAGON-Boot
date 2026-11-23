@@ -34,6 +34,8 @@ pub(crate) struct Prepared {
     /// (node, version in the previous release if any, new version), in
     /// update order.
     pub nodes: Vec<(String, Option<Version>, Version)>,
+    /// The release's facts not checked against their source.
+    pub open_facts: Vec<dagon_sign::release::NodeFact>,
 }
 
 impl Prepared {
@@ -49,7 +51,7 @@ impl Prepared {
             let old = old.map_or("(none)".to_string(), |v| v.to_string());
             s += &format!("  {id:<width$}  {old} -> {new}\n");
         }
-        s
+        s + &crate::commands::open_facts_warning(&self.open_facts)
     }
 }
 
@@ -232,6 +234,7 @@ pub(crate) fn prepare(
             .iter()
             .map(|(n, v, _)| (n.clone(), previous.get(n).copied(), *v))
             .collect(),
+        open_facts: r.open_facts,
     })
 }
 

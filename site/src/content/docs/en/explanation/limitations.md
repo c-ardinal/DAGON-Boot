@@ -63,7 +63,7 @@ Identity and VERSION:
 
 Values:
 
-- DAGON's own MCU definitions hold values marked `unverified`.
+- DAGON's own MCU definitions hold values marked `unverified`. `dagon release` and `dagon deploy` warn of each such value the firmware of a node in the release is built with (the interrupt masking budget and the erase times); `dagon release --checked-facts` refuses a release that still has one (RB-06).
 - The execution model's budgets ([section 11](/en/explanation/lifecycle-events/#11-execution-model)) are not set the way 11.3 says.
 
 Parts of the design the code lacks, in whole or in part:

@@ -212,6 +212,10 @@ pub fn release_build(a: &ReleaseBuildArgs) -> Res {
         .collect::<Result<Vec<_>, _>>()?;
     let key = load_key(a.key.as_deref())?;
     let r = release::build(&reg, &t, &topo_bin, &images, name, &key).map_err(|e| e.to_string())?;
+    if a.checked_facts {
+        r.require_checked_facts().map_err(|e| e.to_string())?;
+    }
+    eprint!("{}", open_facts_warning(&r.open_facts));
     write_file(&out, &r.bundle)?;
     println!(
         "{}: {} images, {} bytes, topology sha256 {}",
@@ -221,6 +225,23 @@ pub fn release_build(a: &ReleaseBuildArgs) -> Res {
         to_hex(&sha256(&topo_bin))
     );
     Ok(())
+}
+
+/// The warning a release or deploy shows for the facts its nodes are built
+/// with that are not checked against their source; empty with none.
+pub(crate) fn open_facts_warning(facts: &[release::NodeFact]) -> String {
+    if facts.is_empty() {
+        return String::new();
+    }
+    let mut s = format!(
+        "warning: {} definition fact(s) not checked against their source \
+         (`dagon release --checked-facts` refuses them):\n",
+        facts.len()
+    );
+    for f in facts {
+        s += &format!("  {f}\n");
+    }
+    s
 }
 
 pub fn topo_compile(a: &TopoCompileArgs) -> Res {
@@ -494,3 +515,8 @@ fn stage0_payload(
     }
     Ok(Some(stage0))
 }
+
+#[cfg(test)]
+// Tests set up and inspect their own scratch folders directly.
+#[allow(clippy::disallowed_methods)]
+mod tests;

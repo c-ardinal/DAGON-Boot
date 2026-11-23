@@ -2,7 +2,7 @@ import { expect, test, type Page } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 import { openSample, settled } from './console.ts';
 
-// WCAG 2.2 AA, as axe-core checks it, on every screen the Console shows (C-473). The criteria a
+// WCAG 2.2 AA, as axe-core checks it, on every screen the Console shows. The criteria a
 // machine cannot judge are in the audit record; the ones fixed by hand have their own tests below.
 const WCAG = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22a', 'wcag22aa'];
 

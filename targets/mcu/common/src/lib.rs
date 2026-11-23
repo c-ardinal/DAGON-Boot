@@ -23,6 +23,8 @@
 #[doc(hidden)]
 pub use dagon_format as __format;
 
+#[cfg(any(test, feature = "boot-time"))]
+pub mod boot_time;
 pub mod frames;
 pub mod guard;
 pub mod hooks;
@@ -37,5 +39,3 @@ pub mod uart;
 pub mod vector;
 #[cfg(any(test, feature = "verify-time"))]
 pub mod verify_time;
-#[cfg(any(test, feature = "boot-time"))]
-pub mod boot_time;

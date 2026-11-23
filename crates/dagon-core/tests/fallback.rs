@@ -394,7 +394,9 @@ fn without_a_node_tag_no_app_starts() {
 /// confirmed boot core starts. Without a whole request it is `start`.
 mod handed {
     use super::*;
-    use dagon_core::bootcore::{app_result, start_handed, Handed, Refusal, Start, START_APP};
+    use dagon_core::bootcore::{
+        app_result, start_handed, Handed, Refusal, Start, NO_TAG, START_APP,
+    };
     use std::cell::Cell;
 
     /// A valid boot core in the boot core slot.
@@ -512,6 +514,36 @@ mod handed {
         let cell = Cell::new(START_APP);
         let left = app_result(Refusal::NoImage);
         assert_eq!(handed(&mut m, &cell), Ok(core_with(left)));
+        assert_eq!(cell.get(), left);
+    }
+
+    #[test]
+    fn without_a_node_tag_a_request_starts_no_app() {
+        let mut m = Mem::new();
+        let mut h = app_header(A, &app_body(A, 0x101));
+        h.target_tag = NO_TAG;
+        let body = app_body(A, 0x101);
+        let a = put_app(&mut m, A, &signed(h, SEED), &body);
+        with_core(&mut m, &[(target::APP, kind::PROVISION, a)]);
+        let cell = Cell::new(START_APP);
+        let untagged = Apps {
+            target_tag: NO_TAG,
+            ..APPS
+        };
+        let write = |i: usize, w: u32| {
+            let mut v = cell.get();
+            v[i] = w;
+            cell.set(v);
+        };
+        let got = start_handed(
+            &mut m,
+            (&AT, &untagged),
+            (|| cell.get(), write),
+            &stage0_verifier(),
+            &mut dagon_core::bootcore::NoDiag,
+        );
+        let left = app_result(Refusal::NoImage);
+        assert_eq!(got, Ok(core_with(left)));
         assert_eq!(cell.get(), left);
     }
 

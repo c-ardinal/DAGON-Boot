@@ -667,8 +667,10 @@ pub enum Handed {
 /// none, the cell takes [`app_result`] and only the confirmed boot core
 /// starts (no pending one: the request came from a core that settled its
 /// trial), with the result left in the cell. With no request, it is
-/// [`start`]: a boot core, else the confirmed app. With nothing to start,
-/// it reports the reason to `diag` and returns it.
+/// [`start`]: a boot core, else the confirmed app. A stage0 without a
+/// node tag ([`NO_TAG`]) runs no app decision: the result is
+/// [`Refusal::NoImage`]. With nothing to start, it reports the reason to
+/// `diag` and returns it.
 pub fn start_handed<F: Flash, V: SigVerifier + ?Sized, D: Diag>(
     flash: &mut F,
     (at, apps): (&Stage0<'_>, &Apps<'_>),
@@ -687,8 +689,12 @@ pub fn start_handed<F: Flash, V: SigVerifier + ?Sized, D: Diag>(
             },
         });
     }
-    let refusal = match Log::load(flash, apps.log) {
-        Ok(mut log) => {
+    // A stage0 built without a node tag starts no app ([`NO_TAG`]).
+    let log = Log::load(flash, apps.log)
+        .ok()
+        .filter(|_| apps.target_tag != NO_TAG);
+    let refusal = match log {
+        Some(mut log) => {
             let named = log.state.confirmed.is_some() || log.state.pending.is_some();
             let cfg = crate::boot::BootConfig {
                 mcu_id: at.mcu_id,
@@ -708,7 +714,7 @@ pub fn start_handed<F: Flash, V: SigVerifier + ?Sized, D: Diag>(
                 crate::boot::Decision::NoImage => Refusal::NoImage,
             }
         }
-        Err(_) => Refusal::NoImage,
+        None => Refusal::NoImage,
     };
     refuse_app(flash, at, refusal, write, verifier, diag).map(Handed::Core)
 }

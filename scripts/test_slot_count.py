@@ -9,7 +9,8 @@ there: an array of two slots, "the other slot" as `1 - x`, or a literal
 list of the A and B slots. The wire codecs (dagon-proto, dagon-format)
 keep their fixed room for A and B (`StatusResp::IMAGE_SLOTS`) and are not
 read, nor are the Console's labels of the STATUS entries. Tests are not
-read either: their fixtures are two-slot or one-slot nodes by design.
+read either: their fixtures are two-slot or one-slot nodes by design. The
+Kani proofs (`proofs.rs`, built only under `cfg(kani)`) are read as tests.
 
     python -m unittest discover -s scripts -p "test_*.py"
 """
@@ -68,7 +69,7 @@ def rust_sources():
         src = ROOT / "crates" / c / "src"
         for p in src.rglob("*.rs"):
             rel = p.relative_to(src)
-            if p.name == "tests.rs" or p.name.startswith("tests_") or "tests" in rel.parts:
+            if p.name in ("tests.rs", "proofs.rs") or p.name.startswith("tests_") or "tests" in rel.parts:
                 continue
             text = p.read_text(encoding="utf-8")
             cut = TEST_MODULE.search(text)

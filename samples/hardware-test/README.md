@@ -24,8 +24,11 @@ connected; a DAGON project for it (`topology.yaml` as
   `<release>`); `selftest` checks the plan reader against it. DAGON's own
   test of that plan is `the_plan_names_the_package_and_each_node_s_old_and_new_version`
   (`cargo test -p dagon-cli -- the_plan_names --nocapture` prints it).
+- `hwt-fan.toml`: a setup of more than three nodes, every child linked
+  to the coordinator (see More than three nodes).
 - `measure.py`: the measurements the firmware has a measuring build for
   (see Measurements); `test_measure.py` its tests without hardware.
+- `test_hwt.py`: runs `hwt.py selftest` under unittest (CI runs it).
 
 ## Usage
 
@@ -43,6 +46,9 @@ python samples/hardware-test/hwt.py run --project <project> --dagon <dagon.exe> 
 python samples/hardware-test/hwt.py run ... --only status batch final
 python samples/hardware-test/hwt.py run ... --from interrupt-seg
 
+# with the F401 ROM recovery (erases the seg whole through its ST-LINK)
+python samples/hardware-test/hwt.py run ... --erase-probe <VID:PID:serial>
+
 # no hardware: status parsing, plan check (deploy-plan.txt), crate versions,
 # --only, tampering, key cleanup, restore
 python samples/hardware-test/hwt.py selftest
@@ -57,7 +63,13 @@ python samples/hardware-test/hwt.py selftest
   (Windows PnP id with `hub_usb`, and the coordinator's MCU id).
 - `dagon deploy` is never answered in advance: its plan (each node and the
   version it goes to, and the package file) is read first and must be
-  exactly the step's; otherwise the harness answers `n` and fails.
+  exactly the step's; otherwise the harness answers `n` and fails. Its ROM
+  question is answered `y` only when it names exactly the step's `rom`
+  nodes.
+- The one write outside the CLI is the `erase` step: only with
+  `--erase-probe`, only a `[setup.erase]` node, only through that probe,
+  and only when the node is confirmed and its first write's boot core and
+  stage0 are on disk.
 - `dagon rollback` and `apply` ask nothing; the harness checks
   what they will do before calling them (rollback: the other slot holds a
   confirmed version; apply: only the deliberately bad releases, which must
@@ -107,9 +119,10 @@ CRC recomputed) and a release signed with a throwaway key (refused by
 three times; each boot core with a release, for seg and the coordinator (`core-seg`,
 `core-hub`): raised, it goes to the idle slot and is confirmed; raised again,
 back to the other slot; a failing one goes back to the confirmed slot and the
-node still answers, all read from `dagon status`' versions lines; F401 ROM
-write (SKIPPED); the hub updating itself ten times (`hub-x10`); a final
-good deploy.
+node still answers, all read from `dagon status`' versions lines; the F401
+erased whole and written again through the hub's ROM path (`rom-recovery`,
+only with `--erase-probe`, else SKIPPED); the hub updating itself ten times
+(`hub-x10`); a final good deploy.
 
 Test versions are 2.0.N (the format is major.minor.patch only, no
 pre-release tags). A node's version is its crate's: before each deploy step
@@ -134,11 +147,59 @@ crates from this DAGON: run `dagon gen` first.
 
 ## Not automated
 
-- F401 ROM write: `dagon deploy` uses the ROM path only for an F401
-  that does not answer; making it silent needs an erase outside the normal
-  confirmation.
 - Interrupting by resetting the coordinator: the CLI has no command that resets the
   coordinator on its own; the interrupt is the CLI killed mid-transfer.
+
+## F401 ROM recovery
+
+`dagon deploy` writes a node through its ROM loader only when the node
+answers nothing: the hub drives the F401's NRST and BOOT0 and talks to the
+STM32 system-memory loader over I2C (`dagon-romlink`). `rom-recovery` makes
+the seg silent first: its `erase` step erases the whole flash through the
+NUCLEO's ST-LINK (`probe-rs erase --chip STM32F401RETx --probe <sel>`, chip
+from `[setup.erase]`). The step runs only with `--erase-probe`, the probe
+selector `probe-rs list` prints, and only when the seg is confirmed and
+`out/provision/seg/bootcore.img` and `stage0.bin` from its first write
+exist (the ROM write needs both). After the erase, `dagon status` must show the seg
+answering nothing.
+
+The deploy step then answers the plan and the ROM question (`No answer from
+seg ...`) y only when they name exactly the seg. It passes when the seg is
+on the new version in slot A, confirmed, and the hub and watch unchanged.
+`<nn>-rom-recovery-1-deploy-rom.json` holds, per ROM write:
+
+- `write_ms`: from the node's first progress line to `rewritten through
+  the ROM loader`;
+- `stats`: the loader session's attempts, frames, longest round trip and
+  elapsed time, when the CLI prints them (issue #17: `<node>: ROM loader: attempts
+  <a>, frames <f>, max round trip <ms> ms, elapsed <ms> ms`); `null` when
+  it does not;
+- `limits`: `FRAME_TIMEOUT_MS`, `FRAME_GAP_MS` and `ATTEMPTS` read from
+  `crates/dagon-romlink/src/lib.rs`. The step fails when the longest round
+  trip reaches `FRAME_TIMEOUT_MS` or the attempts exceed `ATTEMPTS`.
+
+A failure after the erase leaves the seg silent; the restore then writes
+nothing and exits 2. Write the seg again with `dagon deploy seg` (ROM
+loader) or `dagon flash seg` (ST-LINK).
+
+## More than three nodes
+
+The 構成 limit is `MAX_NODES` (32 nodes). The simulator writes all 32 in one
+release (`cargo test -p dagon-host --test sim one_write_reaches_every_node_of_a_topology_at_the_limit`);
+`hwt-fan.toml` is the boards' part: `seg`, `seg2` (a second NUCLEO-F401RE on
+the same I2C bus at its own address), `watch` and `hub`. Add a child per
+board on hand, up to seven under the coordinator, to the project's 構成,
+its `[build.<id>]` packages and `[setup] nodes` / `sync`.
+
+```sh
+python samples/hardware-test/hwt.py sync --setup samples/hardware-test/hwt-fan.toml --project <fan project> --repo <this repo> --dagon <dagon.exe>
+python samples/hardware-test/hwt.py run --setup samples/hardware-test/hwt-fan.toml --project <fan project> --dagon <dagon.exe> --key <key> --port <COMn>
+```
+
+The scenarios: status, a batch update of every node, the added node alone,
+every child in one release, a manual rollback of each child, A/B three
+times, a final good deploy. The limitations page's node count line is
+generated from `hwt.toml` and `hwt-fan.toml` (`python site/scripts/gen.py`).
 
 ## The hub seen again after it updates itself
 

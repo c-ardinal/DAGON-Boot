@@ -784,8 +784,9 @@ fn short_log_node(cores: Cores) -> Node {
 /// the boot core and its settle append; with `compaction`, each step of
 /// a compaction with each record it carries (a torn record ends the
 /// face's room, so a compaction can follow from any start). With one boot
-/// core slot no core is rolled back (no other core is left to start), so
-/// no core ROLLBACK is written.
+/// core slot a core ROLLBACK is written only for a pending record whose
+/// image is no longer in the slot, which takes three image writes (beyond
+/// the default bound): it is in [`allowed`], not required.
 fn inventory(cores: Cores, compaction: bool) -> Vec<Site> {
     use dagon_format::statelog::kind::*;
     let two = cores.0.len() == 2;
@@ -819,6 +820,16 @@ fn inventory(cores: Cores, compaction: bool) -> Vec<Site> {
     v
 }
 
+/// The sites a search of `cores` may cut: its whole [`inventory`], and the
+/// core ROLLBACK a single core slot writes for a stale pending record.
+fn allowed(cores: Cores) -> Vec<Site> {
+    use dagon_format::statelog::kind::ROLLBACK;
+    let mut v = inventory(cores, true);
+    v.push(record(target::BOOTCORE, ROLLBACK));
+    v.extend(compaction_sites(&[(target::BOOTCORE, ROLLBACK)]));
+    v
+}
+
 /// Searches `cores` from `node`, checks it cut every flash operation of
 /// the inventory every way (the compaction's only when `compaction`: the
 /// start runs the log short) and none outside it, and writes the report
@@ -828,11 +839,7 @@ fn search(cores: Cores, node: Node, compaction: bool, name: &str, title: &str) {
     let (n, c) = explore(cores, node, b);
     eprintln!("{title}: {n} states, {} cuts", c.cuts());
     assert!(n > 100, "{n} states");
-    c.check(
-        &inventory(cores, compaction),
-        &inventory(cores, true),
-        &ALL_WAYS,
-    );
+    c.check(&inventory(cores, compaction), &allowed(cores), &ALL_WAYS);
     Coverage::report(
         name,
         &format!(

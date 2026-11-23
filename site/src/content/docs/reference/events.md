@@ -96,7 +96,7 @@ DAGONの状態の変化は、いずれも状態機械の遷移で、遷移はい
 | `app.trial_started` | 0x24 | `trial_started`: Pending \| Trial → Trial | `slot: u8` (1 B), `version: Version` (4 B), `attempt: u8` (1 B), `max: u8` (1 B) | replay, host |  | ブートローダが待機中のスロットを試行として起動しました（これまでのブート回数は`attempt`回で、ブートローダの許可する上限は`max`回）。 |
 | `app.confirmed` | 0x25 | `confirmed`: Trial → Confirmed | `slot: u8` (1 B), `version: Version` (4 B) | live, host |  | 試行中のスロットを、自己検査の後に確定しました。 |
 | `app.demoted` | 0x26 | `demoted`: Confirmed → Written | `slot: u8` (1 B), `version: Version` (4 B) | live, host |  | 他方のスロットが確定しました。このスロットは確定状態ではなくなりました。 |
-| `app.rolled_back` | 0x27 | `rolled_back`: Pending \| Trial → Reverted | `from: u8` (1 B), `to: u8` (1 B), `reason: u8` (1 B) | replay, host |  | ブートローダがスロットをロールバックし（試行回数の上限に到達したか、待機中のイメージが検査に失敗しました）、`to`を起動しました。 |
+| `app.rolled_back` | 0x27 | `rolled_back`: Pending \| Trial → Reverted | `from: u8` (1 B), `to: u8` (1 B), `reason: u8` (1 B), `version: Version` (4 B) | replay, host |  | ブートローダがスロットをロールバックし（試行回数の上限に到達したか、待機中のイメージが検査に失敗しました）、`to`を起動しました。`version`はロールバック対象のイメージの版です。ロールバック表示は該当イメージ専用で（スロットへの新規イメージ書込で解除）、消費側は新規のロールバックと起動ごとに再生される既存のロールバックを識別可能です。 |
 | `app.pending_withdrawn` | 0x28 | `pending_withdrawn`: Pending \| Trial → Confirmed | `slot: u8` (1 B), `version: Version` (4 B) | live, replay, host |  | 確定済のスロットが再度待機状態に設定されていました。別のスロットが待機状態になったか、ブートローダがその試行を終了したので、確定済のスロットに復帰します。 |
 
 ### 状態機械`core_image`
@@ -112,7 +112,7 @@ stage0のあるself-bootのマイコンの、ブートローダのスロット1�
 | `app.core_pending_set` | 0x42 | `pending_set`: Written \| Pending \| Reverted → Pending | `slot: u8` (1 B), `version: Version` (4 B) | live, host |  | 次回のリセットでstage0が試行するコアになりました。 |
 | `app.core_confirmed` | 0x43 | `confirmed`: Pending → Confirmed | `slot: u8` (1 B), `version: Version` (4 B) | host |  | 新規のコアが自身の検査に合格し、自身を確定しました。 |
 | `app.core_demoted` | 0x44 | `demoted`: Confirmed → Written | `slot: u8` (1 B), `version: Version` (4 B) | host |  | 別のコアが自身を確定しました。このコアは確定状態ではなくなりました。 |
-| `app.core_rolled_back` | 0x45 | `rolled_back`: Pending → Reverted | `from: u8` (1 B), `to: u8` (1 B), `reason: u8` (1 B) | replay, host |  | stage0が待機中のコアを断念し（起動回数の上限に到達したか、イメージが検査に失敗しました）、`to`のコアがその結果を記録しました。 |
+| `app.core_rolled_back` | 0x45 | `rolled_back`: Pending → Reverted | `from: u8` (1 B), `to: u8` (1 B), `reason: u8` (1 B), `version: Version` (4 B) | replay, host |  | stage0が待機中のコアを断念し（起動回数の上限に到達したか、イメージが検査に失敗しました）、`to`のコアがその結果を記録しました。`version`は`image`と同様、断念したコアの版です。 |
 
 ### 状態機械`session`
 

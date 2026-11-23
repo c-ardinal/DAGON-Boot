@@ -216,6 +216,8 @@ struct Seen {
     events: Vec<String>,
     offers: Vec<UpdateOffer>,
     trials: Vec<TrialInfo>,
+    /// `rolled_back` payloads: from, to, reason, version.
+    rollbacks: Vec<(u8, u8, u8, Version)>,
 }
 
 /// A user extension recording what it sees and answering as told.
@@ -237,7 +239,11 @@ impl Extension for Probe {
         } else {
             kind_name(e).to_string()
         };
-        self.seen.borrow_mut().events.push(k);
+        let mut seen = self.seen.borrow_mut();
+        seen.events.push(k);
+        if let Some(r) = e.get::<image::RolledBack>() {
+            seen.rollbacks.push((r.from, r.to, r.reason, r.version));
+        }
     }
     fn accept_update(&mut self, o: &UpdateOffer, _: &Ctx<'_>) -> Option<Accept> {
         self.seen.borrow_mut().offers.push(*o);
@@ -586,6 +592,7 @@ fn a_rollback_the_boot_core_made_is_replayed() {
     let mut n = Node::new(Probe::default());
     n.reset(|m| {
         m.status.slots[1].state = SlotState::Reverted;
+        m.status.slots[1].version = Version::new(1, 4, 0);
         m.status.last_reason = 3;
     });
     assert_eq!(
@@ -593,6 +600,12 @@ fn a_rollback_the_boot_core_made_is_replayed() {
         ["starting", "store_opened", "replay:rolled_back"]
     );
     assert_eq!(n.agent.images().state(1), Some(image::State::Reverted));
+    // The image rolled back is named: a consumer tells this rollback from
+    // one of another image.
+    assert_eq!(
+        n.probe.seen.borrow().rollbacks,
+        [(1, 0, 3, Version::new(1, 4, 0))]
+    );
 }
 
 #[test]

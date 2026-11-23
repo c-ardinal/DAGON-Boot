@@ -23,6 +23,9 @@ embassy-sync = "0.8"
 # verify_time: a stage0 built to measure its signature check (both the
 # records and, on a Cortex-M target, the SysTick cycle counter).
 verify-time = []
+# boot_time: a boot core built to measure its listen window or its boot
+# decision.
+boot-time = []
 
 [dev-dependencies]
 critical-section = { version = "1", features = ["std"] }

@@ -141,7 +141,10 @@ const ITEMS: Record<string, { query?: string; check: (p: Page) => Promise<void> 
   },
   'DAGON/DAGONとの連携': {
     check: async (p) => {
-      await press(p, 'DAGON', 'DAGONとの連携');
+      // Stopped by the lock table (no serve): disabled for assistive technology too, and a press says why.
+      const r = await row(p, 'DAGON', 'DAGONとの連携');
+      await expect(r).toHaveAttribute('aria-disabled', 'true');
+      await r.click({ force: true });
       await expect(p.locator('.why')).toBeVisible();
     },
   },
@@ -185,7 +188,7 @@ const ITEMS: Record<string, { query?: string; check: (p: Page) => Promise<void> 
     check: async (p) => {
       await p.context().grantPermissions(['clipboard-read', 'clipboard-write']);
       await offWithReason(p, 'トラブル対処', '記録のコピー');
-      await press(p, 'DAGON', 'DAGONとの連携');
+      await (await row(p, 'DAGON', 'DAGONとの連携')).click({ force: true });
       await expect(p.locator('.why')).toBeVisible();
       // Stopped by the lock table: it said why where it was pressed, and the menu stays.
       await p.keyboard.press('Escape');

@@ -58,13 +58,13 @@
       tabindex="0"
       data-control="edit"
       aria-disabled={!ok}
-      aria-label="{p.name} {DEFINE.place}"
+      aria-label="{[p.name, sub, n ? DEFINE.count(n) : '', DEFINE.place].filter(Boolean).join(' ')}"
       onpointerdown={(e) => ok && e.button === 0 && ondrag?.(p, e)}
       ondblclick={() => ok && placeNow(p)}
       onkeydown={(e) => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), ok && placeNow(p))}
     >
       <Icon name="grip-vertical" size="var(--i-s)" />
-      <span class="n"><span translate="no" title={p.name}>{p.name}</span><small translate="no">{sub}</small></span>
+      <span class="n"><span translate="no" title={p.name}>{p.name}</span> <small translate="no">{sub}</small></span>
       <span class="used">{n ? DEFINE.count(n) : ''}</span>
     </div>
   </li>

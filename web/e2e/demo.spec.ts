@@ -45,6 +45,7 @@ const OPENERS: Record<string, (p: Page) => Promise<void>> = {
     await expect(p.locator('.bubble')).toHaveCount(0);
   },
   'the / key': async (p) => {
+    await p.locator('#canvas').focus();
     await p.keyboard.press('/');
     await expect(p.locator('.bubble')).toContainText(BUBBLE);
     await expect(p.locator('.bubble input')).toHaveCount(0);

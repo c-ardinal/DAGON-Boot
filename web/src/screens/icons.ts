@@ -45,6 +45,8 @@ export const ICONS = {
   ],
   'chevron-down': ['m6 9 6 6 6-6'],
   'chevron-up': ['m18 15-6-6-6 6'],
+  'chevrons-up': ['m17 11-5-5-5 5', 'm17 18-5-5-5 5'],
+  'chevrons-down': ['m7 6 5 5 5-5', 'm7 13 5 5 5-5'],
   'chevron-right': ['m9 18 6-6-6-6'],
   check: ['M20 6 9 17l-5-5'],
   square: ['M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z'],

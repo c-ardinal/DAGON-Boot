@@ -24,7 +24,7 @@ describe('the role chip on a card', () => {
   const link = (from: string, to: string): Link => ({ ...SAMPLE_CONFIG.links[1], from, to, wires: [] });
   const chips = (nodes: Node[], links: Link[]) => {
     const b = html({ config: { ...SAMPLE_CONFIG, nodes, links, order: nodes.map((n) => n.id), reach: [] } });
-    return Object.fromEntries(nodes.map((n) => [n.id, new RegExp(`<b[^>]*>\\[${n.no}\\] ${n.id}</b><span class="role[^"]*">([^<]*)</span>`).exec(b)?.[1]]));
+    return Object.fromEntries(nodes.map((n) => [n.id, new RegExp(`<b[^>]*>\\[${n.no}\\] ${n.id}</b> ?<span class="role[^"]*">([^<]*)</span>`).exec(b)?.[1]]));
   };
 
   test('counts the links from the nearest coordinator above, starting again at each coordinator', () => {

@@ -78,6 +78,12 @@
     el.addEventListener('pointerup', up);
     el.addEventListener('pointercancel', up);
   }
+  /** At the tallest height the window allows. */
+  const tall = $derived(height !== null && height >= limit(globalThis.innerHeight ?? 0));
+  function toggleHeight() {
+    height = limit(tall ? 0 : innerHeight);
+    keep(height);
+  }
   /** The keyboard moves the edge in steps. */
   function keys(e: KeyboardEvent) {
     const d = e.key === 'ArrowUp' ? 8 * STEP : e.key === 'ArrowDown' ? -8 * STEP : 0;
@@ -95,14 +101,21 @@
     <!-- svelte-ignore a11y_no_noninteractive_tabindex a11y_no_noninteractive_element_interactions -->
     <div class="handle" role="separator" aria-orientation="horizontal" aria-valuenow={Math.round(section?.getBoundingClientRect().height ?? height ?? 0)} aria-valuemin={120} aria-valuemax={Math.round((globalThis.innerHeight ?? 0) * MAX_SHARE)} aria-label={DRAWER.resize} title={DRAWER.resize} tabindex="0" onpointerdown={grab} onkeydown={keys}></div>
   {/if}
-  <div class="tabs" role="tablist" aria-label={DRAWER.label}>
-    <div class="scroll">
+  <div class="tabs">
+    <!-- The tabs alone are the tab list; the open-close button beside them is not a tab. -->
+    <div class="scroll" role="tablist" aria-label={DRAWER.label}>
       {#each tabs as t (t.id)}
         <button role="tab" id="drawer-tab-{t.id}" aria-selected={open === t.id} aria-controls="drawer-body" onclick={() => (open === t.id ? onclose() : onpick(t.id))}>
           {t.label}{#if t.count !== undefined}<span class="count" class:alarm={t.alarm && t.count > 0}>{t.count}</span>{/if}
         </button>
       {/each}
     </div>
+    {#if open}
+      <!-- The height without dragging the edge (WCAG 2.5.7), on a full-size target (2.5.8): the tallest, or back to the lowest. -->
+      <button class="button-icon" title={tall ? DRAWER.lower : DRAWER.raise} aria-label={tall ? DRAWER.lower : DRAWER.raise} onclick={toggleHeight}
+        ><span class="layer"><Icon name={tall ? 'chevrons-down' : 'chevrons-up'} /></span></button
+      >
+    {/if}
     <button
       class="button-icon"
       title="{open ? DRAWER.close : DRAWER.label} (Ctrl+J)"

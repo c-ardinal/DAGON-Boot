@@ -141,7 +141,10 @@ const ITEMS: Record<string, { query?: string; check: (p: Page) => Promise<void> 
   },
   'DAGON/DAGONとの連携': {
     check: async (p) => {
-      await press(p, 'DAGON', 'DAGONとの連携');
+      // Stopped by the lock table (no serve): disabled for assistive technology too, and a press says why.
+      const r = await row(p, 'DAGON', 'DAGONとの連携');
+      await expect(r).toHaveAttribute('aria-disabled', 'true');
+      await r.click({ force: true });
       await expect(p.locator('.why')).toBeVisible();
     },
   },
@@ -185,7 +188,7 @@ const ITEMS: Record<string, { query?: string; check: (p: Page) => Promise<void> 
     check: async (p) => {
       await p.context().grantPermissions(['clipboard-read', 'clipboard-write']);
       await offWithReason(p, 'トラブル対処', '記録のコピー');
-      await press(p, 'DAGON', 'DAGONとの連携');
+      await (await row(p, 'DAGON', 'DAGONとの連携')).click({ force: true });
       await expect(p.locator('.why')).toBeVisible();
       // Stopped by the lock table: it said why where it was pressed, and the menu stays.
       await p.keyboard.press('Escape');
@@ -200,6 +203,20 @@ const ITEMS: Record<string, { query?: string; check: (p: Page) => Promise<void> 
       await press(p, 'トラブル対処', 'このURLのコピー');
       await expect(p.locator('.toast')).toBeVisible();
       expect(await p.evaluate(() => navigator.clipboard.readText())).toBe(await p.evaluate(() => location.href));
+    },
+  },
+  'トラブル対処/アニメーションの停止と再開': {
+    query: 'sim&agent=linked',
+    check: async (p) => {
+      const state = () => p.locator('.dagon .mark img').evaluate((e) => getComputedStyle(e).animationPlayState);
+      expect(await state()).toBe('running');
+      await press(p, 'トラブル対処', 'アニメーションの停止と再開');
+      expect(await state()).toBe('paused');
+      // Kept across a reload, and pressed again it runs.
+      await start(p, 'sim&agent=linked');
+      expect(await state()).toBe('paused');
+      await press(p, 'トラブル対処', 'アニメーションの停止と再開');
+      expect(await state()).toBe('running');
     },
   },
   'プロジェクト/リスタート': {

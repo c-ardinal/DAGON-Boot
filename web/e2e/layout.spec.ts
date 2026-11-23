@@ -72,7 +72,7 @@ test('sweep: no overflow, overlap, clipped text or clipped focus ring at any win
     await page.waitForTimeout(260);
     const prep = await boxes(page);
     // The first view at this window, in both modes: full cards, never compact (the sample is small).
-    const compact = async (mode: string) => { await page.keyboard.press('f'); await page.waitForTimeout(400); if (await page.locator('.node.compact').count()) faults.push(`${w}x${h} ${mode}: the first view has compact cards`); };
+    const compact = async (mode: string) => { await page.locator('#canvas').focus(); await page.keyboard.press('f'); await page.waitForTimeout(400); if (await page.locator('.node.compact').count()) faults.push(`${w}x${h} ${mode}: the first view has compact cards`); };
     await compact('準備');
     await page.getByRole('radio', { name: '書込' }).click();
     await page.waitForTimeout(300);

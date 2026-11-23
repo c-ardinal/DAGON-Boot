@@ -66,6 +66,12 @@ button {
   color: inherit;
 }
 
+/* Placeholder text is text: the muted colour holds 4.5:1 on every layer (WCAG 1.4.3), the browser's grey does not. */
+::placeholder {
+  color: var(--c-muted);
+  opacity: 1;
+}
+
 .visually-hidden {
   position: absolute;
   width: 1px;
@@ -73,6 +79,13 @@ button {
   overflow: hidden;
   clip-path: inset(50%);
   white-space: nowrap;
+}
+
+/* アニメーションの停止と再開 (the menu, WCAG 2.2.2): every looping motion pauses where it stands. */
+:root[data-still] *,
+:root[data-still] *::before,
+:root[data-still] *::after {
+  animation-play-state: paused !important;
 }
 
 /* Every scrolling surface: one thin scrollbar in the line colour, no arrows; and a control brought into view by focus keeps room for its ring. */

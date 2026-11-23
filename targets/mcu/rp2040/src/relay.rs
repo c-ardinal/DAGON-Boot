@@ -229,6 +229,8 @@ pub fn start<B: BoardDef, const N: usize>(
         high.spawn(uart_task(uart, watch).expect("task pool"));
     }
     spawner.spawn(feed(guard).expect("task pool"));
+    #[cfg(feature = "masked-time")]
+    crate::node::spawn_masked_readout::<B>(spawner);
     events
 }
 

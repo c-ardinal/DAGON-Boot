@@ -326,11 +326,17 @@ class Runs(unittest.TestCase):
         result = next((self.root / "rec").glob("*/result.json")).read_text()
         self.assertIn('"masked_max_us = 38"', result)
 
-    def test_masked_time_without_a_probe_writes_nothing(self):
+    def test_masked_time_without_a_probe_takes_the_led_groups(self):
         proj = self.project({"kind": "uf2-drive"}, mcu="rp2040")
         self.app(proj)
-        self.assertEqual(self.run_it(self.args(proj, drive="E:"), name="masked-time"), 1)
-        self.assertEqual(self.flashes, [])
+        self.cargo = self.app_cargo
+        self.assertEqual(self.run_it(self.args(proj, drive="E:"), name="masked-time", answer="3 8"), 0)
+        self.assertEqual(self.reads, [])
+        self.assertIn('"masked_max_us = 38"', next((self.root / "rec").glob("*/result.json")).read_text())
+
+    def test_the_readout_delay_is_the_firmware_s(self):
+        src = (REPO / "targets/mcu/common/src/masked_time.rs").read_text(encoding="utf-8")
+        self.assertIn(f"pub const READOUT_AFTER_S: u64 = {measure.MASKED_READOUT_AFTER_S};", src)
 
     def test_a_probe_without_its_chip_is_refused_before_any_write(self):
         proj = self.project({"kind": "uf2-drive"}, mcu="rp2040")

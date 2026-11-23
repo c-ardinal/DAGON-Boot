@@ -85,6 +85,9 @@ LISTEN_MARGIN_MS = 10
 # The longest `[execution] masked_max_us` a definition may state
 # (dagon-topology MASKED_MAX_US_LIMIT).
 MASKED_MAX_US_LIMIT = 1000
+# Seconds after the app starts at which a node with no probe blinks the
+# longest masking (dagon-mcu-common masked_time::READOUT_AFTER_S).
+MASKED_READOUT_AFTER_S = 180
 
 
 # ---- files -------------------------------------------------------------
@@ -313,16 +316,22 @@ def blink_verdict(blinks, hz):
     }
 
 
+def groups_value(text):
+    """The number the blink groups give: one count per decimal digit, ten
+    for a 0."""
+    groups = [int(g) for g in text.split()]
+    if not groups or not all(1 <= g <= 10 for g in groups):
+        raise ValueError(f"{text!r}: give each group's count, 1 to 10 (10 for a 0)")
+    return int("".join(str(g % 10) for g in groups))
+
+
 def groups_us(text):
     """Microseconds from the blink groups a boot core's measuring build
     blinks on its `[boot] led` light (the display backlight on the Waveshare
     RP2040-Touch-LCD-1.28): one count per decimal digit of the milliseconds,
     ten for a 0. The milliseconds are rounded up, so this is at most 1 ms
     over the value the node keeps."""
-    groups = [int(g) for g in text.split()]
-    if not groups or not all(1 <= g <= 10 for g in groups):
-        raise ValueError(f"{text!r}: give each group's count, 1 to 10 (10 for a 0)")
-    return int("".join(str(g % 10) for g in groups)) * 1000
+    return groups_value(text) * 1000
 
 
 def listen_verdict(us, window_ms):
@@ -429,8 +438,6 @@ def measure(a, name, flash=run_flash, read=probe_read, wait=time.sleep, ask=inpu
     result = {"measurement": name, "node": a.node, "mcu": mcu}
     wrote = False
     try:
-        if name == "masked-time" and not chip:
-            raise SystemExit("masked-time reads the node by probe only: give --probe (and --chip on a UF2 node)")
         with Switched(package_file(a.project, a.node, m, mcu), feature_of(m, mcu)):
             wrote = True
             write()
@@ -456,11 +463,21 @@ def measure(a, name, flash=run_flash, read=probe_read, wait=time.sleep, ask=inpu
                 result.update(blink_verdict(blinks, hz))
         elif name == "masked-time":
             print("Talk to the node for a while without writing it (e.g. `dagon status --port <COMn>` "
-                  "a few times, and let its app run), then press Enter.")
-            ask("done? ")
-            (us,), cmd = read(chip, a.probe, syms["DAGON_MASKED_MAX_US"])
-            (count,), _ = read(chip, a.probe, syms["DAGON_MASKED_COUNT"])
-            log({"command": cmd, "masked_max_us": us, "count": count})
+                  "a few times, and let its app run).")
+            if chip:
+                ask("then press Enter: ")
+                (us,), cmd = read(chip, a.probe, syms["DAGON_MASKED_MAX_US"])
+                (count,), _ = read(chip, a.probe, syms["DAGON_MASKED_COUNT"])
+                log({"command": cmd, "masked_max_us": us, "count": count})
+            else:
+                print(f"{MASKED_READOUT_AFTER_S} s after the app starts, the board's diagnostic light "
+                      "(the display backlight on the Waveshare RP2040-Touch-LCD-1.28) blinks the "
+                      "microseconds: count the blinks of each group between two long dark pauses "
+                      "(ten blinks for a 0) and give the counts in order, e.g. 3 8.")
+                us = groups_value(ask("groups: "))
+                # The blinks show a value only once a section was timed.
+                count = 1 if us > 0 else 0
+                log({"groups_us": us})
             result.update(masked_verdict(us, count))
         else:
             (symbol,) = m["symbols"]

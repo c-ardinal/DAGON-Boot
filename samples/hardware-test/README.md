@@ -230,7 +230,7 @@ python samples/hardware-test/measure.py decide-time ... --node hub --drive <UF2 
 
 # the longest time DAGON's own code masks interrupts (a probe reads it)
 python samples/hardware-test/measure.py masked-time --project <project> --dagon <dagon.exe> --node seg --key <secret key file> [--probe <sel>]
-python samples/hardware-test/measure.py masked-time ... --node hub --drive <UF2 drive> --probe <sel> --chip RP2040
+python samples/hardware-test/measure.py masked-time ... --node hub --drive <UF2 drive>
 
 # a run stopped before it put a Cargo.toml back
 python samples/hardware-test/measure.py restore --project <project>
@@ -277,7 +277,11 @@ python samples/hardware-test/measure.py selftest
   keeps the longest in `DAGON_MASKED_MAX_US` (the number timed in
   `DAGON_MASKED_COUNT`). Once the node runs, the script asks you to talk
   to it for a while without writing it (`dagon status` a few times), then
-  reads both by probe; without a probe it writes nothing and fails. PASS
+  reads both by probe. Without one, an RP2040 app blinks the microseconds
+  on its board's diagnostic LED 180 s after it starts (the display
+  backlight on the Waveshare hub; the groups the boot core
+  measurements blink, the app still running) and the script asks for
+  the counts. PASS
   when a section was timed and the longest is 1 to 1000 us; the record
   gives the `[execution] masked_max_us` line for the MCU definition.
 

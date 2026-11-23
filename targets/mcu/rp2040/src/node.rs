@@ -197,6 +197,50 @@ fn hex(id: &[u8; 8]) -> [u8; 16] {
 pub use usb_node::*;
 
 #[cfg(feature = "usb")]
+/// Spawns the masking readout of a `masked-time` build on `spawner`, on a
+/// board with a diagnostic LED.
+#[cfg(feature = "masked-time")]
+pub(crate) fn spawn_masked_readout<B: BoardDef>(spawner: embassy_executor::Spawner) {
+    if let Some(gpio) = B::DIAG_LED {
+        spawner.spawn(masked_readout(gpio, B::DIAG_LED_ACTIVE_HIGH).expect("task pool"));
+    }
+}
+
+/// `dagon_mcu_common::masked_time::READOUT_AFTER_S` after the start, takes
+/// the diagnostic LED (the Waveshare hub's display backlight) and blinks
+/// the longest masking seen until then, in microseconds, as decimal digit
+/// groups the way a measuring boot core blinks its value: a long dark
+/// pause, then one group per digit (ten blinks for a 0), short dark gaps
+/// between them. The app keeps running.
+#[cfg(feature = "masked-time")]
+#[embassy_executor::task]
+async fn masked_readout(gpio: u8, active_high: bool) -> ! {
+    use core::sync::atomic::Ordering;
+
+    use crate::arm::led;
+    use dagon_mcu_common::masked_time::{digits, DAGON_MASKED_MAX_US, READOUT_AFTER_S};
+    use embassy_time::Timer;
+
+    Timer::after_secs(READOUT_AFTER_S).await;
+    let (groups, n) = digits(DAGON_MASKED_MAX_US.load(Ordering::Relaxed));
+    led::init(gpio, active_high);
+    loop {
+        led::set(false);
+        Timer::after_millis(2_000).await;
+        for (i, &blinks) in groups[..n].iter().enumerate() {
+            if i > 0 {
+                Timer::after_millis(800).await;
+            }
+            for _ in 0..blinks {
+                led::set(true);
+                Timer::after_millis(250).await;
+                led::set(false);
+                Timer::after_millis(250).await;
+            }
+        }
+    }
+}
+
 mod usb_node {
     use dagon_proto::payload::role;
     use embassy_executor::Spawner;
@@ -239,6 +283,8 @@ mod usb_node {
         let high = crate::exec::start();
         high.spawn(serve(parts.usb, tag, serial, agent, guard, task).expect("task pool"));
         spawner.spawn(feed(guard).expect("task pool"));
+        #[cfg(feature = "masked-time")]
+        super::spawn_masked_readout::<B>(spawner);
         events
     }
 

@@ -47,18 +47,36 @@ const RAM: [(u32, u32); 4] = [IRAM, DRAM, RTC_FAST, RTC_SLOW];
 
 /// SRAM1 seen on the instruction bus from 0x40378000 is the same memory
 /// the data bus sees from 0x3FC88000 (SRAM0 below it is instruction
-/// only), so copies are compared at their data-bus address.
+/// only), so copies are compared by the memory they take ([`memory`]).
 const SRAM1_IBUS: (u32, u32) = (0x4037_8000, 0x403E_0000);
 const SRAM1_DBUS: u32 = 0x3FC8_8000;
 
-/// The data-bus address of `a` (itself outside the SRAM1 instruction
-/// alias).
-fn shared(a: u32) -> u32 {
-    if (SRAM1_IBUS.0..SRAM1_IBUS.1).contains(&a) {
-        a - SRAM1_IBUS.0 + SRAM1_DBUS
-    } else {
-        a
+/// `len` bytes at `a` as the memory they take: a part in the SRAM1
+/// instruction alias at its data-bus address, the rest where it is (a
+/// range may cross from SRAM0 into SRAM1). Empty parts are `(0, 0)`.
+fn memory(a: u32, len: u32) -> [(u32, u32); 2] {
+    let end = a + len;
+    let (lo, hi) = (a.max(SRAM1_IBUS.0), end.min(SRAM1_IBUS.1));
+    if lo >= hi {
+        return [(a, end), (0, 0)];
     }
+    let alias = (
+        lo - SRAM1_IBUS.0 + SRAM1_DBUS,
+        hi - SRAM1_IBUS.0 + SRAM1_DBUS,
+    );
+    // Below the alias (SRAM0) or above it, never both: the RAM ranges
+    // end inside SRAM1.
+    let rest = if a < lo { (a, lo) } else { (hi, end) };
+    [alias, rest]
+}
+
+/// Whether two ranges take some of the same memory.
+fn share(a: (u32, u32), b: (u32, u32)) -> bool {
+    memory(a.0, a.1).iter().any(|&(s, e)| {
+        memory(b.0, b.1)
+            .iter()
+            .any(|&(t, f)| s < e && t < f && s < f && t < e)
+    })
 }
 
 /// A RAM segment: `len` bytes of flash at `from` copied to `to`.
@@ -227,11 +245,10 @@ pub fn plan<F: Flash>(flash: &mut F, at: u32, end: u32) -> Result<Plan, Refused>
             plan.nmaps += 1;
         } else if RAM.iter().any(|&r| within(r, addr, len)) {
             // Through either bus: SRAM1 has an address on each.
-            let at = shared(addr);
-            let overlaps = plan.copies().iter().any(|c| {
-                let to = shared(c.to);
-                at < to + c.len && to < at + len
-            });
+            let overlaps = plan
+                .copies()
+                .iter()
+                .any(|c| share((addr, len), (c.to, c.len)));
             if overlaps {
                 return Err(Refused::Range(addr));
             }

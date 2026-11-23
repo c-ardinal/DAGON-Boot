@@ -150,6 +150,19 @@ fn ram_segments_overlapping_through_the_other_bus_are_refused() {
 }
 
 #[test]
+fn a_ram_segment_crossing_into_sram1_is_compared_by_its_parts() {
+    // The IRAM segment moved to start 4 bytes below SRAM1, so most of it
+    // lies in SRAM1; the DRAM segment moved to 0x3FC88000, the same
+    // memory as 0x40378000 on the instruction bus.
+    let mut b = with_segment_addr(2, 0x4037_7FFC);
+    let len1 = u32::from_le_bytes(b[24 + 4..24 + 8].try_into().unwrap()) as usize;
+    let s1 = 24 + 8 + len1;
+    put32(&mut b, s1, 0x3FC8_8000);
+    let r = plan(&mut slot(&b), AT, END);
+    assert_eq!(r, Err(Refused::Range(0x4037_7FFC)));
+}
+
+#[test]
 fn a_mapped_segment_off_its_page_offset_is_refused() {
     let r = plan(&mut slot(&with_segment_addr(4, 0x4201_0040)), AT, END);
     assert_eq!(r, Err(Refused::Unaligned(0x4201_0040)));

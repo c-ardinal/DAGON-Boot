@@ -181,7 +181,8 @@
   /** The click that ends a drag opens nothing. */
   let dragged = false;
   function down(e: PointerEvent) {
-    if (!root || e.button !== 0) return;
+    // The narrow tier stacks the mark in the page: a drag there would only overwrite the wide tier's kept place.
+    if (!root || e.button !== 0 || isNarrow()) return;
     dragged = false;
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
     drag = { id: e.pointerId, dx: e.clientX - root.offsetLeft, dy: e.clientY - root.offsetTop, x0: e.clientX, y0: e.clientY, moved: false, from: { x: root.offsetLeft, y: root.offsetTop }, at: { x: root.offsetLeft, y: root.offsetTop } };

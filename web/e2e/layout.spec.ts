@@ -148,6 +148,16 @@ test('narrow windows: every control is reached without a sideways scroll, nothin
     }
     await page.getByRole('radio', { name: '準備', exact: true }).click();
     await page.keyboard.press('Escape');
+    // The stacked mark is not dragged: a drag keeps no place, so the wide tier's stays as it was.
+    await page.locator('.dagon .mark').scrollIntoViewIfNeeded();
+    const m = (await page.locator('.dagon .mark').boundingBox())!;
+    await page.mouse.move(m.x + m.width / 2, m.y + m.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(m.x - 40, m.y - 40, { steps: 4 });
+    await page.mouse.up();
+    const kept = await page.evaluate(() => Object.keys(localStorage).filter((k) => k.startsWith('dagon-pos:')));
+    if (kept.length) faults.push(`${w}x${h}: a drag of the stacked mark kept a place (${kept.join(', ')})`);
+    if (await page.locator('.bubble').count()) await page.keyboard.press('Escape');
   }
   expect([...new Set(faults)]).toEqual([]);
 });

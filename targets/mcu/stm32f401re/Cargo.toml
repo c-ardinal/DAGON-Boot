@@ -14,7 +14,7 @@ build = "build.rs"
 [package.metadata.dagon]
 mcu = "stm32f401re"
 # Firmware clippy runs in CI (scripts/ci_crates.py --firmware-lint).
-lint = { target = "thumbv7em-none-eabihf", features = ["", "conform"] }
+lint = { target = "thumbv7em-none-eabihf", features = ["", "conform", "masked-time"] }
 
 [features]
 # node by default: a generated node names this package without features.
@@ -35,6 +35,9 @@ image-stage0 = []
 image-bootcore = []
 # The boot core's measuring builds (dagon-mcu-common's boot_time).
 boot-time = ["dagon-mcu-common/boot-time"]
+# An app built to measure how long DAGON's own code masks interrupts
+# (dagon-mcu-common's masked_time): the longest in DAGON_MASKED_MAX_US.
+masked-time = ["dagon-mcu-common/masked-time"]
 
 [dependencies]
 dagon-agent = { path = "../../../crates/dagon-agent" }

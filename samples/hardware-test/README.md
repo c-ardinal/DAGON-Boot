@@ -228,6 +228,10 @@ python samples/hardware-test/measure.py decide-time --project <project> --dagon 
 python samples/hardware-test/measure.py listen-time ... --node hub --drive <UF2 drive>
 python samples/hardware-test/measure.py decide-time ... --node hub --drive <UF2 drive> [--probe <sel> --chip RP2040]
 
+# the longest time DAGON's own code masks interrupts (a probe reads it)
+python samples/hardware-test/measure.py masked-time --project <project> --dagon <dagon.exe> --node seg --key <secret key file> [--probe <sel>]
+python samples/hardware-test/measure.py masked-time ... --node hub --drive <UF2 drive>
+
 # a run stopped before it put a Cargo.toml back
 python samples/hardware-test/measure.py restore --project <project>
 
@@ -266,6 +270,22 @@ python samples/hardware-test/measure.py selftest
   in order (`5 2` is 52 ms). Their feature goes into the node's boot crate
   (`boot/<id>/Cargo.toml`). They wait out stage0's check first, which
   takes seconds on an RP2040 without a crystal.
+
+- `masked-time`: the node's app (dagon.toml `[build.<id>] package`) with
+  its MCU package's `masked-time` times every critical section of DAGON's
+  watchdog guard, the only place DAGON's own code masks interrupts, and
+  keeps the longest in `DAGON_MASKED_MAX_US` (the number timed in
+  `DAGON_MASKED_COUNT`). Once the node runs, the script asks you to talk
+  to it for a while without writing it (`dagon status` a few times), then
+  reads both by probe. Without one, an RP2040 app blinks the microseconds
+  on its board's diagnostic LED 180 s after it starts (the display
+  backlight on the Waveshare hub; the groups the boot core
+  measurements blink, the app still running) and the script asks for
+  the counts. The firmware times the work inside each section, not the
+  masking around it, so the value to write is the worst plus a margin:
+  twice the worst, at least 10 us more. PASS when a section was timed and
+  that value is at most 1000 us; the record gives the
+  `[execution] masked_max_us` line for the MCU definition.
 
 The feature is named in the package's `default` features for the one
 write; the file is put back byte for byte afterwards, also on a failure or

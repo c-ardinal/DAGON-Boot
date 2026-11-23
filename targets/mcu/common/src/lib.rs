@@ -18,6 +18,8 @@
 //!   timed in core clock cycles, for a stage0 built to measure it.
 //! - [`boot_time`] (feature `boot-time`): the records of a boot core built
 //!   to measure its listen window or its boot decision.
+//! - [`masked_time`] (feature `masked-time`): the longest time DAGON's own
+//!   code masks interrupts, for an app built to measure it.
 #![no_std]
 
 #[doc(hidden)]
@@ -31,6 +33,8 @@ pub mod hooks;
 pub mod link;
 pub mod liveness;
 pub mod mapped;
+#[cfg(any(test, feature = "masked-time"))]
+pub mod masked_time;
 pub mod reattach;
 pub mod serve;
 pub mod shared;

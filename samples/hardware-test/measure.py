@@ -10,6 +10,8 @@ normal build back. See README.md, "Measurements".
     python measure.py listen-time   --project <project> --dagon <exe> --node <id> --key <file>
                                     [--probe <sel>] [--chip <chip>] [--drive <dir>] [--out <dir>]
     python measure.py decide-time   (the same arguments as listen-time)
+    python measure.py masked-time   --project <project> --dagon <exe> --node <id> --key <file>
+                                    [--probe <sel>] [--chip <chip>] [--drive <dir>] [--out <dir>]
     python measure.py restore       --project <project>
     python measure.py selftest
 
@@ -37,8 +39,10 @@ BACKUP = ".measure-backup"
 
 # What each measurement builds and reads. `package` is where the feature
 # goes: "stage0" is targets/mcu/<mcu>/stage0 in the DAGON source, "boot" the
-# node's boot crate (<project>/boot/<id>). `part` is the folder dagon flash
-# builds that part in (<project>/out/flash/target/<part>).
+# node's boot crate (<project>/boot/<id>), "app" the node's app crate
+# (dagon.toml `[build.<id>] package`). `part` is the folder dagon flash
+# builds that part in (<project>/out/flash/target/<part>); the app builds in
+# its own crate's target folder.
 MEASUREMENTS = {
     "stage0-verify": {
         "package": "stage0",
@@ -65,9 +69,36 @@ MEASUREMENTS = {
         # Stage0's check and the decision's check of the app.
         "wait_s": 65,
     },
+    # The app times every critical section of DAGON's guard while it runs;
+    # the user drives the node in between (read only).
+    "masked-time": {
+        "package": "app",
+        "feature": "dagon-mcu-{mcu}/masked-time",
+        "part": None,
+        "symbols": ["DAGON_MASKED_MAX_US", "DAGON_MASKED_COUNT"],
+        # The boot to the app: stage0's check and the boot decision.
+        "wait_s": 65,
+    },
 }
 # The margin the listen window may add beyond itself.
 LISTEN_MARGIN_MS = 10
+# The longest `[execution] masked_max_us` a definition may state
+# (dagon-topology MASKED_MAX_US_LIMIT).
+MASKED_MAX_US_LIMIT = 1000
+# Seconds after the app starts at which a node with no probe blinks the
+# longest masking (dagon-mcu-common masked_time::READOUT_AFTER_S).
+MASKED_READOUT_AFTER_S = 180
+# The margin over the worst value measured (lifecycle-events 11.3: the
+# worst value plus a margin): the firmware times only the work inside each
+# critical section, not masking, the guard's borrow and unmasking around
+# it, and its clock counts whole microseconds. The definition takes twice
+# the worst, and at least MASKED_MIN_MARGIN_US more.
+MASKED_MIN_MARGIN_US = 10
+
+
+def masked_definition(us):
+    """The `masked_max_us` to write for a worst measured value `us`."""
+    return max(2 * us, us + MASKED_MIN_MARGIN_US)
 
 
 # ---- files -------------------------------------------------------------
@@ -152,14 +183,33 @@ def node_definition(project, node):
     return tomllib.loads(path.read_text(encoding="utf-8"))
 
 
+def app_dir(project, node):
+    """The node's app crate: dagon.toml `[build.<node>] package`."""
+    cfg = tomllib.loads((Path(project) / "dagon.toml").read_text(encoding="utf-8"))
+    package = cfg.get("build", {}).get(node, {}).get("package")
+    if package is None:
+        raise SystemExit(f"dagon.toml has no [build.{node}] package: masked-time builds the node's app")
+    return Path(project) / package
+
+
 def package_file(project, node, m, mcu):
     if m["package"] == "boot":
         return Path(project) / "boot" / node / "Cargo.toml"
+    if m["package"] == "app":
+        return app_dir(project, node) / "Cargo.toml"
     return source_root(project) / "targets" / "mcu" / mcu / "stage0" / "Cargo.toml"
 
 
+def elf_folder(project, node, m):
+    """Where the measuring build's ELF is: the app crate's target folder,
+    else the part's folder under out/flash/target."""
+    if m["package"] == "app":
+        return app_dir(project, node) / "target"
+    return Path(project) / "out" / "flash" / "target" / m["part"]
+
+
 def feature_of(m, mcu):
-    return m["feature"].format(bootcore=f"dagon-{mcu}-bootcore")
+    return m["feature"].format(bootcore=f"dagon-{mcu}-bootcore", mcu=mcu)
 
 
 # ---- the built ELF -----------------------------------------------------
@@ -277,16 +327,22 @@ def blink_verdict(blinks, hz):
     }
 
 
+def groups_value(text):
+    """The number the blink groups give: one count per decimal digit, ten
+    for a 0."""
+    groups = [int(g) for g in text.split()]
+    if not groups or not all(1 <= g <= 10 for g in groups):
+        raise ValueError(f"{text!r}: give each group's count, 1 to 10 (10 for a 0)")
+    return int("".join(str(g % 10) for g in groups))
+
+
 def groups_us(text):
     """Microseconds from the blink groups a boot core's measuring build
     blinks on its `[boot] led` light (the display backlight on the Waveshare
     RP2040-Touch-LCD-1.28): one count per decimal digit of the milliseconds,
     ten for a 0. The milliseconds are rounded up, so this is at most 1 ms
     over the value the node keeps."""
-    groups = [int(g) for g in text.split()]
-    if not groups or not all(1 <= g <= 10 for g in groups):
-        raise ValueError(f"{text!r}: give each group's count, 1 to 10 (10 for a 0)")
-    return int("".join(str(g % 10) for g in groups)) * 1000
+    return groups_value(text) * 1000
 
 
 def listen_verdict(us, window_ms):
@@ -298,6 +354,29 @@ def listen_verdict(us, window_ms):
         "limit_us": limit_us,
         "verdict": "PASS" if ok else "FAIL",
         "why": None if ok else ("the window never ended (0)" if us == 0 else f"{us} us > {limit_us} us"),
+    }
+
+
+def masked_verdict(us, count):
+    """The longest time DAGON's own code masked interrupts: PASS when a
+    section was timed and the worst plus its margin
+    ([`masked_definition`]) is within what a definition may state; that
+    value, to write as `[execution] masked_max_us`, goes in the record."""
+    value = masked_definition(us)
+    ok = count >= 1 and us > 0 and value <= MASKED_MAX_US_LIMIT
+    why = None
+    if count == 0 or us == 0:
+        why = "no critical section was timed (the app did not start?)"
+    elif not ok:
+        why = f"{us} us with its margin, {value} us, is over {MASKED_MAX_US_LIMIT} us"
+    return {
+        "masked_max_us": us,
+        "masked_count": count,
+        "with_margin_us": value,
+        "limit_us": MASKED_MAX_US_LIMIT,
+        "definition": f"masked_max_us = {value}" if ok else None,
+        "verdict": "PASS" if ok else "FAIL",
+        "why": why,
     }
 
 
@@ -368,7 +447,7 @@ def measure(a, name, flash=run_flash, read=probe_read, wait=time.sleep, ask=inpu
         log({"command": cmd})
         flash(cmd, a.project)
 
-    part = Path(a.project) / "out" / "flash" / "target" / m["part"]
+    part = elf_folder(a.project, a.node, m)
     result = {"measurement": name, "node": a.node, "mcu": mcu}
     wrote = False
     try:
@@ -395,6 +474,24 @@ def measure(a, name, flash=run_flash, read=probe_read, wait=time.sleep, ask=inpu
                 print("Count the fast blinks between two dark pauses on the board's diagnostic output.")
                 blinks = int(ask("blinks: ").strip())
                 result.update(blink_verdict(blinks, hz))
+        elif name == "masked-time":
+            print("Talk to the node for a while without writing it (e.g. `dagon status --port <COMn>` "
+                  "a few times, and let its app run).")
+            if chip:
+                ask("then press Enter: ")
+                (us,), cmd = read(chip, a.probe, syms["DAGON_MASKED_MAX_US"])
+                (count,), _ = read(chip, a.probe, syms["DAGON_MASKED_COUNT"])
+                log({"command": cmd, "masked_max_us": us, "count": count})
+            else:
+                print(f"{MASKED_READOUT_AFTER_S} s after the app starts, the board's diagnostic light "
+                      "(the display backlight on the Waveshare RP2040-Touch-LCD-1.28) blinks the "
+                      "microseconds: count the blinks of each group between two long dark pauses "
+                      "(ten blinks for a 0) and give the counts in order, e.g. 3 8.")
+                us = groups_value(ask("groups: "))
+                # The blinks show a value only once a section was timed.
+                count = 1 if us > 0 else 0
+                log({"groups_us": us})
+            result.update(masked_verdict(us, count))
         else:
             (symbol,) = m["symbols"]
             if chip:

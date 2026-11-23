@@ -249,6 +249,8 @@ pub fn start<B: BoardDef, const N: usize>(
             "the DAGON F401 layout needs 512 KiB of flash"
         )
     };
+    #[cfg(feature = "masked-time")]
+    guard.time_masking(|| embassy_time::Instant::now().as_micros());
     let (store, flash) = open_store(parts.flash, B::ERASE_REGIONS)?;
     let period = watchdog_period_ms(on_trial(&store));
     install_watchdog(parts.iwdg, guard, period, &store);

@@ -1,4 +1,4 @@
-//! The ESP32-S3 stage0 in the emulator (C-559 U3): stage0's ROM image at
+//! The ESP32-S3 stage0 in the emulator: stage0's ROM image at
 //! flash 0x0, a test boot core and a test app in their slots with signed
 //! detached headers, and the boot core and app logs, booted in Espressif's
 //! QEMU. What runs tells itself on the ROM's text output, which is
@@ -309,6 +309,15 @@ fn esp32s3_stage0_in_qemu() {
     n.app_hdr = header(image_kind::APP, APP.1, &n.app, TAG);
     case(
         "out-of-range-segment",
+        &n,
+        &[started, ASKS, result, &rejected],
+    );
+    // A signed body shorter than the image: its last segment runs past
+    // what the signature covers, so it is refused, not loaded.
+    let mut n = Node::good();
+    n.app_hdr = header(image_kind::APP, APP.1, &n.app[..n.app.len() - 64], TAG);
+    case(
+        "past-the-signed-body",
         &n,
         &[started, ASKS, result, &rejected],
     );

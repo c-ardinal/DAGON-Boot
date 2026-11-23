@@ -599,7 +599,28 @@ impl SimStore {
     /// ROLLBACK the log cannot take starts no trial: the confirmed slot
     /// starts with the trial the log names left open.
     pub fn boot(&mut self) -> Boot {
-        let b = self.decide();
+        let core = self.start_core();
+        self.boot_with(core)
+    }
+
+    /// Stage0's choice at reset: whether a boot core starts (on a layout
+    /// with no boot core slots, the `bootcore` region alone), through the
+    /// resets a failing core causes. Its result is for this reset only:
+    /// [`SimStore::boot_with`] takes it.
+    pub fn start_core(&mut self) -> bool {
+        if !self.bootcore_present() {
+            return false;
+        }
+        match self.layout.cores {
+            Some(c) => self.boot_core(c).is_some(),
+            None => true,
+        }
+    }
+
+    /// [`SimStore::boot`] after stage0's choice `core`
+    /// ([`SimStore::start_core`]) of this reset.
+    pub fn boot_with(&mut self, core: bool) -> Boot {
+        let b = self.decide(core);
         let running = match b {
             Boot::Run(s) => s,
             Boot::Nothing => statelog::slot::NONE,
@@ -608,14 +629,12 @@ impl SimStore {
         b
     }
 
-    fn decide(&mut self) -> Boot {
+    fn decide(&mut self, core: bool) -> Boot {
         if !self.bootcore_present() {
             return Boot::Nothing;
         }
-        if let Some(c) = self.layout.cores {
-            if self.boot_core(c).is_none() {
-                return self.confirmed_app();
-            }
+        if self.layout.cores.is_some() && !core {
+            return self.confirmed_app();
         }
         let (ls, _) = self.log_state();
         if let Some(p) = ls.pending {
@@ -746,11 +765,6 @@ impl SimStore {
     /// The key the boot stages verify images under.
     pub fn pubkey(&self) -> [u8; 32] {
         self.pubkey
-    }
-
-    /// Whether the boot stage is there to start anything at all.
-    pub fn has_boot_core(&mut self) -> bool {
-        self.bootcore_present()
     }
 }
 

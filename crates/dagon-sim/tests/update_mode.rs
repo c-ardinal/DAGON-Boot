@@ -153,7 +153,7 @@ fn the_rp2040_boot_core_writes_the_app() {
 /// One request frame of `cmd` with payload `p`; the reply's status and
 /// payload after it.
 fn ask(node: &mut SimNode, seq: u8, cmd: Cmd, p: &[u8], now: u64) -> (Status, Vec<u8>) {
-    let mut buf = [0u8; 64];
+    let mut buf = [0u8; 700];
     let n = Frame {
         flags: 0,
         seq,
@@ -230,4 +230,60 @@ fn nothing_to_start_keeps_the_boot_core_in_recovery_mode() {
     assert_eq!(hello_mode(&mut node, 1), mode::RECOVERY);
     node.tick(10 * 60_000);
     assert_eq!(node.run(), Run::BootCore(mode::RECOVERY));
+}
+
+/// Stage0 present but no boot core it can start (both core slots and
+/// both app slots erased): nothing serves, recovery mode included.
+#[test]
+fn no_boot_core_to_start_serves_no_recovery_mode() {
+    use dagon_port::Flash;
+    let mut node = hub();
+    let layout = Layout::RP2040_HUB;
+    for &(at, len) in layout.slots.iter().chain(layout.cores.unwrap().slots) {
+        node.flash().erase(at, len).unwrap();
+    }
+    node.reset(0);
+    assert!(!matches!(node.run(), Run::BootCore(_)), "{:?}", node.run());
+}
+
+/// A transfer the boot core heard nothing of for `IDLE_TIMEOUT_MS` is
+/// dropped, as `update_mode::serve_in` drops it: its next chunk is
+/// refused.
+#[test]
+fn the_boot_core_drops_a_transfer_left_idle() {
+    use dagon_port::Flash;
+    let mut node = hub();
+    for &(at, len) in Layout::RP2040_HUB.slots {
+        node.flash().erase(at, len).unwrap();
+    }
+    node.reset(0);
+    assert_eq!(node.run(), Run::BootCore(mode::RECOVERY));
+    let img = sample::HUB_1_0_0;
+    let mut p = [0u8; 600];
+    let n = XferBegin {
+        target: target::APP,
+        slot: 0,
+        total_len: img.len() as u32,
+        hdr_len: 512,
+    }
+    .encode(&mut p)
+    .unwrap();
+    assert_eq!(ask(&mut node, 1, Cmd::XferBegin, &p[..n], 1).0, Status::Ok);
+    let chunk = |offset: usize, p: &mut [u8]| {
+        XferChunk {
+            offset: offset as u32,
+            data: &img[offset..offset + 32],
+        }
+        .encode(p)
+        .unwrap()
+    };
+    let n = chunk(0, &mut p);
+    assert_eq!(ask(&mut node, 2, Cmd::XferHdr, &p[..n], 2).0, Status::Ok);
+    let idle = u64::from(dagon_agent::IDLE_TIMEOUT_MS);
+    node.tick(2 + idle);
+    let n = chunk(32, &mut p);
+    assert_ne!(
+        ask(&mut node, 3, Cmd::XferHdr, &p[..n], 3 + idle).0,
+        Status::Ok
+    );
 }

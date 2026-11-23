@@ -271,24 +271,23 @@ impl SimNode {
     /// The boot core's start: update mode when the app handed over
     /// (consuming its UPDATE_STAY), else the boot decision.
     fn start(&mut self, now_ms: u64) -> Run {
-        if self.store.has_boot_core() && self.store.take_stay() {
-            return self.serve_core(mode::UPDATE, now_ms);
-        }
+        let core = self.store.start_core();
         if !self.flash().is_powered() {
             return Run::Off;
         }
-        match self.boot_app() {
-            Run::Dead | Run::App(slot::NONE) if self.recovers() => {
+        if core && self.store.take_stay() {
+            return self.serve_core(mode::UPDATE, now_ms);
+        }
+        let mut core = Some(core);
+        match self.boot_app(&mut core) {
+            // `core`: the boot core of the reset that found nothing.
+            Run::Dead | Run::App(slot::NONE)
+                if core == Some(true) && self.store.boot_core_receives() =>
+            {
                 self.serve_core(mode::RECOVERY, now_ms)
             }
             run => run,
         }
-    }
-
-    /// Whether a boot core that receives is there to enter recovery mode
-    /// when nothing can be started.
-    fn recovers(&mut self) -> bool {
-        self.store.boot_core_receives() && self.store.has_boot_core()
     }
 
     fn serve_core(&mut self, in_mode: u8, now_ms: u64) -> Run {
@@ -307,9 +306,17 @@ impl SimNode {
         Run::BootCore(in_mode)
     }
 
-    fn boot_app(&mut self) -> Run {
+    /// The boot decision at each reset until an app runs (an app on trial
+    /// that crashes resets again); `core`: stage0's choice for the first
+    /// one, then for the last one made.
+    fn boot_app(&mut self, core: &mut Option<bool>) -> Run {
         for _ in 0..=self.store.layout.trial_attempts() + 1 {
-            let boot = self.store.boot();
+            let chosen = match *core {
+                Some(c) => c,
+                None => self.store.start_core(),
+            };
+            *core = Some(chosen);
+            let boot = self.store.boot_with(chosen);
             if !self.flash().is_powered() {
                 return Run::Off;
             }
@@ -319,6 +326,7 @@ impl SimNode {
             self.on_trial = self.status().slots[s as usize].state == SlotState::Trying;
             if self.on_trial && self.trial_app == TrialApp::CrashesAtBoot {
                 self.boots += 1;
+                *core = None;
                 continue;
             }
             self.check.set(
@@ -372,6 +380,9 @@ impl SimNode {
         if !matches!(self.run, Run::Off) && !self.flash().is_powered() {
             self.run = Run::Off;
             return;
+        }
+        if let Some(core) = self.core.as_mut() {
+            core.tick(now_ms * 1_000);
         }
         if self.run == Run::BootCore(mode::UPDATE)
             && now_ms.saturating_sub(self.core_served_ms) >= u64::from(EXIT_IDLE_MS)

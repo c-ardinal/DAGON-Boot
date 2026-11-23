@@ -179,9 +179,12 @@ fn the_plan_names_the_package_and_each_node_s_old_and_new_version() {
         .listing()
         .replace(&p.release.display().to_string(), "<release>");
     println!("{shown}");
+    // The facts not checked against their source follow the nodes, as
+    // `dagon release` warns of them.
+    let warning = crate::commands::open_facts_warning(&p.open_facts);
     assert_eq!(
         shown,
-        "deploy to 2 node(s) (<release>):\n  seg  (none) -> 2.0.7\n  hub  (none) -> 2.0.7\n"
+        format!("deploy to 2 node(s) (<release>):\n  seg  (none) -> 2.0.7\n  hub  (none) -> 2.0.7\n{warning}")
     );
     let _ = std::fs::remove_dir_all(&cfg.base);
 }

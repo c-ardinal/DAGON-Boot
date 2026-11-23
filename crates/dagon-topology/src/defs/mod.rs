@@ -49,7 +49,7 @@ use crate::schema::{ControlKind, LinkKind, RomEntry, UartIface};
 
 pub use board_boot::{BoardBoot, BoardBus, BoardDevice, BoardPeripheral, BoardPin};
 pub use clock::{BoardClock, ClockKind, ClockSetup, ClockSource, ClockStage, StageClocks};
-pub use execution::{BoardFlash, Conformance, EraseRegionDef, Execution, Fact, FlashOp};
+pub use execution::{BoardFlash, Conformance, EraseRegionDef, Execution, Fact, FlashOp, OpenFact};
 pub use isolation::{Core, Isolation, McuBoot, PeriodRange, Peripheral, RecordPlacement, Watchdog};
 pub use load::{DefError, DefSource, Source, BUILTIN_FILES};
 pub use slot_layout::{HeaderDef, OwnedLayout, SlotLayoutDef, SlotName, TargetName};

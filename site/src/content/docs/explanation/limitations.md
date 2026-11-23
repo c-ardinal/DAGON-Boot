@@ -63,7 +63,7 @@ description: "DAGONの設計上の範囲外、利用者の責任範囲、設計�
 
 値:
 
-- DAGONのマイコン定義には、`unverified`とマークした値があります。
+- DAGONのマイコン定義には、`unverified`とマークした値があります。`dagon release`と`dagon deploy`は、リリースの対象ノードのファームウェアが使用する未検証の値（割込禁止の最長時間と消去時間）を警告として表示します。`dagon release --checked-facts`は、その値が残存するリリースを拒否します（RB-06）。
 - 実行モデルの上限（[11節](/explanation/lifecycle-events/#11-実行モデル)）は、11.3の手順で決定した値ではありません。
 
 設計の構成要素のうち、コードとの差異があるもの:

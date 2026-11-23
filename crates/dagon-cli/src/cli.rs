@@ -322,6 +322,11 @@ pub struct ReleaseBuildArgs {
     /// Topology binary to package [default: compiled from the topology]
     #[arg(long, value_name = "BIN")]
     pub topology_bin: Option<String>,
+    /// Refuse the release while a node is built with a definition fact not
+    /// checked against its source ({ unverified = N } or "unmeasured")
+    /// [default: list them as warnings]
+    #[arg(long)]
+    pub checked_facts: bool,
     #[arg(long, value_name = "FILE", help = KEY)]
     pub key: Option<String>,
     #[arg(long, value_name = "FILE", help = CONFIG)]

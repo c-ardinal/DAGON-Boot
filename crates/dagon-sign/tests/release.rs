@@ -198,6 +198,64 @@ fn release_build_with_the_sample() {
     );
 }
 
+/// The built-in definitions with the facts of the sample's hub and segment
+/// stated: the hub's masking budget unmeasured and its erase time
+/// unverified, every fact of the segment checked.
+fn registry_with_facts() -> dagon_topology::defs::Registry {
+    let dir = std::env::temp_dir().join(format!("dagon-sign-facts-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let toml = dir.join("dagon.toml");
+    let mut text = String::from(
+        "format = 1\n[mcu_override.rp2040.execution]\nmasked_max_us = \"unmeasured\"\n\
+         [[mcu_override.rp2040.execution.erase_regions]]\nstart = 0x1000_0000\n\
+         unit_max_ms = { unverified = 450 }\n\
+         [mcu_override.stm32f401re.execution]\nmasked_max_us = 20\n",
+    );
+    for (start, ms) in [
+        (0x0800_0000u32, 800),
+        (0x0801_0000, 2_400),
+        (0x0802_0000, 4_000),
+    ] {
+        text += &format!(
+            "[[mcu_override.stm32f401re.execution.erase_regions]]\nstart = {start:#x}\nunit_max_ms = {ms}\n"
+        );
+    }
+    std::fs::write(&toml, text).unwrap();
+    let r = dagon_topology::defs::Registry::load(&[dagon_topology::defs::Source::Project(&toml)]);
+    std::fs::remove_dir_all(&dir).unwrap();
+    r.unwrap()
+}
+
+/// A release reports each fact its nodes are built with that is not
+/// checked against its source, and RB-06 refuses the release while one is
+/// left; a release of nodes whose facts are all checked passes.
+#[test]
+fn release_reports_and_can_refuse_facts_not_checked() {
+    let reg = registry_with_facts();
+    let t = sample();
+    let build = |images: &[Vec<u8>]| {
+        release::build(&reg, &t, &topology_bin(), images, "release-1.1", &key()).unwrap()
+    };
+    let r = build(&[hub_app(1), hub_app(0), f401_app(1), f401_app(0)]);
+    let open: Vec<String> = r.open_facts.iter().map(|f| f.to_string()).collect();
+    assert_eq!(
+        open,
+        [
+            "node 'hub' (rp2040): execution.masked_max_us is unmeasured",
+            "node 'hub' (rp2040): execution.erase_regions[0].unit_max_ms = 450 \
+             is not checked against its source",
+        ]
+    );
+    let e = r.require_checked_facts().unwrap_err();
+    assert_eq!((e.check, e.code), ("RB-06", "R-FACT"));
+    assert!(e.message.starts_with("2 fact(s)"), "{e}");
+    assert!(e.message.contains(&open[1]), "{e}");
+
+    let r = build(&[f401_app(1), f401_app(0)]);
+    assert!(r.open_facts.is_empty(), "{:?}", r.open_facts);
+    r.require_checked_facts().unwrap();
+}
+
 /// The ESP32-S3 boots through the vendor's 2nd stage: its definition
 /// declares no boot core slots, so a boot core image for it is refused,
 /// saying why. The hub and the F401 take boot core A/B pairs.

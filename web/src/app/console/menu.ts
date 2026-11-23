@@ -19,6 +19,10 @@ export interface MenuContext {
   barNarrow: boolean;
   partsOpen: boolean;
   arranged: boolean;
+  /** A node is selected on the canvas (its card can be moved). */
+  nodeSelected: boolean;
+  /** The DAGON mark is on the page. */
+  markShown: boolean;
   connected: boolean;
   /** Why 接続 / 切断 cannot be used now. */
   hubLocked: string | null;
@@ -36,6 +40,8 @@ export interface MenuContext {
     restart(): void;
     openParts(): void;
     arrange(): void;
+    moveCard(): void;
+    moveMark(): void;
     fit(): void;
     toggleHub(): void;
     chooseFile(): void;
@@ -75,6 +81,8 @@ export function consoleMenu(c: MenuContext): MenuGroup[] {
         { label: DEFINE.redo, hint: MENU.hint.redo, key: 'Ctrl+Shift+Z', control: 'edit', off: notDefine ?? (d.canRedo ? null : MENU.off.noRedo), run: () => d.redo() },
         { label: PARTS.open, hint: MENU.hint.parts, off: notDefine ?? (c.partsOpen ? MENU.off.partsOpen : null), run: run.openParts },
         { label: MENU.arrange, hint: MENU.hint.arrange, off: c.arranged ? null : MENU.off.arranged, run: run.arrange },
+        // The single-pointer way to move a card (WCAG 2.5.7): the next click on the canvas places it.
+        { label: MENU.moveCard, hint: MENU.hint.moveCard, key: 'Alt+矢印', off: (c.mode === 'define' && !graph ? MENU.off.notGraph : null) ?? (c.nodeSelected ? null : MENU.off.noNode), run: run.moveCard },
         // The view toggle leaves the menu while the header holds it.
         ...(c.barNarrow ? [{ label: graph ? MENU.viewTable : MENU.viewGraph, hint: graph ? MENU.hint.viewTable : MENU.hint.viewGraph, off: notDefine, run: () => (d.view = graph ? 'table' : 'graph') }] : []),
         { label: ZOOM.fit, hint: MENU.hint.fit, key: 'F', off: c.mode === 'define' && !graph ? MENU.off.notGraph : null, run: run.fit },
@@ -103,6 +111,7 @@ export function consoleMenu(c: MenuContext): MenuGroup[] {
               { label: MENU.applyProposal, hint: MENU.hint.apply, control: 'apply', off: c.lastProposal < 0 ? MENU.off.noProposal : null, run: run.applyProposal },
             ]
           : [{ label: AGENT.menuLink, hint: MENU.hint.link, control: 'link', off: c.simulated ? MENU.off.demo : null, run: run.link }]),
+        ...(c.markShown ? [{ label: MENU.moveMark, hint: MENU.hint.moveMark, key: 'Alt+矢印', run: run.moveMark }] : []),
         { label: MENU.cli, hint: MENU.hint.cli, off: c.simulated ? MENU.off.demo : null, run: run.cli },
         ...(c.agentLinked ? [{ label: AGENT.menuUnlink, hint: MENU.hint.unlink, danger: true, run: () => run.confirm(CONFIRM.unlink, run.unlink) }] : []),
       ],

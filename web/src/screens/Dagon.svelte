@@ -2,7 +2,8 @@
   import { isNarrow } from '../app/narrow.ts';
   import { tick, untrack } from 'svelte';
   import type { Agent, AskKind } from '../app/agent.svelte.ts';
-  import { AGENT } from '../app/copy.ts';
+  import { AGENT, ANNOUNCE, CANVAS } from '../app/copy.ts';
+  import { placeByClick, stepOf } from '../app/move.ts';
   import { rise, tokenMs } from '../app/motion.ts';
   import Icon from './Icon.svelte';
 
@@ -22,9 +23,11 @@
     openRequest: number;
     /** The bubble is open; the page closes it on Escape wherever focus is. */
     open?: boolean;
+    /** A sentence for screen readers: where the mark went. */
+    onannounce?: (text: string) => void;
   }
 
-  let { agent, demo = false, place, onask, onapply, ontalk, openRequest, open = $bindable(false) }: Props = $props();
+  let { agent, demo = false, place, onask, onapply, ontalk, openRequest, open = $bindable(false), onannounce }: Props = $props();
 
   const MARGIN = 12;
   const DRAG_PX = 4;
@@ -38,7 +41,7 @@
   let field = $state<HTMLInputElement>();
   let text = $state('');
   let answered = $state(false);
-  /** Where the user put it; null: the default place, kept by the stylesheet. Only a drag changes it. */
+  /** Where the user put it; null: the default place, kept by the stylesheet. A drag, Alt + arrow or the menu's move changes it. */
   let pos = $state<Corner | null>(null);
   let stage = $state({ w: 0, h: 0, mark: 0 });
   /** The bubble's corner, from the mark's. */
@@ -209,14 +212,52 @@
     dragged = drag.moved;
     const at = drag.at;
     endDrag();
-    if (!dragged) return;
-    pos = toCorner(settle(at));
+    if (dragged) keep(settle(at));
+  }
+  function keep(p: Point) {
+    pos = toCorner(p);
     try {
       localStorage.setItem(key, JSON.stringify(pos));
     } catch {
       // Storage may be off: the place then lasts for this page only.
     }
   }
+  /** Where the mark stands now, from the stage's top-left. */
+  const here = (): Point => (root ? { x: root.offsetLeft, y: root.offsetTop } : { x: 0, y: 0 });
+
+  /** Alt + arrow on the mark: a step, kept as a drop is. */
+  function stepKey(e: KeyboardEvent) {
+    const step = stepOf(e);
+    // As with a drag: the stacked mark of the narrow tier keeps no place.
+    if (!step || isNarrow()) return;
+    e.preventDefault();
+    const p = here();
+    keep(inStage({ x: p.x + step.x, y: p.y + step.y }));
+    onannounce?.(ANNOUNCE.moved(AGENT.name));
+  }
+
+  /** The menu's move: the next click on the stage puts the mark's centre there; a click elsewhere or Escape leaves it. */
+  let placing = $state(false);
+  let stopPlacing: (() => void) | null = null;
+  export function startMove() {
+    stopPlacing?.();
+    placing = true;
+    onannounce?.(CANVAS.moveHint(AGENT.name));
+    const done = () => ((placing = false), (stopPlacing = null));
+    stopPlacing = placeByClick(
+      () => root?.parentElement?.getBoundingClientRect(),
+      (cx, cy) => {
+        done();
+        const o = root?.parentElement?.getBoundingClientRect();
+        if (!o) return;
+        keep(settle({ x: cx - o.left - stage.mark / 2, y: cy - o.top - stage.mark / 2 }));
+        onannounce?.(ANNOUNCE.moved(AGENT.name));
+        markEl?.focus();
+      },
+      () => (done(), onannounce?.(ANNOUNCE.moveCancelled)),
+    );
+  }
+  $effect(() => () => stopPlacing?.());
   function press() {
     if (!dragged) open = !open;
     dragged = false;
@@ -262,11 +303,14 @@
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div class="dagon" class:thinking={agent.thinking} class:answered bind:this={root} style:right={shown && `${shown.r}px`} style:bottom={shown && `${shown.b}px`} style:translate={nudge && `${nudge.x}px ${nudge.y}px`} data-avoid="" onkeydown={keys}>
-  <button class="mark" bind:this={markEl} aria-label={AGENT.name} aria-expanded={open} title={open ? AGENT.markClose : AGENT.markOpen} onpointerdown={down} onpointermove={move} onpointerup={up} onpointercancel={endDrag} onclick={press}>
+  <button class="mark" bind:this={markEl} aria-label={AGENT.name} aria-expanded={open} title={open ? AGENT.markClose : AGENT.markOpen} onpointerdown={down} onpointermove={move} onpointerup={up} onpointercancel={endDrag} onclick={press} onkeydown={stepKey}>
     <span class="shadow" aria-hidden="true"></span>
     <img src="./icons/dagon-256.png" srcset="./icons/dagon-256.png 256w, ./icons/dagon-512.png 512w" sizes="96px" alt="" draggable="false" />
   </button>
 
+  {#if placing}
+    <p class="placing-hint">{CANVAS.moveHint(AGENT.name)}</p>
+  {/if}
   {#if open}
     <section transition:rise={{ dur: '--dur-quick' }} class="bubble" style:left="{bubbleAt.x}px" style:top="{bubbleAt.y}px" style:max-height={bubbleMax ? `${bubbleMax}px` : null} aria-label={AGENT.name} aria-live="polite" bind:this={bubbleEl}>
       {#if demo}
@@ -325,6 +369,22 @@
   }
   .mark:active {
     cursor: grabbing;
+  }
+  /* What the next click does, above the mark while it waits for it. */
+  .placing-hint {
+    position: absolute;
+    right: 0;
+    bottom: calc(100% + var(--s-2));
+    width: max-content;
+    max-width: min(var(--w-bubble), calc(100vw - 2 * var(--m-edge)));
+    margin: 0;
+    padding: var(--s-1) var(--s-3);
+    border: 1px solid var(--c-accent);
+    border-radius: var(--r-s);
+    background: var(--c-layer-2);
+    color: var(--c-paper);
+    font-size: var(--t-small);
+    pointer-events: none;
   }
   .mark:focus-visible {
     outline: var(--st-w-focus) solid var(--c-paper);

@@ -1,0 +1,48 @@
+# The ESP32-S3 stage0 and the most bytes each part of it may take
+# (scripts/stage0_size.py). The ROM copies this stage0 into RAM from flash
+# 0x0, so it has no flash region in the definition yet (C-559 U2): its
+# limit is [image] max_bytes, 30 KiB of the 32 KiB below the partition
+# table at 0x8000 (C-559), against the bytes of its loadable segments,
+# less 1/16 as every stage0 leaves free. The parts come from the symbol
+# table (`nm`, Rust paths): a symbol belongs to the first part one of
+# whose `match` prefixes starts its path; the rest, the literal pools and
+# the padding are `other`. Fat LTO inlines code into its caller (the
+# verifier into dagon_format's verify_header), so a change can move bytes
+# between parts. Measured at 24,476 bytes when this budget was set.
+
+[image]
+max_bytes = 30720
+# The only layout it builds with until the definition gives stage0's.
+features = ["qemu-layout"]
+# The symbol table reader of the Xtensa toolchain, by either name espup
+# installs.
+nm = ["xtensa-esp-elf-nm", "xtensa-esp32s3-elf-nm"]
+
+[[part]]
+name = "verifier"
+match = ["dagon_ed25519"]
+max_bytes = 2304
+
+[[part]]
+name = "sha2"
+match = ["sha2", "digest", "hybrid_array", "block_buffer"]
+max_bytes = 3072
+
+[[part]]
+name = "dagon-core"
+match = ["dagon_core"]
+max_bytes = 5120
+
+[[part]]
+name = "dagon-format"
+match = ["dagon_format"]
+max_bytes = 5888
+
+[[part]]
+name = "mcu-package"
+match = ["dagon_esp32s3_stage0", "dagon_mcu_esp32s3", "dagon_port", "stage0_start"]
+max_bytes = 7424
+
+[[part]]
+name = "other"
+max_bytes = 4992

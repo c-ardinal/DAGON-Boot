@@ -39,7 +39,10 @@
 #![no_std]
 // The build that measures the boot decision stops after it: the code that
 // starts the app is unused there.
-#![cfg_attr(feature = "decide-time", allow(unreachable_code, unused_variables, unused_mut))]
+#![cfg_attr(
+    feature = "decide-time",
+    allow(unreachable_code, unused_variables, unused_mut)
+)]
 
 use core::panic::PanicInfo;
 
@@ -56,9 +59,9 @@ use dagon_events::{
     compose, compose_boot, BootExtension, Bounds, Clock, Extension, Layer, Nop, Published, Watchdog,
 };
 use dagon_format::header::port_kind;
+use dagon_mcu_stm32f401re::boot_link::I2cPort;
 #[cfg(any(feature = "listen-time", feature = "decide-time"))]
 use dagon_mcu_stm32f401re::boot_time;
-use dagon_mcu_stm32f401re::boot_link::I2cPort;
 use dagon_mcu_stm32f401re::clock::Setup;
 use dagon_mcu_stm32f401re::flash::F401Flash;
 use dagon_mcu_stm32f401re::layout as board;

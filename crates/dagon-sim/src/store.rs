@@ -599,7 +599,28 @@ impl SimStore {
     /// ROLLBACK the log cannot take starts no trial: the confirmed slot
     /// starts with the trial the log names left open.
     pub fn boot(&mut self) -> Boot {
-        let b = self.decide();
+        let core = self.start_core();
+        self.boot_with(core)
+    }
+
+    /// Stage0's choice at reset: whether a boot core starts (on a layout
+    /// with no boot core slots, the `bootcore` region alone), through the
+    /// resets a failing core causes. Its result is for this reset only:
+    /// [`SimStore::boot_with`] takes it.
+    pub fn start_core(&mut self) -> bool {
+        if !self.bootcore_present() {
+            return false;
+        }
+        match self.layout.cores {
+            Some(c) => self.boot_core(c).is_some(),
+            None => true,
+        }
+    }
+
+    /// [`SimStore::boot`] after stage0's choice `core`
+    /// ([`SimStore::start_core`]) of this reset.
+    pub fn boot_with(&mut self, core: bool) -> Boot {
+        let b = self.decide(core);
         let running = match b {
             Boot::Run(s) => s,
             Boot::Nothing => statelog::slot::NONE,
@@ -608,14 +629,12 @@ impl SimStore {
         b
     }
 
-    fn decide(&mut self) -> Boot {
+    fn decide(&mut self, core: bool) -> Boot {
         if !self.bootcore_present() {
             return Boot::Nothing;
         }
-        if let Some(c) = self.layout.cores {
-            if self.boot_core(c).is_none() {
-                return self.confirmed_app();
-            }
+        if self.layout.cores.is_some() && !core {
+            return self.confirmed_app();
         }
         let (ls, _) = self.log_state();
         if let Some(p) = ls.pending {
@@ -703,6 +722,55 @@ impl SimStore {
             .ok_or(StoreError::Range)?
             .0;
         self.program(a, hdr)
+    }
+}
+
+impl SimStore {
+    /// Whether the MCU's boot core receives on some link (its
+    /// definition's `[boot_receive]`), so the app may hand over to it.
+    pub fn boot_core_receives(&self) -> bool {
+        simulated_mcu(self.layout.mcu)
+            .boot_receive
+            .as_ref()
+            .is_some_and(|r| r.kinds.values().any(|&on| on))
+    }
+
+    /// An UPDATE_STAY no UPDATE_DONE has consumed (`Log::request_stay`).
+    fn stay_waiting(&mut self) -> bool {
+        let (_, _, recs) = self.records();
+        recs.iter()
+            .rev()
+            .find(|r| matches!(r.kind, kind::UPDATE_STAY | kind::UPDATE_DONE))
+            .is_some_and(|r| r.kind == kind::UPDATE_STAY)
+    }
+
+    fn append_marker(&mut self, k: u8) -> Result<(), StoreError> {
+        self.append(Record {
+            kind: k,
+            target: statelog::target::APP,
+            slot: statelog::slot::NONE,
+            reason: reason::NONE,
+            seq: 0,
+            version: Version::default(),
+            digest16: [0; 16],
+        })
+    }
+
+    /// The boot core's start (`Log::take_stay`): `true` when the app
+    /// handed over, its UPDATE_STAY now consumed by an UPDATE_DONE.
+    pub fn take_stay(&mut self) -> bool {
+        self.stay_waiting() && self.append_marker(kind::UPDATE_DONE).is_ok()
+    }
+
+    /// No app runs (the boot core serves instead): STATUS reports no
+    /// active slot, as the boot core's own store is opened with none.
+    pub fn run_no_app(&self) {
+        self.running.store(statelog::slot::NONE, Ordering::Relaxed);
+    }
+
+    /// The key the boot stages verify images under.
+    pub fn pubkey(&self) -> [u8; 32] {
+        self.pubkey
     }
 }
 
@@ -796,6 +864,18 @@ impl SlotStore for SimStore {
         _: &Transition,
     ) -> Result<(), StoreError> {
         self.append(Self::log_record(kind::CONFIRMED, slot, reason::NONE, hdr))
+    }
+
+    /// UPDATE_STAY for the boot core (`Log::request_stay`; this model's
+    /// one face makes no room); a stay already waiting is left as it is.
+    fn request_update_mode(&mut self) -> Result<(), StoreError> {
+        if !self.boot_core_receives() {
+            return Err(StoreError::Unsupported);
+        }
+        if self.stay_waiting() {
+            return Ok(());
+        }
+        self.append_marker(kind::UPDATE_STAY)
     }
 
     /// The boot core log keeps room for the trials it starts (the boot

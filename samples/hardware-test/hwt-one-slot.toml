@@ -1,0 +1,107 @@
+# Sample hardware test, one-slot setup: the hub and the seg with app slot B
+# left out, so every update hands over to the boot core, which writes the
+# one slot in update mode. Run with `hwt.py run --setup hwt-one-slot.toml`
+# against a project whose dagon.toml leaves app slot B out (README.md, "One
+# app slot"). Same step kinds as hwt.toml.
+
+[setup]
+# The [build.<id>] nodes of the setup project, in update order. The watch
+# (ESP32-S3) is left out until its factory agent takes the write.
+nodes = ["seg", "hub"]
+# The coordinator's node id (dagon status prints it as "hub").
+coordinator = "hub"
+# The coordinator's USB VID/PID as Windows shows it in the port's PnP device id;
+# the pinned --port must be this device for the whole run.
+hub_usb = "VID_C0DE&PID_CAFE"
+# Cargo feature of each node app that makes its self-check fail (in
+# samples/f401-app, samples/esp32s3-app; `sync` adds it to the coordinator app).
+fail_feature = "no-confirm"
+# Longest wait for nodes to settle on a confirmed version: the coordinator's trial
+# lasts about 68 s per attempt, 3 attempts before it reverts (~3.5 min).
+settle_timeout_s = 360
+poll_s = 5
+# dagon status attempts while the coordinator is away (re-enumerating after reset).
+status_tries = 6
+# `sync`: the sample each node's package is refreshed from.
+sync = { seg = "f401-app" }
+# Each node has one app slot: a deploy writes it in place, through the boot
+# core (the app hands over with REBOOT mode 1), so the active slot stays.
+one_slot = true
+
+# Versions: a node's version is its crate's ([package] version in the
+# Cargo.toml of its [build.<id>] package). Each deploy step sets it there for
+# the nodes it deploys; the crates keep the last one. The format is
+# major.minor.patch (u8.u8.u16, no pre-release tags), so tests use major 2
+# (2.0.N) as their range; the setup's own releases stay below 2.0.0 or move
+# on above the test range. A re-run may reuse the same versions: nothing
+# refuses a lower or equal one.
+#
+# Step kinds (`do`):
+#   status                                   record only; every node answers, confirmed
+#   deploy   version [nodes] [expect]        sets each deployed node's crate version to
+#                                             `version`, then dagon deploy; its confirmation is
+#                                             answered y only when the plan lists exactly these
+#                                             nodes, each -> `version`, and
+#                                             out/deploy/v<version>.dgb (else n: FAIL)
+#            expect = "ok"          (default) deployed nodes on `version`, confirmed,
+#                                             active slot flipped; others unchanged
+#            expect = "rolled-back"           built with feature no-confirm (self-check
+#                                             fails); the CLI fails, then every deployed
+#                                             node returns to its previous version, confirmed
+#            interrupt_at = <percent>         the CLI is killed when the (only) node's
+#                                             transfer reaches this percent; expect
+#                                             "unchanged" (old version still running)
+#   tamper   of [fix_crc]                    flips 4 payload bytes of the first image of
+#                                             release `of` (fix_crc: and recomputes the item
+#                                             CRC, so the digest/signature chain must catch
+#                                             it); dagon apply must refuse it and nothing
+#                                             changes on any node
+#   foreign  version node                    the node's ELFs signed with a throwaway key;
+#                                             dagon apply must refuse it, nothing changes
+#   rollback node                            dagon rollback; the node is on the version its
+#                                             other slot held, confirmed, slot flipped
+#   core     node version [expect]           sets the node's boot crate version
+#                                             (boot/<node>/Cargo.toml) to `version`, the app
+#                                             stays on the version it runs; dagon deploy, its
+#                                             plan checked as above
+#            expect = "ok"          (default) `dagon status`: boot core `version`, running and
+#                                             confirmed, in the slot that was idle
+#            expect = "rolled-back"           built with boot_features = no-confirm (the core
+#                                             fails its own check); the CLI fails with
+#                                             BootCoreRolledBack; the core it ran is running and
+#                                             confirmed, the other is not; the node answers
+#   skip     reason                          recorded as SKIPPED
+
+[[scenario]]
+id = "status"
+title = "status of all nodes"
+steps = [{ do = "status" }]
+
+[[scenario]]
+id = "seg-hand-over"
+title = "seg hands over to its boot core, which writes its one app slot (I2C)"
+steps = [{ do = "deploy", version = "2.0.40", nodes = ["seg"] }]
+
+[[scenario]]
+id = "hub-hand-over"
+title = "hub hands over to its boot core, which writes its one app slot (USB re-enumerates twice)"
+steps = [{ do = "deploy", version = "2.0.41", nodes = ["hub"] }]
+
+[[scenario]]
+id = "batch"
+title = "one release hands over on seg and hub in turn"
+steps = [{ do = "deploy", version = "2.0.42" }]
+
+[[scenario]]
+id = "hand-over-x3"
+title = "three hand-overs in a row on each node"
+steps = [
+  { do = "deploy", version = "2.0.43" },
+  { do = "deploy", version = "2.0.44" },
+  { do = "deploy", version = "2.0.45" },
+]
+
+[[scenario]]
+id = "final"
+title = "every node on a confirmed known-good version"
+steps = [{ do = "deploy", version = "2.0.46" }]

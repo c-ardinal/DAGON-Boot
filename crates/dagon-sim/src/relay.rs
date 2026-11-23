@@ -463,6 +463,10 @@ impl SimRelay {
         if f.flags & (flags::RESP | flags::EVENT) != 0 {
             return None;
         }
+        // Its boot core relays nothing: it answers every request itself.
+        if self.node.in_boot_core() {
+            return self.node.handle_frame(frame, self.bus.now_ms);
+        }
         // As the relay on a node: RELAY always, SUBCTL and I2C_RAW with a
         // node on the recovery lines, CAPS about RELAY; the rest is the
         // node's own agent.

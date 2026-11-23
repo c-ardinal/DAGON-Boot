@@ -11,6 +11,8 @@ publish = false
 
 [dependencies]
 dagon-agent = { path = "../../../crates/dagon-agent" }
+# log_store: the state log the store appends to.
+dagon-core = { path = "../../../crates/dagon-core" }
 dagon-events = { path = "../../../crates/dagon-events" }
 dagon-format = { path = "../../../crates/dagon-format" }
 dagon-port = { path = "../../../crates/dagon-port" }

@@ -1,0 +1,27 @@
+[package]
+name = "dagon-esp32s3-stage0-qemu"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+version = "0.0.0"
+publish = false
+
+# The images the ESP32-S3 stage0's emulator test starts (crates/dagon-cli
+# `esp_image::qemu`): a boot core in RAM that asks for the app by reset
+# and an app whose code and strings run mapped from flash. Each tells what
+# it saw on the ROM's text output. Test images only: never written to a
+# node.
+[package.metadata.dagon]
+lint = { features = [""] }
+
+# Standalone: built for the ESP32-S3 only.
+[workspace]
+
+[dependencies]
+dagon-core = { path = "../../../../crates/dagon-core" }
+dagon-mcu-esp32s3 = { path = "..", default-features = false }
+
+[profile.release]
+opt-level = "z"
+lto = "fat"
+codegen-units = 1
+panic = "abort"

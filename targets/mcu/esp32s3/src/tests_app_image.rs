@@ -169,6 +169,29 @@ fn a_mapped_segment_off_its_page_offset_is_refused() {
 }
 
 #[test]
+fn a_ram_segment_off_a_word_is_refused() {
+    // Its address: the IRAM segment moved 2 bytes up.
+    let r = plan(&mut slot(&with_segment_addr(2, 0x4037_8002)), AT, END);
+    assert_eq!(r, Err(Refused::Unaligned(0x4037_8002)));
+    // Its length: the IRAM segment 2 bytes short (refused before the next
+    // segment header, which no longer lines up, is read).
+    let mut b = APP_HEAD.to_vec();
+    let len1 = u32::from_le_bytes(b[24 + 4..24 + 8].try_into().unwrap()) as usize;
+    let dram = 24 + 8 + len1;
+    assert_eq!(
+        u32::from_le_bytes(b[dram..dram + 4].try_into().unwrap()),
+        0x3FC8_A700
+    );
+    let len2 = u32::from_le_bytes(b[dram + 4..dram + 8].try_into().unwrap()) as usize;
+    let iram = dram + 8 + len2;
+    put32(&mut b, iram + 4, 0x26FE);
+    assert_eq!(
+        plan(&mut slot(&b), AT, END),
+        Err(Refused::Unaligned(0x4037_8000))
+    );
+}
+
+#[test]
 fn mapped_segments_on_one_mmu_entry_are_refused() {
     // IROM moved to page 0, the entry the DROM segment takes (one table for
     // both buses).

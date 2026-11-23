@@ -1,0 +1,14 @@
+[build]
+target = "xtensa-esp32s3-none-elf"
+
+[target.xtensa-esp32s3-none-elf]
+# Joined to ../.cargo/config.toml's flags: stage0's own linker script
+# (stage0.x, found through build.rs's search path), no C runtime, and the
+# compact SHA-2 rounds as in the other stage0s.
+rustflags = [
+    "-C", "link-arg=-nostartfiles", "-C", "link-arg=-Tstage0.x",
+    "--cfg", 'sha2_backend_soft="compact"',
+]
+
+[unstable]
+build-std = ["core"]

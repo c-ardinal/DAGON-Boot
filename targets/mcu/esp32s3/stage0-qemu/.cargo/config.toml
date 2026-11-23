@@ -1,0 +1,8 @@
+[build]
+target = "xtensa-esp32s3-none-elf"
+
+# The linker scripts come from build.rs, per image; ../.cargo/config.toml's
+# flags are joined to these.
+
+[unstable]
+build-std = ["core"]

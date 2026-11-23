@@ -8,7 +8,7 @@
 //! - [`rom`], [`serve`]: ENTER_ROM and what follows a reply
 //! - [`layout`]: the partition table (`partitions.csv`), [`otadata`],
 //!   [`framer`]
-//! - Xtensa only: `flash::EspFlash` (`Flash`), `boot::EspBootSelect`
+//! - Xtensa with the `hal` feature (default): `flash::EspFlash` (`Flash`), `boot::EspBootSelect`
 //!   (`BootSelectV`), `sys` (`Clock`, `Watchdog`, `Reset`), `link` (UART
 //!   settings), and `node`: `node::start` runs the link task on a
 //!   high-priority interrupt executor; [`links`]: the node's uplinks as
@@ -35,15 +35,15 @@ pub mod serve;
 pub mod store;
 pub mod trial;
 
-#[cfg(target_arch = "xtensa")]
+#[cfg(all(target_arch = "xtensa", feature = "hal"))]
 pub mod boot;
-#[cfg(target_arch = "xtensa")]
+#[cfg(all(target_arch = "xtensa", feature = "hal"))]
 pub mod flash;
-#[cfg(target_arch = "xtensa")]
+#[cfg(all(target_arch = "xtensa", feature = "hal"))]
 pub mod link;
-#[cfg(target_arch = "xtensa")]
+#[cfg(all(target_arch = "xtensa", feature = "hal"))]
 pub mod node;
-#[cfg(target_arch = "xtensa")]
+#[cfg(all(target_arch = "xtensa", feature = "hal"))]
 pub mod sys;
 
 // The constants this package's MCU definition states (`dagon-mcu.toml`):

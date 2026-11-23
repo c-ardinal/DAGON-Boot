@@ -17,7 +17,23 @@ and not on the board. Kind V: the stock ESP-IDF 2nd stage with app rollback
 | `board` | the `BoardDef` trait a board crate implements |
 
 Reset on panic is on by default (feature `panic-reset`), so a trial image
-that panics rolls back.
+that panics rolls back. The firmware modules (`flash`, `boot`, `sys`,
+`link`, `node`, `links`' uplinks) need the `hal` feature, also on by
+default; stage0 builds without it and uses the pure modules only.
+
+### Stage0 (in progress)
+
+`stage0/` is DAGON's own first stage for this MCU, the image the ROM loads
+from flash 0x0 in place of the ESP-IDF 2nd stage: it checks the boot core
+and the app with the same verifier and decision as the other MCUs
+(`dagon_core::bootcore::start_handed`, the app handed over by reset),
+loads the ESP image (`app_image`) and maps it through the MMU. It is not
+written to nodes yet: its layout (the retained cell, the two logs, the
+RTC slow clock) is the emulator's provisional one (`qemu-layout`) until
+the definition gives stage0's after the hardware measurement. CI boots it
+in Espressif's QEMU with the test images of `stage0-qemu/`
+(`crates/dagon-cli/src/esp_image_qemu.rs`) and measures it against its
+30 KiB budget (`stage0/budget.toml`, `scripts/stage0_size.py`).
 
 There is no DAGON boot stage on this MCU: the vendor's 2nd stage starts
 the app. Boot extensions therefore do not exist here, and `dagon gen`

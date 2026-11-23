@@ -177,5 +177,40 @@ class Stage0Size(unittest.TestCase):
             stage0_size.flash_bytes(b"MZ" + bytes(60), at, size)
 
 
+
+class RomLoaded(unittest.TestCase):
+    def test_the_esp32s3_stage0_is_rom_loaded_with_a_budget_inside_its_limit(self):
+        import tomllib
+        self.assertIn("esp32s3", stage0_size.rom_loaded())
+        self.assertNotIn("esp32s3", stage0_size.stage0_mcus())
+        for mcu in stage0_size.rom_loaded():
+            path = stage0_size.MCU / mcu / "stage0" / "budget.toml"
+            size = tomllib.loads(path.read_text(encoding="utf-8"))["image"]["max_bytes"]
+            parts = stage0_size.read_budget(path)
+            self.assertLessEqual(sum(p["max_bytes"] for p in parts), size - stage0_size.margin(size))
+
+    def test_loaded_bytes_count_every_loadable_segment(self):
+        img = elf([
+            (1, 0x403C_B700, 0x5000),  # code
+            (1, 0x3FCE_5700, 0x700),   # read-only data
+            (6, 0x0, 0x9999),          # not PT_LOAD
+        ])
+        self.assertEqual(stage0_size.loaded_bytes(img), 0x5700)
+
+    def test_symbols_go_to_their_parts_and_other_takes_the_rest(self):
+        parts = budget(BUDGET)
+        nm = "\n".join([
+            "403cb700 00000100 T dagon_ed25519::small::verify",
+            "403cb800 00000020 t <sha2::Sha512 as digest::Update>::update",
+            "403cb820 00000010 t compiler_builtins::mem::memcpy",
+            "403cb830 t no_size",
+        ])
+        used = stage0_size.symbol_parts(nm, parts, 0x200)
+        self.assertEqual(used["verifier"], 0x100)
+        self.assertEqual(used["sha2"], 0x20)
+        self.assertEqual(used["other"], 0x200 - 0x120)
+        self.assertEqual(sum(used.values()), 0x200)
+
+
 if __name__ == "__main__":
     unittest.main()

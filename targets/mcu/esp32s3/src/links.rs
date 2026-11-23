@@ -48,14 +48,14 @@ pub const LINK_KINDS: &[KindInfo] = &[
 
 dagon_mcu_common::link_requirements!("esp32s3", LINK_KINDS);
 
-#[cfg(target_arch = "xtensa")]
+#[cfg(all(target_arch = "xtensa", feature = "hal"))]
 pub use node_links::{Uart, UsbCdc};
 
 /// The node's two uplinks as [`Link`]s: frames cut out of the byte stream
 /// (SOF, CRC, a partial frame dropped after 20 ms without a byte; the
 /// bytes of one read share its completion time), replies sent and waited
 /// for until they have left the node.
-#[cfg(target_arch = "xtensa")]
+#[cfg(all(target_arch = "xtensa", feature = "hal"))]
 mod node_links {
     use embassy_time::{with_timeout, Duration};
     use embedded_io_async::{Read, Write};

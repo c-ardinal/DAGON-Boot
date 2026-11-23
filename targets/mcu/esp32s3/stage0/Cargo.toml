@@ -1,0 +1,39 @@
+[package]
+name = "dagon-esp32s3-stage0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+version = "0.0.0"
+publish = false
+
+# Firmware clippy runs in CI (scripts/ci_crates.py --firmware-lint), with
+# the QEMU layout (the only one until the definition gives stage0's).
+[package.metadata.dagon]
+lint = { features = ["qemu-layout"] }
+
+# Standalone: built for the ESP32-S3 only (the esp toolchain of
+# ../rust-toolchain.toml), so it stays out of the host workspace.
+[workspace]
+
+[dependencies]
+# The pure modules only (the app image plan, the definition's constants,
+# the key): no esp-hal.
+dagon-mcu-esp32s3 = { path = "..", default-features = false }
+dagon-core = { path = "../../../../crates/dagon-core" }
+dagon-ed25519 = { path = "../../../../crates/dagon-ed25519" }
+dagon-format = { path = "../../../../crates/dagon-format" }
+dagon-port = { path = "../../../../crates/dagon-port" }
+
+[features]
+# The provisional layout for the QEMU test (src/qemu_layout.rs): the
+# retained cell's place, the boot core and app logs and the RTC slow
+# clock. The definition gives none of them until stage0's definition
+# lands after the hardware measurement; without this feature stage0 does
+# not build, so no image with these values reaches a node.
+qemu-layout = []
+
+[profile.release]
+opt-level = "z"
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+debug = true

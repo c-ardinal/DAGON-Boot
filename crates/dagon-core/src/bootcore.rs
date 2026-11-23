@@ -3,7 +3,8 @@
 //! The app's agent writes a new boot core into the idle boot core slot (the
 //! only one when the MCU definition gives one) and
 //! records it pending (SLOT_PENDING, target BOOTCORE) after verifying its
-//! signature. Stage0, which is never updated and never writes flash, starts
+//! signature. Stage0, which is never updated and writes flash only for the
+//! app decision of a hand-off by reset ([`start_handed`]), starts
 //! the pending core on trial while the trial cell (two words of retained
 //! memory, [`trial_cell`]) counts fewer than `max` starts for that image;
 //! otherwise it starts the confirmed core. The core that runs settles the
@@ -643,6 +644,114 @@ pub fn confirmed_app<F: Flash, V: SigVerifier + ?Sized>(
     let inside = entry >= body && entry - body < h.payload_size;
     let tagged = apps.target_tag != NO_TAG && h.target_tag == apps.target_tag;
     (inside && tagged).then_some((c.slot, body))
+}
+
+/// What stage0 starts on an MCU whose boot core hands the app over by
+/// reset ([`start_handed`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Handed {
+    /// A boot core; stage0 stores `cell` before it starts it.
+    Core(Start<u32>),
+    /// The app in APP slot `slot`, its body at `body`: the one the app
+    /// decision chose on the boot core's request (`trial` when it starts
+    /// a pending app), or the confirmed one when no boot core may start.
+    App { slot: u8, body: u32, trial: bool },
+}
+
+/// Stage0's decision on an MCU whose boot core asks for the app by reset
+/// (the hand-off through the cell, [`START_APP`]), the same on every such
+/// MCU. A request it takes ([`take_request`], through `read` and
+/// `write(index, word)`) runs the app decision once
+/// ([`crate::boot::decide`] over the log at `apps.log`, its BOOT_ATTEMPT and
+/// ROLLBACK records included); an app it chooses starts. When it chooses
+/// none, the cell takes [`app_result`] and only the confirmed boot core
+/// starts (no pending one: the request came from a core that settled its
+/// trial), with the result left in the cell. With no request, it is
+/// [`start`]: a boot core, else the confirmed app. A stage0 without a
+/// node tag ([`NO_TAG`]) runs no app decision: the result is
+/// [`Refusal::NoImage`]. With nothing to start, it reports the reason to
+/// `diag` and returns it.
+pub fn start_handed<F: Flash, V: SigVerifier + ?Sized, D: Diag>(
+    flash: &mut F,
+    (at, apps): (&Stage0<'_>, &Apps<'_>),
+    (read, mut write): (impl Fn() -> [u32; 2], impl FnMut(usize, u32)),
+    verifier: &V,
+    diag: &mut D,
+) -> Result<Handed, NoCore<CoreFail>> {
+    if !take_request(&read, &mut write) {
+        let cell = read();
+        return start(flash, at, apps, cell, verifier, diag).map(|b| match b {
+            Boot::Core(s) => Handed::Core(s),
+            Boot::App { slot, body } => Handed::App {
+                slot,
+                body,
+                trial: false,
+            },
+        });
+    }
+    // A stage0 built without a node tag starts no app ([`NO_TAG`]).
+    let log = Log::load(flash, apps.log)
+        .ok()
+        .filter(|_| apps.target_tag != NO_TAG);
+    let refusal = match log {
+        Some(mut log) => {
+            let named = log.state.confirmed.is_some() || log.state.pending.is_some();
+            let cfg = crate::boot::BootConfig {
+                mcu_id: at.mcu_id,
+                target_tag: apps.target_tag,
+                max_attempts: at.max,
+            };
+            let layout = crate::boot::SlotLayout { slots: apps.slots };
+            match crate::boot::decide(flash, &mut log, &layout, &cfg, verifier) {
+                crate::boot::Decision::Boot { slot, entry, trial } => {
+                    return Ok(Handed::App {
+                        slot,
+                        body: entry,
+                        trial,
+                    })
+                }
+                crate::boot::Decision::NoImage if named => Refusal::Rejected,
+                crate::boot::Decision::NoImage => Refusal::NoImage,
+            }
+        }
+        None => Refusal::NoImage,
+    };
+    refuse_app(flash, at, refusal, write, verifier, diag).map(Handed::Core)
+}
+
+/// Stage0 starts no app on the boot core's request ([`start_handed`], or
+/// an app the decision chose that the MCU cannot load): the cell takes
+/// [`app_result`]`(refusal)` through `write(index, word)`, and only the
+/// confirmed boot core starts, with the result left in the cell (its
+/// `Start::cell`). With no such core, the reason goes to `diag`.
+pub fn refuse_app<F: Flash, V: SigVerifier + ?Sized, D: Diag>(
+    flash: &mut F,
+    at: &Stage0<'_>,
+    refusal: Refusal,
+    mut write: impl FnMut(usize, u32),
+    verifier: &V,
+    diag: &mut D,
+) -> Result<Start<u32>, NoCore<CoreFail>> {
+    let left = app_result(refusal);
+    left.into_iter().enumerate().for_each(|(i, w)| write(i, w));
+    let st = LogState {
+        pending: None,
+        ..read_state(flash, at.log).unwrap_or_default()
+    };
+    let slots = u8::try_from(at.slots.len()).unwrap_or(u8::MAX);
+    choose(&st, left, at.max, slots, |s, r| {
+        let slot = *at.slots.get(usize::from(s)).ok_or(CoreFail::Kind)?;
+        check_inline(flash, slot, s, (r, verifier), at.mcu_id)
+    })
+    .map(|s| Start { cell: left, ..s })
+    .map_err(|no| {
+        let why = no.why.unwrap_or(CoreFail::Unnamed);
+        diag.report(why.code());
+        NoCore {
+            named: no.named,
+            why,
+        }
+    })
 }
 
 /// The trial cell as the boot core sees it at start.

@@ -553,3 +553,7 @@ mod tests {
         assert!(e.contains("cannot be loaded"), "{e}");
     }
 }
+
+#[cfg(test)]
+#[path = "esp_image_qemu.rs"]
+mod qemu;

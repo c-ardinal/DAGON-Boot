@@ -28,10 +28,17 @@ the rest, and the alignment padding between sections, belong to `other`.
 A build fails when the parts do not add up to the image's flash bytes or
 when a part is over its `max_bytes`; the parts list is printed and written
 next to the image (`<image>.parts.txt`).
+
+A stage0 the ROM copies into RAM (ESP32-S3: its `budget.toml` has
+`[image]`) has no flash region in its definition: it is built once with
+the budget's `features` and its loadable bytes are checked against
+`[image] max_bytes`, less the same 1/16; its parts come from the symbol
+table (`nm`), `other` taking what no part's symbol does.
 """
 import os
 import pathlib
 import re
+import shutil
 import struct
 import subprocess
 import sys
@@ -236,8 +243,85 @@ def target_of(mcu: str) -> str:
     return tomllib.loads(config.read_text(encoding="utf-8"))["build"]["target"]
 
 
+def rom_loaded() -> list[str]:
+    """MCUs whose stage0 the ROM copies into RAM (the package's
+    `stage0/budget.toml` has `[image]`): measured against that budget's
+    `max_bytes`, not a flash region of the definition."""
+    out = []
+    for b in sorted(MCU.glob("*/stage0/budget.toml")):
+        if "image" in tomllib.loads(b.read_text(encoding="utf-8")):
+            out.append(b.parent.parent.name)
+    return out
+
+
+def loaded_bytes(elf: bytes) -> int:
+    """Bytes of the ELF32 little-endian image's loadable segments."""
+    if elf[:4] != b"\x7fELF" or elf[4] != 1 or elf[5] != 1:
+        raise ValueError("not a 32-bit little-endian ELF")
+    phoff, = struct.unpack_from("<I", elf, 0x1C)
+    phentsize, phnum = struct.unpack_from("<HH", elf, 0x2A)
+    total = 0
+    for i in range(phnum):
+        p_type, _, _, _, p_filesz = struct.unpack_from("<IIIII", elf, phoff + i * phentsize)
+        if p_type == PT_LOAD:
+            total += p_filesz
+    return total
+
+
+def symbol_parts(nm_text: str, parts: list[dict], image: int) -> dict[str, int]:
+    """Bytes per part from `nm -S` output (address, size, type, Rust path):
+    each sized symbol to the first part a prefix of which starts its path;
+    `other` takes what no part's symbol does (other symbols, literal pools,
+    padding), so the parts add up to the image."""
+    used = {p["name"]: 0 for p in parts}
+    for line in nm_text.splitlines():
+        f = line.split(None, 3)
+        if len(f) < 4:
+            continue
+        part = next((p["name"] for p in parts[:-1]
+                     if any(fits(m, f[3]) for m in p["match"])), None)
+        if part is not None:
+            used[part] += int(f[1], 16)
+    used[OTHER] = image - sum(used.values())
+    return used
+
+
+def check_rom_loaded(elf_path: pathlib.Path, mcu_id: str) -> list[str]:
+    """Checks one built ROM-loaded stage0 against its budget; why it does
+    not pass."""
+    budget_path = MCU / mcu_id / "stage0" / "budget.toml"
+    image = tomllib.loads(budget_path.read_text(encoding="utf-8"))["image"]
+    size = image["max_bytes"]
+    used = loaded_bytes(elf_path.read_bytes())
+    name = f"{mcu_id} stage0"
+    print(f"{name}: {used} of {size} bytes ({size - used} free, margin {margin(size)})")
+    why = verdict(used, size)
+    failed = [f"{name}: {why}"] if why else []
+    nm = next((n for n in image["nm"] if shutil.which(n)), None)
+    if nm is None:
+        return failed + [f"{name}: none of {image['nm']} is on PATH"]
+    listing = subprocess.run([nm, "-S", "--demangle=rust", str(elf_path)],
+                             check=True, capture_output=True, text=True).stdout
+    parts = read_budget(budget_path)
+    text, bad = parts_report(symbol_parts(listing, parts, used), parts, used)
+    print(text, end="")
+    elf_path.with_name(elf_path.name + ".parts.txt").write_text(text, encoding="utf-8")
+    return failed + [f"{name}: {b}" for b in bad]
+
+
 def build_all() -> None:
     failed = []
+    for mcu in rom_loaded():
+        pkg = MCU / mcu / "stage0"
+        name = tomllib.loads((pkg / "Cargo.toml").read_text(encoding="utf-8"))["package"]["name"]
+        features = tomllib.loads((pkg / "budget.toml").read_text(encoding="utf-8"))["image"]["features"]
+        env = dict(os.environ)
+        env.setdefault("DAGON_ALLOW_TEST_KEY", "1")
+        build = ["cargo", "build", "--release", "--bin", name, "--features", ",".join(features)]
+        if subprocess.run(build, cwd=pkg, env=env).returncode:
+            failed.append(f"{mcu} stage0: does not build")
+            continue
+        failed += check_rom_loaded(pkg / "target" / target_of(mcu) / "release" / name, mcu)
     for mcu in stage0_mcus():
         pkg = MCU / mcu / "stage0"
         name = tomllib.loads((pkg / "Cargo.toml").read_text(encoding="utf-8"))["package"]["name"]

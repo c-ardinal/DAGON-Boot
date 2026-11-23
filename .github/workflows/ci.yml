@@ -308,9 +308,21 @@ jobs:
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.12"
+      # The ESP32-S3 stage0 builds with Espressif's Xtensa toolchain (its
+      # rust-toolchain.toml names `esp`) and is measured with its `nm`.
+      - name: Xtensa toolchain
+        uses: esp-rs/xtensa-toolchain@ec6d36527049a7f4fb2cb0c1a644668c1bb8a2a4 # v1.7.0
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        with:
+          default: false
+          buildtargets: esp32s3
+          ldproxy: false
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
-          workspaces: targets/mcu/rp2040/stage0
+          workspaces: |
+            targets/mcu/rp2040/stage0
+            targets/mcu/esp32s3/stage0
       - name: Build and measure
         run: |
           for t in $(python scripts/stage0_size.py --targets); do rustup target add "$t"; done
@@ -338,6 +350,65 @@ jobs:
       # allows (crates/dagon-ed25519/tests/m0_cycles.rs).
       - name: Stage0 verifier cycles on a Cortex-M0+ (emulated)
         run: cargo test -p dagon-ed25519 --test m0_cycles --locked -- --include-ignored --nocapture
+
+  # The ESP32-S3 stage0 booted in Espressif's QEMU (C-559 U3), built as the
+  # emulator test takes it (the provisional `qemu-layout`, the RFC 8032 test
+  # key, the node tag the test signs for), with a test boot core and a test
+  # app (targets/mcu/esp32s3/stage0-qemu): a good app mapped from flash
+  # through a PADDING segment, a bad signature, a tampered body, a signed
+  # app with a segment in stage0's window, no app, and no boot core that
+  # passes (crates/dagon-cli/src/esp_image_qemu.rs).
+  stage0-qemu:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Rust from rust-toolchain.toml
+        shell: bash
+        run: |
+          rustup toolchain install
+          rustup default "$(sed -n 's/^channel = "\([^"]*\)".*/\1/p' rust-toolchain.toml)"
+      - name: Xtensa toolchain
+        uses: esp-rs/xtensa-toolchain@ec6d36527049a7f4fb2cb0c1a644668c1bb8a2a4 # v1.7.0
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        with:
+          default: false
+          buildtargets: esp32s3
+          ldproxy: false
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          workspaces: |
+            .
+            targets/mcu/esp32s3/stage0
+            targets/mcu/esp32s3/stage0-qemu
+      - name: Espressif QEMU
+        env:
+          RELEASE: esp-develop-9.2.2-20250817
+          ARCHIVE: qemu-xtensa-softmmu-esp_develop_9.2.2_20250817-x86_64-linux-gnu.tar.xz
+          SHA256: 588bfaccd0f929650655d10a580f020c6ba9c131712d8fa519280081b8d126eb
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libgcrypt20 libglib2.0-0t64 libpixman-1-0 libsdl2-2.0-0 libslirp0
+          curl -sSLf -o qemu.tar.xz "https://github.com/espressif/qemu/releases/download/$RELEASE/$ARCHIVE"
+          echo "$SHA256  qemu.tar.xz" | sha256sum -c -
+          mkdir -p "$RUNNER_TEMP/esp-qemu"
+          tar -xJf qemu.tar.xz -C "$RUNNER_TEMP/esp-qemu"
+          echo "DAGON_QEMU=$RUNNER_TEMP/esp-qemu/qemu/bin/qemu-system-xtensa" >> "$GITHUB_ENV"
+      - name: Build stage0 and the test images
+        env:
+          DAGON_ALLOW_TEST_KEY: "1"
+          DAGON_TARGET_TAG: qemu-node
+        run: |
+          (cd targets/mcu/esp32s3/stage0 && cargo build --release --locked --features qemu-layout)
+          (cd targets/mcu/esp32s3/stage0-qemu && cargo build --release --locked)
+      - name: Boot in QEMU
+        run: |
+          out=xtensa-esp32s3-none-elf/release
+          export DAGON_STAGE0_ELF="$PWD/targets/mcu/esp32s3/stage0/target/$out/dagon-esp32s3-stage0"
+          export DAGON_QEMU_CORE_ELF="$PWD/targets/mcu/esp32s3/stage0-qemu/target/$out/core"
+          export DAGON_QEMU_APP_ELF="$PWD/targets/mcu/esp32s3/stage0-qemu/target/$out/app"
+          cargo test -p dagon-cli --locked --bin dagon esp32s3_stage0_in_qemu -- --ignored --nocapture
 
   # `dagon new` and `dagon gen`, then each self-boot node's generated boot
   # crate built for both boot core slots and signed for each, as a release

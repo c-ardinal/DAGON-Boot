@@ -211,8 +211,11 @@ python samples/hardware-test/measure.py selftest
   check adds to every boot. It has no limit of its own (the check feeds the
   watchdog); PASS when a decision was taken, with the seconds recorded.
 - Both boot core measurements read the value through a debug probe (on a
-  UF2 node `--probe` with `--chip`). Without one, an RP2040 boot core with
-  a boot LED (the board's `[boot] led`) shows it there: the milliseconds,
+  UF2 node `--probe` with `--chip`). Without one, an RP2040 boot core
+  blinks it on the light its board names in `[boot] led` (on the Waveshare
+  RP2040-Touch-LCD-1.28 that is the display backlight, GPIO25, not a
+  separate LED; a board without `[boot] led` shows nothing and is read
+  only by a probe): the milliseconds,
   rounded up, one blink group per decimal digit, most significant first,
   ten blinks for a 0, groups apart by a short dark gap and the whole
   number repeated after a long dark pause. The script asks for the counts

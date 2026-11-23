@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Hardware measurements the firmware has a measuring build for: writes a
 node with that build through `dagon flash`, reads the value it keeps (a
-debug probe reads it by symbol; blinks on the board's LED where it has
-no probe), checks it against its limit, records it, and writes the node's
+debug probe reads it by symbol; blinks on the board's `[boot] led` light,
+e.g. the display backlight, where it has no probe), checks it against its limit, records it, and writes the node's
 normal build back. See README.md, "Measurements".
 
     python measure.py stage0-verify --project <project> --dagon <exe> --node <id> --key <file>
@@ -279,7 +279,8 @@ def blink_verdict(blinks, hz):
 
 def groups_us(text):
     """Microseconds from the blink groups a boot core's measuring build
-    shows on its boot LED: one count per decimal digit of the milliseconds,
+    blinks on its `[boot] led` light (the display backlight on the Waveshare
+    RP2040-Touch-LCD-1.28): one count per decimal digit of the milliseconds,
     ten for a 0. The milliseconds are rounded up, so this is at most 1 ms
     over the value the node keeps."""
     groups = [int(g) for g in text.split()]
@@ -400,7 +401,8 @@ def measure(a, name, flash=run_flash, read=probe_read, wait=time.sleep, ask=inpu
                 (us,), cmd = read(chip, a.probe, syms[symbol])
                 log({"command": cmd, "us": us})
             else:
-                print("Count the blinks of each group on the boot LED, between two dark pauses "
+                print("Count the blinks of each group on the board's boot light ([boot] led; the display "
+                      "backlight on the Waveshare RP2040-Touch-LCD-1.28), between two dark pauses "
                       "(ten blinks for a 0), and give the counts in order, e.g. 5 2.")
                 us = groups_us(ask("groups: "))
                 log({"groups_us": us})

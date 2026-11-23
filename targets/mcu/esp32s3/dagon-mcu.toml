@@ -174,8 +174,9 @@ flag = "unmeasured"
 # - the flash of the Espressif ESP32-S3-WROOM-1/1U (datasheet v1.8, Table
 #   6-8), ESP32-S3-WROOM-2 (v1.7, Table 6-7) and ESP32-S3-MINI-1/1U (v1.7,
 #   Table 6-8) modules, which name no part: tSE max 500 ms
-# ISSI IS25LP080D (pico-sdk's boot2_is25lp080) is not counted: its datasheet
-# could not be obtained, and it is to be checked against this value.
+# - ISSI IS25LP080D, datasheet Rev. B13 (section 9.9 Program/Erase
+#   Performance): tSE max 300 ms (the part pico-sdk 2.1.1's
+#   boot2_is25lp080 is written for)
 # The value is the largest of these, 500 ms.
 # Unverified until checked on hardware. The masking budget of DAGON's own
 # code is to be measured on the board.

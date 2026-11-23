@@ -93,8 +93,8 @@ ram_bytes = 0
 stack_bytes = 561
 
 [connection]
-hint = "BOOT を押しながら USB をつないでから、書き込んでください。"
-label = "USB（BOOT を押しながら）"
+hint = "BOOT の押下状態で USB を接続した後、書込を実行してください。"
+label = "USB（BOOT 押下状態）"
 
 [coordinator]
 pio_state_machines = 8

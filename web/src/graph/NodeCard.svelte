@@ -148,7 +148,6 @@
   class:err={m !== null && m !== 'skeleton' && m.silent}
   class:drop
   class:checkable={check !== undefined}
-  class:compact
   class:filling={level !== undefined}
   style:left="{at.x}px"
   style:top="{at.y}px"
@@ -457,7 +456,7 @@
     content: '▸';
     margin-right: var(--s-1);
   }
-  .compact .slotline {
+  :global(.canvas.compact) .slotline {
     display: none;
   }
   .chip.silent {
@@ -500,25 +499,25 @@
     content: counter(shown) '%';
   }
   /* Compact (9 ノード and on, or when normal cards would shrink names under 13 px): name, version, state. */
-  .compact .prod,
-  .compact .meta,
-  .compact .role,
-  .compact .note {
+  :global(.canvas.compact) .prod,
+  :global(.canvas.compact) .meta,
+  :global(.canvas.compact) .role,
+  :global(.canvas.compact) .note {
     display: none;
   }
-  .compact .hd {
+  :global(.canvas.compact) .hd {
     border-bottom: 0;
   }
   /* Past this zoom the name holds its 13 px on screen. */
-  .compact .hd b {
+  :global(.canvas.compact) .hd b {
     flex: 1;
     min-width: 0;
     font-size: max(var(--t-caption), calc(13 * var(--t-caption) / 12 / var(--zoom)));
   }
-  .compact .bd {
+  :global(.canvas.compact) .bd {
     padding-top: 0;
   }
-  .compact .chips {
+  :global(.canvas.compact) .chips {
     margin-top: var(--s-1);
   }
 

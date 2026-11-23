@@ -14,6 +14,8 @@ export default defineConfig({
   server: { host: '127.0.0.1', fs: { allow: ['..'] } },
   preview: { host: '127.0.0.1' },
   test: {
+    // Once, before every project: the built WebAssembly is the tests' (simulator, test key).
+    globalSetup: ['src/wasm/global-setup.ts'],
     projects: [
       // The page's logic, and its first paint rendered on the server.
       { extends: true, test: { name: 'page', include: ['src/**/*.test.ts'], exclude: ['src/**/*.svelte.test.ts'], setupFiles: ['src/wasm/test-setup.ts'] } },

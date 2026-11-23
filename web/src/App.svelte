@@ -56,6 +56,7 @@
   import NodeList from './screens/define/NodeList.svelte';
   import Table from './screens/define/Table.svelte';
   import { devHub } from './serial/devHub.ts';
+  import { isNarrow } from './app/narrow.ts';
   import Unsupported from './Unsupported.svelte';
   import { dagonReady, versionText } from './wasm/dagon.ts';
 
@@ -210,12 +211,14 @@
   }
   /** The free part of the canvas a fit fills: the middle column less the room a toast stands in, so a notice never covers a card of the fit view. */
   const TOAST_ROOM = 64;
+  // The narrow tier stacks the columns under the canvas: the fit takes the canvas's own box.
   const fitArea = () => {
+    if (isNarrow()) return undefined;
     const r = midEl?.getBoundingClientRect();
     return r && new DOMRect(r.left, r.top, r.width, Math.max(0, r.height - TOAST_ROOM));
   };
   /** The whole middle column: the fit falls back to it when the toast's room alone would make the cards compact. */
-  const wholeArea = () => midEl?.getBoundingClientRect();
+  const wholeArea = () => (isNarrow() ? undefined : midEl?.getBoundingClientRect());
   /** The sheet shows only when it holds something. */
   const sheetShown = $derived(ws.mode === 'define' ? ws.cliPanel !== null || d.selected !== null : !op.config || op.selected !== null || (!!op.recovering && !!op.recovered));
   const idle = $derived(WRITABLE.has(op.state));
@@ -780,6 +783,45 @@
   /* While a dialog is open its own button is the one main action. */
   .frame.modal :global(footer .primary) {
     visibility: hidden;
+  }
+  /* The narrow tier: the stage stacks instead of floating. The canvas keeps a window's height of its own (it pans inside, WCAG 1.4.10's two-dimensional exception); the columns follow it in the page, which scrolls down. */
+  @media (max-width: 1023px) {
+    .frame {
+      height: auto;
+      min-height: 100vh;
+      overflow: visible;
+    }
+    .frame.work {
+      grid-template-rows: auto auto 0;
+    }
+    .stage {
+      display: flex;
+      flex-direction: column;
+      overflow: visible;
+    }
+    main {
+      flex: none;
+      height: var(--h-canvas-narrow);
+    }
+    .overlay {
+      grid-template-columns: minmax(0, 1fr);
+      pointer-events: auto;
+    }
+    .col.end {
+      align-items: stretch;
+    }
+    .grow,
+    .mark-room {
+      display: none;
+    }
+    .float.parts,
+    .float.sheet {
+      width: auto;
+      overflow: visible;
+    }
+    .dock {
+      overflow: visible;
+    }
   }
 </style>
 

@@ -378,4 +378,34 @@
     border-radius: var(--r-s);
     font: 400 var(--t-caption) / 20px var(--f-mono);
   }
+  /* The narrow tier: the bar wraps onto more rows rather than losing a control off its side; the brand keeps its mark, its name goes to assistive technology alone. */
+  @media (max-width: 1023px) {
+    header {
+      display: flex;
+      flex-wrap: wrap;
+      height: auto;
+      padding-block: var(--s-1);
+      row-gap: var(--s-1);
+    }
+    .left {
+      flex: 1 1 auto;
+    }
+    .right {
+      flex-wrap: wrap;
+      row-gap: var(--s-1);
+    }
+    .name {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      overflow: hidden;
+      clip-path: inset(50%);
+    }
+    .modes {
+      order: 3;
+    }
+    .help {
+      top: 100%;
+    }
+  }
 </style>

@@ -57,6 +57,17 @@ body {
   overflow: hidden;
 }
 
+/* The narrow tier (under 1024 px of window: a 1280 window at 200 % zoom and more): what does not fit is reached by scrolling the page down, never lost off its side (WCAG 1.4.10). */
+@media (max-width: 1023px) {
+  html,
+  body {
+    height: auto;
+    min-height: 100%;
+    overflow-x: hidden;
+    overflow-y: auto;
+  }
+}
+
 body {
   margin: 0;
 }

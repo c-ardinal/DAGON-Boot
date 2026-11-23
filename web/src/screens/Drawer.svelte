@@ -95,7 +95,7 @@
 </script>
 
 <!-- The tab strip always stays; the body opens under it, over the canvas, whose box does not change. -->
-<section in:fade bind:this={section} class="drawer" class:open={open !== null} style:height={open !== null ? (height !== null ? `${height}px` : undefined) : 'var(--h-row)'} aria-label={DRAWER.label}>
+<section in:fade bind:this={section} class="drawer" class:open={open !== null} style:height={open !== null && height !== null ? `${height}px` : undefined} aria-label={DRAWER.label}>
   {#if open}
     <!-- The handle: the open drawer's top edge, dragged to change its height. -->
     <!-- svelte-ignore a11y_no_noninteractive_tabindex a11y_no_noninteractive_element_interactions -->
@@ -151,6 +151,10 @@
   }
   /* In a low window the drawer gives way (its body scrolls; the tabs stay), so the focal number and the zoom keep their room above it. */
   /* The open drawer leaves the end column its room: the bar, the band, the mark, the zoom pill (three buttons and its number) and their gaps. */
+  /* Closed: the tab row alone. */
+  .drawer:not(.open) {
+    height: var(--h-row);
+  }
   .drawer.open {
     height: var(--h-drawer);
     max-height: min(60vh, calc(100vh - var(--h-bar) - var(--h-status) - var(--w-mark) - 3 * var(--h-button) - 6 * var(--s-4)));
@@ -229,5 +233,21 @@
   }
   .body:focus {
     outline: none;
+  }
+  /* The narrow tier: the tabs wrap onto more rows rather than scroll sideways, and the open drawer takes its height in the page, which scrolls down. */
+  @media (max-width: 1023px) {
+    .tabs {
+      height: auto;
+    }
+    .scroll {
+      flex-wrap: wrap;
+      overflow-x: visible;
+    }
+    .drawer:not(.open) {
+      height: auto;
+    }
+    .drawer.open {
+      max-height: none;
+    }
   }
 </style>

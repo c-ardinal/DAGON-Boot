@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { isNarrow } from '../app/narrow.ts';
   import { tick, untrack } from 'svelte';
   import type { Agent, AskKind } from '../app/agent.svelte.ts';
   import { AGENT } from '../app/copy.ts';
@@ -102,6 +103,8 @@
   /** Beside the mark where that is free; else the free spot nearest it, over the cards when the windows leave no other: nothing of the bubble lies over the sheet or a toast, wherever the mark is. */
   function placeBubble() {
     if (!open || !bubbleEl || !root) return;
+    // The narrow tier stacks the mark and its bubble in the page (CSS): nothing to place.
+    if (isNarrow()) return void ((bubbleAt = { x: 0, y: 0 }), (bubbleMax = 0));
     const [mx, my, s] = [root.offsetLeft, root.offsetTop, root.offsetWidth];
     // A low window: the bubble is no taller than the free area, its body scrolls.
     bubbleMax = Math.max(0, stage.h - 2 * MARGIN);
@@ -448,6 +451,27 @@
     .small,
     input {
       min-height: 2.75rem;
+    }
+  }
+  /* The narrow tier: the mark stands under the columns at the right and its bubble under it, both in the page, which scrolls down; no drag places them. */
+  @media (max-width: 1023px) {
+    .dagon {
+      position: static;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: var(--s-2);
+      width: auto;
+      height: auto;
+      translate: none;
+    }
+    .mark {
+      width: var(--w-mark);
+      height: var(--w-mark);
+    }
+    .bubble {
+      position: static;
+      width: 100%;
     }
   }
 </style>

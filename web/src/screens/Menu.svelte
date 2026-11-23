@@ -154,4 +154,15 @@
     margin: var(--s-2) 0;
     background: var(--c-layer-2);
   }
+  /* The narrow tier: a group's items open under the groups, both as wide as the window allows; the page scrolls down to the last of them. */
+  @media (max-width: 1023px) {
+    .menu {
+      flex-direction: column;
+      align-items: flex-end;
+    }
+    .panel {
+      width: min(var(--w-menu), calc(100vw - 2 * var(--m-edge)));
+      max-height: none;
+    }
+  }
 </style>

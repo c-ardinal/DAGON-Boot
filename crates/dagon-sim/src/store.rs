@@ -245,6 +245,7 @@ impl SimStore {
     pub fn snapshot(&self) -> SimStore {
         SimStore {
             stage0_node: self.stage0_node,
+            running: Arc::new(AtomicU8::new(self.running.load(Ordering::Relaxed))),
             ..SimStore::new(self.flash().clone(), self.layout, self.pubkey)
         }
     }

@@ -24,6 +24,12 @@ const SEED: [u8; 32] = [
 ];
 /// Operations per sequence; every sequence up to this length is checked.
 const DEPTH: usize = 7;
+// CONFIRMs the exploration ran: a copy that lost the slot its device
+// runs from would report no trial and explore none (counted per test
+// thread).
+thread_local! {
+    static CONFIRMS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
 
 fn kp() -> KeyPair {
     KeyPair::from_seed(Seed::new(SEED))
@@ -232,6 +238,7 @@ impl Model {
                     ),
                     Status::Ok
                 );
+                CONFIRMS.with(|c| c.set(c.get() + 1));
             }
             Op::Boot => {
                 self.store.boot();
@@ -310,6 +317,7 @@ fn explore(model: &mut Model, path: &mut Vec<Op>) -> usize {
 fn the_simulators_store_agrees_with_the_agents_machines() {
     let checked = explore(&mut Model::new(), &mut Vec::new());
     assert!(checked > 1_500, "{checked} sequences");
+    assert!(CONFIRMS.with(|c| c.get()) > 0, "no CONFIRM explored");
 }
 
 /// The case the shared contract fixes: a confirmed image re-tried while

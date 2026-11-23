@@ -11,6 +11,7 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use crate::flash::SimFlash;
 use dagon_agent::{SlotStore, StoreError, Transition};
+use dagon_core::boot::Place;
 use dagon_core::bootcore::{
     choose, confirmed_app, read_state, settle_log, Apps, Cell, MustReset, Settled, CLEARED,
 };
@@ -680,9 +681,15 @@ impl SimStore {
             faces: [base, base],
             face_len: len,
         };
+        let places: Vec<Place> = self
+            .layout
+            .slots
+            .iter()
+            .map(|&(b, n)| Place::inline(b, n))
+            .collect();
         let apps = Apps {
             log: &log,
-            slots: self.layout.slots,
+            slots: &places,
             target_tag,
             entry: |_, body| body,
         };

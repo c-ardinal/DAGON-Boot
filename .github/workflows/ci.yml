@@ -470,6 +470,8 @@ jobs:
         run: python scripts/ja_wording.py
       - name: Sample script tests
         run: python -m unittest discover -s samples/demo-data -p "test_*.py"
+      - name: Hardware test script tests
+        run: python -m unittest discover -s samples/hardware-test -p "test_*.py"
       - name: Plugin hook tests
         # The tests make real commits.
         env:

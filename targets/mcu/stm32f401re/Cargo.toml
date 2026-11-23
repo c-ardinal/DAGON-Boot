@@ -33,6 +33,8 @@ conform = ["node", "dep:dagon-conform"]
 slot-b = []
 image-stage0 = []
 image-bootcore = []
+# The boot core's measuring builds (dagon-mcu-common's boot_time).
+boot-time = ["dagon-mcu-common/boot-time"]
 
 [dependencies]
 dagon-agent = { path = "../../../crates/dagon-agent" }

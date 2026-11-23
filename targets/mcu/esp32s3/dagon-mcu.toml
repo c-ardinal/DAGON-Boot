@@ -490,7 +490,7 @@ privileged_why = "protection"
 
 [connection]
 label = "USB-C"
-hint = "USB-C でつないでから、書き込んでください（つながらないときは BOOT を押しながら）。"
+hint = "USB-C で接続した後、書込を実行してください（接続不可の場合は BOOT の押下状態で接続）。"
 
 [[doctor]]
 what = "espup"

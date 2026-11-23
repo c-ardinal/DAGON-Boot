@@ -189,7 +189,8 @@ fn a_cell_for_another_image_counts_nothing() {
 /// trial start, the request is no result, and a cut write or take of the
 /// request (one word new, one old) is no request.
 #[kani::proof]
-#[kani::unwind(3)]
+// The array comparisons run memcmp over the cell's 8 bytes.
+#[kani::unwind(9)]
 fn the_cell_values_never_read_as_each_other() {
     let p = any_ref();
     let other: u32 = kani::any();

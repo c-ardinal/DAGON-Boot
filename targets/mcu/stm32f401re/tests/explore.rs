@@ -501,16 +501,22 @@ fn ops_of(cores: Cores, n: &Node, op: Op) -> Option<usize> {
     Some(k)
 }
 
+/// What `run` leaves: the node, the step's result, and what the cut
+/// flash operation was.
+type Ran = (Node, Result<(), Broke>, Option<Site>);
+
 /// `op` from `n`, cut by `fault`.
-fn run(cores: Cores, n: &Node, op: Op, fault: Option<Fault>) -> Option<(Node, Result<(), Broke>)> {
+fn run(cores: Cores, n: &Node, op: Op, fault: Option<Fault>) -> Option<Ran> {
     let mut m = n.copy();
     m.f.cut = fault.map(|x| (x.at, x.half));
     let r = step(cores, &mut m, op)?;
+    let mut site = None;
     if let Some(x) = fault {
         m.running = Running::Down;
         if !x.keep {
             m.cell = CLEARED;
         }
+        site = m.f.site(x.at);
     }
     let f = m.f.copy();
     Some((
@@ -520,6 +526,7 @@ fn run(cores: Cores, n: &Node, op: Op, fault: Option<Fault>) -> Option<(Node, Re
             running: m.running,
         },
         r,
+        site,
     ))
 }
 
@@ -660,10 +667,11 @@ impl Packed {
     }
 }
 
-/// The search: breadth first over distinct states; returns the states seen.
-fn explore(cores: Cores, bound: Bound) -> usize {
+/// The search: breadth first over distinct states from `start`; returns
+/// the states seen and the flash operations it cut.
+fn explore(cores: Cores, start: Node, bound: Bound) -> (usize, Coverage) {
     let broken = broken(cores);
-    let start = installed_node(cores);
+    let mut covered = Coverage::default();
     let mut seen: HashSet<(u64, u8, u8, u8)> = HashSet::new();
     let at = |n: &Node, b: Bound| (n.key(), b.steps, b.writes, b.faults);
     let mut settled: HashSet<u64> = HashSet::new();
@@ -701,9 +709,19 @@ fn explore(cores: Cores, bound: Bound) -> usize {
                 }
             }
             for fault in faults {
-                let Some((m, r)) = run(cores, &n, op, fault) else {
+                let Some((m, r, site)) = run(cores, &n, op, fault) else {
                     continue;
                 };
+                if let Some(x) = fault {
+                    let site = site.expect("the cut operation was asked for");
+                    covered.add(
+                        site,
+                        Way {
+                            half: x.half,
+                            keep: x.keep,
+                        },
+                    );
+                }
                 let mut p = path.clone();
                 p.push((op, fault));
                 if let Err(e) = r {
@@ -720,7 +738,7 @@ fn explore(cores: Cores, bound: Bound) -> usize {
             }
         }
     }
-    seen.len()
+    (seen.len(), covered)
 }
 
 /// The search's bound: `DAGON_EXPLORE_STEPS` / `_WRITES` / `_FAULTS`
@@ -739,18 +757,135 @@ fn bound() -> Bound {
     }
 }
 
+/// [`installed_node`] with its log face filled (CONFIRMED records of the
+/// running app) until it takes just the trials' room: the next record
+/// leaves it short, so the search compacts the log at each kind of step
+/// and with each record a compaction can carry.
+fn short_log_node(cores: Cores) -> Node {
+    let n = installed_node(cores);
+    let app = image(image_kind::APP, cores, 0, 0);
+    let mut f = n.f.clone();
+    let mut log = Log::load(&mut f, &LOG).unwrap();
+    while log.room() > dagon_core::log::trial_room(TRIAL_ATTEMPTS) {
+        log.append(
+            &mut f,
+            dagon_format::statelog::kind::CONFIRMED,
+            head(&app, 0),
+            0,
+        )
+        .unwrap();
+    }
+    n
+}
+
+/// Every flash operation a node of `cores` makes outside its first
+/// install: each slot's erase, body and header; each record the agent,
+/// the boot core and its settle append; with `compaction`, each step of
+/// a compaction with each record it carries. With one boot core slot no
+/// core is rolled back (no other core is left to start), so no core
+/// ROLLBACK is written.
+fn inventory(cores: Cores, compaction: bool) -> Vec<Site> {
+    use dagon_format::statelog::kind::*;
+    let two = cores.0.len() == 2;
+    let mut v = Vec::new();
+    for slot in 0..2 {
+        v.extend(slot_sites(target::APP, slot));
+    }
+    for slot in 0..cores.0.len() as u8 {
+        v.extend(slot_sites(target::BOOTCORE, slot));
+    }
+    for k in [SLOT_PENDING, BOOT_ATTEMPT, CONFIRMED, ROLLBACK] {
+        v.push(record(target::APP, k));
+    }
+    for k in [SLOT_PENDING, CONFIRMED] {
+        v.push(record(target::BOOTCORE, k));
+    }
+    let mut carried = vec![
+        (target::APP, SLOT_PENDING),
+        (target::APP, ROLLBACK),
+        (target::APP, SNAPSHOT),
+        (target::BOOTCORE, SLOT_PENDING),
+        (target::BOOTCORE, SNAPSHOT),
+    ];
+    if two {
+        v.push(record(target::BOOTCORE, ROLLBACK));
+        carried.push((target::BOOTCORE, ROLLBACK));
+    }
+    if compaction {
+        v.extend(compaction_sites(&carried));
+    }
+    v
+}
+
+/// Searches `cores` from `node`, checks it cut every flash operation of
+/// the inventory every way (and no other), and writes the report section
+/// `name`.
+fn search(cores: Cores, node: Node, compaction: bool, name: &str, title: &str) {
+    let b = bound();
+    let (n, c) = explore(cores, node, b);
+    eprintln!("{title}: {n} states, {} cuts", c.cuts());
+    assert!(n > 100, "{n} states");
+    c.check(&inventory(cores, compaction), &ALL_WAYS);
+    Coverage::report(
+        name,
+        &format!(
+            "## {title}\n\n\
+             探索の範囲: 手順 {} 回、イメージの書込 {} 回、手順内の電断 {} 回まで。\
+             状態 {n} 件、電断 {} 件、復旧失敗 0 件。\n\n{}",
+            b.steps,
+            b.writes,
+            b.faults,
+            c.cuts(),
+            c.table(&ALL_WAYS)
+        ),
+    );
+}
+
+const TWO: Cores = Cores(&CORE_SLOTS);
+const ONE: Cores = Cores(&ONE_CORE);
+
 #[test]
 fn every_state_of_a_node_with_two_boot_core_slots_boots_a_good_app() {
-    let n = explore(Cores(&CORE_SLOTS), bound());
-    eprintln!("two boot core slots: {n} states");
-    assert!(n > 100, "{n} states");
+    search(
+        TWO,
+        installed_node(TWO),
+        false,
+        "explore-two-core-slots",
+        "アプリのエージェントによる更新（ブートローダのスロット 2 個、初回書込の直後から）",
+    );
 }
 
 #[test]
 fn every_state_of_a_node_with_one_boot_core_slot_boots_a_good_app() {
-    let n = explore(Cores(&ONE_CORE), bound());
-    eprintln!("one boot core slot: {n} states");
-    assert!(n > 100, "{n} states");
+    search(
+        ONE,
+        installed_node(ONE),
+        false,
+        "explore-one-core-slot",
+        "アプリのエージェントによる更新（ブートローダのスロット 1 個、初回書込の直後から）",
+    );
+}
+
+#[test]
+fn every_state_of_a_node_with_two_boot_core_slots_and_a_short_log_boots_a_good_app() {
+    search(
+        TWO,
+        short_log_node(TWO),
+        true,
+        "explore-two-core-slots-short-log",
+        "アプリのエージェントによる更新（ブートローダのスロット 2 個、ログの面の残量が試行の予約量だけの状態から）",
+    );
+}
+
+#[test]
+fn every_state_of_a_node_with_one_boot_core_slot_and_a_short_log_boots_a_good_app() {
+    search(
+        ONE,
+        short_log_node(ONE),
+        true,
+        "explore-one-core-slot-short-log",
+        "アプリのエージェントによる更新（ブートローダのスロット 1 個、ログの面の残量が試行の予約量だけの状態から）",
+    );
 }
 
 /// Runs `path` from the installed node; every step happens.
@@ -760,7 +895,7 @@ fn walk(cores: Cores, path: &[(Op, Option<Fault>)]) -> Node {
 
 fn walk_from(cores: Cores, mut n: Node, path: &[(Op, Option<Fault>)]) -> Node {
     for &(op, fault) in path {
-        let (m, r) = run(cores, &n, op, fault).unwrap_or_else(|| panic!("{op:?} cannot happen"));
+        let (m, r, _) = run(cores, &n, op, fault).unwrap_or_else(|| panic!("{op:?} cannot happen"));
         r.unwrap_or_else(|e| panic!("{op:?}: {}", e.0));
         n = m;
     }

@@ -299,7 +299,10 @@ fn newer_face_wins() {
     write_log(&mut m, 0, 1, &[(kind::PROVISION, a)]);
     write_log(&mut m, 1, 2, &[(kind::PROVISION, b)]);
     let log = Log::load(&mut m, &LOG).unwrap();
-    assert_eq!((log.generation, log.state.active()), (2, B));
+    assert_eq!(
+        (log.generation, log.state.confirmed.map(|c| c.slot)),
+        (2, Some(B))
+    );
 }
 
 #[test]

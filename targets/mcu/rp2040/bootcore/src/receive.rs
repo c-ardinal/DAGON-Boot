@@ -22,9 +22,7 @@ use dagon_agent::Agent;
 use dagon_events::{compose, Bounds, Composed, Layer, Nop, Published, Watchdog as Periods};
 use dagon_mcu_common::guard::Watch;
 use dagon_mcu_common::shared::{driver, FlashDriver, SharedFlash};
-use dagon_mcu_rp2040::boot_receive::{
-    self, Entry, Links, Mailbox, PumpPort, Sleep, BOOT_LINKS,
-};
+use dagon_mcu_rp2040::boot_receive::{self, Entry, Links, Mailbox, PumpPort, Sleep, BOOT_LINKS};
 use dagon_mcu_rp2040::flash::{RpFlash, REGIONS};
 use dagon_mcu_rp2040::layout::watchdog_ms;
 use dagon_mcu_rp2040::node;
@@ -138,6 +136,8 @@ pub fn serve(
         &CORE,
         0,
         &ERASE_REGIONS,
+        // No app runs while the boot core receives.
+        dagon_format::statelog::slot::NONE,
     );
     let us: fn() -> u64 = now_us;
     let periods = Periods::new(watchdog_ms(true), watchdog_ms(false));

@@ -122,7 +122,7 @@ pub(crate) fn open_store(
     static FLASH_DRIVER: StaticCell<FlashDriver<F401Flash<'static>>> = StaticCell::new();
     let driver = FLASH_DRIVER.init(driver(F401Flash::new(flash)));
     let flash = SharedFlash::new(driver, &layout::FLASH_REGIONS);
-    let store = KindSStore::load(flash, &layout::LOG, layout::SLOTS, regions)?
+    let store = KindSStore::load(flash, &layout::LOG, layout::SLOTS, regions, ACTIVE)?
         .with_cores(&layout::CORE_SLOTS, crate::trial::holds());
     Ok((store, flash))
 }
@@ -143,8 +143,7 @@ pub fn own_version(store: &mut Store) -> Version {
 
 /// Whether the running image is on trial.
 pub fn on_trial(store: &Store) -> bool {
-    let s = store.log_state();
-    s.on_trial() && s.active() == ACTIVE
+    store.log_state().trying(ACTIVE)
 }
 
 /// The IWDG period the app keeps: the boot core's for this boot (trial or

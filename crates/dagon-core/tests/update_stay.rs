@@ -90,7 +90,7 @@ fn readers_that_predate_the_records_skip_them() {
     ];
     let fold = |rs: &[Record]| rs.iter().fold(LogState::default(), |s, r| s.apply(r));
     assert_eq!(fold(&with), fold(&plain));
-    assert_eq!(fold(&with).active(), B);
+    assert!(fold(&with).trying(B));
 }
 
 /// The app writes UPDATE_STAY; the boot core reads it, consumes it with

@@ -291,7 +291,14 @@ fn update_mode(
 ) -> ! {
     static EVENTS: StaticCell<Published<(), 4>> = StaticCell::new();
     let events = EVENTS.uninit().write(Published::new());
-    if let Ok(store) = KindSStore::load(flash, &board::LOG, board::SLOTS, &ERASE_REGIONS) {
+    if let Ok(store) = KindSStore::load(
+        flash,
+        &board::LOG,
+        board::SLOTS,
+        &ERASE_REGIONS,
+        // No app runs in update mode.
+        dagon_format::statelog::slot::NONE,
+    ) {
         let store = store.with_cores(&board::CORE_SLOTS, trial::holds());
         let now: fn() -> u64 = || 0;
         let periods = Watchdog::new(board::TRIAL_WDT_MS, board::CONFIRMED_WDT_MS);

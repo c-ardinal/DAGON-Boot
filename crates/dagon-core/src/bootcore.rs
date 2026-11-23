@@ -710,6 +710,22 @@ pub fn start_handed<F: Flash, V: SigVerifier + ?Sized, D: Diag>(
         }
         Err(_) => Refusal::NoImage,
     };
+    refuse_app(flash, at, refusal, write, verifier, diag).map(Handed::Core)
+}
+
+/// Stage0 starts no app on the boot core's request ([`start_handed`], or
+/// an app the decision chose that the MCU cannot load): the cell takes
+/// [`app_result`]`(refusal)` through `write(index, word)`, and only the
+/// confirmed boot core starts, with the result left in the cell (its
+/// `Start::cell`). With no such core, the reason goes to `diag`.
+pub fn refuse_app<F: Flash, V: SigVerifier + ?Sized, D: Diag>(
+    flash: &mut F,
+    at: &Stage0<'_>,
+    refusal: Refusal,
+    mut write: impl FnMut(usize, u32),
+    verifier: &V,
+    diag: &mut D,
+) -> Result<Start<u32>, NoCore<CoreFail>> {
     let left = app_result(refusal);
     left.into_iter().enumerate().for_each(|(i, w)| write(i, w));
     let st = LogState {
@@ -721,7 +737,7 @@ pub fn start_handed<F: Flash, V: SigVerifier + ?Sized, D: Diag>(
         let slot = *at.slots.get(usize::from(s)).ok_or(CoreFail::Kind)?;
         check_inline(flash, slot, s, (r, verifier), at.mcu_id)
     })
-    .map(|s| Handed::Core(Start { cell: left, ..s }))
+    .map(|s| Start { cell: left, ..s })
     .map_err(|no| {
         let why = no.why.unwrap_or(CoreFail::Unnamed);
         diag.report(why.code());

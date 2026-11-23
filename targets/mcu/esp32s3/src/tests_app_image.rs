@@ -137,6 +137,19 @@ fn overlapping_ram_segments_are_refused() {
 }
 
 #[test]
+fn ram_segments_overlapping_through_the_other_bus_are_refused() {
+    // The DRAM segment moved to the instruction-bus address of the SRAM
+    // the IRAM segment fills (0x40378000 is 0x3FC88000 on the data bus).
+    // The IRAM segment, which comes next, is the one refused.
+    let r = plan(&mut slot(&with_segment_addr(1, 0x4037_8100)), AT, END);
+    assert_eq!(r, Err(Refused::Range(0x4037_8000)));
+    // And the IRAM segment moved onto the DRAM one through its data-bus
+    // address (0x3FC8A700 is 0x4037A700 on the instruction bus).
+    let r = plan(&mut slot(&with_segment_addr(2, 0x4037_A800)), AT, END);
+    assert_eq!(r, Err(Refused::Range(0x4037_A800)));
+}
+
+#[test]
 fn a_mapped_segment_off_its_page_offset_is_refused() {
     let r = plan(&mut slot(&with_segment_addr(4, 0x4201_0040)), AT, END);
     assert_eq!(r, Err(Refused::Unaligned(0x4201_0040)));

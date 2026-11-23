@@ -5,7 +5,8 @@
 //! stores, IROM and DROM segments are mapped through the MMU in 64 KiB
 //! pages, and segments with load address 0 are the tool's padding between
 //! them. A segment anywhere else, one that leaves the image's slot, a RAM
-//! segment that overlaps another or stage0's own window, two mapped segments
+//! segment that overlaps another (through either bus's address of the same
+//! SRAM) or stage0's own window, two mapped segments
 //! on one MMU entry (both buses share the table), and an entry point
 //! outside the loaded code are refused: stage0 never starts such an image.
 
@@ -43,6 +44,22 @@ pub const IROM: (u32, u32) = (0x4200_0000, 0x4400_0000);
 pub const DROM: (u32, u32) = (0x3C00_0000, 0x3E00_0000);
 
 const RAM: [(u32, u32); 4] = [IRAM, DRAM, RTC_FAST, RTC_SLOW];
+
+/// SRAM1 seen on the instruction bus from 0x40378000 is the same memory
+/// the data bus sees from 0x3FC88000 (SRAM0 below it is instruction
+/// only), so copies are compared at their data-bus address.
+const SRAM1_IBUS: (u32, u32) = (0x4037_8000, 0x403E_0000);
+const SRAM1_DBUS: u32 = 0x3FC8_8000;
+
+/// The data-bus address of `a` (itself outside the SRAM1 instruction
+/// alias).
+fn shared(a: u32) -> u32 {
+    if (SRAM1_IBUS.0..SRAM1_IBUS.1).contains(&a) {
+        a - SRAM1_IBUS.0 + SRAM1_DBUS
+    } else {
+        a
+    }
+}
 
 /// A RAM segment: `len` bytes of flash at `from` copied to `to`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -209,10 +226,12 @@ pub fn plan<F: Flash>(flash: &mut F, at: u32, end: u32) -> Result<Plan, Refused>
             *slot = map;
             plan.nmaps += 1;
         } else if RAM.iter().any(|&r| within(r, addr, len)) {
-            let overlaps = plan
-                .copies()
-                .iter()
-                .any(|c| addr < c.to + c.len && c.to < addr + len);
+            // Through either bus: SRAM1 has an address on each.
+            let at = shared(addr);
+            let overlaps = plan.copies().iter().any(|c| {
+                let to = shared(c.to);
+                at < to + c.len && to < at + len
+            });
             if overlaps {
                 return Err(Refused::Range(addr));
             }

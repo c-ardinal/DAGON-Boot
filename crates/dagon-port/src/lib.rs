@@ -63,6 +63,23 @@ pub trait Flash {
     fn read(&mut self, addr: u32, buf: &mut [u8]) -> Result<(), FlashError>;
     fn erase(&mut self, addr: u32, len: u32) -> Result<(), FlashError>;
     fn write(&mut self, addr: u32, data: &[u8]) -> Result<(), FlashError>;
+
+    /// The SHA-256 of the `len` bytes at `addr` (an image body). The
+    /// default reads them through [`Flash::read`] into the software
+    /// SHA-256; a port with a hash peripheral overrides it.
+    fn sha256(&mut self, addr: u32, len: u32) -> Result<[u8; 32], FlashError> {
+        let mut sha = dagon_format::Sha256::new();
+        let mut buf = [0u8; 256];
+        let mut done = 0u32;
+        while done < len {
+            let n = (len - done).min(buf.len() as u32) as usize;
+            let at = addr.checked_add(done).ok_or(FlashError::Range)?;
+            self.read(at, &mut buf[..n])?;
+            sha.update(&buf[..n]);
+            done += n as u32;
+        }
+        Ok(sha.finalize())
+    }
 }
 
 /// `app.link_up` / `app.link_down` `addr` of a link without an address.

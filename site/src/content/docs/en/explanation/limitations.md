@@ -12,7 +12,7 @@ For application developers, extension authors and DAGON contributors. The last s
 | Image kind | Previous version | A power cut during a write | What recovers it |
 |---|---|---|---|
 | `app` | None. A new version that fails its trial has none to go back to; `dagon rollback` answers that there is no previous version, and DAGON Console offers no rollback for the node. | No app is left to start in the slot. | The kind that writes the app (`[writers] app`) starts and receives the app again; on the ESP32-S3 the 2nd stage starts the factory recovery agent. |
-| `bootcore` | None. A new boot loader that fails its trial has no previous one to go back to. | Stage0 has no boot loader it may start and starts the app the state log's confirmed APP record names, after checking it. While the app is on trial, its agent refuses a boot loader transfer and its pending setting, so this cut never meets an app trial. | That confirmed app (`[writers] bootcore`) writes the boot loader again. Only without a confirmed app does stage0 start nothing and wait for recovery through the ROM loader. |
+| `bootcore` | None. A new boot loader that fails its trial has no previous one to go back to. | Stage0 has no boot loader it may start and starts the app the state log's confirmed APP record names, after checking it. While an app is pending or on trial, its agent refuses a boot loader transfer and its pending setting, and while the boot loader is pending it refuses an app's pending setting, so neither this cut nor a boot loader trial ever meets an app trial. | That confirmed app (`[writers] bootcore`) writes the boot loader again. Only without a confirmed app does stage0 start nothing and wait for recovery through the ROM loader. |
 | `agent` | None. | The confirmed app keeps running; the recovery agent cannot be used until it is written again. | The confirmed app (`[writers] agent`) writes it again. |
 | `stage0` | None: DAGON never writes stage0 in the field. | Does not arise: stage0 is not written in the field. | The MCU's ROM loader (`dagon flash`). |
 
@@ -34,6 +34,7 @@ For application developers, extension authors and DAGON contributors. The last s
 
 The hub and the boot:
 
+- With the state log's last record torn by a power loss, the boot loader cannot record a pending app's BOOT_ATTEMPT and starts the confirmed app. Its agent then takes the log's pending slot for the running one: HELLO answers the new version, and CONFIRM confirms the new image, which never ran (the exhaustive search's `known_confirm_of_an_image_that_never_ran`).
 - The relay (`dagon-relay`) does not depend on the MCU, and the `[coordinator]` section of an MCU definition decides whether that MCU may relay. A node relays over the links its MCU definition lists in `[[relay_link]]`, and the topology routes each node to one of them. The RP2040 is the only MCU with both that section and the code that runs the relay.
 - DAGON writes the hub and the children beyond it. Nothing beyond a child can be written.
 - Updating reaches the first coordinator and the nodes linked to it over I2C or UART. It skips a second coordinator and the nodes beyond it, and nodes linked by any other kind of link. The 構成 check tells them as information (◇).

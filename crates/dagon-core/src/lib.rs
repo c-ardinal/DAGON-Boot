@@ -9,3 +9,6 @@ pub mod boot;
 pub mod bootcore;
 pub mod key;
 pub mod log;
+
+#[cfg(kani)]
+mod proofs;

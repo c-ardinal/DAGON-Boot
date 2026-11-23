@@ -12,3 +12,7 @@ dagon-port = { path = "../dagon-port" }
 [dev-dependencies]
 dagon-ed25519 = { path = "../dagon-ed25519", features = ["compact"] }
 ed25519-compact = { version = "2.6", default-features = false }
+
+[lints.rust]
+# `cfg(kani)`: the proofs of stage0's decision (src/proofs.rs).
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(kani)"] }

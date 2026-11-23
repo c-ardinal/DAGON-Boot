@@ -596,7 +596,8 @@ pub struct MustReset;
 /// The boot core running from slot `running` settles the boot core trial
 /// in the log at `layout` before it starts the app: the pending core
 /// confirms itself only when `healthy` (its own check passed) and the
-/// record reads back; the old core records the rollback, and runs the app
+/// record reads back (a pending core that is the confirmed image itself
+/// runs the app when its record does not land); the old core records the rollback, and runs the app
 /// even when that record does not land (its next start writes it again).
 /// Clear the trial cell after `Confirmed` or `RolledBack`. It never erases
 /// flash: the record goes into the room the agent reserved when it set the
@@ -639,8 +640,22 @@ pub fn settle_log<F: Flash>(
             if !healthy {
                 return Err(MustReset);
             }
-            log.append_in_place(flash, target::BOOTCORE, kind::CONFIRMED, p, reason::NONE)
-                .map_err(|_| MustReset)?;
+            if log
+                .append_in_place(flash, target::BOOTCORE, kind::CONFIRMED, p, reason::NONE)
+                .is_err()
+            {
+                // The confirmed image itself, written again into its own
+                // slot (one boot core slot): stage0 starts it as the
+                // confirmed core once the trial's starts are spent, so a
+                // reset would bring this core back to the same record
+                // that does not land, for ever. It runs the app, whose
+                // start makes the log's room; the next start confirms.
+                return if log.core.confirmed == Some(p) {
+                    Ok(Settled::Nothing)
+                } else {
+                    Err(MustReset)
+                };
+            }
             let back = Log::load(flash, layout).map_err(|_| MustReset)?;
             if back.core.confirmed != Some(p) || back.core.pending.is_some() {
                 return Err(MustReset);

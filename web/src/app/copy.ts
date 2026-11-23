@@ -500,6 +500,8 @@ export const CANVAS = {
   dotFoundName: (n: number) => `発見${n}`,
   /** The link to the wiring table. */
   wiringLink: '配線表の表示',
+  /** Over the canvas after the menu's move item, until the click that places the card. */
+  moveHint: (name: string) => `${name}の移動先をクリックしてください（Escで中止）。`,
 } as const;
 
 /** Node card. */
@@ -716,6 +718,7 @@ export const HELP = {
   keys: [
     ['Tab', 'ノードへ移動'],
     ['矢印', '隣接ノードへ移動'],
+    ['Alt + 矢印', 'ノードやDAGONマークの移動（Shift併用で4倍の距離）'],
     ['Enter', '選択'],
     ['Esc', 'シート・メニュー・一覧の非表示'],
     ['Delete', '選択したノードやリンクの削除（確認後）'],
@@ -738,6 +741,8 @@ export const ANNOUNCE = {
   hubLost: 'PC接続ノード 切断',
   placed: (product: string, hub: boolean) => `${product}を配置、${hub ? 'コーディネータ' : 'ノード'}`,
   removed: (name: string) => `${name}を削除、Ctrl+Zで復元が可能`,
+  moved: (name: string) => `${name}を移動`,
+  moveCancelled: '移動を中止',
   problems: (errors: number, warnings: number) => `問題${errors}、注意${warnings}`,
   mode: (define: boolean) => (define ? '準備モード' : '書込モード'),
   fileChecking: (name: string, size: string) => `${name} ${size}、確認中`,
@@ -1204,6 +1209,8 @@ export const MENU = {
   groups: { project: 'プロジェクト', define: '構成', connect: '接続操作', dagon: 'DAGON', help: 'トラブル対処' },
   save: '保存',
   arrange: '自動整列',
+  moveCard: '選択ノードの移動',
+  moveMark: 'DAGONマークの移動',
   place: 'パッケージファイルの選択と書込',
   rollback: '前のバージョンへの復元',
   applyProposal: 'DAGONの案の反映',
@@ -1226,6 +1233,8 @@ export const MENU = {
     redo: '取消した変更を再実行します',
     parts: '左側に部品のウィンドウを表示します（ドラッグでキャンバスに配置が可能です）',
     arrange: '移動したカードをコーディネータ起点の配列に再整列します',
+    moveCard: '選択したノードのカードをキャンバスのクリック位置へ移動します（Alt+矢印キーでも移動が可能です）',
+    moveMark: 'DAGONのマークをクリック位置へ移動します（Alt+矢印キーでも移動が可能です）',
     fit: '全ノードを表示するサイズと位置に調整します',
     viewTable: 'ノード・リンク・配線を表形式で表示します',
     viewGraph: 'ノードとリンクを図で表示します',

@@ -97,6 +97,53 @@ const ITEMS: Record<string, { query?: string; check: (p: Page) => Promise<void> 
       expect((await p.locator('.node').nth(1).boundingBox())!.x).toBeCloseTo(before.x, 0);
     },
   },
+  // The ways to move a card without a drag (WCAG 2.5.7, 2.1.1): a click after this item, and Alt + an arrow key.
+  '構成/選択ノードの移動': {
+    check: async (p) => {
+      await offWithReason(p, '構成', '選択ノードの移動');
+      const card = p.locator('.node').nth(1);
+      const centre = async () => {
+        const b = (await card.boundingBox())!;
+        return { x: b.x + b.width / 2, y: b.y + b.height / 2, left: b.x };
+      };
+      await card.click();
+      await expect(card).toHaveAttribute('aria-pressed', 'true');
+      const box = (await p.locator('.box').boundingBox())!;
+      const to = { x: box.x + box.width * 0.2, y: box.y + box.height * 0.7 };
+      // Escape leaves the card where it is.
+      const before = await centre();
+      await press(p, '構成', '選択ノードの移動');
+      await expect(p.locator('.placing-hint')).toBeVisible();
+      await p.keyboard.press('Escape');
+      await expect(p.locator('.placing-hint')).toHaveCount(0);
+      expect(await centre()).toEqual(before);
+      // The click places the card's centre there, opens nothing, and leaves the card selected and focused.
+      await press(p, '構成', '選択ノードの移動');
+      await p.mouse.click(to.x, to.y);
+      await expect(p.locator('.placing-hint')).toHaveCount(0);
+      // It glides there, as a card that changes place does.
+      await settled(p);
+      const placed = await centre();
+      expect(Math.abs(placed.x - to.x)).toBeLessThan(2);
+      expect(Math.abs(placed.y - to.y)).toBeLessThan(2);
+      await expect(card).toBeFocused();
+      await expect(card).toHaveAttribute('aria-pressed', 'true');
+      // Alt + arrow steps the focused card 16 px of the canvas, with Shift 64; a plain arrow moves the focus only.
+      const zoom = await p.locator('.canvas').evaluate((e) => Number(getComputedStyle(e).getPropertyValue('--zoom')));
+      await p.keyboard.press('Alt+ArrowRight');
+      expect((await centre()).left - placed.left).toBeCloseTo(16 * zoom, 0);
+      await p.keyboard.press('Alt+Shift+ArrowLeft');
+      expect((await centre()).left - placed.left).toBeCloseTo(-48 * zoom, 0);
+      await expect(card).toBeFocused();
+      const kept = await centre();
+      await p.keyboard.press('ArrowDown');
+      expect(await centre()).toEqual(kept);
+      // Each move is the user's place: 自動整列 takes the card back.
+      await press(p, '構成', '自動整列');
+      await settled(p);
+      expect((await centre()).x).toBeCloseTo(before.x, 0);
+    },
+  },
   '構成/キャンバス全体の表示': {
     check: async (p) => {
       const first = await canvasState(p);
@@ -219,6 +266,35 @@ const ITEMS: Record<string, { query?: string; check: (p: Page) => Promise<void> 
       expect(await state()).toBe('running');
     },
   },
+  'DAGON/DAGONマークの移動': {
+    query: 'sim&agent=linked',
+    check: async (p) => {
+      const mark = p.locator('.dagon .mark');
+      const at = async () => (await mark.boundingBox())!;
+      const from = await at();
+      await press(p, 'DAGON', 'DAGONマークの移動');
+      await expect(p.locator('.dagon .placing-hint')).toBeVisible();
+      const box = (await p.locator('.box').boundingBox())!;
+      const to = { x: box.x + box.width * 0.3, y: box.y + box.height * 0.3 };
+      await p.mouse.click(to.x, to.y);
+      await expect(p.locator('.dagon .placing-hint')).toHaveCount(0);
+      await expect(p.locator('.bubble'), 'the placing click opens nothing').toHaveCount(0);
+      const placed = await at();
+      expect(placed.x).not.toBe(from.x);
+      expect(Math.hypot(placed.x + placed.width / 2 - to.x, placed.y + placed.height / 2 - to.y)).toBeLessThan(placed.width);
+      await expect(mark).toBeFocused();
+      // Alt + arrow on the focused mark: 16 px a step.
+      await p.keyboard.press('Alt+ArrowLeft');
+      expect((await at()).x).toBeCloseTo(placed.x - 16, 0);
+      await p.keyboard.press('Alt+ArrowUp');
+      expect((await at()).y).toBeCloseTo(placed.y - 16, 0);
+      // The place is kept for the project, as a drop's is.
+      const kept = await at();
+      await start(p, 'sim&agent=linked');
+      expect((await at()).x).toBeCloseTo(kept.x, 0);
+      expect((await at()).y).toBeCloseTo(kept.y, 0);
+    },
+  },
   'プロジェクト/リスタート': {
     check: async (p) => {
       await press(p, 'プロジェクト', 'リスタート');
@@ -250,4 +326,23 @@ test('the table above covers every item the menu shows, linked or not', async ({
     }
   }
   expect([...shown].sort()).toEqual(Object.keys(ITEMS).sort());
+});
+
+test('Alt + arrow moves only the card that has the focus, not the one behind a focused card check', async ({ page }) => {
+  await start(page);
+  await page.getByRole('radio', { name: '書込', exact: true }).click();
+  await settled(page);
+  const boxesNow = () => page.locator('.node').evaluateAll((ns) => ns.map((n) => { const r = n.getBoundingClientRect(); return [Math.round(r.x), Math.round(r.y)]; }));
+  const card = page.locator('.node').nth(1);
+  await card.click();
+  const check = page.locator('.check').first();
+  await check.focus();
+  const before = await boxesNow();
+  await page.keyboard.press('Alt+ArrowRight');
+  await page.waitForTimeout(100);
+  expect(await boxesNow()).toEqual(before);
+  // The card itself still steps.
+  await card.focus();
+  await page.keyboard.press('Alt+ArrowRight');
+  expect(await boxesNow()).not.toEqual(before);
 });

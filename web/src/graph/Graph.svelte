@@ -28,7 +28,8 @@
 </script>
 
 <script lang="ts">
-  import { CANVAS, LINK } from '../app/copy.ts';
+  import { ANNOUNCE, CANVAS, LINK } from '../app/copy.ts';
+  import { placeByClick, stepOf } from '../app/move.ts';
   import { easeOut, fade, draw, moves, tokenMs, tokenNumber } from '../app/motion.ts';
   import { lightsStill, nodeState, type NodeState } from '../app/nodeState.ts';
   import NodeCard from './NodeCard.svelte';
@@ -54,8 +55,10 @@
     view?: View;
     /** Where the user put each card; the others stand in the tree layout. */
     positions?: Record<string, Pt>;
-    /** A card drag ended. */
+    /** A card was moved (a drag, Alt + arrow, or a click after `startMove`). */
     onmoved?: () => void;
+    /** A sentence for screen readers: where a moved card went. */
+    onannounce?: (text: string) => void;
     /** The free part of the window (client px) a fit puts the graph in; read only when fitting. */
     freeArea?: () => DOMRect | undefined;
     /** The whole area, tried when `freeArea` alone would make the fit compact. */
@@ -92,6 +95,7 @@
     view = $bindable(newView()),
     positions = $bindable({}),
     onmoved,
+    onannounce,
     freeArea,
     wholeArea,
     fill = {},
@@ -171,11 +175,15 @@
     if (t === 1) glide = null;
   }
 
-  // A new layout: cards that have a place glide to the new one; a new or dragged card is there at once.
+  /** A card an Alt + arrow step moved: there at once, as a dragged one is, so held keys do not lag. */
+  let stepped: string | null = null;
+
+  // A new layout: cards that have a place glide to the new one; a new, dragged or stepped card is there at once.
   $effect(() => {
     const to = pos;
     untrack(() => {
-      const now = Object.fromEntries(Object.entries(to).map(([id, q]): [string, Pt] => [id, arriving || id === dragging || !shown[id] ? q : shown[id]]));
+      const now = Object.fromEntries(Object.entries(to).map(([id, q]): [string, Pt] => [id, arriving || id === dragging || id === stepped || !shown[id] ? q : shown[id]]));
+      stepped = null;
       shown = now;
       if (Object.entries(to).every(([id, q]) => now[id].x === q.x && now[id].y === q.y)) {
         glide = null;
@@ -352,7 +360,51 @@
 
   const DIRS = { ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right' } as const;
 
+  /** The card a click places next (after the menu's move item), or null. */
+  let placing = $state<string | null>(null);
+  let stopPlacing: (() => void) | null = null;
+
+  function moveTo(id: string, p: Pt) {
+    positions = { ...positions, [id]: p };
+    onmoved?.();
+    onannounce?.(ANNOUNCE.moved(nameOf(id)));
+  }
+
+  /** The next click on the canvas puts the card's centre there; a click elsewhere or Escape leaves it. */
+  export function startMove(id: string) {
+    stopPlacing?.();
+    placing = id;
+    onannounce?.(CANVAS.moveHint(nameOf(id)));
+    stopPlacing = placeByClick(
+      () => boxEl?.getBoundingClientRect(),
+      (cx, cy) => {
+        const p = toCanvas(cx, cy);
+        placing = stopPlacing = null;
+        moveTo(id, { x: p.x - NODE_W / 2, y: p.y - hOf(id) / 2 });
+        focusKey = `node:${id}`;
+        canvas.querySelector<HTMLElement>(`[data-key="${focusKey}"]`)?.focus();
+      },
+      () => {
+        placing = stopPlacing = null;
+        onannounce?.(ANNOUNCE.moveCancelled);
+      },
+    );
+  }
+  $effect(() => () => stopPlacing?.());
+
   function onKey(e: KeyboardEvent) {
+    const step = stepOf(e);
+    if (step) {
+      // The card that has the focus itself: not its check or a link chip, whose keys reach the canvas too.
+      const key = (e.target as HTMLElement).dataset.key;
+      if (!key?.startsWith('node:')) return;
+      e.preventDefault();
+      const id = key.slice(5);
+      const from = pos[id];
+      stepped = id;
+      if (from) moveTo(id, { x: from.x + step.x, y: from.y + step.y });
+      return;
+    }
     const dir = DIRS[e.key as keyof typeof DIRS];
     if (!dir) return;
     const from = stops.find((s) => s.key === focusKey);
@@ -459,7 +511,10 @@
   }
 </script>
 
-<div class="graph">
+<div class="graph" class:placing={placing !== null}>
+  {#if placing}
+    <p class="placing-hint">{CANVAS.moveHint(nameOf(placing))}</p>
+  {/if}
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div class="box" bind:this={boxEl} onpointerdown={panStart} onfocusin={reveal}>
     {#if !config}
@@ -602,6 +657,26 @@
   }
   .box:active {
     cursor: grabbing;
+  }
+  .placing .box {
+    cursor: crosshair;
+  }
+  /* What the next click does, over the canvas's top edge while a card waits for it. */
+  .placing-hint {
+    position: absolute;
+    z-index: var(--z-chip);
+    top: var(--s-3);
+    left: 50%;
+    translate: -50% 0;
+    max-width: calc(100% - 2 * var(--s-3));
+    margin: 0;
+    padding: var(--s-1) var(--s-3);
+    border: 1px solid var(--c-accent);
+    border-radius: var(--r-s);
+    background: var(--c-layer-2);
+    color: var(--c-paper);
+    font-size: var(--t-small);
+    pointer-events: none;
   }
   /* The zoom alone scales the canvas: the 2560 theme's type stays out of it, so its 150 % reads true. */
   .canvas {

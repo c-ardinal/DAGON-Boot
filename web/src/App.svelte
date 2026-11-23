@@ -56,7 +56,8 @@
   import NodeList from './screens/define/NodeList.svelte';
   import Table from './screens/define/Table.svelte';
   import { devHub } from './serial/devHub.ts';
-  import { isNarrow } from './app/narrow.ts';
+  import { isNarrow, NARROW_QUERY } from './app/narrow.ts';
+  import { MediaQuery } from 'svelte/reactivity';
   import Unsupported from './Unsupported.svelte';
   import { dagonReady, versionText } from './wasm/dagon.ts';
 
@@ -115,6 +116,7 @@
     },
   });
   let graph = $state<ReturnType<typeof Graph>>();
+  let dagon = $state<ReturnType<typeof Dagon>>();
   const dv = new DefineView({ d, cli, ws, build, stopped, dropTarget: (x, y) => graph?.dropTarget(x, y) });
   const ov = new OperateView({ op, d, writes, feedback, simulated, demoSite: DEMO_SITE, next: (): Next => next });
   const band = $derived(ov.band);
@@ -184,6 +186,8 @@
   /** The bar's width: under this the edit tools would meet the actions, so they live in ☰ alone (its items are always there). */
   const BAR_TOOLS_MIN = 1100;
   let barNarrow = $state(false);
+  /** The window is in the narrow tier (the stage stacks in the page). */
+  const narrowTier = new MediaQuery(NARROW_QUERY, false);
   $effect(() => {
     const bar = document.querySelector('.frame > header');
     if (!bar) return;
@@ -289,6 +293,9 @@
       barNarrow,
       partsOpen,
       arranged: Object.keys(ws.positions).length > 0,
+      nodeSelected: !!graphProps.selected?.startsWith('node:'),
+      // The narrow tier stacks the mark in the page, where no place is kept.
+      markShown: (agentLinked || simulated) && !narrowTier.current,
       connected,
       hubLocked: ov.hubLocked,
       idle,
@@ -302,6 +309,8 @@
         restart: () => (ws.restartOpen = true),
         openParts: () => (partsOpen = true),
         arrange: () => ws.arrange(),
+        moveCard: () => graphProps.selected?.startsWith('node:') && graph?.startMove(graphProps.selected.slice(5)),
+        moveMark: () => dagon?.startMove(),
         fit: () => graph?.fit(),
         toggleHub,
         chooseFile: () => fileInput?.click(),
@@ -496,7 +505,7 @@
           <p id="canvas-help" class="visually-hidden">{CANVAS.describe}</p>
           {#if ws.mode === 'operate' || d.view === 'graph'}
             <!-- One graph for both modes: changing mode moves the same cards to their places. -->
-            <Graph bind:this={graph} bind:view={ws.canvasView} bind:positions={ws.positions} onmoved={() => ws.savePositions()} freeArea={fitArea} {wholeArea} building={build.building} {...graphProps} />
+            <Graph bind:this={graph} bind:view={ws.canvasView} bind:positions={ws.positions} onmoved={() => ws.savePositions()} onannounce={(t) => (d.status = t)} freeArea={fitArea} {wholeArea} building={build.building} {...graphProps} />
           {/if}
         </main>
         <div class="overlay">
@@ -557,7 +566,7 @@
           </div>
           {#if agentLinked || simulated}
             <!-- Over the columns, from the free area's bottom-right as the zoom is: no sheet, table or toast moves it; the drawer carries it up with the zoom; a drag places it. -->
-            <Dagon {agent} demo={simulated} place={cli.hello?.workspace ?? d.doc.topo.name ?? 'local'} bind:open={agentLink.bubbleOpen} onask={(text, kind, at) => agentLink.ask(text, kind, at)} onapply={(i, at) => agentLink.applyProposal(i, at)} ontalk={() => (feedback.drawerTab = 'talk')} openRequest={agentLink.openRequest} />
+            <Dagon bind:this={dagon} {agent} onannounce={(t) => (d.status = t)} demo={simulated} place={cli.hello?.workspace ?? d.doc.topo.name ?? 'local'} bind:open={agentLink.bubbleOpen} onask={(text, kind, at) => agentLink.ask(text, kind, at)} onapply={(i, at) => agentLink.applyProposal(i, at)} ontalk={() => (feedback.drawerTab = 'talk')} openRequest={agentLink.openRequest} />
           {/if}
         </div>
         <div class="dock" data-avoid="">

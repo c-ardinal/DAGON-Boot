@@ -14,5 +14,9 @@ dagon-events = { path = "../dagon-events", features = ["catalog-docs"] }
 dagon-sim = { path = "../dagon-sim" }
 
 [dev-dependencies]
+# The port traits the catalog names, checked by the build (tests/docs.rs).
+dagon-format = { path = "../dagon-format" }
+dagon-host = { path = "../dagon-host" }
+dagon-port = { path = "../dagon-port" }
 serde_json = "1"
 toml = "0.8"

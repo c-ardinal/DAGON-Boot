@@ -1,7 +1,8 @@
 """Checks that a component's version is at least what its commits require.
 
 The version is the component's entry in compat.toml; the commits are those
-since the component's last release tag (`<component>-v<version>`) that
+since the component's last release tag (`<component>-v<version>`, on any
+branch: a release tagged on main counts on the branch work goes on in) that
 touch its files (a file belongs to the component with the longest matching
 path). Kinds and bumps follow site/src/content/docs/explanation/versioning.md. Offline: reads only git
 and compat.toml.
@@ -104,17 +105,23 @@ def git(*args):
 
 
 def last_release(name, version, at="HEAD"):
-    """The highest final release tag of `name` below `version` among the
-    tags merged into `at`, and its version."""
+    """The highest final release tag of `name` up to `version`, and its
+    version, as of `at`. A tag only on another branch counts (a release is
+    tagged on main, not on the branch work goes on in); a tag on a commit
+    after `at` does not, nor does a tag of `version` on `at` itself: that
+    is the release being made."""
     base, _ = parse_version(version)
+    here = set(git("tag", "--list", f"{name}-v*", "--points-at", at).split())
+    later = set(git("tag", "--list", f"{name}-v*", "--contains", at).split()) - here
     found = []
-    for tag in git("tag", "--list", f"{name}-v*", "--merged", at).split():
+    for tag in git("tag", "--list", f"{name}-v*").split():
         try:
             v, rc = parse_version(tag[len(name) + 2:])
         except ValueError:
             continue
-        if not rc and v < base:
-            found.append((v, tag))
+        if rc or v > base or tag in later or (tag in here and v == base):
+            continue
+        found.append((v, tag))
     return max(found, default=(None, None))
 
 

@@ -6,6 +6,7 @@ use dagon_retained_model::boot::{self, Behaviour, Manifest, Target, VerifierRepl
 use dagon_retained_model::fuse::{self, fuse_id, CallSite, Cell, FuseV1, FuseV2, LAYER_APP};
 use dagon_retained_model::harness::{check, run_many, shrink, World};
 use dagon_retained_model::identity::{self, identity, LoadError};
+use dagon_retained_model::journal::{Journal, Keyed, Layout, CLASS_MAX};
 use dagon_retained_model::mem::{Mem, Survives};
 use dagon_retained_model::record::{
     self, Geometry, Ring, Writer, RECORD_MAX, V1 as RecV1, V1_SIZE,
@@ -925,4 +926,120 @@ fn regression_trial_cell_check_cut_after_its_probe() {
         },
     ];
     ok::<TrialWorld>(&c, &ops);
+}
+
+// --- State log: keyed records ----------------------------------------------
+
+/// Bytes before and after the faces that nothing may write.
+const GUARD: usize = 64;
+
+/// Two faces of `face_records` records each after their headers.
+fn layout(face_records: usize) -> Layout {
+    let face_len = 32 * (1 + face_records);
+    Layout {
+        faces: [GUARD, GUARD + face_len],
+        face_len,
+    }
+}
+
+/// A started journal on erased faces, face 0 valid.
+fn journal(l: &Layout) -> (Mem, Journal) {
+    let mut mem = Mem::new(2 * GUARD + 2 * l.face_len, 0xFF, 0);
+    mem.poke(
+        l.faces[0],
+        &dagon_format::FaceHeader { generation: 1 }.to_bytes(),
+    );
+    mem.allow(l.faces[0]..l.faces[1] + l.face_len);
+    let j = Journal::load(&mem, l).unwrap();
+    (mem, j)
+}
+
+fn record_at(mem: &Mem, face: usize, i: usize) -> [u8; 32] {
+    mem.bytes()[face + 32 * (1 + i)..][..32].try_into().unwrap()
+}
+
+/// U0.1: the latest put of a key is its value, and an erase of the key
+/// leaves nothing, in the running fold and in a fresh load.
+#[test]
+fn keyed_fold_latest_wins_erase_deletes() {
+    let c = layout(12);
+    let (mut mem, mut j) = journal(&c);
+    j.append_keyed(&mut mem, Keyed::put(5, &[7, 7], &[1]))
+        .unwrap();
+    j.append_keyed(&mut mem, Keyed::put(5, &[7, 7], &[2]))
+        .unwrap();
+    let values = |j: &Journal| -> Vec<(Vec<u8>, u8)> {
+        j.keyed
+            .iter()
+            .map(|k| (k.key().to_vec(), k.value()[0]))
+            .collect()
+    };
+    assert_eq!(values(&j), [(vec![7, 7], 2)]);
+    assert_eq!(Journal::load(&mem, &c).unwrap().keyed, j.keyed);
+    j.append_keyed(&mut mem, Keyed::erase(5, 5, &[7, 7]))
+        .unwrap();
+    assert!(j.keyed.is_empty());
+    assert!(Journal::load(&mem, &c).unwrap().keyed.is_empty());
+
+    // An erase of another class, or of a longer key, removes nothing; an
+    // erase of a key range removes every key of its classes in the range.
+    j.append_keyed(&mut mem, Keyed::put(5, &[7, 7], &[3]))
+        .unwrap();
+    j.append_keyed(&mut mem, Keyed::put(4, &[7, 8], &[9]))
+        .unwrap();
+    j.append_keyed(&mut mem, Keyed::put(5, &[6, 7], &[4]))
+        .unwrap();
+    j.append_keyed(&mut mem, Keyed::erase(3, 3, &[7, 7]))
+        .unwrap();
+    j.append_keyed(&mut mem, Keyed::erase(5, 5, &[7, 7, 0]))
+        .unwrap();
+    assert_eq!(j.keyed.len(), 3);
+    j.append_keyed(&mut mem, Keyed::erase(4, 5, &[7])).unwrap();
+    assert_eq!(values(&j), [(vec![6, 7], 4)]);
+    assert_eq!(Journal::load(&mem, &c).unwrap().keyed, j.keyed);
+}
+
+/// U0.1: compaction by code that decodes no keyed class (the boot loader)
+/// carries a record of a class nothing decodes, byte for byte, and leaves
+/// out what the fold removed.
+#[test]
+fn boot_core_compaction_copies_unknown_keyed_kind() {
+    let l = layout(12);
+    let (mut mem, mut j) = journal(&l);
+    j.append_keyed(&mut mem, Keyed::put(CLASS_MAX, &[1], &[0xAA]))
+        .unwrap();
+    j.append_keyed(&mut mem, Keyed::put(CLASS_MAX, &[2], &[0xBB]))
+        .unwrap();
+    j.append_keyed(&mut mem, Keyed::put(CLASS_MAX, &[1], &[0xCC]))
+        .unwrap();
+    let (second, third) = (
+        record_at(&mem, l.faces[0], 1),
+        record_at(&mem, l.faces[0], 2),
+    );
+
+    // The boot loader's journal: loaded from the bytes, no store over it.
+    let mut core = Journal::load(&mem, &l).unwrap();
+    core.compact(&mut mem).unwrap();
+    assert_eq!(core.generation, 2);
+    assert_eq!(record_at(&mem, l.faces[1], 0), second);
+    assert_eq!(record_at(&mem, l.faces[1], 1), third);
+    assert_eq!(record_at(&mem, l.faces[1], 2), [0xFF; 32]);
+    assert_eq!(Journal::load(&mem, &l).unwrap().keyed, core.keyed);
+}
+
+/// Found by the model: foreign bytes in an erased record ahead of the
+/// log's end, and a journal that kept appending from RAM programmed its
+/// next record over them, where a `Log` loaded for that append compacts.
+/// An append now checks that its record is erased (retained-formats.md 6).
+#[test]
+fn regression_append_into_a_record_that_is_not_erased() {
+    // The record after the end is not erased, so the append compacts and
+    // the put is read back whole.
+    let l = layout(16);
+    let (mut mem, mut j) = journal(&l);
+    mem.poke(l.faces[0] + 32, &[0x00]);
+    j.append_keyed(&mut mem, Keyed::put(5, &[1], &[2])).unwrap();
+    assert_eq!(j.generation, 2);
+    assert_eq!(Journal::load(&mem, &l).unwrap().keyed, j.keyed);
+    assert_eq!(j.keyed.len(), 1);
 }

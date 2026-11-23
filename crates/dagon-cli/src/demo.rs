@@ -1,6 +1,6 @@
-//! The sample project on the simulator, for tests: the 親機 (RP2040) with
-//! its two 子機 (the F401 on I2C, the ESP32-S3 watch on the UART), all on
-//! 1.0.0, as dagon-sim simulates them for `dagon sim run`, driven by the
+//! The sample project on the simulator, for tests: the coordinator (RP2040) with
+//! the two nodes linked to it (the F401 on I2C, the ESP32-S3 watch on the UART), all on
+//! 1.0.0, as dagon-sim simulates them for `dagon sim`, driven by the
 //! same dagon-host code as real hardware, with the links' timing.
 //!
 //! Everything is made fresh at start in a demo folder under the system's
@@ -8,7 +8,7 @@
 //! sample 構成, the 1.0.0 images the simulated boards run and release
 //! demo-1.1.0, all signed with the demo key; the 1.0.0 package is kept
 //! (out/deploy) as written firmware is. `--sim-fail <node>` makes that
-//! 子機's new version crash at boot, so its update falls back to 1.0.0.
+//! node's new version crash at boot, so its update falls back to 1.0.0.
 
 use std::path::{Path, PathBuf};
 
@@ -139,14 +139,14 @@ pub(crate) fn package(key: &KeyPair, v: Version) -> Result<Vec<u8>, String> {
     package_with(key, v, v)
 }
 
-/// The demo 構成's package: every app `v`, the 子機's boot core `core`.
+/// The demo 構成's package: every app `v`, the F401 node's boot core `core`.
 pub(crate) fn package_with(key: &KeyPair, v: Version, core: Version) -> Result<Vec<u8>, String> {
     let t = dagon_topology::parse_str(YAML).map_err(|e| e.to_string())?;
     let bin = dagon_topology::compile_str(YAML).map_err(|e| e.to_string())?;
     let images = [
         img(key, &SEG, 0, v, SEG_LEN)?,
         img(key, &SEG, 1, v, SEG_LEN)?,
-        // The 子機's boot core: written when the one it runs is of another
+        // The F401 node's boot core: written when the one it runs is of another
         // version.
         img_of(key, &SEG, image_kind::BOOTCORE, 0, core, CORE_LEN)?,
         img_of(key, &SEG, image_kind::BOOTCORE, 1, core, CORE_LEN)?,
@@ -174,7 +174,7 @@ pub(crate) fn package_with(key: &KeyPair, v: Version, core: Version) -> Result<V
 /// Makes the demo folder `dir` afresh (only one this command made before is
 /// replaced): its 構成, a demo key pair, dagon.toml and the release.
 /// Returns dagon.toml's path and the demo key.
-/// The demo 構成: sample with the 親機's uplink set to `uplink` (it is
+/// The demo 構成: sample with the coordinator's uplink set to `uplink` (it is
 /// not part of the compiled topology, so the release matches either way).
 pub fn yaml(uplink: Medium) -> String {
     YAML.replacen(
@@ -458,7 +458,7 @@ mod tests {
             .unwrap();
             cs.slots[usize::from(cs.active)].version
         };
-        assert_eq!(core(&mut h), NEW, "the 子機's boot core went with it");
+        assert_eq!(core(&mut h), NEW, "the F401 node's boot core went with it");
         crate::kept::store(&cfg, &t, &key.pk, &new).unwrap();
         let back = crate::kept::read(&cfg, &key.pk, "v1.0.0").unwrap();
         assert_eq!(run(&mut h, &back), ["done 1.0.0"; 3]);

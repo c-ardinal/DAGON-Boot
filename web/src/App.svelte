@@ -64,7 +64,7 @@
   import { dagonReady, mcuConnection, releaseVersions, require_release_key, set_release_key, trialMs, useDefinitions, versionText } from './wasm/dagon.ts';
 
   const params = new URLSearchParams(location.search);
-  // The stand-in hubs are for development builds only; the public demo page always drives the simulator.
+  // The stand-in nodes connected to the PC are for development builds only; the public demo page always drives the simulator.
   const stand = import.meta.env.DEV ? devHub(params) : DEMO_SITE ? devHub(new URLSearchParams('sim')) : null;
   const dev = stand !== null;
   const serial = navigator.serial;
@@ -79,22 +79,22 @@
       opened = t ?? (await ports.chooseAndOpen());
       return opened;
     },
-    // The stand-in hub comes back by itself; a real one is chosen again in the browser.
+    // The stand-in PC-connected node comes back by itself; a real one is chosen again in the browser.
     reselect: async () => {
       if (dev && opened) {
         if (opened instanceof MockTransport) opened.replug();
         await opened.open();
         return opened;
       }
-      // `opened` follows only once Operate took it as this hub (reconnectChosen).
+      // `opened` follows only once Operate took it as this PC-connected node (reconnectChosen).
       return ports.chooseAndOpen();
     },
     timer: true,
-    // The simulator's clock runs at the demo's speed; a real hub keeps the default.
+    // The simulator's clock runs at the demo's speed; a real PC-connected node keeps the default.
     get clock() {
       return stand?.clock;
     },
-    // The CLI gave the hub back: the device the page had, opened again without the chooser.
+    // The CLI gave the node connected to the PC back: the device the page had, opened again without the chooser.
     again: async () => {
       if (!opened) throw new Error('no device');
       await opened.open();
@@ -110,10 +110,10 @@
     trialMs: (id) => trialMs(d.doc.topo.nodes.find((n) => n.id === id)?.mcu ?? ''),
   });
 
-  /** `dagon serve`: the page is always its page; K0/K3 when it cannot be reached. */
+  /** `dagon serve`: the page is always its page; `none` or `stopped` when it cannot be reached. */
   const cli = new Cli();
   const demoStandIn = import.meta.env.DEV && params.has('demo');
-  /** The 親機 and 子機 are simulated: the demo page's own simulator. */
+  /** The node connected to the PC and the other nodes are simulated: the demo page's own simulator. */
   const simulated = DEMO_SITE || demoStandIn;
   /** The 定義 document: the project's 構成 as edited (its YAML is the one source of truth). */
   const d = new Define();
@@ -177,10 +177,10 @@
   }
 
   /** The open project's 構成 (its YAML through serve): 運用 when it has no problems, else 定義. */
-  // The start screen is reached only through `leave` (menu, 最初からやり直す), so no unsaved edit is here when a project opens.
+  // The start screen is reached only through `leave` (menu, リスタート), so no unsaved edit is here when a project opens.
   async function openWork(want?: 'operate' | 'define') {
     const yaml = await cli.loadTopology().catch(() => undefined);
-    // 呼び名 and positions live beside the YAML (GET /v1/layout).
+    // 表示名 and positions live beside the YAML (GET /v1/layout).
     if (!(await layoutFile.open())) notice = { word: LAYOUT.refused, error: true, detail: `${LAYOUT.refusedDetail}（${cli.layoutRefused}）` };
     local = false;
     op.reset();
@@ -247,7 +247,7 @@
   let helpOpen = $state(false);
   let helpKeys = $state(false);
   let restartOpen = $state(false);
-  /** Menu 新しく作る / 見本から新しく作る / 開く: the 構成 is saved first (or the dialog asks). */
+  /** Menu プロジェクト作成 (空白から作成 / サンプルから作成) / プロジェクトのオープン: the 構成 is saved first (or the dialog asks). */
   function toStart(c: StartChoice) {
     if (stopped(DEMO_SITE && c === 'open' ? 'open' : 'project')) return;
     menuOpen = false;
@@ -261,7 +261,7 @@
     void start.choose(c);
   }
 
-  /** "最初からやり直す": the page's records go and the start screen opens; the project's files stay. */
+  /** "リスタート": the page's records go and the start screen opens; the project's files stay. */
   function restart() {
     if (stopped('project')) return void (restartOpen = false);
     restartOpen = false;
@@ -286,7 +286,7 @@
     void tick().then(() => document.querySelector<HTMLElement>('[aria-controls="menu"]')?.focus());
   }
 
-  /** 運用 pressed while it cannot be entered: M69 (or 未保存) in the band until the 構成 changes. */
+  /** 運用 pressed while it cannot be entered: MODE.lockedProblems (or 未保存) in the band until the 構成 changes. */
   let locked = $state<{ why: Operable | 'unsaved'; at: number } | null>(null);
   const lockShown = $derived(locked && locked.at === d.revision ? locked.why : null);
   function lock(why: Operable | 'unsaved') {
@@ -305,7 +305,7 @@
   const modeLocked = $derived(busyStates.includes(op.state));
 
   function switchMode(m: 'operate' | 'define') {
-    // 運用 only with a 構成 that has no problems (parts not updatable yet are skipped there); the YAML decides, never the 親機.
+    // 運用 only with a 構成 that has no problems (parts updating skips do not stop it); the YAML decides, never the node connected to the PC.
     if (m === 'operate' && d.operable !== 'ok') return lock(d.operable);
     // ... and only the saved one, the 構成 build, sign and release use too.
     if (m === 'operate' && autosave.pending) {
@@ -316,11 +316,11 @@
   }
 
   function enterMode(m: 'operate' | 'define') {
-    // A file checked against another 構成 (fileRefused, otherTopology or fileReady, e.g. after "ファイルの構成を取り込む") is checked again.
+    // A file checked against another 構成 (fileRefused, otherTopology or fileReady, e.g. after "ファイルの構成の取込") is checked again.
     const recheck = m === 'operate' && op.file !== null && ['fileRefused', 'otherTopology', 'fileReady'].includes(op.state) && op.config?.yaml !== d.config.yaml;
     if (m === 'operate') op.useConfig(d.config);
     mode = m;
-    d.status = ANNOUNCE.A22(m === 'define');
+    d.status = ANNOUNCE.mode(m === 'define');
     if (recheck && op.file) op.takeFile(op.file.name, op.file.bytes);
   }
 
@@ -355,7 +355,7 @@
     await autosave.now();
   }
 
-  /** The project's definitions, or none at all with × 定義を読めない when they fail (never the builtin set instead). */
+  /** The project's definitions, or none at all with × 定義エラー when they fail (never the builtin set instead). */
   function useServedDefinitions(json: string | null) {
     if (useDefinitions(json, cli.defsFailed) === 'blocked') cli.defsFailed = true;
     // Blocked: a save waiting for its quiet time is dropped (none is sent while blocked).
@@ -442,7 +442,7 @@
   }
   const problemCount = $derived(d.problems.filter((p) => p.severity === 'error').length);
   const drawerTabs = $derived<DrawerTab[]>([
-    { id: 'problems', label: DRAWER.problems, count: problemCount + d.notYet, alarm: problemCount > 0 },
+    { id: 'problems', label: DRAWER.problems, count: problemCount + d.skipped, alarm: problemCount > 0 },
     { id: 'jobs', label: DRAWER.jobs, ...(runningJobs ? { count: runningJobs } : {}) },
     { id: 'output', label: DRAWER.output },
     { id: 'timeline', label: DRAWER.timeline },
@@ -461,7 +461,7 @@
     if (cli.defsFailed) return { cause: DEFINE.defsChip, sentence: DEFINE.defsSentence };
     if (d.unreadable) return { cause: DEFINE.unreadableChip, sentence: DEFINE.unreadableSentence };
     if (firstError) return { sentence: DEFINE.fixSentence };
-    if (d.notYet) return { sentence: DEFINE.notYetSentence(d.notYet) };
+    if (d.skipped) return { sentence: DEFINE.skippedSentence(d.skipped) };
     if (d.doc.topo.nodes.length === 0) return { sentence: CANVAS.empty };
     return { sentence: prepareSentence({ needsSkeleton, building: buildState === 'running', built: builtRevision === d.revision }) };
   });
@@ -567,7 +567,7 @@
     value: problemCount,
     alarm: true,
     sub: [DEFINE.dotNodes, d.doc.topo.nodes.length] as const,
-    more: [[DEFINE.dotLinks, String(d.doc.topo.links?.length ?? 0)], ...(d.notYet ? [[DEFINE.dotNotYet, String(d.notYet)] as const] : [])],
+    more: [[DEFINE.dotLinks, String(d.doc.topo.links?.length ?? 0)], ...(d.skipped ? [[DEFINE.dotSkipped, String(d.skipped)] as const] : [])],
     name: DEFINE.dotProblemsName(problemCount, d.doc.topo.nodes.length, d.doc.topo.links?.length ?? 0),
   });
 
@@ -577,9 +577,9 @@
     if (opened instanceof WebSerialTransport && portOf(e) === opened.port) op.lose();
   });
   /**
-   * An allowed device came (back): while dagon-host reopens the rebooted hub
+   * An allowed device came (back): while dagon-host reopens the rebooted PC-connected node
    * (hubRestarting) it is a candidate; once that is over (reconnectNeeded) the page takes it by
-   * itself when it is the hub on trial with the version just sent.
+   * itself when it is the node connected to the PC on trial with the version just sent.
    */
   ports.on('connect', (e) => {
     const port = portOf(e);
@@ -587,7 +587,7 @@
     connecting = connecting.then(() => hubConnected(port)).catch(() => undefined);
   });
   let connecting: Promise<void> = Promise.resolve();
-  /** "もう一度つなぐ": the device the user chose, kept only when Operate took it as this hub. */
+  /** "再接続": the device the user chose, kept only when Operate took it as this PC-connected node. */
   async function reconnectChosen() {
     if (await op.reconnectHub()) opened = op.device;
   }
@@ -615,7 +615,7 @@
     'chooseFile', 'updateResponding', 'otherFile', 'update', 'useLatest', 'recover', 'recoverAgain', 'defineFix',
   ]);
 
-  /** States 書き込む writes in directly: the hub answers and nothing runs. */
+  /** States 書込 writes in directly: the node connected to the PC answers and nothing runs. */
   const WRITABLE: ReadonlySet<string> = new Set(['ready', 'nodesSilent', 'done']);
   /** States that show the update's progress (node chips, percent, the dot number). */
   const UPDATING: ReadonlySet<string> = new Set(['writing', 'hubRestarting', 'reconnectNeeded', 'stopped', 'done', 'recovering', 'recoverFailed']);
@@ -653,7 +653,7 @@
       Object.entries(op.progress).flatMap(([id, p]): [string, Chip][] => {
         const c = cardChipOf(id, p);
         if (!c) return [];
-        // M27 beside the rebooting hub while the page reconnects by itself.
+        // The countdown beside the rebooting PC-connected node while the page reconnects by itself.
         return [[id, p.stage === 'rebooting' && reconnectLeft !== null ? { ...c, note: `${RECONNECT.auto} ${RECONNECT.left(reconnectLeft)}` } : c]];
       }),
     ),
@@ -722,7 +722,7 @@
   const chips = $derived(updating ? progressChips : diffChips);
   /** The water in each node while it is written (writing, hubRestarting, recovering). */
   const fill = $derived(PERCENT.has(op.state) ? Object.fromEntries(Object.keys(waterOf(op.progress)).map((id) => [id, op.percentOf(id, nowMs)])) : {});
-  // The comparison stays while the update runs (P14: never silently replaced).
+  // The comparison stays while the update runs (never silently replaced).
   /** The refusal modal: why the package cannot be written and what to do; closing leaves the band's buttons. */
   let refusalClosed = $state<ReleaseFile | null>(null);
   const refusalOpen = $derived(op.file !== null && (op.state === 'fileRefused' || op.state === 'otherTopology') && refusalClosed !== op.file);
@@ -766,7 +766,7 @@
   let pickForRecovery: { id?: string } | null = null;
   /** The silent node whose ROM write waits for the user's word. */
   let romAsk = $state<string | null>(null);
-  /** 「書き込む」 on one node: the way it answers decides what comes next. */
+  /** 「書込」 on one node: the way it answers decides what comes next. */
   async function writeOne(id?: string, chosen?: { name: string; bytes: Uint8Array }, again = false) {
     if (stopped('recover')) return;
     const r = await (again ? op.retry() : op.writeNode({ id, chosen }));
@@ -842,7 +842,7 @@
   $effect(() => {
     if (op.state !== 'reconnectNeeded') dialogDismissed = false;
   });
-  /** Clock for the %, M27 (dagon-host's clock) and the elapsed time (wall clock), read while they show; the % rises as often. */
+  /** Clock for the %, the reconnect countdown (dagon-host's clock) and the elapsed time (wall clock), read while they show; the % rises as often. */
   let nowMs = $state(0);
   let wallMs = $state(Date.now());
   $effect(() => {
@@ -891,12 +891,12 @@
     // Again on entering 書込 and after each write (the written package was kept).
     if (mode === 'operate' && (op.state === 'ready' || op.state === 'done')) untrack(() => void loadVersions());
   });
-  /** 書き込む while watching: the version (the latest build unless one was chosen), checked against the 構成, to the checked cards. */
+  /** 書込 while watching: the version (the latest build unless one was chosen), checked against the 構成, to the checked cards. */
   async function writeVersion(id = latest ? 'latest' : (kept[0]?.id ?? 'latest')) {
     if (stopped('update')) return;
     const pkg = id === 'latest' ? (latest ? { name: `${latest.label}.dgb`, bytes: latest.bytes } : null) : await cli.keptBytes(id).then((b) => (b ? { name: `${id}.dgb`, bytes: b } : null));
     if (!pkg) {
-      notice = { word: BAND.M58.chip, error: true, detail: BAND.M58.sentence };
+      notice = { word: BAND.noRelease.chip, error: true, detail: BAND.noRelease.sentence };
       return;
     }
     const no = await op.noWrite(pkg.bytes);
@@ -920,7 +920,7 @@
       .slice(-300),
   );
 
-  /** M27: seconds left of the automatic reconnect, in 5 s steps (hubRestarting). */
+  /** Seconds left of the automatic reconnect, in 5 s steps (hubRestarting). */
   const RECONNECT_STEP_S = 5;
   const reconnectLeft = $derived(
     op.reconnectUntil === null || op.state !== 'hubRestarting'
@@ -929,17 +929,17 @@
   );
 
   const hub = $derived(hubOf(op.state));
-  /** The 親機 this page talks to (the one writing reaches). */
+  /** The node connected to the PC this page talks to (the one writing reaches). */
   const hubNode = $derived(op.config?.nodes.find((n) => n.role === 'hub' && op.config?.reach.includes(n.id)));
   const connected = $derived(!['idle', 'lost'].includes(hub));
-  /** DAGON waits for its agent's answer (the lock table's 返事待ち). */
+  /** DAGON waits for its agent's answer (the lock table's DAGONの回答待機). */
   const thinking = $derived(agent.thinking);
   const BUILD_KINDS = new Set(['build', 'sign', 'release', 'gen', 'conform']);
   const running = (kinds: (k: string) => boolean) => cli.jobs.some((j) => (j.state === 'running' || j.state === 'queued') && kinds(j.kind));
   /** The lock table's states now, leftmost first. */
   const lockStates = $derived(
     activeStates({
-      // the page has no demo playback of its own; a simulator is driven by the user like a real hub.
+      // the page has no demo playback of its own; a simulator is driven by the user like a real PC-connected node.
       demo: false,
       updating: ['writing', 'hubRestarting', 'reconnectNeeded'].includes(op.state),
       recovering: op.state === 'recovering',
@@ -1030,12 +1030,12 @@
     chooseFile: 'file', updateResponding: 'file', otherFile: 'file', useLatest: 'update', update: 'update',
     recover: 'recover', recoverAgain: 'recover', connect: 'connect', connectDiscover: 'connect', reselect: 'connect', reconnect: 'connect',
   };
-  /** Why the header's つなぐ / 切断 cannot be used now. */
+  /** Why the header's 接続 / 切断 cannot be used now. */
   const hubLocked = $derived(HUB_LOCKED.has(op.state) ? (HUB_TOGGLE.locked[op.state] ?? null) : null);
   /** The locked toggle was pressed: its reason stands in the band until the state changes. */
   let hubNotice = $state<{ at: string; why: string } | null>(null);
   const hubNoticeShown = $derived(hubNotice && hubNotice.at === op.state ? hubNotice.why : null);
-  /** The header's つなぐ / 切断: 切断 closes the port and keeps its permission. */
+  /** The header's 接続 / 切断: 切断 closes the port and keeps its permission. */
   function toggleHub() {
     if (stopped('connect')) return;
     if (hubLocked) {
@@ -1065,9 +1065,9 @@
       built: latest !== null || kept.length > 0,
     });
     if (dialogOpen) return { ...b, primary: null };
-    // The demo page reads no files: its prepared package is what 書き込む writes.
+    // The demo page reads no files: its prepared package is what 書込 writes.
     if (DEMO_SITE && op.state === 'ready') return { ...b, sentence: SIM.siteWrite };
-    if (op.latestMissing) return { ...b, ...BAND.M58 };
+    if (op.latestMissing) return { ...b, ...BAND.noRelease };
     if (hubNoticeShown) return { ...b, chip: undefined, pair: undefined, sentence: hubNoticeShown };
     return b;
   });
@@ -1146,7 +1146,7 @@
       await navigator.clipboard.writeText(text);
       notice = { word: MENU.copied };
     } catch {
-      notice = { word: MENU.copied.replace('した', 'できない'), error: true };
+      notice = { word: MENU.copied.replace('完了', '失敗'), error: true };
     }
   }
   const selectedNode = $derived(op.selected?.startsWith('node:') ? op.selected.slice(5) : null);
@@ -1206,7 +1206,7 @@
       ],
     },
   ]);
-  /** 前のバージョンに戻す, from the menu or the sheet: asks first, like every change that cannot be undone. */
+  /** 前のバージョンへの復元, from the menu or the sheet: asks first, like every change that cannot be undone. */
   function askRollback(id: string) {
     const n = op.config?.nodes.find((x) => x.id === id);
     const v = previousVersion(op.live[id]?.status, imageRows(n?.mcuId));
@@ -1221,7 +1221,7 @@
     cliPanel = 'link';
   }
 
-  /** 雛形を生成: the modal is open while `skeleton` is set; `id` is serve's job once it has taken it. */
+  /** テンプレート生成: the modal is open while `skeleton` is set; `id` is serve's job once it has taken it. */
   let skeleton = $state<{ id: number | null; failure?: string } | null>(null);
   const skeletonJob = $derived(skeleton?.id == null ? null : (cli.jobs.find((j) => j.id === skeleton?.id) ?? null));
   // 中止: the modal goes with the job.
@@ -1277,7 +1277,7 @@
     if (cause && bad !== 'modal' && !untrack(() => refusalOpen || stopNode !== null)) untrack(() => (notice = { word: cause, error: cause.startsWith('×'), detail }));
   });
 
-  /** 書き込む: the 親機 answered nothing (silentHub) → writing directly over USB; otherwise the next step of writing through DAGON. */
+  /** 書込: the node connected to the PC answered nothing (silentHub) → writing directly over USB; otherwise the next step of writing through DAGON. */
   const writeAction = $derived(
     op.state === 'silentHub' ? null : op.state === 'ready' && !op.latestMissing && band.secondary.some((b) => b.action === 'useLatest') ? 'useLatest' : (band.primary?.action ?? null),
   );
@@ -1290,7 +1290,7 @@
     act(writeAction);
   }
 
-  /** Writing directly over USB to the 親機 whose DAGON answered nothing (the hub first: it reaches the rest). */
+  /** Writing directly over USB to the node connected to the PC whose DAGON answered nothing (the node connected to the PC first: it reaches the rest). */
   let factory = $state<{ node: string; id: number | null } | null>(null);
   const hubId = $derived((hubNode ?? op.config?.nodes.find((n) => n.role === 'hub'))?.id ?? null);
   const factoryNode = $derived(op.config?.nodes.find((n) => n.id === factory?.node) ?? null);
@@ -1307,7 +1307,7 @@
     });
     factory = { node, id: j?.id ?? null };
   }
-  // Pressing 書き込む in the modal is the consent serve's write asks for.
+  // Pressing 書込 in the modal is the consent serve's write asks for.
   const consentAnswered = new Set<string>();
   $effect(() => {
     const j = factoryJob;
@@ -1632,7 +1632,7 @@
   {/if}
   {#if factory && factoryNode}
     <FactoryModal
-      node={{ label: `[${factoryNode.no}] ${factoryNode.name}`, target: `[${factoryNode.no}] ${factoryNode.name}（${factoryNode.role === 'hub' ? NODE.roleHub : NODE.roleNode}）· ${factoryNode.product}` }}
+      node={{ label: `[${factoryNode.no}] ${factoryNode.name}`, target: `[${factoryNode.no}] ${factoryNode.name}（${factoryNode.role === 'hub' ? NODE.roleHub : NODE.roleOther}）· ${factoryNode.product}` }}
       child={factoryNode.role !== 'hub'}
       how={mcuConnection(factoryMcu)}
       canWrite={cli.canFlash(factoryMcu)}
@@ -1996,7 +1996,7 @@
   .why.failed {
     border-color: var(--c-signal);
   }
-  /* Q2: while a dialog is open its own button is the one main action. */
+  /* While a dialog is open its own button is the one main action. */
   .frame.modal :global(footer .primary) {
     visibility: hidden;
   }

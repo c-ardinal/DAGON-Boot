@@ -16,7 +16,7 @@ describe('words that are gone', () => {
   });
 
   test('the write order list is gone, its words and its component', () => {
-    expect(withWord(/書き込みの順(?!番)|OrderList/)).toEqual([]);
+    expect(withWord(/書込の順(?!序)|OrderList/)).toEqual([]);
   });
 
   test('no screen fixes a layout by reading the window width', () => {

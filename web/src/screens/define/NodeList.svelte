@@ -40,7 +40,7 @@
   const full = $derived(d.doc.topo.nodes.length >= maxNodes());
   const used = (key: Part['key']) => d.doc.topo.nodes.filter((n) => ('board' in key ? n.board === key.board : !n.board && n.mcu === key.mcu)).length;
 
-  /** Enter, double-click (and the 置く of the table) place without a pointer: as "置く" always did. */
+  /** Enter, double-click (and the 配置 of the table) place without a pointer: as "配置" always did. */
   function placeNow(p: Part) {
     if ('board' in p.key ? !canPlace(d.doc, p.key.board) : full) return;
     if ('board' in p.key) d.place(p.key.board, p.name);

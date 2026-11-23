@@ -72,7 +72,7 @@ async function stoppedAt(opts: MockOptions, fetchAsset: Fetch = site) {
 }
 
 describe('recovery from the page with dagon-host recover', () => {
-  test('ROM path against the simulated F401 ROM loader (no hub): an erased 7セグ comes back on 1.1.0', async () => {
+  test('ROM path against the simulated F401 ROM loader (no PC-connected node): an erased 7セグ comes back on 1.1.0', async () => {
     const sim = simulator(7)!;
     expect(sim, 'built with the sim feature (npm run wasm:dev)').not.toBeNull();
     expect(sim.hub().wipe(0x42)).toBe(true);
@@ -91,7 +91,7 @@ describe('recovery from the page with dagon-host recover', () => {
     expect(op.recovered).toMatchObject({ path: 'rom', rom: { attempts: 1 } });
     expect(v(op.recovered?.version)).toBe('1.1.0');
     expect(op.progress.seg.stage).toBe('done');
-    expect(op.status).toBe(ANNOUNCE.A16('7セグ', 0));
+    expect(op.status).toBe(ANNOUNCE.recovered('7セグ', 0));
     expect(v(op.live.seg.hello?.activeVersion)).toBe('1.1.0');
     expect(op.live.seg.hello?.trial).toBe(false);
   }, 120_000);
@@ -110,7 +110,7 @@ describe('recovery from the page with dagon-host recover', () => {
     expect(op.progress.seg.stage).toBe('coreBack');
     expect(op.coreWentBack).toBe(true);
     expect(op.wentBack).toBe(false);
-    expect(op.status).toBe(ANNOUNCE.A13core('7セグ'));
+    expect(op.status).toBe(ANNOUNCE.coreBack('7セグ'));
     // What the node says afterwards, read as a new connection would.
     await op.disconnect();
     const after = session(sim.transport, sim.clock);
@@ -164,7 +164,7 @@ describe('recovery from the page with dagon-host recover', () => {
     // Both match: nothing stands to be written, and the same app version stays.
     expect(await op.noWrite(both)).toMatchObject({ same: op.fileVersions.seg });
     // The app is what the node runs: it is not written, and the card says only what was.
-    expect(said).toEqual(['→ ブートローダ 1.1.0']);
+    expect(said).toEqual(['→ ブートローダ1.1.0']);
     expect(op.progress.seg).toMatchObject({ stage: 'done', percent: 100 });
     expect(op.percentOf('seg')).toBe(100);
     expect(await op.noWrite(both)).toMatchObject({ coreToo: true });
@@ -201,7 +201,7 @@ describe('recovery from the page with dagon-host recover', () => {
   }, 120_000);
 
   test('the words say the boot loader was the same only when it was compared', async () => {
-    expect(WRITE.alreadyOn('1.1.0', true).detail).toContain('ブートローダも同じ');
+    expect(WRITE.alreadyOn('1.1.0', true).detail).toContain('ブートローダも同一');
     expect(WRITE.alreadyOn('1.1.0', false).detail).not.toContain('ブートローダ');
     const sim = simulator(13)!;
     const op = session(sim.transport, sim.clock);
@@ -261,11 +261,11 @@ describe('recovery from the page with dagon-host recover', () => {
     await op.update();
     expect(op.state).toBe('done');
     expect(op.finished).toMatchObject({ kind: 'updated', wrote: 0, same: 3 });
-    expect(bandOf(op.state, op.ctx, { finish: op.finished }).sentence).toBe(BAND.M66none.sentence);
+    expect(bandOf(op.state, op.ctx, { finish: op.finished }).sentence).toBe(BAND.doneNone.sentence);
     expect(op.progress.seg).toMatchObject({ stage: 'unchanged', percent: 100 });
-    expect(NODE.unchanged).toContain('書き込み');
+    expect(NODE.unchanged).toContain('書込');
     // One written, the others as they were: the sentence says which is which.
-    expect(bandOf('done', op.ctx, { finish: { kind: 'updated', left: 0, wrote: 1, same: 2 } }).sentence).toBe(BAND_FOR.M66part(1, 2).sentence);
+    expect(bandOf('done', op.ctx, { finish: { kind: 'updated', left: 0, wrote: 1, same: 2 } }).sentence).toBe(BAND_FOR.donePart(1, 2).sentence);
   }, 240_000);
 
   test('a slot waiting for the next boot is not called unchanged', () => {
@@ -294,14 +294,14 @@ describe('recovery from the page with dagon-host recover', () => {
     expect(await op.noWrite(both)).toBe(null);
   }, 120_000);
 
-  test('the hub chosen again after a boot core took over, with an app that needs no writing, is done', () => {
+  test('the node connected to the PC chosen again after a boot core took over, with an app that needs no writing, is done', () => {
     const core = 0x01010000;
     expect(hubBack({ outcome: 'notOnTrial', version: 0x01000000 } as never, undefined, core, core, true)).toBe('done');
     expect(hubBack({ outcome: 'notOnTrial', version: 0x01000000 } as never, undefined, core, core, false)).toBe('unwritten');
     expect(hubBack({ outcome: 'notOnTrial', version: 0x01000000 } as never, undefined, core, 0x01000000, true)).toBe('coreBack');
   });
 
-  test('the hub chosen again by hand after its boot core write: what it says decides the words', () => {
+  test('the node connected to the PC chosen again by hand after its boot core write: what it says decides the words', () => {
     const on = (version: number) => ({ outcome: 'notOnTrial', version }) as never;
     // The app was not sent: the boot core is what stopped the write.
     expect(hubBack(on(5), undefined, 9, 5)).toBe('coreBack');
@@ -361,11 +361,11 @@ describe('recovery from the page with dagon-host recover', () => {
     expect(op.recoverTarget?.id).toBe('seg');
 
     await op.writeNode();
-    // The node refused again: its reason stays (× 書き込めない), not a generic failure nor 応答なし.
+    // The node refused again: its reason stays (× 書込不可), not a generic failure nor 応答なし.
     expect(op.state).toBe('recoverFailed');
     expect(op.progress.seg).toMatchObject({ stage: 'refused', reason: 'E_FLASH' });
-    expect(NODE.refused[op.progress.seg.reason!]).toBe('× 書き込み失敗');
-    expect(bandOf(op.state, op.ctx).sentence).toBe(BAND.M33.sentence);
+    expect(NODE.refused[op.progress.seg.reason!]).toBe('× 書込失敗');
+    expect(bandOf(op.state, op.ctx).sentence).toBe(BAND.recoverFailed.sentence);
     expect(op.recoverTarget?.id).toBe('seg');
 
     t.setRefuse('i2c:66');
@@ -410,7 +410,7 @@ describe('recovery from the page with dagon-host recover', () => {
     expect([op.state, op.progress.seg.stage]).toEqual(['recoverFailed', 'cannotFix']);
   }, 120_000);
 
-  test('back to the previous version after a finished update (UC-O10)', async () => {
+  test('back to the previous version after a finished update', async () => {
     const t = new MockTransport();
     const op = session(t, fastClock());
     await op.connect();
@@ -419,7 +419,7 @@ describe('recovery from the page with dagon-host recover', () => {
     expect(op.state).toBe('done');
     await op.rollback('seg');
     expect(op.state).toBe('done');
-    expect(op.status).toBe(ANNOUNCE.A15('7セグ', '1.0.0'));
+    expect(op.status).toBe(ANNOUNCE.rolledBack('7セグ', '1.0.0'));
     expect([v(t.helloOf('i2c:66').activeVersion), t.helloOf('i2c:66').trial]).toEqual(['1.0.0', false]);
   }, 120_000);
 
@@ -438,18 +438,18 @@ describe('recovery from the page with dagon-host recover', () => {
     expect(op.state).toBe('recoverFailed');
     expect(op.progress.seg).toMatchObject({ stage: 'refused', reason: 'topology' });
     expect(NODE.refused.topology).toBe('× 構成不一致');
-    expect(op.status).toBe(ANNOUNCE.A10topology);
+    expect(op.status).toBe(ANNOUNCE.fileTopology);
   }, 120_000);
 
-  test('recovery with a published file that is not a release says 形式違い', async () => {
+  test('recovery with a published file that is not a release says 形式不一致', async () => {
     const t = new MockTransport({ quiet: ['i2c:66'] });
     const op = session(t, fastClock(), async (p) => (p === LATEST_RELEASE ? new TextEncoder().encode('not a release') : null));
     await silentNode(op);
     await op.writeNode();
     expect(op.state).toBe('recoverFailed');
     expect(op.progress.seg).toMatchObject({ stage: 'refused', reason: 'format' });
-    expect(NODE.refused.format).toBe('× 形式違い');
-    expect(op.status).toBe(ANNOUNCE.A10format);
+    expect(NODE.refused.format).toBe('× 形式不一致');
+    expect(op.status).toBe(ANNOUNCE.fileFormat);
   }, 120_000);
 
   test('a file chosen for recovery is refused with its own words: source, configuration, not a release', async () => {
@@ -459,15 +459,15 @@ describe('recovery from the page with dagon-host recover', () => {
     const bad = SITE[LATEST_RELEASE].slice();
     bad[bad.length - 1] ^= 1;
     await op.writeNode({ chosen: { name: 'tampered.dgb', bytes: bad } });
-    expect([op.state, op.alert]).toEqual(['nodesSilent', ANNOUNCE.A10source]);
+    expect([op.state, op.alert]).toEqual(['nodesSilent', ANNOUNCE.fileSource]);
     await op.writeNode({ chosen: { name: 'notes.txt', bytes: new TextEncoder().encode('hello') } });
-    expect([op.state, op.alert]).toEqual(['nodesSilent', ANNOUNCE.A10format]);
+    expect([op.state, op.alert]).toEqual(['nodesSilent', ANNOUNCE.fileFormat]);
     op.config = { ...SAMPLE_CONFIG, yaml: SIM_PAIR_YAML };
     await op.writeNode({ chosen: { name: 'sample-1.1.0.dgb', bytes: SITE[LATEST_RELEASE] } });
-    expect([op.state, op.alert]).toEqual(['nodesSilent', ANNOUNCE.A10topology]);
+    expect([op.state, op.alert]).toEqual(['nodesSilent', ANNOUNCE.fileTopology]);
   }, 120_000);
 
-  test('a rollback that gets no answer shows 応答なし; "もう一度直す" rolls back again, it does not install the release', async () => {
+  test('a rollback that gets no answer shows 応答なし; "再試行" rolls back again, it does not install the release', async () => {
     const t = new MockTransport();
     const op = session(t, fastClock());
     await op.connect();
@@ -482,17 +482,17 @@ describe('recovery from the page with dagon-host recover', () => {
     t.setQuiet('i2c:66', false);
     await op.retry();
     expect(op.state).toBe('done');
-    expect(op.status).toBe(ANNOUNCE.A15('7セグ', '1.0.0'));
+    expect(op.status).toBe(ANNOUNCE.rolledBack('7セグ', '1.0.0'));
     expect([v(t.helloOf('i2c:66').activeVersion), t.helloOf('i2c:66').trial]).toEqual(['1.0.0', false]);
   }, 120_000);
 
-  test('recovering the hub: not back in 45 s, chosen again (reconnectNeeded), then confirmed on the release', async () => {
+  test('recovering the node connected to the PC: not back in 45 s, chosen again (reconnectNeeded), then confirmed on the release', async () => {
     const { t, op } = await stoppedAt({ refuse: { hub: 0x07 } });
     expect([op.failed, op.recoverTarget?.id]).toEqual(['hub', 'hub']);
     t.setRefuse('hub');
     t.setHubAway(Infinity);
     await op.writeNode();
-    expect([op.state, op.alert]).toEqual(['reconnectNeeded', ANNOUNCE.A21timeout]);
+    expect([op.state, op.alert]).toEqual(['reconnectNeeded', ANNOUNCE.reconnectTimeout]);
     expect(t.helloOf('hub').trial).toBe(true);
 
     t.replug();
@@ -501,7 +501,7 @@ describe('recovery from the page with dagon-host recover', () => {
     expect([v(t.helloOf('hub').activeVersion), t.helloOf('hub').trial]).toEqual(['1.1.0', false]);
   }, 120_000);
 
-  test('rolling the hub back: not back in 45 s, chosen again (reconnectNeeded), then confirmed on the previous version', async () => {
+  test('rolling the node connected to the PC back: not back in 45 s, chosen again (reconnectNeeded), then confirmed on the previous version', async () => {
     const t = new MockTransport();
     const op = session(t, fastClock());
     await op.connect();
@@ -518,7 +518,7 @@ describe('recovery from the page with dagon-host recover', () => {
     expect([v(t.helloOf('hub').activeVersion), t.helloOf('hub').trial]).toEqual(['1.0.0', false]);
   }, 120_000);
 
-  test('"最新のリリースを使う" takes the project latest release through serve; without one the band says M58', async () => {
+  test('"最新リリースの使用" takes the project latest release through serve; without one the band says so', async () => {
     const t = new MockTransport();
     const op = session(t, fastClock());
     await op.connect();
@@ -529,7 +529,7 @@ describe('recovery from the page with dagon-host recover', () => {
     const op2 = session(t2, fastClock(), nothing);
     await op2.connect();
     expect(await op2.useLatest()).toBe(false);
-    expect([op2.state, op2.alert, op2.latestMissing]).toEqual(['ready', ANNOUNCE.A22latest, true]);
+    expect([op2.state, op2.alert, op2.latestMissing]).toEqual(['ready', ANNOUNCE.noRelease, true]);
 
     const bad = SITE[LATEST_RELEASE].slice();
     bad[bad.length - 1] ^= 1;

@@ -1,5 +1,5 @@
 # Simulator pair: the simulated RP2040 hub and an F401 on I2C. Used by
-# `dagon sim run` and the dagon-host tests.
+# `dagon sim` and the dagon-host tests.
 dagon: 2
 name: sim-pair
 nodes:

@@ -7,7 +7,9 @@ use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
-use dagon_catalog::{conflicts, design_ports_table, events_md, machines, ports_md, Lang, REGISTRY};
+use dagon_catalog::{
+    conflicts, design_ports_table, events_md, gaps_md, machines, ports_md, InTree, Lang, REGISTRY,
+};
 use dagon_events::{state_machine, Layer, PORTS};
 
 const BLESS: &str = "`DAGON_BLESS=1 cargo test -p dagon-catalog --test docs`";
@@ -115,6 +117,83 @@ fn the_design_port_table_is_generated() {
     }
 }
 
+/// The limitations page lists what the tree lacks of the catalog, between
+/// its markers; the rest of the page is written by hand.
+#[test]
+fn the_limitations_gap_list_is_generated() {
+    const BEGIN: &str =
+        "<!-- generated from dagon_events::PORTS: DAGON_BLESS=1 cargo test -p dagon-catalog --test docs -->\n";
+    const END: &str = "<!-- end of generated list -->\n";
+    let (ja, _) = with_japanese(|lang| gaps_md(PORTS, lang));
+    for (page, list) in [
+        ("site/src/content/docs/explanation/limitations.md", ja),
+        (
+            "site/src/content/docs/en/explanation/limitations.md",
+            gaps_md(PORTS, Lang::En),
+        ),
+    ] {
+        let text = read(page);
+        let a = text
+            .find(BEGIN)
+            .unwrap_or_else(|| panic!("{page}: no gap list marker {BEGIN}"))
+            + BEGIN.len();
+        let b = a + text[a..].find(END).expect("the gap list's end marker");
+        let mut whole = text.clone();
+        whole.replace_range(a..b, &list);
+        check(page, &whole);
+    }
+}
+
+/// What the catalog says the tree has, named as code so the build checks
+/// it: a port's path as a trait bound (this file stops building when the
+/// trait is gone, private or no longer a trait), a part's path by `use`.
+/// Evaluates to the paths as written.
+macro_rules! named_in_code {
+    (ports: $($t:path),* ; parts: $($($p:ident)::+),* $(,)?) => {{
+        $({
+            fn _is_a_public_trait<T: ?Sized + $t>() {}
+        })*
+        $({
+            #[allow(unused_imports)]
+            use $($p)::+ as _;
+        })*
+        [$(stringify!($t)),*, $(stringify!($($p)::+)),*]
+    }};
+}
+
+/// The catalog's `Has` paths are exactly those the build checks above, so
+/// a path added to the catalog without its check, or one left here after
+/// the catalog drops it, fails.
+#[test]
+fn what_the_catalog_says_the_tree_has_is_checked_by_the_build() {
+    let checked: BTreeSet<String> = named_in_code!(
+        ports:
+            dagon_port::Link,
+            dagon_host::Transport,
+            dagon_format::SigVerifier,
+            dagon_port::Watchdog,
+            dagon_agent::SlotStore,
+            dagon_events::Extension,
+            dagon_events::BoardBringUp,
+            dagon_port::NodeLink;
+        parts:
+            dagon_agent::image,
+            dagon_agent::session,
+            dagon_events::Composed,
+    )
+    .iter()
+    .map(|s| s.replace(' ', ""))
+    .collect();
+    let mut catalog = BTreeSet::new();
+    for p in PORTS {
+        if let InTree::Has(paths) = p.in_tree {
+            assert!(!paths.is_empty(), "{}", p.id);
+            catalog.extend(paths.iter().map(|s| s.to_string()));
+        }
+    }
+    assert_eq!(catalog, checked);
+}
+
 /// A new or changed description fails until it is translated, and the
 /// table holds nothing the catalogs no longer say.
 #[test]
@@ -123,6 +202,7 @@ fn the_japanese_table_is_exactly_what_the_catalogs_say() {
         events_md(&machines(), lang);
         ports_md(PORTS, lang);
         design_ports_table(PORTS, lang);
+        gaps_md(PORTS, lang);
     });
     let have: BTreeSet<String> = ja_table().into_keys().collect();
     let missing: Vec<_> = asked.difference(&have).collect();
@@ -381,7 +461,7 @@ fn conflicts_across_machines_of_a_layer_are_named() {
 fn a_machine_renders_every_transition() {
     let ja = events_md(&[one::CATALOG], Lang::Ja(&|en| format!("訳 {en}")));
     assert!(ja.contains(
-        "## レイヤー`boot`\n\n### 状態機械`one`\n\n訳 First.\n\n状態: `A` (最初の状態), `B`。"
+        "## レイヤー`boot`\n\n### 状態機械`one`\n\n訳 First.\n\n状態: `A` (初期状態), `B`。"
     ));
     assert!(ja.contains("| action | 訳 Went. |"));
     let md = events_md(&[one::CATALOG], Lang::En);

@@ -193,6 +193,40 @@ class LastRelease(unittest.TestCase):
             bc.ROOT = repo
             self.assertEqual(bc.last_release("x", "9.0.0")[1], "x-v0.2.0")
             self.assertEqual(bc.last_release("x", "9.0.0", at=middle)[1], "x-v0.1.0")
+            # The tag being released, on the checked commit, is not its own previous release.
+            self.assertEqual(bc.last_release("x", "0.2.0")[1], "x-v0.1.0")
+        finally:
+            bc.ROOT = saved
+            shutil.rmtree(repo, ignore_errors=True)
+
+    def test_a_release_tagged_only_on_another_branch_still_counts(self):
+        # A release commit tagged on main, and the work branch it was cut from going on with a feature.
+        repo = pathlib.Path(tempfile.mkdtemp(prefix="dagon-bump-"))
+        def git(*a):
+            return subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t",
+                                   "-c", "commit.gpgsign=false", *a], cwd=repo, check=True,
+                                  capture_output=True, text=True).stdout.strip()
+        saved = bc.ROOT
+        try:
+            git("init", "-q", "-b", "work")
+            (repo / "x").mkdir()
+            (repo / "x" / "a").write_text("0")
+            git("add", ".")
+            git("commit", "-q", "-m", "feat(x): first")
+            git("checkout", "-q", "-b", "main")
+            git("commit", "-q", "--allow-empty", "-m", "chore: release x 0.1.0")
+            git("tag", "x-v0.1.0")
+            git("checkout", "-q", "work")
+            (repo / "x" / "a").write_text("1")
+            git("commit", "-q", "-am", "feat(x)!: changed")
+            bc.ROOT = repo
+            prev, tag = bc.last_release("x", "0.1.0")
+            self.assertEqual(tag, "x-v0.1.0")
+            comps = [{"name": "x", "paths": ["x"]}]
+            kinds = [k for k, _ in bc.commits_since(tag, "x", comps, ["x"])]
+            self.assertEqual(kinds, ["breaking"])
+            self.assertTrue(bc.check("x", "0.1.0", prev, kinds), "a released version with changes since must rise")
+            self.assertEqual(bc.check("x", "0.2.0", prev, kinds), [])
         finally:
             bc.ROOT = saved
             shutil.rmtree(repo, ignore_errors=True)

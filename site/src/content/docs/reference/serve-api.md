@@ -5,55 +5,55 @@ editUrl: false
 ---
 
 :::note
-`crates/dagon-cli/src/serve/api.rs`から生成しています。直接編集せず、`python site/scripts/gen.py`でもう一度生成してください。
+`crates/dagon-cli/src/serve/api.rs`から生成しています。直接編集せず、`python site/scripts/gen.py`で再度生成してください。
 :::
 
-どのルートも、`dagon serve`が表示するループバックのアドレスの下にあります。
+どのルートも`dagon serve`が表示するループバックのアドレスの下にあります。
 `/v1/`へのリクエストには、serveが表示したアドレスの合言葉を
-`Authorization: Bearer <passphrase>`で付けます（無いと401）。HostとOriginの確認も通ります（通らないと403）。
+`Authorization: Bearer <passphrase>`で付与します（不在の場合は401）。HostとOriginの確認も実施します（不合格の場合は403）。
 
 | メソッド | パス | 内容 |
 |---|---|---|
-| `GET` | `/v1/hello` | バージョン、作業領域、できること。鍵があるかどうか（鍵そのものは含みません）。 |
-| `GET` | `/v1/agent` | エージェントとそのつなぎ方（それぞれここで使えるか。キー、パス、コマンドは含みません）、同意、つなぐと送るもの。 |
-| `POST` | `/v1/agent/link` | そのエージェントにそのつなぎ方で送ることへの利用者の同意を記録します。定義されたエージェントとつなぎ方へのはっきりした同意でなければ、何も記録しません。 |
-| `DELETE` | `/v1/agent/link` | 同意を取り消します（無いときも完了します）。 |
-| `PUT` | `/v1/agent/key/{agent}/{way}` | つなぎ方のキーをOSの資格情報ストアに登録します。答えはGET /v1/agentの本文です（キーが登録されているかどうかで、キーそのものは含みません）。 |
-| `DELETE` | `/v1/agent/key/{agent}/{way}` | つなぎ方のキーを消します（登録が無いときも成功します）。 |
-| `POST` | `/v1/agent/ask` | DAGONへの1つの質問。このリクエストで答えます。 |
-| `GET` | `/v1/definitions` | 使っている定義を`Registry::to_json`の形で。ページのdagon-wasmのためです（`load_definitions`）。 |
-| `GET` | `/v1/topology` | ディスクにあるとおりの、プロジェクトの構成のYAML（最初の保存の前は404）。 |
-| `PUT` | `/v1/topology` | `dagon topo check`と同じ確認の後で、構成のYAMLを書きます。 |
-| `GET` | `/v1/nodes/{id}/build` | dagon.tomlにあるノードの`[build.<id>]`テーブル（無ければ404）。 |
-| `PUT` | `/v1/nodes/{id}/build` | dagon.tomlの`[build.<id>]`を置き換えます。ファイルのほかの部分はそのままです。 |
-| `POST` | `/v1/build` | `nodes`（省くとすべて）のアプリケーションを作業としてビルドします。答えは、ビルドした各スロットとその大きさを挙げます。 |
-| `POST` | `/v1/sign` | `nodes`のビルド済みのアプリケーションに、CLIの鍵で署名します。 |
-| `POST` | `/v1/release` | すべての署名付きイメージからリリースを作ります。各イメージのバージョンは、ノードのcrateが与えたものです（`version`を与えるなら、すべてのイメージのバージョンと同じでなければなりません）。 |
-| `GET` | `/v1/release/latest` | プロジェクトのout/releaseでいちばん新しい.dgb。 |
-| `GET` | `/v1/release/{id}` | プロジェクトのout/releaseにあるリリースを名前で返します。プロジェクトの鍵で検証が通ったときだけです。 |
-| `GET` | `/v1/kept` | プロジェクトに残してあるパッケージ（out/deploy）。新しいバージョンから順に、各ノードに与えるバージョンとともに返します。 |
-| `GET` | `/v1/kept/{id}` | 残してあるパッケージのバイト列。検証が通ったときだけ返します。 |
-| `POST` | `/v1/kept` | 書き込もうとしているパッケージを残します。プロジェクトの鍵で検証が通ったときだけです。そのidを答えます。 |
-| `GET` | `/v1/bootcore/{node}` | ノードの署名付きのブートローダ（ROMの経路）: [provision.&lt;node&gt;] bootcore、無ければ &lt;provision_dir&gt;/&lt;node&gt;/bootcore.img。 |
-| `GET` | `/v1/stage0/{node}` | stage0のあるマイコンをROMの経路ですべて書き直すときのstage0のバイト列。provisionが書いたもので、&lt;provision_dir&gt;/&lt;node&gt;/stage0.binです。stage0に署名はありません。ホストは書き込む前に、マイコンのstage0の領域に収まることを確かめます。 |
-| `GET` | `/v1/layout` | 呼び名とエディタの位置（最初の保存の前は空の配置）。 |
-| `PUT` | `/v1/layout` | この形式の配置ファイル。全体をまとめて書きます。 |
-| `POST` | `/v1/conform` | ページがポートを渡した後で、親機を通して`node`に12の適合試験を行います。 |
-| `GET` | `/v1/conform/{node}` | ノードの最後の適合試験の結果（最初の実行の前は404）。 |
-| `POST` | `/v1/ai/topology` | 作業。モデルからの質問はページに届きます。 |
-| `POST` | `/v1/ai/port` | DAGONをボードに移植する作業: 501を返します。このdagonに移植の作業はありません。 |
-| `GET` | `/v1/jobs/{id}` | 作業の状態、段階、進み具合、ログの行、質問、結果。 |
-| `POST` | `/v1/jobs/{id}/answer` | 作業の開いている質問への`{answer}`（無ければ409）。 |
-| `POST` | `/v1/jobs/{id}/cancel` | 実行中の作業を止めます。 |
-| `POST` | `/v1/device` | `{state: "released"}`: ページが親機のポートを閉じたので、それを待っているCLIの作業が使えます。 |
-| `GET` | `/v1/project` | 開いているプロジェクトと、最近のもの。 |
+| `GET` | `/v1/hello` | バージョン、作業領域、可能な操作。キーの有無（キー自体は対象外）。 |
+| `GET` | `/v1/agent` | エージェントとその接続方法（それぞれの使用可否。キー、パス、コマンドは対象外）、同意、接続時の送信内容。 |
+| `POST` | `/v1/agent/link` | そのエージェントにその接続方法で送信することへの利用者の同意を記録します。定義済のエージェントと接続方法への明示的な同意以外は、何も記録しません。 |
+| `DELETE` | `/v1/agent/link` | 同意を取消します（同意が不在の場合も完了します）。 |
+| `PUT` | `/v1/agent/key/{agent}/{way}` | 接続方法のキーをOSの資格情報ストアに登録します。応答はGET /v1/agentの本文です（キーの登録の有無で、キー自体は対象外です）。 |
+| `DELETE` | `/v1/agent/key/{agent}/{way}` | 接続方法のキーを削除します（未登録の場合も成功します）。 |
+| `POST` | `/v1/agent/ask` | DAGONへの1つの質問。このリクエストで応答します。 |
+| `GET` | `/v1/definitions` | 使用中の定義を`Registry::to_json`の形式で。ページのdagon-wasm用です（`load_definitions`）。 |
+| `GET` | `/v1/topology` | ディスク上の、プロジェクトの構成のYAML（初回保存前は404）。 |
+| `PUT` | `/v1/topology` | `dagon topo check`と同一の確認の後に、構成のYAMLを保存します。 |
+| `GET` | `/v1/nodes/{id}/build` | dagon.tomlにあるノードの`[build.<id>]`テーブル（不在の場合は404）。 |
+| `PUT` | `/v1/nodes/{id}/build` | dagon.tomlの`[build.<id>]`を置換します。ファイルの他の部分は変更しません。 |
+| `POST` | `/v1/build` | `nodes`（省略時は全部）のアプリケーションを作業としてビルドします。応答にはビルドした各スロットとそのサイズを列挙します。 |
+| `POST` | `/v1/sign` | `nodes`のビルド済のアプリケーションに、CLIのキーで署名します。 |
+| `POST` | `/v1/release` | 全部の署名付きイメージからリリースを作成します。各イメージのバージョンは、ノードのcrateが付与したバージョンです（`version`を指定する場合、全イメージのバージョンと一致する必要があります）。 |
+| `GET` | `/v1/release/latest` | プロジェクトのout/releaseで最新の.dgb。 |
+| `GET` | `/v1/release/{id}` | プロジェクトのout/releaseにあるリリースを名称で返却します。プロジェクトのキーで検証に合格した場合だけです。 |
+| `GET` | `/v1/kept` | プロジェクトに保存済のパッケージ（out/deploy）。最新バージョンから順番に、各ノードに付与するバージョンと同時に返却します。 |
+| `GET` | `/v1/kept/{id}` | 保存済のパッケージのバイト列。検証に合格した場合だけ返却します。 |
+| `POST` | `/v1/kept` | これから書込するパッケージを保存します。プロジェクトのキーで検証に合格した場合だけです。そのidを応答します。 |
+| `GET` | `/v1/bootcore/{node}` | ノードの署名付きのブートローダ（ROMの経路）: [provision.&lt;node&gt;] bootcore、不在の場合は&lt;provision_dir&gt;/&lt;node&gt;/bootcore.img。 |
+| `GET` | `/v1/stage0/{node}` | stage0のあるマイコンをROMの経路で全体再書込する際のstage0のバイト列。provisionが出力したもので、&lt;provision_dir&gt;/&lt;node&gt;/stage0.binです。stage0に署名はありません。ホストは書込前に、マイコンのstage0の領域に収容可能かを確認します。 |
+| `GET` | `/v1/layout` | 表示名とエディタの位置（初回保存前は未設定の配置）。 |
+| `PUT` | `/v1/layout` | この形式の配置ファイル。全体を一括で記述します。 |
+| `POST` | `/v1/conform` | ページによるポートの受渡後に、PC接続ノード経由で`node`に12の適合試験を実施します。 |
+| `GET` | `/v1/conform/{node}` | ノードの直近の適合試験結果（初回実行前は404）。 |
+| `POST` | `/v1/ai/topology` | 作業。モデルからの質問はページへ送信します。 |
+| `POST` | `/v1/ai/port` | DAGONのボード移植: 応答は501です。 |
+| `GET` | `/v1/jobs/{id}` | 作業の状態、段階、進捗、ログの行、質問、結果。 |
+| `POST` | `/v1/jobs/{id}/answer` | 作業の未回答の質問への`{answer}`（質問が不在の場合は409）。 |
+| `POST` | `/v1/jobs/{id}/cancel` | 実行中の作業を停止します。 |
+| `POST` | `/v1/device` | `{state: "released"}`: ページがPC接続ノードのポートをクローズしたので、そのポートを待機中のCLIの作業が使用可能です。 |
+| `GET` | `/v1/project` | オープン中のプロジェクトと、最近のプロジェクト。 |
 | `POST` | `/v1/project/open` | dagon.tomlのあるフォルダ。 |
-| `POST` | `/v1/project/new` | そこで`dagon new`を実行します（from_sampleが無ければ空の構成）。鍵の組が無ければ~/.dagon/keys/&lt;name&gt; に作ります。 |
-| `POST` | `/v1/project/init` | 構成はあるがdagon.tomlが無いフォルダに、そのYAML（`yaml`、またはフォルダの唯一のもの）のためのdagon.tomlを作ります。鍵の組が無ければ~/.dagon/keys/&lt;folder&gt; に作ります。その後で開きます。 |
-| `GET` | `/v1/fs` | ホームの下のフォルダの中のフォルダ（既定はホーム）。dagon.tomlがあるものに印を付けます。鍵のフォルダは除きます。 |
-| `POST` | `/v1/gen` | 開いているプロジェクトで`dagon gen`を実行します。dagon.tomlはファイルのロックの下で編集します。 |
-| `POST` | `/v1/flash` | `device`は、書き込みの手段が報告する候補の1つを示します。候補が複数あり指定が無いと、作業は候補を示して終わり（written: false）、何も書きません。 |
-| `POST` | `/v1/doctor` | 定義に基づく、プロジェクトのマイコンに要るツール。ここではだれもコマンドを確認できないので、プロジェクト自身が定義する確認は、ターミナルの`dagon doctor`で行うものとして報告します。 |
+| `POST` | `/v1/project/new` | その位置で`dagon new`を実行します（from_sampleが不在ならノードなしの構成）。キーの組が不在なら~/.dagon/keys/&lt;name&gt;に作成します。 |
+| `POST` | `/v1/project/init` | 構成はあるがdagon.tomlが不在のフォルダに、そのYAML（`yaml`、またはフォルダ内の唯一のYAML）用のdagon.tomlを作成します。キーの組が不在なら~/.dagon/keys/&lt;folder&gt;に作成します。その後にオープンします。 |
+| `GET` | `/v1/fs` | ホーム配下のフォルダ内のフォルダ（既定はホーム）。dagon.tomlがあるフォルダにマークを付与します。キーのフォルダは除外します。 |
+| `POST` | `/v1/gen` | オープン中のプロジェクトで`dagon gen`を実行します。dagon.tomlはファイルのロック下で編集します。 |
+| `POST` | `/v1/flash` | `device`は、書込の手段が報告する候補の1つを指定します。候補が複数で指定が不在の場合、作業は候補を提示して終了し（written: false）、何も書込しません。 |
+| `POST` | `/v1/doctor` | 定義に準拠した、プロジェクトのマイコンに必要なツール。ここではコマンドの確認が不可能なので、プロジェクト自身が定義する確認は、ターミナルの`dagon doctor`で実施する確認として報告します。 |
 
-`/v1/events`はWebSocketです。ページが最初のメッセージで合言葉を送ると、serveのイベント
-（作業の進み具合、ログ、結果、質問、親機の受け渡し）を受け取ります。
+`/v1/events`はWebSocketです。ページが最初のメッセージで合言葉を送信すると、serveのイベント
+（作業の進捗、ログ、結果、質問、PC接続ノードの受渡）を受信します。

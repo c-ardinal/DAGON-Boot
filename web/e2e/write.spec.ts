@@ -9,12 +9,12 @@ const toWrite = async (page: Page, query: string, size = { width: 1920, height: 
   await openSample(page, query);
   await page.getByRole('radio', { name: '書込' }).click();
   await settled(page);
-  await page.locator('header').getByRole('button', { name: '接続する' }).click();
+  await page.locator('header').getByRole('button', { name: '接続' }).click();
   await page.locator('.st-alive').first().waitFor({ timeout: 60_000 });
   await expect(page.locator('.split .main')).toHaveAttribute('aria-disabled', 'false', { timeout: 30_000 });
   await expect(page.locator('.split .caret')).toHaveAttribute('aria-disabled', 'false', { timeout: 30_000 });
 };
-/** A card's check, by its order in the sample: hub, seg, watch. */
+/** A card's check, by its order in the sample: PC-connected node, seg, watch. */
 const check = (page: Page, n: 'hub' | 'seg' | 'watch') => page.locator('.check').nth(['hub', 'seg', 'watch'].indexOf(n));
 const sentence = (page: Page) => page.locator('#band .sentence').innerText();
 const finished = (page: Page) => expect(page.locator('.split .main')).toHaveAttribute('aria-disabled', 'false', { timeout: 240_000 });
@@ -24,10 +24,10 @@ test('the split button writes the checked nodes, again after done, and says when
   await toWrite(page, 'sim');
   const before = await heights(page);
   // With a build there to write, the band asks for the press, not for a file.
-  await expect(page.locator('#band .sentence')).toContainText('『書き込む』を押して');
+  await expect(page.locator('#band .sentence')).toContainText('『書込』をクリック');
 
   await check(page, 'watch').click();
-  // Every height any card has while the write runs, the 親機's reboot included.
+  // Every height any card has while the write runs, the PC-connected node's reboot included.
   await page.evaluate(() => {
     const seen = new Set<string>();
     (window as unknown as { seen: Set<string> }).seen = seen;
@@ -51,21 +51,21 @@ test('the split button writes the checked nodes, again after done, and says when
   // Every checked node is on it already: said, not silent.
   await page.locator('.toast').waitFor({ state: 'detached', timeout: 10_000 });
   await page.locator('.split .main').click();
-  await expect(page.locator('.toast')).toContainText('すべて');
+  await expect(page.locator('.toast')).toContainText('全ノード');
   await expect(page.locator('.node.st-busy')).toHaveCount(0);
 
   // The dropdown part does the same, and the focus comes back to the button.
   await page.locator('.toast').waitFor({ state: 'detached', timeout: 10_000 });
   await page.locator('.split .caret').click();
   await page.locator('.split .list .row').first().click();
-  await expect(page.locator('.toast')).toContainText('すべて');
+  await expect(page.locator('.toast')).toContainText('全ノード');
   await expect(page.locator('.split .main')).toBeFocused();
 
   // Nothing checked: said too.
   await page.locator('.toast').waitFor({ state: 'detached', timeout: 10_000 });
   for (const n of ['hub', 'seg'] as const) await check(page, n).click();
   await page.locator('.split .main').click();
-  await expect(page.locator('.toast')).toContainText('ノードを選ぶ');
+  await expect(page.locator('.toast')).toContainText('ノード未選択');
 
   // Another node checked: the press after done writes it, from the dropdown part.
   await check(page, 'watch').click();
@@ -93,7 +93,7 @@ test('a node whose boot loader alone differs is written, and its card says the b
 
   // The app is on 1.1.0 already: only the boot loader stands to be written.
   await page.locator('.split .main').click();
-  await expect(page.locator('.node', { hasText: '→ ブートローダ 1.1.0' })).toBeVisible({ timeout: 60_000 });
+  await expect(page.locator('.node', { hasText: '→ ブートローダ1.1.0' })).toBeVisible({ timeout: 60_000 });
   await finished(page);
   // The app was what the node runs: it was not written.
   await expect(page.locator('.node', { hasText: '→ 1.1.0' })).toHaveCount(0);
@@ -101,7 +101,7 @@ test('a node whose boot loader alone differs is written, and its card says the b
 
   // Now both are the same: said, nothing written.
   await page.locator('.split .main').click();
-  await expect(page.locator('.toast')).toContainText('すべて 1.1.0');
+  await expect(page.locator('.toast')).toContainText('全ノード1.1.0');
   await expect(page.locator('.node.st-busy')).toHaveCount(0);
 });
 
@@ -112,14 +112,14 @@ test('a package the nodes already run, chosen as a file: the band and the toast 
   await page.locator('.split .main').click();
   await expect(page.locator('.node.st-busy').first()).toBeVisible({ timeout: 30_000 });
   await finished(page);
-  await expect(page.locator('.toast')).toContainText('書き込み済み 3 ノード');
+  await expect(page.locator('.toast')).toContainText('3ノードの書込完了');
   await page.locator('.toast').waitFor({ state: 'detached', timeout: 10_000 });
 
   await page.locator('input[type=file]').setInputFiles(small);
   await page.locator('.split .main').click();
-  await expect(page.locator('.toast')).toContainText('書き込み不要', { timeout: 60_000 });
-  await expect(page.locator('#band .sentence')).toContainText('書き込みませんでした');
-  await expect(page.locator('.node', { hasText: '書き込み不要' })).toHaveCount(3);
+  await expect(page.locator('.toast')).toContainText('書込不要', { timeout: 60_000 });
+  await expect(page.locator('#band .sentence')).toContainText('書込を省略しました');
+  await expect(page.locator('.node', { hasText: '書込不要' })).toHaveCount(3);
 });
 
 for (const size of [{ width: 1920, height: 1080 }, { width: 1280, height: 720 }, { width: 1024, height: 600 }]) {
@@ -152,9 +152,9 @@ test('the mascot does not move when a toast comes', async ({ page, context }) =>
   await settled(page);
   const at = () => page.locator('.dagon').boundingBox();
   const before = await at();
-  await page.getByRole('button', { name: 'メニューを開く' }).click();
-  await page.getByRole('button', { name: '困ったとき', exact: true }).click();
-  await page.locator('.panel').last().locator('button:has(span:text-is("この URL をコピーする"))').click();
+  await page.getByRole('button', { name: 'メニューの表示' }).click();
+  await page.getByRole('button', { name: 'トラブル対処', exact: true }).click();
+  await page.locator('.panel').last().locator('button:has(span:text-is("このURLのコピー"))').click();
   await page.locator('.toast').waitFor();
   await settled(page);
   expect(await at()).toEqual(before);

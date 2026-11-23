@@ -273,9 +273,9 @@ pub fn hello_answer(resp: &[u8], max: usize) -> Option<HelloResp> {
     }
 }
 
-/// Room for a HELLO answer frame (37 bytes) in [`NodeLink::hello`]. A longer
-/// frame is not a HELLO answer.
-const HELLO_ANSWER_MAX: usize = 64;
+/// Room for the longest HELLO answer frame in [`NodeLink::hello`]: its
+/// status, then the longest body. A longer frame is not a HELLO answer.
+const HELLO_ANSWER_MAX: usize = dagon_proto::frame_len(1 + HelloResp::MAX_LEN);
 
 /// Another node, reachable over this link at an address. The link has no
 /// direction: the node at the other end may be anywhere in the 構成. A
@@ -417,6 +417,8 @@ mod tests {
                 trial: false,
                 key_id: [0; 8],
                 max_payload: 256,
+                // Every command number: the longest answer.
+                cmds: dagon_proto::payload::CmdSet::from_bytes(&[0xFF; 32]).unwrap(),
             };
             out[8] = Status::Ok as u8;
             let n = h.encode(&mut out[9..]).unwrap();

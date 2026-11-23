@@ -308,7 +308,7 @@ fn update_mode(
             trial_attempts: TRIAL_ATTEMPTS,
         };
         let mut agent: Agent<_, _, _, BootCore> = Agent::for_writer(cfg, VERIFIER, store, chain);
-        let first = stay.as_ref().map(Stay::frame);
+        let first = stay.as_ref();
         serve(
             &mut port,
             &mut agent,

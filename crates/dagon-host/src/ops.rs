@@ -103,7 +103,7 @@ pub enum Outcome<E> {
     Failed(Error<E>),
     NotStarted,
     /// A linked node that answered nothing in this session, not even HELLO
-    /// (the hub said so): no DAGON runs on it, as on a node added to the
+    /// (the relaying node said so): no DAGON runs on it, as on a node added to the
     /// configuration and never written. Nothing was sent to it and the run went on with the other nodes; it
     /// takes its first write directly (the factory write, or the ROM path
     /// where its MCU and link have one: [`Host::write_path`]).
@@ -262,7 +262,7 @@ impl<T: Transport, C: HostClock> Host<T, C> {
     }
 
     /// One planned node of an apply: [`Outcome::NeedsFirstWrite`] when the
-    /// hub says it answers nothing and it has answered nothing in this
+    /// relaying node says it answers nothing and it has answered nothing in this
     /// session, else its update. A node that answered earlier in the session
     /// and is silent now ran DAGON: it fails and stops the run.
     async fn apply_node(
@@ -990,9 +990,9 @@ impl<T: Transport, C: HostClock> Host<T, C> {
     }
 }
 
-/// No DAGON answers at the node: the hub relayed its first request (HELLO)
+/// No DAGON answers at the node: the relaying node relayed its first request (HELLO)
 /// and answered that the node did not, after every resend, so nothing else
-/// was sent to it. A hub that does not answer is no such evidence.
+/// was sent to it. A relaying node that does not answer is no such evidence.
 fn is_silent<E>(e: &Error<E>) -> bool {
     matches!(e, Error::Relay(Status::Timeout))
 }

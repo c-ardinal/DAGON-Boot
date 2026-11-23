@@ -62,7 +62,7 @@ describe('the % runs only while work is really in progress', () => {
     expect(op.percentOf('seg', later)).toBeLessThan(100);
   }, 60_000);
 
-  test('waiting for the user to choose the hub again freezes too', async () => {
+  test('waiting for the user to choose the node connected to the PC again freezes too', async () => {
     const { op } = await written({ hubAway: Infinity }, 3_600_000);
     expect(op.state).toBe('reconnectNeeded');
     const now = op.now();

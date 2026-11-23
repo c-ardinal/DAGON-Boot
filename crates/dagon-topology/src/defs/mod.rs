@@ -447,7 +447,7 @@ impl McuDef {
     }
 }
 
-/// The pins a board wires new links to when it is the 親機 (numbered
+/// The pins a board wires new links to when it is the coordinator (numbered
 /// GPIOs, as the topology's `buses[]` and `links[].pins` take them).
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -513,6 +513,29 @@ pub struct RelayFirmware {
     pub ram_bytes: u32,
 }
 
+/// `[codec]` of an MCU definition ([`McuDef::codec`]): a budget per image the wire codec is
+/// measured in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CodecBudgets {
+    /// Every boot core of the MCU (each board's and the one without a board).
+    pub bootcore: Option<CodecBudget>,
+    /// The relay firmware (the MCU package's `examples/relay.rs`).
+    pub relay: Option<CodecBudget>,
+}
+
+/// What the wire codec (`dagon_proto`) may take in one image, bytes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CodecBudget {
+    /// Its functions and named read-only data in flash.
+    pub flash_bytes: u32,
+    /// The deepest stack from any of its functions, through what they call.
+    pub stack_bytes: u32,
+    /// Its static data in RAM.
+    pub ram_bytes: u32,
+}
+
 /// One `[[relay_link]]` as written; [`McuDef::relay_link_defs`] gives the runtime table.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -531,7 +554,7 @@ pub enum AddressingSpec {
     Fixed(u8),
 }
 
-/// Link kinds by direction: `up` towards the PC or the 親機, `down` to 子機.
+/// Link kinds by direction: `up` towards the PC or the node nearer the PC, `down` to the node at the other end of the link.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Links {
@@ -743,6 +766,15 @@ pub struct McuDef {
     /// the MCU package's `examples/relay.rs`, measures it and fails above this value
     /// (`scripts/relay_ram.py`).
     pub relay: Option<RelayFirmware>,
+    /// The wire codec's budgets: `bootcore` (every boot core of the MCU) and `relay` (the relay
+    /// firmware), each `{ flash_bytes, stack_bytes, ram_bytes }`: the codec's (`dagon_proto`)
+    /// functions and named read-only data in flash, the deepest stack from any of its functions,
+    /// and its static data in RAM, in bytes. `bootcore` only with a `[[slot_layout]]` of target
+    /// `bootcore`, `relay` only with `[[relay_link]]`; an MCU with such an image gives its budget.
+    /// CI builds each image with rustc's stack frame records, measures it, and fails above a
+    /// value, and when the call graph has an indirect call other than a handler row's dispatch, a
+    /// call it cannot follow or recursion (`scripts/codec_budget.py`).
+    pub codec: Option<CodecBudgets>,
     /// How the user connects it for a write: `label`, `hint`.
     pub connection: Connection,
     /// Tool check: `what`, `probe` (command), `expect` (`"runs"`, `{ line = "..." }`, `{ prefix =
@@ -971,7 +1003,7 @@ pub struct BoardDef {
     /// `cooperative`), `rom_entry` (`force-download-boot`, `m5pm1`, `stm32-i2c-rom`). Left out for
     /// the coordinator.
     pub default_link: Option<DefaultLink>,
-    /// Pins the page wires new links to when this board is the 親機: `i2c = { controller, sda, scl }`
+    /// Pins the page wires new links to when this board is the coordinator: `i2c = { controller, sda, scl }`
     /// (a new I2C bus; `controller` is one of the board's `i2c`) and `pio_uart = { tx, rx }` (a new
     /// PIO UART link), numbered GPIOs below the MCU's `gpio_count`. Only on boards whose MCU has
     /// `[coordinator]`.

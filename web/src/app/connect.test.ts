@@ -42,7 +42,7 @@ describe('Web Serial', () => {
     return { serial, fire, chooser: () => chooser };
   }
 
-  test('with a real hub, Web Serial works as before', async () => {
+  test('with a real PC-connected node, Web Serial works as before', async () => {
     const f = fakeSerial();
     const ws = webSerial(f.serial);
     const seen: string[] = [];

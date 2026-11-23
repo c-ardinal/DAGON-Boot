@@ -1,7 +1,8 @@
 """DAGON's software architecture: the layered design, as one figure and one table of components.
 
 This is the design, kept by hand here; it is not read from the code. gen.py writes the figure
-to assets/architecture/ for the READMEs and, with the table, into the site's Explanation page.
+to assets/architecture/ for the READMEs and, with the table, into the site's Explanation page, and
+the components this tree lacks (NOT_IN_TREE) into the limitations page.
 """
 from xml.sax.saxutils import escape
 
@@ -12,15 +13,15 @@ COLOURS = (INK, LAYER1, LAYER2, LAYER3, PAPER, MUTED, HAIR, ACCENT, WATER, ATTEN
 FONT = "'Zen Kaku Gothic New','Hiragino Sans','Yu Gothic UI','Noto Sans JP',system-ui,sans-serif"
 
 W = 1400
-COLUMNS = ("Boot", "Image and Storage", "Update and Comms", "Hub", "Trust", "Liveness", "Isolation", "Observability")
+COLUMNS = ("Boot", "Image and Storage", "Update and Comms", "Hub", "Trust", "Liveness", "Observability")
 HUB = 3
 
 PC_ROWS = (
     ("PC Front Ends", "full", ("dagon CLI", "dagon serve", "DAGON Console", "Claude Code Plugin")),
-    ("PC Host Extensions", "full", ("Host Extension Chain", "Action Definitions", "Agent Definitions")),
-    ("PC Host Services", "cols", (("Project Generator", "Definition Registry", "Topology Check"), ("Node Build",), ("Operations",), ("Host Machines",),
-                                  ("Release Builder",), ("AI Agent Link",), ("Protection Planner",), ("Event Stream", "Catalog"))),
-    ("PC Host Ports", "cols", ((), ("BuildRunner",), ("Transport",), ("confirm_plan",), ("Signer", "KeyStore"), ("Agent",), (), ("Action",))),
+    ("PC Host Extensions", "full", ("Agent Definitions",)),
+    ("PC Host Services", "cols", (("Project Generator", "Definition Registry", "Topology Check"), ("Node Build",), ("Operations",), (),
+                                  ("Release Builder",), ("AI Agent Link",), (), ("Event Stream", "Catalog"))),
+    ("PC Host Ports", "cols", ((), ("BuildRunner",), ("Transport",), ("confirm_plan",), ("Signer", "KeyStore"), ("Agent",), (), ())),
     ("PC Host Adapters", "cols", ((), ("Cargo Runner",), ("Serial", "Web Serial", "Simulator Link"), ("ROM Writers",), ("File Key Pair",), (), (), ())),
 )
 PC_COLS = 8
@@ -32,23 +33,22 @@ DEVICE_TOP = (
 DEVICE_COLS = (
     ("Layer Services", {0: ("Stage0 Sequence", "Boot Sequence", "Boot Action Interpreter"), 1: ("Image Lifecycle",),
                         2: ("Update Session", "Wire Protocol", "Serving Loop", "Recovery Entry"),
-                        3: ("Relay", "Coordinator", "Release Store", "Node Recovery", "Bus Guardian"),
+                        3: ("Relay", "Coordinator"),
                         5: ("Liveness Guard", "Reboot Gate"),
-                        6: ("Entry Gate", "Service ABI", "Operation Cancellation", "Fault Unwind", "Lockup Fuse", "Reset Cleanup"),
-                        7: ("Publisher", "Boot Record Writer", "Boot Replay", "VERSION Responder")}),
-    ("Core Logic", {0: ("Boot Decision", "Core Chooser"), 1: ("State Log Fold",), 3: ("Delivery Plan", "Recovery Policy", "Constraint Evaluator"),
+                        6: ("Publisher", "VERSION Responder")}),
+    ("Core Logic", {0: ("Boot Decision", "Core Chooser"), 1: ("State Log Fold",), 3: ("Constraint Evaluator",),
                     4: ("Trust Rule",), 5: ("Deadline Book",)}),
     ("Replaceable Ports", {0: ("DecisionPolicy", "BoardBringUp"), 1: ("SlotStore", "LogStorage", "SelfCheck"), 2: ("UpdateTransport", "UpdateProtocol", "Recovery"),
-                           3: ("NodeLink",), 4: ("ImageVerifier", "Digest", "CryptoProvider"), 5: ("WatchdogDriver",), 7: ("Diagnostics", "Display", "LogSink")}),
-    ("Driver Contract", {0: ("BootSelect",), 1: ("Flash",), 3: ("I2cBus", "StreamPort", "SubControl"), 5: ("Reset",), 6: ("SandboxArch",)}),
+                           3: ("NodeLink",), 4: ("ImageVerifier", "Digest", "CryptoProvider"), 5: ("WatchdogDriver",), 6: ("Diagnostics", "Display", "LogSink")}),
+    ("Driver Contract", {0: ("BootSelect",), 1: ("Flash",), 3: ("I2cBus", "StreamPort", "SubControl"), 5: ("Reset",)}),
 )
 BOARD = ("Board Definition", "Board Bring-Up", "Board Extension", "Boot Action Program", "Shared Bus")
-MCU = {0: ("Reset and Jump",), 1: ("Flash Driver", "Slot Store Driver"), 2: ("Link Drivers",), 5: ("Watchdog Driver", "Clock", "Execution Setup"), 6: ("Architecture Kind",)}
+MCU = {0: ("Reset and Jump",), 1: ("Flash Driver", "Slot Store Driver"), 2: ("Link Drivers",), 5: ("Watchdog Driver", "Clock", "Execution Setup")}
 MCU_STRIP = "MCU Definition"
-SILICON = ("ROM Loader", "boot2", "Vendor 2nd Stage", "Protection Unit", "Peripherals")
+SILICON = ("ROM Loader", "boot2", "Vendor 2nd Stage", "Peripherals")
 LIBRARIES = ("dagon-format", "dagon-proto", "dagon-events", "Retained Codecs")
 PROOF = ("dagon-conform", "dagon-sim", "dagon-retained-model")
-DIRECT = ("ROM Loader Client", "Trusted Extension")
+DIRECT = ("ROM Loader Client",)
 
 PORT_ROWS = ("PC Host Ports", "Replaceable Ports", "Driver Contract")
 
@@ -58,107 +58,88 @@ COMPONENTS = {
     "dagon serve": ("DAGON Consoleのためのローカルのサーバ", "The local server for DAGON Console"),
     "DAGON Console": ("ブラウザのUI", "The browser UI"),
     "Claude Code Plugin": ("移植と構成の生成のスキル、サブエージェント、フック", "Porting and topology skills, subagents and hooks"),
-    "Host Extension Chain": ("ホストの拡張を順に呼ぶチェーン", "The chain of host extensions, in order"),
-    "Action Definitions": ("イベントの後で動かすアクションのデータ", "Data for actions run after an event"),
-    "Agent Definitions": ("エージェントとそのつなぎ方のデータ", "Data for agents and their ways"),
-    "Project Generator": ("構成からプロジェクトを作る（`dagon new`、`dagon gen`）", "Renders a project from the topology (`dagon new`, `dagon gen`)"),
-    "Definition Registry": ("ボードとマイコンの定義を持つ", "Holds the definitions of boards and MCUs"),
-    "Topology Check": ("構成のYAMLを読み、検証規則を適用する", "Reads the topology YAML and applies the validation rules"),
+    "Agent Definitions": ("エージェントとその接続方法のデータ", "Data for agents and their ways"),
+    "Project Generator": ("構成からプロジェクトを作成する（`dagon new`、`dagon gen`）", "Renders a project from the topology (`dagon new`, `dagon gen`)"),
+    "Definition Registry": ("ボードとマイコンの定義を保持", "Holds the definitions of boards and MCUs"),
+    "Topology Check": ("構成のYAMLを読込し、検証規則を適用する", "Reads the topology YAML and applies the validation rules"),
     "Node Build": ("dagon.tomlの`[build.<id>]`に従ってノードごとにcargo buildする", "Runs cargo build per node from `[build.<id>]` in dagon.toml"),
     "Operations": ("apply、status、recoverの手順", "The apply, status and recover procedures"),
-    "Host Machines": ("ホストの操作の状態機械", "State machines of host operations"),
-    "Release Builder": ("検査の後でマニフェストを署名し、パッケージファイル（.dgb）を作る", "Signs the manifest after its checks and makes the package file (.dgb)"),
+    "Release Builder": ("検査後にマニフェストに署名し、パッケージファイル（.dgb）を作成する", "Signs the manifest after its checks and makes the package file (.dgb)"),
     "AI Agent Link": ("dagon aiのコマンド", "The dagon ai commands"),
-    "Protection Planner": ("拡張の保護マップの計画と確認", "Plans and checks extensions' protection maps"),
     "Event Stream": ("ホストのイベントの配信", "Delivers host events"),
-    "Catalog": ("すべてのイベントとポートの一覧", "Lists every event and port"),
+    "Catalog": ("全イベントと全ポートの一覧", "Lists every event and port"),
     "BuildRunner": ("ビルドを実行するポート", "Port that runs builds"),
-    "Transport": ("親機へのバイト列のポート", "Port for the byte stream to the hub"),
-    "confirm_plan": ("書き込みの前の確認の判断点", "Decision point before a write"),
+    "Transport": ("PC接続ノードへのバイト列のポート", "Port for the byte stream to the hub"),
+    "confirm_plan": ("書込前の確認の判断点", "Decision point before a write"),
     "Signer": ("署名のポート", "Port that signs"),
-    "KeyStore": ("利用者が選んだ置き場所（環境変数、OSのキーストア、1Passwordなど）から署名の鍵を受け取るポート", "Port that receives the signing key from where the user chose to keep it (an environment variable, the OS key store, 1Password and so on)"),
+    "KeyStore": ("利用者が選択した格納先（環境変数、OSのキーストア、1Passwordなど）から署名のキーを受信するポート", "Port that receives the signing key from where the user chose to keep it (an environment variable, the OS key store, 1Password and so on)"),
     "Agent": ("エージェントのポート", "Port for an agent"),
-    "Action": ("アクションのポート", "Port for an action"),
-    "Cargo Runner": ("cargoで動くビルド", "Builds through cargo"),
+    "Cargo Runner": ("cargoで実行するビルド", "Builds through cargo"),
     "Serial": ("CLIのシリアルポートのTransport", "The CLI's serial port Transport"),
     "Web Serial": ("dagon-wasmのWeb SerialのTransport", "dagon-wasm's Web Serial Transport"),
     "Simulator Link": ("dagon-simの模擬リンク", "dagon-sim's simulated link"),
     "ROM Writers": ("PCのdagon-romlinkによるROMの手順", "ROM procedures on the PC through dagon-romlink"),
-    "File Key Pair": ("ファイルの鍵の組", "Key pair in files"),
-    "DAGON Link": ("ホスト、親機、ノードのあいだのフレームとコマンド", "Frames and commands between host, hub and nodes"),
+    "File Key Pair": ("ファイルのキーの組", "Key pair in files"),
+    "DAGON Link": ("ホスト、コーディネータ、他のノード間のフレームとコマンド", "Frames and commands between host, hub and nodes"),
     "Release Bundle": ("パッケージファイル（.dgb）の形式", "Format of the package file (.dgb)"),
     "Image Header": ("署名付きのイメージのヘッダ", "Header of a signed image"),
-    "Topology Binary": ("コンパイル済みの構成の形式", "Format of the compiled topology"),
-    "VERSION": ("ノードのバージョンと状態の問い合わせ", "Query of a node's versions and state"),
+    "Topology Binary": ("コンパイル済の構成の形式", "Format of the compiled topology"),
+    "VERSION": ("ノードのバージョンと状態の照会", "Query of a node's versions and state"),
     "User Application": ("利用者のアプリ", "The user's app"),
     "User Extensions": ("利用者の拡張", "The user's extensions"),
-    "Library Extensions": ("ライブラリが提供する拡張。ボードの拡張と利用者の拡張のあいだで動く", "Extensions a library provides, run between the board's and the user's"),
+    "Library Extensions": ("ライブラリが提供する拡張。ボードの拡張と利用者の拡張の中間で動作する", "Extensions a library provides, run between the board's and the user's"),
     "Boot Start": ("ブートのレイヤーの起動", "Starts the boot layer"),
     "App Start": ("アプリのレイヤーの起動", "Starts the app layer"),
     "Relay Start": ("リレーのレイヤーの起動", "Starts the relay layer"),
     "Chain Composer": ("拡張のチェーンの合成", "Composes the extension chain"),
-    "Extension API": ("拡張が触れてよい範囲", "What an extension may touch"),
-    "Stage0 Sequence": ("リセットの後で最初に動く手順", "The first steps after a reset"),
+    "Extension API": ("拡張のアクセス可能な範囲", "What an extension may touch"),
+    "Stage0 Sequence": ("リセット後に最初に動作する手順", "The first steps after a reset"),
     "Boot Sequence": ("ブートローダの手順", "The boot loader's steps"),
     "Boot Action Interpreter": ("ブートのアクションプログラムの実行", "Runs boot action programs"),
     "Image Lifecycle": ("スロットのイメージの状態機械", "State machine of a slot's image"),
-    "Update Session": ("書き込みのセッションの状態機械", "State machine of a write session"),
+    "Update Session": ("書込のセッションの状態機械", "State machine of a write session"),
     "Wire Protocol": ("リンクのメッセージとセッションの対応", "Maps link messages onto the session"),
-    "Serving Loop": ("リクエストに答えるループ", "The loop that answers requests"),
-    "Recovery Entry": ("復旧の経路への入り口", "Entry to a recovery path"),
-    "Relay": ("要求をホップごとに、リンクの先のノードへ中継する", "Forwards requests hop by hop to the nodes its links reach"),
-    "Coordinator": ("保存したリリースをノードに対して実行する", "Runs a stored release across nodes"),
-    "Release Store": ("リリースの面N/Pとその昇格を持つ", "Holds the release faces N/P and their promotion"),
-    "Node Recovery": ("ノードごとの復旧の段階と、回数に上限のある再試行", "Per-node recovery tiers with bounded retries"),
-    "Bus Guardian": ("共有のバスを直列化し、バスの固まりと切り離しを扱う", "Serialises a shared bus; handles a stuck bus and isolation"),
+    "Serving Loop": ("リクエストに応答するループ", "The loop that answers requests"),
+    "Recovery Entry": ("復旧経路への入口", "Entry to a recovery path"),
+    "Relay": ("要求をホップごとに、リンク経由で到達するノードへ中継する", "Forwards requests hop by hop to the nodes its links reach"),
+    "Coordinator": ("PCがコーディネータを経由して書込する", "The PC writes through the coordinator"),
     "Liveness Guard": ("タスクの生存を条件とするキック", "Kicks the watchdog on task liveness"),
-    "Reboot Gate": ("先に返答し、上限のある遅れを待ってからリセットする", "Replies first, waits a bounded delay, then resets"),
-    "Entry Gate": ("拡張の呼び出しの入り口", "Entry to an extension call"),
-    "Service ABI": ("拡張からDAGONへの唯一の呼び出し", "An extension's only call into DAGON"),
-    "Operation Cancellation": ("途中の特権の操作の取り消し", "Cancels a privileged operation part-way"),
-    "Fault Unwind": ("フォールトと超過からの戻り", "Returns from a fault or overrun"),
-    "Lockup Fuse": ("ロックアップした拡張の記録", "Records an extension that locked up"),
-    "Reset Cleanup": ("リセットの後のペリフェラルの初期化", "Reinitialises peripherals after a reset"),
-    "Publisher": ("待てる公開の状態を書く", "Writes the waitable published state"),
-    "Boot Record Writer": ("ブートのイベントを保持メモリに書く", "Writes boot events to retained memory"),
-    "Boot Replay": ("起動時にブートのイベントを出し直す", "Re-emits boot events at start"),
-    "VERSION Responder": ("VERSIONに答える", "Answers VERSION"),
+    "Reboot Gate": ("返答を優先し、上限付きの遅延を待機した後にリセットする", "Replies first, waits a bounded delay, then resets"),
+    "Publisher": ("待機可能な公開状態を出力する", "Writes the waitable published state"),
+    "VERSION Responder": ("VERSIONに応答する", "Answers VERSION"),
     "Boot Decision": ("どのスロットを起動するかの判断", "Decides which slot starts"),
-    "Core Chooser": ("stage0がブートローダのスロットを選ぶ", "stage0 picks the boot loader slot"),
-    "State Log Fold": ("記録から状態を畳み込む", "Folds records into state"),
-    "Delivery Plan": ("順序、試行の時間枠、昇格の判断", "Order, trial window, promotion judgement"),
-    "Recovery Policy": ("状態と失敗の回数から復旧の段階を選ぶ", "Chooses a recovery tier from state and failure counts"),
-    "Constraint Evaluator": ("マニフェストの制約を確かめる", "Checks manifest constraints"),
-    "Trust Rule": ("署名と鍵についての1つの認証の決まり", "The one rule for signatures and keys"),
+    "Core Chooser": ("stage0がブートローダのスロットを選択する", "stage0 picks the boot loader slot"),
+    "State Log Fold": ("記録から状態を集約する", "Folds records into state"),
+    "Constraint Evaluator": ("マニフェストの制約を検証する", "Checks manifest constraints"),
+    "Trust Rule": ("署名とキーについての唯一の認証規則", "The one rule for signatures and keys"),
     "Deadline Book": ("ガードの後ろの純粋な期限の計算", "Pure deadline accounting behind the guard"),
     "DecisionPolicy": ("ブートの方針のポート", "Port for boot policy"),
-    "BoardBringUp": ("ボードの立ち上げのポート", "Port for bringing up the board"),
-    "SlotStore": ("イメージの置き場所のポート", "Port for where images live"),
-    "LogStorage": ("状態ログの置き場所のポート", "Port for where the state log lives"),
+    "BoardBringUp": ("ボードの起動処理のポート", "Port for bringing up the board"),
+    "SlotStore": ("イメージの格納先のポート", "Port for where images live"),
+    "LogStorage": ("状態ログの格納先のポート", "Port for where the state log lives"),
     "SelfCheck": ("確定のときの自己検査のポート", "Port for the self-check at confirm"),
     "UpdateTransport": ("リンクのバイト列のポート", "Port for a link's bytes"),
     "UpdateProtocol": ("メッセージのポート", "Port for messages"),
-    "Recovery": ("追加の復旧の経路のポート", "Port for an added recovery path"),
-    "NodeLink": ("リンクの先の別のノードに届くポート", "Port for reaching another node over a link"),
-    "ImageVerifier": ("ヘッダの署名の検証のポート", "Port for verifying a header's signature"),
+    "Recovery": ("追加の復旧経路のポート", "Port for an added recovery path"),
+    "NodeLink": ("リンク経由で別ノードに到達するポート", "Port for reaching another node over a link"),
+    "ImageVerifier": ("ヘッダの署名検証のポート", "Port for verifying a header's signature"),
     "Digest": ("本体のハッシュのポート", "Port for the body hash"),
     "CryptoProvider": ("暗号の基本要素のポート", "Port for crypto primitives"),
     "WatchdogDriver": ("ウォッチドッグのポート", "Port for the watchdog"),
     "Diagnostics": ("追加の診断のポート", "Port for added diagnostics"),
     "Display": ("表示のポート", "Port for display"),
-    "LogSink": ("ログの行き先のポート", "Port for where logs go"),
+    "LogSink": ("ログの出力先のポート", "Port for where logs go"),
     "BootSelect": ("kind Sはジャンプ、kind Vはベンダーの選択情報の操作", "Kind S: the jump; kind V: the vendor's selection data"),
-    "Flash": ("フラッシュの消去、書き込み、読み出し", "Flash erase, write and read"),
-    "I2cBus": ("親機のI2Cバス", "The hub's I2C bus"),
-    "StreamPort": ("親機のバイト列", "The hub's byte stream"),
-    "SubControl": ("子機の制御線", "A child's control lines"),
+    "Flash": ("フラッシュの消去、書込、読出", "Flash erase, write and read"),
+    "I2cBus": ("コーディネータのI2Cバス", "The hub's I2C bus"),
+    "StreamPort": ("コーディネータのバイト列", "The hub's byte stream"),
+    "SubControl": ("接続先のノードの制御線", "A child's control lines"),
     "Reset": ("システムのリセット", "System reset"),
-    "SandboxArch": ("1つのアーキテクチャの特権の入口とアンワインドのレジスタ", "Privilege entry and unwind registers for one architecture"),
     "Board Definition": ("ボードのデータ", "The board's data"),
     "Board Bring-Up": ("ボードの電源、ピン、バスの準備", "Prepares the board's power, pins and buses"),
-    "Board Extension": ("ボードが持つ拡張", "The board's own extension"),
+    "Board Extension": ("ボード固有の拡張", "The board's own extension"),
     "Boot Action Program": ("ブートの宣言的なプログラム", "Declarative program at boot"),
-    "Shared Bus": ("複数の者が使うボードのバス", "A board bus several parties use"),
+    "Shared Bus": ("複数の主体が使用するボードのバス", "A board bus several parties use"),
     "Reset and Jump": ("リセットとイメージへのジャンプ", "Reset, and the jump to an image"),
     "Flash Driver": ("フラッシュのドライバ", "The flash driver"),
     "Slot Store Driver": ("kind Sのログ、またはkind Vのベンダーデータ", "A kind S log or kind V vendor data"),
@@ -166,26 +147,47 @@ COMPONENTS = {
     "Watchdog Driver": ("ウォッチドッグのドライバ", "The watchdog driver"),
     "Clock": ("DAGON自身のマイクロ秒の時計（dagon-eventsの`Clock`）。マイコンのcrateが用意する", "DAGON's own microsecond clock (`Clock` of dagon-events), provided by the MCU package"),
     "Execution Setup": ("実行モデルに従うエグゼキュータの優先度", "Executor priorities per the execution model"),
-    "Architecture Kind": ("保護ハードウェアの種類ごとの実装", "Implementation per protection kind"),
     "MCU Definition": ("マイコンのデータ", "The MCU's data"),
     "ROM Loader": ("マイコンのROMのローダ", "The MCU's ROM loader"),
-    "boot2": ("RP2040のブートROMの次に動く256バイト", "The 256 bytes after the RP2040's boot ROM"),
+    "boot2": ("RP2040のブートROMの直後に動作する256バイト", "The 256 bytes after the RP2040's boot ROM"),
     "Vendor 2nd Stage": ("ベンダーの2nd stage", "The vendor's 2nd stage"),
-    "Protection Unit": ("メモリの保護ハードウェア", "Memory protection hardware"),
     "Peripherals": ("マイコンのペリフェラル", "The MCU's peripherals"),
     "dagon-format": ("イメージヘッダ、マニフェスト、状態ログ、構成のバイト配置", "Byte layouts of the image header, manifest, state log and topology"),
     "dagon-proto": ("フレーム、コマンド、エラーの定義", "Frames, commands and errors"),
     "dagon-events": ("イベント、状態機械、拡張", "Events, state machines, extensions"),
-    "Retained Codecs": ("ブート記録、ヒューズ、構成の本体の形式", "Boot record, fuse and topology body formats"),
+    "Retained Codecs": ("構成の本体の形式", "Topology body format"),
     "dagon-conform": ("実機とシミュレータに共通の適合試験", "Conformance tests shared by hardware and the simulator"),
     "dagon-sim": ("模擬フラッシュ、模擬リンク、模擬ROMローダ、故障注入", "Simulated flash, links and ROM loader, with fault injection"),
     "dagon-retained-model": ("保持の形式の実行可能なモデル", "Executable model of the retained formats"),
-    "ROM Loader Client": ("別のマイコンのROMローダを動かす", "Drives another MCU's ROM loader"),
-    "Trusted Extension": ("特権で動く拡張", "An extension that runs privileged"),
+    "ROM Loader Client": ("別のマイコンのROMローダを駆動する", "Drives another MCU's ROM loader"),
 }
 
+ABSENT = ("コードに存在しません。", "Not in the code.")
+# The components above that this tree lacks, in whole or in part: the gap each (Japanese, English), which the
+# limitations page lists. A port's gap is in its dagon_events::PORTS record; a component that is part of such a
+# record names it here instead, and a port is not listed here at all.
+NOT_IN_TREE = {
+    "AI Agent Link": ("`dagon serve`にボード移植の作業は存在しません。`POST /v1/ai/port`の応答は501です。",
+                      "`dagon serve` has no job that ports DAGON to a board: `POST /v1/ai/port` answers 501."),
+    "Boot Action Interpreter": ABSENT,
+    "Retained Codecs": ("ファームウェアに保持形式のコーデックは存在しません。"
+                        "構成本体の形式は`dagon-format`の形式（先頭32バイト、ノード32バイト）で、[保持と永続の形式](/explanation/retained-formats/)"
+                        "の形式ではありません。コーディネータの保存先は単一の領域で、2バンクの置換は存在しません。",
+                        "The firmware has none of the retained codecs: "
+                        "the topology body is `dagon-format`'s (a 32-byte head, 32-byte nodes), not the one in "
+                        "[Retained and persistent formats](/en/explanation/retained-formats/). The hub stores it in one region, "
+                        "with no two-bank replacement."),
+}
+
+
+def gap_list(lang):
+    """The limitations page's list of the components above this tree lacks, in the table's order."""
+    i = 0 if lang == "ja" else 1
+    return "".join(f"- {name}: {NOT_IN_TREE[name][i]}\n" for name in COMPONENTS if isinstance(NOT_IN_TREE.get(name), tuple))
+
+
 WORDS = {
-    "ja": {"title": "DAGON のソフトウェアアーキテクチャ", "component": "コンポーネント", "port": "ポートと取り決め", "contract": "ノードと PC の共通の形式", "hub": "Hub の列は親機のイメージだけ", "vendor": "シリコンとベンダー"},
+    "ja": {"title": "DAGONのソフトウェアアーキテクチャ", "component": "コンポーネント", "port": "ポートと規約", "contract": "ノードとPCの共通形式", "hub": "Hub列はコーディネータのイメージのみ", "vendor": "シリコンとベンダー"},
     "en": {"title": "DAGON's software architecture", "component": "Component", "port": "Port or contract", "contract": "Format shared by PC and node", "hub": "The Hub column is hub images only", "vendor": "Silicon and vendor"},
 }
 

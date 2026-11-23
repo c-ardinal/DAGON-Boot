@@ -128,7 +128,7 @@ fn v23_several_coordinators_over_can() {
     // The shape itself parses: no V-01, and the coordinator count is not V-03.
     let rules = error_rules(&yaml);
     assert!(rules.is_empty(), "{rules:?}");
-    // The second 親機 is skipped: the compiled topology is the sample's.
+    // The second coordinator is skipped: the compiled topology is the sample's.
     let (_, skipped) = dagon_topology::updatable(&dagon_topology::parse_str(&yaml).unwrap());
     assert_eq!(
         skipped,
@@ -467,7 +467,7 @@ fn v24_names_a_hop_its_firmware_cannot_do_yet_without_blocking() {
         "{w:?}"
     );
     assert!(check_str(&yaml).is_pushable(), "a warning only");
-    // A link the 親機 or the 子機 cannot do: V-24 names both ends, V-23 says
+    // A link the coordinator or the node at its other end cannot do: V-24 names both ends, V-23 says
     // it cannot be updated.
     // The link's kind (the first `kind: i2c` is the bus's).
     let ble = mutate("  - kind: i2c\n    bus: ", "  - kind: ble\n    bus: ");
@@ -478,6 +478,59 @@ fn v24_names_a_hop_its_firmware_cannot_do_yet_without_blocking() {
         "{w:?}"
     );
     assert!(info_rules(&ble).contains("V-23"));
+}
+
+/// The shapes updating skips and the hops a firmware does not run, every
+/// message V-23 and V-24 give and every skip reason: each says what DAGON
+/// does, never a pending status ("yet"). Limits are on the limitations page.
+#[test]
+fn v23_v24_messages_and_skip_reasons_state_facts_only() {
+    let grandchild = mutate(
+        HUB_WATCH,
+        "      - { node: seg, port: usart1, pins: { tx: 9, rx: 10 } }",
+    );
+    let two_hubs = DEMO
+        .replacen(
+            "\nbuses:",
+            "  - id: hub2\n    mcu: rp2040\n    role: coordinator\n    port: self-boot\n    tag: hub2\n\nbuses:",
+            1,
+        )
+        .replacen(
+            "links:\n",
+            "links:\n  - kind: usb-cdc\n    ends:\n      - { node: hub2, port: usb }\n      - { node: hub, port: usb }\n",
+            1,
+        )
+        .replacen("order: [seg, watch, hub]", "order: [seg, watch, hub2, hub]", 1);
+    let under_hub2 = two_hubs.replacen(
+        HUB_WATCH,
+        "      - { node: hub2, port: pio-uart, pins: { tx: 26, rx: 27 } }",
+        1,
+    );
+    let ble = mutate("  - kind: i2c\n    bus: ", "  - kind: ble\n    bus: ");
+    let wifi_uplink = with_uplink("wifi-tcp", "browser");
+    let mut said: Vec<String> = [grandchild, two_hubs, under_hub2, ble, wifi_uplink]
+        .iter()
+        .flat_map(|y| check_str(y).issues)
+        .filter(|i| i.rule == "V-23" || i.rule == "V-24")
+        .map(|i| i.message)
+        .collect();
+    assert!(
+        said.iter().any(|m| m.contains("second coordinator")),
+        "every V-23 shape is reached: {said:?}"
+    );
+    use dagon_topology::Skip;
+    said.extend(
+        [
+            Skip::SecondHub,
+            Skip::Deep,
+            Skip::LinkKind,
+            Skip::Unreachable,
+            Skip::CutInvalid,
+        ]
+        .map(|s| s.reason().to_string()),
+    );
+    let pending: Vec<_> = said.iter().filter(|m| m.contains("yet")).collect();
+    assert!(pending.is_empty(), "{pending:?}");
 }
 
 #[test]

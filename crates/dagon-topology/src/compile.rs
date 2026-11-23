@@ -256,7 +256,9 @@ fn link(reg: &Registry, t: &Topology, l: &Link) -> Result<TopoLink, CompileError
         | LinkKind::Ble
         | LinkKind::WifiTcp => {
             // updatable() leaves these out; reaching here is a caller's bug.
-            return Err(bad(format!("link {named} is not updatable yet (V-23)")));
+            return Err(bad(format!(
+                "link {named}: updating uses I2C and UART links only (V-23)"
+            )));
         }
     };
     let mut ends = [end(reg, t, &l.ends[0])?, end(reg, t, &l.ends[1])?];
@@ -370,7 +372,7 @@ mod tests {
         assert_eq!(seg.end(1).map(|e| (e.port, e.addr)), Some((3, 0x42)));
         let watch = v.link(1);
         assert_eq!(watch.end(2).map(|e| (e.port, e.addr)), Some((1, tp::NONE)));
-        // The 親機 (end 0) names the reset lines and the UART pins.
+        // The coordinator (end 0) names the reset lines and the UART pins.
         assert_eq!((seg.gpio_end, watch.gpio_end), (0, 0));
         let flipped = SAMPLE_YAML
             .replace(

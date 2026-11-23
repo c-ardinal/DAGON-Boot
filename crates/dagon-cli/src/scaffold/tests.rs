@@ -538,6 +538,26 @@ fn new_makes_the_project_and_a_key_outside_it() {
 }
 
 #[test]
+fn claude_md_takes_its_words_from_the_words_page() {
+    let template = CLAUDE_FILES[0].1;
+    assert_eq!(template.matches(WORDS_AT).count(), 1);
+    let d = tmp("claude-words");
+    let proj = d.join("fleet");
+    new_project(&proj, "fleet", SAMPLE, &d.join("keys"), &dev()).unwrap();
+    let text = read(&proj, "CLAUDE.md");
+    assert!(!text.contains(WORDS_AT));
+    let words: Vec<&str> = WORDS_PAGE
+        .lines()
+        .filter(|l| l.starts_with("- **"))
+        .collect();
+    assert!(!words.is_empty());
+    for line in words {
+        assert!(text.contains(line), "{line} missing");
+        assert_eq!(template.matches(line).count(), 0, "{line} copied");
+    }
+}
+
+#[test]
 fn new_writes_claude_files_with_no_paths_or_secrets() {
     let d = tmp("claude");
     let proj = d.join("fleet");
@@ -1815,7 +1835,7 @@ fn mcu_templates_wire_the_links_the_topology_names() {
         .find(|l| l.kind == LinkKind::Uart)
         .unwrap()
         .clone();
-    // The same links to other nodes, listed with the 親機's end second.
+    // The same links to other nodes, listed with the end nearer the PC second.
     let to = |mut l: dagon_topology::schema::Link, node: &str| {
         l.ends.reverse();
         l.ends[0].node = node.into();
@@ -1943,7 +1963,7 @@ fn templates_get_the_hops_and_gen_refuses_one_not_available_yet() {
         read(&base, "nodes/seg/src/main.rs"),
         "const UPLINK: Kind = dagon_mcu_stm32f401re::links::Kind::I2c;\nconst DOWNLINKS: &[Kind] = &[];\n"
     );
-    // The 親機 over BLE: gen stops, naming the hop.
+    // The coordinator over BLE: gen stops, naming the hop.
     let ble = dagon_topology::parse_str(&SAMPLE.replacen(
         "    tag: hub-rp2040-lcd\n",
         "    tag: hub-rp2040-lcd\n    uplink: { kind: ble, host: browser }\n",
@@ -1960,10 +1980,10 @@ fn templates_get_the_hops_and_gen_refuses_one_not_available_yet() {
     )
     .unwrap_err();
     assert!(
-        e.contains("uplink of hub over ble: not available yet on rp2040"),
+        e.contains("uplink of hub over ble: the firmware of rp2040 does not run this link kind"),
         "{e}"
     );
-    // A link a 子機 cannot do: named by its two ends.
+    // A link a node cannot do: named by its two ends.
     let wifi = dagon_topology::parse_str(&SAMPLE.replacen(
         "  - kind: i2c\n    bus: ",
         "  - kind: wifi-tcp\n    bus: ",
@@ -1980,7 +2000,7 @@ fn templates_get_the_hops_and_gen_refuses_one_not_available_yet() {
     )
     .unwrap_err();
     assert!(
-        e.contains("link between 'hub' and 'seg' over wifi-tcp: not available yet"),
+        e.contains("link between 'hub' and 'seg' over wifi-tcp: the firmware of"),
         "{e}"
     );
 }

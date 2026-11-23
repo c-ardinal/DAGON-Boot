@@ -12,7 +12,7 @@ const nodes: [string, string][] = [
 const html = (j: Job | null, failure: string | null = null) =>
   render(SkeletonModal, { props: { job: j, failure, place: 'C:/work/home-garden', nodes, onclose: () => undefined, oncancel: () => undefined, onretry: () => undefined, onmore: () => undefined } }).body;
 
-describe('雛形を生成 modal', () => {
+describe('テンプレート生成 modal', () => {
   test('progress: what is being made and 中止 only, no close; no number the job never reports', () => {
     const b = html(job({ percent: null }));
     expect(b).toContain(SKELETON.state.running);
@@ -36,7 +36,7 @@ describe('雛形を生成 modal', () => {
   test('success: the one chip says it; no chip per row and no copy button', () => {
     const b = html(job({ state: 'succeeded', result: { lines: 3, skipped: [] } }));
     expect(b.split(SKELETON.state.done).length - 1).toBe(1);
-    expect(b).not.toContain('場所をコピー');
+    expect(b).not.toContain('生成先のコピー');
   });
 
   test('a node dagon gen skipped is a failure with its reason, never 生成済', () => {
@@ -47,7 +47,7 @@ describe('雛形を生成 modal', () => {
     expect(b).toContain(SKELETON.retry);
   });
 
-  test('a job serve would not take: the reason and もう一度生成する, and it can be closed', () => {
+  test('a job serve would not take: the reason and 再生成, and it can be closed', () => {
     const b = html(null, SKELETON.startFailed);
     expect(b).toContain(SKELETON.state.failed);
     expect(b).toContain(SKELETON.startFailed);
@@ -55,11 +55,11 @@ describe('雛形を生成 modal', () => {
     expect(b).toContain(`aria-label="${NOTICE.close}"`);
   });
 
-  test('failure: the reason and もう一度生成する', () => {
-    const b = html(job({ state: 'failed', lines: ['started', 'nodes/seg7/ に書き込めません'] }));
+  test('failure: the reason and 再生成', () => {
+    const b = html(job({ state: 'failed', lines: ['started', 'nodes/seg7/ への保存に失敗しました'] }));
     expect(b).toContain(SKELETON.state.failed);
     expect(b).toContain(NOTICE.reason);
-    expect(b).toContain('nodes/seg7/ に書き込めません');
+    expect(b).toContain('nodes/seg7/ への保存に失敗しました');
     expect(b).toContain(NOTICE.fix);
     expect(b).toContain(SKELETON.fail.fix);
     expect(b).toContain(SKELETON.retry);

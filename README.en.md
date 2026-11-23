@@ -66,7 +66,7 @@ Every step can also be done with the `dagon` command.
 
 ### Without installing
 
-In the browser (Chrome or Edge 89 or later), try the [DAGON Console demo](https://c-ardinal.github.io/DAGON-Boot/demo/) with no install and no hardware. You write to a simulated hub and its children and go back to a previous version. Reading and writing files, connecting real devices and AI link operations are not available in the demo.
+In the browser (Chrome or Edge 89 or later), try the [DAGON Console demo](https://c-ardinal.github.io/DAGON-Boot/demo/) with no install and no hardware. You write to three simulated microcontrollers (the one on the PC and the two linked to it) and go back to a previous version. Reading and writing files, connecting real devices and AI link operations are not available in the demo.
 
 ### Install and try
 
@@ -103,7 +103,7 @@ The environment variable `DAGON_UNINSTALL=1` works too. The PowerShell script cl
 #### Try it in the simulator
 
 ```sh
-dagon sim run # runs end-to-end scenarios in the simulator
+dagon sim # runs end-to-end scenarios in the simulator
 ```
 
 ## Start your own project
@@ -123,24 +123,26 @@ You can also add DAGON to existing firmware ([steps](https://c-ardinal.github.io
 
 ## How writing works
 
-The microcontroller connected to your PC over USB is the hub. The microcontrollers beyond it are its children.
+Your PC connects to one microcontroller over USB. The others are written through it.
 
 The figure below is the sample setup.
 
 ```mermaid
 flowchart LR
-  PC["PC<br>dagon / DAGON Console"] -- USB --> HUB["Hub<br>RP2040"]
-  HUB -- I2C --> SEG["Child<br>STM32F401RE"]
-  HUB -- UART --> WATCH["Child<br>ESP32-S3"]
+  PC["PC<br>dagon / DAGON Console"] -- USB --> HUB["RP2040"]
+  HUB -- I2C --> SEG["STM32F401RE"]
+  HUB -- UART --> WATCH["ESP32-S3"]
 ```
 
 1. The PC checks the package's signatures and that the package fits this setup.
-2. Through the hub, the PC sends each microcontroller its new image. Children come first and the hub last.
+2. Through the microcontroller on USB, the PC sends each microcontroller its new image. The ones linked beyond it come first and it comes last.
 3. A microcontroller writes the new image to a slot other than the running one.
 4. The microcontroller starts the new image on trial.
-5. When its self-check passes, it confirms the new version. Otherwise it resets and, with two slots, goes back to the previous version.
+5. The PC sends CONFIRM, and the microcontroller confirms the new version when its self-check (`self_check`) answers healthy. An image that is not confirmed is reset and, with two slots, goes back to the previous version.
 
-What DAGON does not do, and what an image with one slot cannot do, are in [Limitations](https://c-ardinal.github.io/DAGON-Boot/doc/en/explanation/limitations/).
+Each step reaches extensions as an event, and extensions answer the decision points (accepting an update, when to reboot, the self-check). A microcontroller can also confirm by itself instead of the PC (`Confirm::Own`).
+
+What DAGON does not do by design, what the user is responsible for, and where the code differs from the design are in [Limitations](https://c-ardinal.github.io/DAGON-Boot/doc/en/explanation/limitations/).
 
 ## DAGON's design information
 
@@ -160,7 +162,7 @@ What DAGON does not do, and what an image with one slot cannot do, are in [Limit
 
 | To do this | Touch | Steps |
 | --- | --- | --- |
-| Add a board | `targets/boards/*/dagon-board.toml` | [Your own board](https://c-ardinal.github.io/DAGON-Boot/doc/en/how-to/own-board/) |
+| Add a board | `targets/boards/*/dagon-board.toml` | [Your own board (chosen by MCU)](https://c-ardinal.github.io/DAGON-Boot/doc/en/how-to/own-board/) |
 | Add an MCU | `targets/mcu/<id>/` | [Adding an MCU or a link](https://c-ardinal.github.io/DAGON-Boot/doc/en/how-to/new-mcu-or-link/) |
 | Add a link or transport | `crates/dagon-format/src/link.rs`, `targets/mcu/*/src/links.rs`, `crates/dagon-host/src/lib.rs` | [Adding an MCU or a link](https://c-ardinal.github.io/DAGON-Boot/doc/en/how-to/new-mcu-or-link/) |
 

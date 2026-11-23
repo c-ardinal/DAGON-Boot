@@ -15,7 +15,7 @@ export const STATE_ICON = {
 } as const satisfies Record<NodeState, string>;
 
 export interface StateInput {
-  /** The page is connected to the 親機. */
+  /** The page is connected to the node connected to the PC. */
   connected: boolean;
   /** Last watch result: null before the first answer or miss. */
   responding?: boolean | null;
@@ -25,7 +25,7 @@ export interface StateInput {
   chip?: string;
   /** The node is being written (its water level shows). */
   writing?: boolean;
-  /** The node is outside what writing reaches (書き込めない). */
+  /** The node is outside what writing reaches (書込不可). */
   unreachable?: boolean;
 }
 

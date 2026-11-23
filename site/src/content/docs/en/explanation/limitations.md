@@ -1,11 +1,12 @@
 ---
 title: "Limitations"
-description: "Where the code differs from the design and what DAGON does not do, as by-design limits and planned ones."
+description: "What DAGON does not do by design, what the user is responsible for, and where the code differs from the design."
 ---
+
+For application developers, extension authors and DAGON contributors. The last section of this page is the one place that says where the code differs from the design.
 
 ## By design
 
-- How to protect the signing key is the user's choice. DAGON does not decide it. Whether to use a hardware root of trust (secure boot fuses, key storage in hardware) is part of that choice.
 - An MCU definition gives each image kind one slot or two (`[[slot]]`), and one slot loads only when `[writers]` names another kind that writes it. A kind with one slot cannot do this:
 
 | Image kind | Previous version | A power cut during a write | What recovers it |
@@ -17,25 +18,37 @@ description: "Where the code differs from the design and what DAGON does not do,
 
 - The boot loader does not relay. A node reached only through a node whose boot loader holds it in update or recovery mode is reached again once that node runs an app: write that node first.
 
-## Planned
+- The ESP32-S3 boots through the official ESP-IDF 2nd stage (the port `vendor-stage2` in compat.toml). A broken 2nd stage is outside what DAGON recovers: it has to be rewritten over USB with the vendor tools.
+- On the RP2040 a boot takes about 15 s on a board without a crystal (the ring oscillator, nominally 6.5 MHz) and about 0.8 s with a 12 MHz crystal: stage0 and the boot loader each check one signature with `Ed25519Small` on every boot. The boot loader keeps its watchdog fed through its check. This is by design: the small verifier leaves the boot loader room for the update session.
+- On a board running on the ring oscillator, the RP2040's boot loader makes its UART bit rate from the nominal 6.5 MHz, so the rate may be off, and its I2C target follows a 400 kHz bus only with a crystal; on the ring oscillator use 100 kHz.
+
+## The user's responsibility
+
+- How to protect the signing key is the user's choice. DAGON does not decide it. Whether to use a hardware root of trust (secure boot fuses, key storage in hardware) is part of that choice.
+- An extension is the user's own trusted code and runs in the app and the host only. DAGON does not isolate it. Reviewing an extension's content, the crates it depends on and the source it takes in is the user's responsibility.
+- An AI agent (a command agent connected through the serve API) runs with the user's rights. DAGON puts no sandbox around it; running it in an OS sandbox is the user's responsibility (see [Agent link: serve API](/en/reference/agent-api/)).
+- The USB VID:PID `c0de:cafe` is a test ID, fixed in the code. It is not an assigned one. Whether it may be used in a product is the user's decision.
+- Through some USB hubs, the PC does not see the hub again after it updates itself and restarts. Connect the hub directly to a USB port of the PC.
+
+## Where the code differs from the design
 
 The hub and the boot:
 
 - The relay (`dagon-relay`) does not depend on the MCU, and the `[coordinator]` section of an MCU definition decides whether that MCU may relay. A node relays over the links its MCU definition lists in `[[relay_link]]`, and the topology routes each node to one of them. The RP2040 is the only MCU with both that section and the code that runs the relay.
 - DAGON writes the hub and the children beyond it. Nothing beyond a child can be written.
-- Through some USB hubs, the PC does not see the hub again after it updates itself and restarts. Connect the hub directly to a USB port of the PC.
+- Updating reaches the first coordinator and the nodes linked to it over I2C or UART. It skips a second coordinator and the nodes beyond it, and nodes linked by any other kind of link. The 構成 check tells them as information (◇).
 - The boot loader of the STM32F401 receives only on its board's DAGON I2C bus (`[[bus]]` with `dagon = true`). A node without a board, or on a board without such a bus, gets a boot loader that opens no listen window and has no update mode. It enters update mode by a STAY within the listen window or by an UPDATE_STAY, but it has no recovery mode: with no app to start it halts. Its app answers REBOOT mode 1 with `E_UNSUPPORTED`, so the hand-over to update mode goes through the listen window only. The ESP32-S3's recovery agent receives only when the 2nd stage starts it because no app slot starts: it opens no listen window and answers HELLO with mode 3, not 1 or 2.
-- On a board running on the ring oscillator, the RP2040's boot loader makes its UART bit rate from the nominal 6.5 MHz, so the rate may be off, and its I2C target follows a 400 kHz bus only with a crystal; on the ring oscillator use 100 kHz.
 - The measured worst-case verify time of stage0 on the built-in MCUs is not recorded. [Stage0's clock and its verify time](/en/explanation/lifecycle-events/) gives an emulator's estimate for the Cortex-M0+; there is no estimate for the STM32F401's Cortex-M4.
-- On the RP2040 a boot takes about 15 s on a board without a crystal (the ring oscillator, nominally 6.5 MHz) and about 0.8 s with a 12 MHz crystal: stage0 and the boot loader each check one signature with `Ed25519Small` on every boot. The boot loader keeps its watchdog fed through its check. This is by design: the small verifier leaves the boot loader room for the update session.
 - On the RP2040, stage0, the boot loader and the app take their clock from a crystal or from the ring oscillator; they do not take an external clock driven into XIN.
-- The ESP32-S3 uses the official ESP-IDF 2nd stage. If that 2nd stage itself is broken, DAGON cannot rescue the board; it has to be rewritten over USB with the vendor tools.
 
-Extension isolation:
+Parts the design no longer has that the code still declares:
 
-- The ESP32-S3's isolation level is `none`. No code programs the PMS and WCL registers.
-- There is no sandbox at run time (Service ABI, Entry Gate, Operation Cancellation, Fault Unwind, Lockup Fuse, Reset Cleanup, SandboxArch). Definitions are checked and protection maps are generated.
-- Protection maps can be generated only for the kinds `armv6m-mpu` and `armv7m-mpu`.
+- In `dagon_events::PORTS`: the boot layer, the trust policy (`trusted only` and so on) and services columns, the `Action` port, the note that `Display` runs in the sandbox at boot, and the `BootRecord` and `Sandbox` records. The table of section 2.1 of [Lifecycle events and extensions](/en/explanation/lifecycle-events/) is generated from them.
+- VERSION ids 0x07, 0x08, 0x09, 0x11 and 0x12 in `version_id::TABLE`. The table of section 5.4 equals it.
+- Boot-stage extensions: the `boot_extensions` machine (`boot.extension_overran`), `targets/boot-extension-template`, the manifest's `trusted`, `stack_bytes` and `ram_bytes`, and `dagon-extension`'s protection map generation and trusted-extension checks.
+- The MCU definitions' `[isolation]`, `[[peripheral]]` and `[boot.record]`. The design's `root_protection` is a table of its own; the code keeps it as a field of `[isolation]` and moves it to its own table with the code change.
+- The models of the boot record, the lockup fuse, the state log's keyed records and the link diagnostics (DTC) in `dagon-retained-model`.
+- `REPLAY`, the decoder for the boot record's replay that `state_machine!` generates.
 
 Links:
 
@@ -48,23 +61,21 @@ Identity and VERSION:
 - The MCU identity is a hand-assigned 16-bit `wire_id`, carried in the image header, the identity reply, VERSION 0x06 and the topology node. It is not the 64-bit name hash of the design.
 - VERSION answers only ids 0x01, 0x06, 0x0A, 0x0B, 0x0C and 0x0D, and refuses a non-empty request.
 
-The signing key:
+Values:
 
-- The signing key is read only from a file. The environment variable `DAGON_SIGNING_KEY` also holds a file's path. No port lets you choose another means (an environment variable, the OS key store, 1Password and so on).
-
-Values and IDs:
-
-- The USB VID:PID `c0de:cafe` is a test ID, fixed in the code. It is not an assigned one.
 - DAGON's own MCU definitions hold values marked `unverified`.
-- The execution model's budgets ([section 12](/en/explanation/lifecycle-events/#12-execution-model)) are not set the way 12.3 says.
+- The execution model's budgets ([section 11](/en/explanation/lifecycle-events/#11-execution-model)) are not set the way 11.3 says.
 
-Components in the design figure that the code does not have:
+Parts of the design the code lacks, in whole or in part:
 
-- Ports with no replaceable trait: BuildRunner, Signer, DecisionPolicy, LogStorage, UpdateProtocol, Recovery, ImageVerifier, Digest, CryptoProvider, Diagnostics, Display, LogSink, Agent, Action
-- On the hub: Coordinator, Release Store, Bus Guardian. The PC drives a write through the hub.
-- The write plan: the Delivery Plan's trial window and promotion judgement
-- Recovery: Recovery Policy's and Node Recovery's automatic choice of tier and bounded retry
-- On the host: Host Machines, Host Extension Chain, Action Definitions
-- At boot: Boot Record Writer, Boot Action Interpreter
-- Retained Codecs: the boot record's and the lockup fuse's formats exist only in the executable model, not in the firmware.
-- The topology body: the firmware's format is `dagon-format`'s (a 32-byte head, 32-byte nodes), not the one in [Retained and persistent formats](/en/explanation/retained-formats/). The hub stores it in one region, with no two-bank replacement.
+<!-- generated from dagon_events::PORTS: DAGON_BLESS=1 cargo test -p dagon-catalog --test docs -->
+- Ports with no trait in the code: `UpdateProtocol`, `Digest`, `CryptoProvider`, `DecisionPolicy`, `LogStorage`, `Recovery`, `Diagnostics`, `Display`, `LogSink`, `Signer`, `KeyStore`, `BuildRunner`, `Agent`, `Action`
+- `KeyStore`: The CLI reads the signing key only from a file: `--key` and `DAGON_SIGNING_KEY` each name a file's path.
+- `BootRecord`: The firmware writes no boot record: its format exists only in the executable model (`dagon-retained-model`).
+- `Sandbox`: There is no sandbox at run time (Service ABI, Entry Gate, Operation Cancellation, Fault Unwind, Lockup Fuse, Reset Cleanup, SandboxArch). Definitions are checked and protection maps are generated.
+<!-- end of generated list -->
+<!-- generated from site/scripts/architecture.py: python site/scripts/gen.py -->
+- AI Agent Link: `dagon serve` has no job that ports DAGON to a board: `POST /v1/ai/port` answers 501.
+- Boot Action Interpreter: Not in the code.
+- Retained Codecs: The firmware has none of the retained codecs: the topology body is `dagon-format`'s (a 32-byte head, 32-byte nodes), not the one in [Retained and persistent formats](/en/explanation/retained-formats/). The hub stores it in one region, with no two-bank replacement.
+<!-- end of generated table -->

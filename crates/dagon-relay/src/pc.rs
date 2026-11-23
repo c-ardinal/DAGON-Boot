@@ -1,11 +1,21 @@
 //! Serving the PC: DAGON frames from the uplink. RELAY and I2C_RAW go to
 //! the worker of the link they name, SUBCTL to the recovery lines (owned
 //! here); everything else, SHOW included, is this node's own agent (owned
-//! here). A link or recovery lines the node does not have answer
-//! E_UNSUPPORTED.
+//! here). A link the board does not wire answers E_UNSUPPORTED; a node
+//! without recovery lines does not serve SUBCTL and I2C_RAW at all. CAPS
+//! about RELAY is answered here too, with the tunnel of the link asked
+//! about; CAPS about any other command is the agent's.
+//!
+//! An answer is at most what the requester takes: the uplink's payload,
+//! and the one its HELLO named ([`OwnAgent::ceiling`]). That is the
+//! ingress of every tunnel, and a request whose answer would not fit it
+//! is refused before a link or a line is used.
 
 use dagon_port::{Link, Nrst, SubControl};
-use dagon_proto::payload::{self, boot0, nrst, Relay as RelayReq, SubCtl};
+use dagon_proto::handler::{self, Handler};
+use dagon_proto::payload::{
+    self, boot0, nrst, CapsReq, CapsResp, CmdSet, I2cRaw, Relay as RelayReq, Req as Asked, SubCtl,
+};
 use dagon_proto::{flags, Cmd, Frame, FrameError, Status, HEADER_LEN, MAX_FRAME};
 
 use crate::port::{Op, Port, Req};
@@ -35,6 +45,29 @@ pub struct Relay<'a, A, C, W, T> {
     pub config: Config,
 }
 
+/// The commands the relay answers itself. Its handlers wait on the
+/// node's links, so the rows have no action: [`Pc::handle`] takes the
+/// typed request of a row and runs it.
+const TABLE: [Handler<(), ()>; 3] = [
+    Handler::deferred(Cmd::Relay),
+    Handler::deferred(Cmd::SubCtl),
+    Handler::deferred(Cmd::I2cRaw),
+];
+
+/// CAPS, which the relay answers about RELAY and leaves to the agent
+/// about anything else (the agent's HELLO names it).
+const CAPS: Handler<(), ()> = Handler::deferred(Cmd::Caps);
+
+/// The commands of its own a relay serves: RELAY, and with recovery lines
+/// SUBCTL and I2C_RAW. The node's HELLO names them with its agent's.
+pub const fn cmds(recovery: bool) -> CmdSet {
+    if recovery {
+        handler::cmds(&TABLE)
+    } else {
+        CmdSet::EMPTY.with(Cmd::Relay as u8)
+    }
+}
+
 struct Pc<'a, A, C, W, T> {
     r: Relay<'a, A, C, W, T>,
     resp: [u8; MAX_FRAME],
@@ -60,6 +93,7 @@ where
         next_id: 1,
         boot0_high: false,
     };
+    pc.r.agent.also_serves(cmds(pc.r.recovery.is_some()));
     let max = up.max_payload();
     let (via, addr) = (up.kind().code(), up.addr());
     let mut link_up = false;
@@ -71,7 +105,7 @@ where
             continue;
         };
         // Every request starts with a gated feed, so a flash erase it runs
-        // has a full watchdog period (execution model, section 12, rule 4).
+        // has a full watchdog period (execution model, section 11, rule 4).
         pc.r.watch.progress(task::PC);
         if !link_up {
             link_up = true;
@@ -124,26 +158,67 @@ where
             Err(_) => return (0, None),
         };
         let is_request = f.flags & (flags::RESP | flags::EVENT) == 0;
-        let (status, bulk) = match Cmd::from_u8(f.cmd) {
-            Some(Cmd::Relay) if is_request => match RelayReq::parse(f.payload) {
-                Ok(r) => self.relay(&r, max).await,
-                Err(s) => (s, 0),
-            },
-            Some(Cmd::SubCtl) if is_request => (self.lines(f.payload).await, 0),
-            Some(Cmd::I2cRaw) if is_request => self.i2c_raw(f.payload, max).await,
-            _ => return self.own(request),
+        let served = cmds(self.r.recovery.is_some());
+        let row = handler::find(&TABLE, f.cmd)
+            .filter(|h| served.has(h.cmd as u8))
+            .or((f.cmd == Cmd::Caps as u8).then_some(&CAPS));
+        let Some(row) = row.filter(|_| is_request) else {
+            return self.own(request);
+        };
+        // What the requester takes: the ingress of a tunnel, and the most
+        // an answer may be.
+        let ceiling = self.r.agent.ceiling().over(max);
+        let room = ceiling.bytes();
+        // The whole request is read, and its answer held against the
+        // ceiling, before any of it runs.
+        let (status, len) = match row.request(f.payload, ceiling) {
+            Err(refused) => (refused, 0),
+            Ok(Asked::Caps(c)) if c.cmd != Cmd::Relay as u8 => return self.own(request),
+            Ok(Asked::Caps(c)) => self.caps(c, room),
+            Ok(Asked::SubCtl(s)) => (self.lines(s).await, 0),
+            Ok(Asked::I2cRaw(raw)) => self.i2c_raw(raw, room).await,
+            Ok(Asked::Relay(r)) => self.relay(&r, room).await,
+            Ok(_) => (Status::Unsupported, 0),
         };
         let out = &mut self.resp[HEADER_LEN..];
-        let len = match (status, Cmd::from_u8(f.cmd)) {
-            // The worker's answer is the bulk, already in place.
-            (Status::Ok, Some(Cmd::Relay | Cmd::I2cRaw)) => {
-                out[0] = Status::Ok as u8;
-                1 + payload::finish_bulk_resp(&mut out[1..], bulk).unwrap_or(0)
+        let len = if status != Status::Ok {
+            payload::put_refusal(out, status, f.cmd, f.payload)
+        } else {
+            out[0] = Status::Ok as u8;
+            if row.spec.resp.bulk {
+                // The worker's answer is the bulk, already in place.
+                1 + payload::finish_bulk_resp(&mut out[1..], len).unwrap_or(0)
+            } else {
+                // The body, if any, is already in place.
+                1 + len
             }
-            _ => payload::put_refusal(out, status, f.cmd, f.payload),
         };
         let n = dagon_proto::finish(&mut self.resp, flags::RESP, f.seq, f.cmd, len).unwrap_or(0);
         (n, None)
+    }
+
+    /// CAPS about RELAY: its fields, and for the link asked about the
+    /// longest inner frame forwarded over it for a requester that takes
+    /// `room` payload bytes ([`RelayReq::tunnel_mtu`]). E_ARG for a link
+    /// the node does not have. The body goes after the status byte;
+    /// returns its length.
+    fn caps(&mut self, asked: CapsReq, room: usize) -> (Status, usize) {
+        let tunnel = match asked.link.map(|id| self.route(id)) {
+            None => None,
+            Some(None) => return (Status::Arg, 0),
+            Some(Some(route)) => {
+                let mtu = RelayReq::tunnel_mtu(room, usize::from(route.link.max_payload));
+                Some(u16::try_from(mtu).unwrap_or(u16::MAX))
+            }
+        };
+        let answer = CapsResp {
+            tunnel_mtu: tunnel,
+            ..CapsResp::of(Cmd::Relay)
+        };
+        match answer.encode(&mut self.resp[HEADER_LEN + 1..]) {
+            Ok(n) => (Status::Ok, n),
+            Err(_) => (Status::Arg, 0),
+        }
     }
 
     /// A request for this node's own agent.
@@ -159,9 +234,9 @@ where
     }
 
     /// Passes `req` with `data` to the worker behind `port`; its answer
-    /// goes where the response's bulk starts, within the uplink's `max`
-    /// payload (after the status byte and the delimiter): E_ARG for one
-    /// longer than that.
+    /// goes where the response's bulk starts, within the `max` payload
+    /// bytes the requester takes (after the status byte and the
+    /// delimiter): E_ARG for one longer than that.
     async fn via(&mut self, port: &Port, req: Req, data: &[u8], max: usize) -> (Status, usize) {
         // The link worker holds the deadline while it works on the request.
         self.r.watch.idle(task::PC);
@@ -192,9 +267,9 @@ where
 
     /// RELAY: E_ARG, before anything is forwarded, for a link the node does
     /// not have, an address that link does not take, or an inner frame
-    /// that is not one whole frame within the tunnel from the uplink's
-    /// `max` payload over that link ([`cmd::relay_admits`]); E_UNSUPPORTED
-    /// for a link the board does not wire.
+    /// that is not one whole frame within the tunnel from the `max` payload
+    /// bytes the requester takes over that link ([`cmd::relay_admits`]);
+    /// E_UNSUPPORTED for a link the board does not wire.
     async fn relay(&mut self, r: &RelayReq<'_>, max: usize) -> (Status, usize) {
         let Some(route) = self.route(r.link) else {
             return (Status::Arg, 0);
@@ -211,11 +286,7 @@ where
     }
 
     /// SUBCTL: BOOT0 first, then NRST (a pulse samples the new BOOT0).
-    async fn lines(&mut self, p: &[u8]) -> Status {
-        let s = match SubCtl::parse(p) {
-            Ok(s) => s,
-            Err(e) => return e,
-        };
+    async fn lines(&mut self, s: SubCtl) -> Status {
         let line = match s.nrst {
             nrst::RELEASE => Nrst::Release,
             nrst::LOW => Nrst::Low,
@@ -236,7 +307,7 @@ where
 
     /// Raw transactions to the ROM loader, only while BOOT0 is high, each
     /// within the recovery link's buffer.
-    async fn i2c_raw(&mut self, p: &[u8], max: usize) -> (Status, usize) {
+    async fn i2c_raw(&mut self, raw: I2cRaw<'_>, max: usize) -> (Status, usize) {
         let Some(rec) = self.r.recovery.as_ref() else {
             return (Status::Unsupported, 0);
         };
@@ -245,10 +316,9 @@ where
         let Some((link, port)) = route.and_then(|k| Some((k.link, k.port?))) else {
             return (Status::Unsupported, 0);
         };
-        let raw = match cmd::i2c_raw(p, self.boot0_high, &link) {
-            Ok(r) => r,
-            Err(e) => return (e, 0),
-        };
+        if let Err(e) = cmd::i2c_raw(&raw, self.boot0_high, &link) {
+            return (e, 0);
+        }
         let timeout = self.r.config.raw_timeout_ms;
         let req = self.req(Op::Raw, addr, timeout, raw.read_len);
         self.via(port, req, raw.data, max).await

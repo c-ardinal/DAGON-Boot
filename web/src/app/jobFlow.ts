@@ -98,11 +98,11 @@ export function buildFailure(j: BuildJobs, reach: readonly string[]): BuildFailu
  * them, and their DAGON does not answer (nothing answers before connecting).
  */
 export function firstWriteNodes(
-  nodes: readonly { id: string; notYet?: string | null }[],
+  nodes: readonly { id: string; skip?: string | null }[],
   live: Readonly<Record<string, { responding: boolean | null } | undefined>>,
   connected: boolean,
   state: L,
 ): string[] {
   if (connected && !NODE_WRITE.has(state)) return [];
-  return nodes.filter((n) => !n.notYet && (!connected || live[n.id]?.responding !== true)).map((n) => n.id);
+  return nodes.filter((n) => !n.skip && (!connected || live[n.id]?.responding !== true)).map((n) => n.id);
 }

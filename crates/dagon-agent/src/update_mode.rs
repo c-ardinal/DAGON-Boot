@@ -50,12 +50,14 @@ impl Entry {
     }
 }
 
-/// A link a boot core serves between sleeps.
+/// The links a boot core serves between sleeps.
 pub trait Port {
-    /// Serves what the link has pending; returns a request frame that has
-    /// arrived whole. Further requests wait (NACKed or unread) until
-    /// [`Port::reply`].
-    fn poll(&mut self) -> Option<&[u8]>;
+    /// Serves what the links have pending; returns a request frame that
+    /// has arrived whole, with the link it came over (0 to `L - 1` of the
+    /// session `Agent<.., L>`, as the node numbers its links; a port of one
+    /// link says 0). Further requests wait (NACKed or unread) until
+    /// [`Port::reply`], which answers on that link.
+    fn poll(&mut self) -> Option<(usize, &[u8])>;
     /// Holds the reply to the last request (`None`: no answer) for the
     /// peer to read; `reboot`: [`Port::delivered`] tells when it was read.
     fn reply(&mut self, frame: Option<&[u8]>, reboot: bool);
@@ -69,11 +71,30 @@ pub trait Port {
 /// The STAY the listen window took, for update mode to answer.
 pub struct Stay {
     frame: [u8; STAY_LEN],
+    on: usize,
 }
 
 impl Stay {
     pub fn frame(&self) -> &[u8] {
         &self.frame
+    }
+
+    /// The link it came over ([`Port::poll`]).
+    pub fn link(&self) -> usize {
+        self.on
+    }
+
+    /// `request` read as a STAY that came over link `on`; `None` when it
+    /// is not one.
+    pub fn read(on: usize, request: &[u8]) -> Option<Stay> {
+        let (f, _) = Frame::decode(request, request.len()).ok()?;
+        let is_stay = f.cmd == Cmd::Stay as u8
+            && f.flags & flags::RESP == 0
+            && payload::parse_empty(&Cmd::Stay.spec().req, f.payload).is_ok();
+        // Kept as the STAY it means: its seq, and none of the fields skipped.
+        let mut frame = [0u8; STAY_LEN];
+        dagon_proto::finish(&mut frame, f.flags, f.seq, f.cmd, 0).ok()?;
+        is_stay.then_some(Stay { frame, on })
     }
 }
 
@@ -84,17 +105,6 @@ pub enum Exit {
     Reboot,
     /// No request for [`EXIT_IDLE_MS`].
     Idle,
-}
-
-fn stay(request: &[u8]) -> Option<Stay> {
-    let (f, _) = Frame::decode(request, request.len()).ok()?;
-    let is_stay = f.cmd == Cmd::Stay as u8
-        && f.flags & flags::RESP == 0
-        && payload::parse_empty(&Cmd::Stay.spec().req, f.payload).is_ok();
-    // Kept as the STAY it means: its seq, and none of the fields skipped.
-    let mut frame = [0u8; STAY_LEN];
-    dagon_proto::finish(&mut frame, f.flags, f.seq, f.cmd, 0).ok()?;
-    is_stay.then_some(Stay { frame })
 }
 
 /// Sleeps on `port` for the `left_us` to the next deadline, at most the
@@ -122,8 +132,8 @@ pub fn listen<P: Port, C: Clock>(
     let end = clock.now_us() + u64::from(window_ms) * US_PER_MS;
     loop {
         feed();
-        if let Some(request) = port.poll() {
-            if let Some(s) = stay(request) {
+        if let Some((on, request)) = port.poll() {
+            if let Some(s) = Stay::read(on, request) {
                 return Some(s);
             }
             port.reply(None, false);
@@ -139,16 +149,19 @@ pub fn listen<P: Port, C: Clock>(
 
 /// Update mode: `agent` answers `first` (the window's STAY), then every
 /// request `port` brings, until the reply to REBOOT has been read or
-/// [`EXIT_IDLE_MS`] pass without a request. A transfer left for
-/// [`IDLE_TIMEOUT_MS`] is dropped. `feed` runs at every wake, at least
-/// every `feed_every_ms`.
-pub fn serve<P, S, X, V, W, C>(
+/// [`EXIT_IDLE_MS`] pass without a request. Each request is handled as
+/// the request of the link it came over ([`Agent::handle_on`]), and a
+/// transfer whose link served no request for [`IDLE_TIMEOUT_MS`] is
+/// dropped ([`Agent::tick`], at every wake: at most `feed_every_ms` late
+/// while another link keeps the node busy). `feed` runs at every wake, at
+/// least every `feed_every_ms`.
+pub fn serve<P, S, X, V, W, C, const L: usize>(
     port: &mut P,
-    agent: &mut Agent<S, X, V, W>,
+    agent: &mut Agent<S, X, V, W, L>,
     clock: &mut C,
     feed_every_ms: u32,
     feed: &mut impl FnMut(),
-    first: Option<&[u8]>,
+    first: Option<&Stay>,
 ) -> Exit
 where
     P: Port,
@@ -163,13 +176,13 @@ where
 
 /// [`serve`] in `entry`'s mode: recovery mode does not leave after
 /// [`EXIT_IDLE_MS`], only on REBOOT.
-pub fn serve_in<P, S, X, V, W, C>(
+pub fn serve_in<P, S, X, V, W, C, const L: usize>(
     port: &mut P,
-    agent: &mut Agent<S, X, V, W>,
+    agent: &mut Agent<S, X, V, W, L>,
     clock: &mut C,
     feed_every_ms: u32,
     feed: &mut impl FnMut(),
-    mut first: Option<&[u8]>,
+    mut first: Option<&Stay>,
     entry: Entry,
 ) -> Exit
 where
@@ -187,14 +200,15 @@ where
     let mut reboot = false;
     loop {
         feed();
+        agent.tick(clock.now_us());
         let request = match first.take() {
-            Some(r) => Some(r),
+            Some(s) => Some((s.link(), s.frame())),
             None => port.poll(),
         };
-        if let Some(request) = request {
+        if let Some((on, request)) = request {
             last = clock.now_us();
             transfer = true;
-            let reply = agent.handle(request);
+            let reply = agent.handle_on(on, request);
             reboot = reply.as_ref().is_some_and(|r| r.reboot);
             port.reply(reply.map(|r| r.frame), reboot);
             continue;
@@ -204,8 +218,9 @@ where
             return Exit::Reboot;
         }
         let quiet = clock.now_us().saturating_sub(last);
+        // No link brought a request since `last`, the transfer's included:
+        // the `tick` of this wake dropped it.
         if transfer && quiet >= abort_us {
-            agent.abort();
             transfer = false;
         }
         if entry.leaves_when_idle() && quiet >= exit_us {

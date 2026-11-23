@@ -16,7 +16,7 @@ export interface Issue {
 }
 
 export interface Problem extends Issue {
-  /** S07 short name. */
+  /** Short name of the rule. */
   short: string;
   /** How to fix it, one sentence. */
   sentence: string;
@@ -57,9 +57,9 @@ function where(path: string, doc: Doc): Where {
   return { rest: path };
 }
 
-/** The chip of a problem: ! an error, ▲ a caution, ◇ a part not updatable yet. */
+/** The chip of a problem: ! an error, ▲ a caution, ◇ a part updating skips or a hop the firmware does not run. */
 export function problemChip(p: Pick<Issue, 'rule' | 'severity'>): { mark: '!' | '▲' | '◇'; kind: 'error' | 'warning' | 'unsupported' } {
-  // V-24 (a hop the firmware cannot do yet) is the same kind of "not yet" as V-23.
+  // V-24 (a hop the firmware does not run) is a limit of DAGON, as V-23 is, not a thing to fix.
   if (p.rule === 'V-23' || p.rule === 'V-24') return { mark: '◇', kind: 'unsupported' };
   return p.severity === 'warning' ? { mark: '▲', kind: 'warning' } : { mark: '!', kind: 'error' };
 }
@@ -102,7 +102,7 @@ function select(w: Where, doc: Doc): string | null {
 
 const RANK: Record<Issue['severity'], number> = { error: 0, warning: 1, info: 2 };
 
-/** topo_check on the document (as JSON, which the YAML parser reads): errors, then cautions, then what is not updatable yet. */
+/** topo_check on the document (as JSON, which the YAML parser reads): errors, then cautions, then what updating skips. */
 export function problems(doc: Doc): Problem[] {
   const text = JSON.stringify(topoWithNames(doc.topo));
   const report = JSON.parse(topo_check(text)) as { issues: Issue[] };

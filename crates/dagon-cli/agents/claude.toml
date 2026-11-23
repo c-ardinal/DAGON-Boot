@@ -41,7 +41,7 @@ system = "file"
 # service "dagon", account "claude/api" (dagon ai key set, or DAGON Console).
 [[ways]]
 id = "api"
-name = "API キー"
+name = "APIキー"
 [ways.transport]
 kind = "messages-http"
 url = "https://api.anthropic.com/v1/messages"

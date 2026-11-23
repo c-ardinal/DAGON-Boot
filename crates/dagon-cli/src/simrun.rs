@@ -1,4 +1,4 @@
-//! `sim run`: the four simulator scenarios, end to end through dagon-host
+//! `sim`: the four simulator scenarios, end to end through dagon-host
 //! against the simulated hub (RP2040) and F401, with the public RFC 8032
 //! test key. Needs no hardware.
 
@@ -375,15 +375,30 @@ fn s4() -> R {
     ))
 }
 
-pub fn run() -> Result<(), String> {
-    let scenarios: [Scenario; 4] = [
-        ("S1", "update with a power cut", s1),
-        ("S2", "trial app never confirms", s2),
-        ("S3", "tampered release", s3),
-        ("S4", "erased F401 via ROM loader", s4),
-    ];
+const SCENARIOS: [Scenario; 4] = [
+    ("S1", "update with a power cut", s1),
+    ("S2", "trial app never confirms", s2),
+    ("S3", "tampered release", s3),
+    ("S4", "erased F401 via ROM loader", s4),
+];
+
+/// Every scenario's ID and title, in run order.
+pub fn scenarios() -> impl Iterator<Item = (&'static str, &'static str)> {
+    SCENARIOS.iter().map(|(id, title, _)| (*id, *title))
+}
+
+/// Runs the scenario `only` names, or every scenario.
+pub fn run(only: Option<&str>) -> Result<(), String> {
+    let chosen: Vec<&Scenario> = SCENARIOS
+        .iter()
+        .filter(|(id, _, _)| only.is_none_or(|o| o == *id))
+        .collect();
+    if chosen.is_empty() {
+        return Err(format!("no scenario {}", only.unwrap_or_default()));
+    }
+    let total = chosen.len();
     let mut failed = 0;
-    for (id, name, f) in scenarios {
+    for (id, name, f) in chosen {
         match f() {
             Ok(d) => println!("{id} PASS {name}: {d}"),
             Err(e) => {
@@ -395,7 +410,7 @@ pub fn run() -> Result<(), String> {
     if failed == 0 {
         Ok(())
     } else {
-        Err(format!("{failed} of 4 scenarios failed"))
+        Err(format!("{failed} of {total} scenarios failed"))
     }
 }
 
@@ -843,7 +858,14 @@ mod tests {
 
     #[test]
     fn all_scenarios_pass() {
-        super::run().unwrap();
+        super::run(None).unwrap();
+    }
+
+    #[test]
+    fn one_scenario_runs_alone_and_an_unknown_id_is_refused() {
+        super::run(Some("S3")).unwrap();
+        assert!(super::run(Some("S9")).is_err());
+        assert_eq!(super::scenarios().count(), 4);
     }
 
     #[test]

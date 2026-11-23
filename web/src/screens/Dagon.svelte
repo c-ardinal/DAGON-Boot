@@ -17,7 +17,7 @@
     onapply: (i: number, at: Element) => void;
     /** Opens the drawer's 会話 tab. */
     ontalk: () => void;
-    /** Bumped from outside (the menu's "DAGON と話す", the / key): opens the bubble and focuses its field. */
+    /** Bumped from outside (the menu's "DAGONとの対話", the / key): opens the bubble and focuses its field. */
     openRequest: number;
     /** The bubble is open; the page closes it on Escape wherever focus is. */
     open?: boolean;

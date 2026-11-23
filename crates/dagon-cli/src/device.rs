@@ -201,7 +201,7 @@ fn node_targets(cfg: &Config, t: &Topology) -> Result<Vec<NodeRoute>, String> {
     Ok(nodes)
 }
 
-/// The node the PC is connected to: the 親機 the reachable part starts from.
+/// The node the PC is connected to: the coordinator the reachable part starts from.
 fn connected(t: &Topology) -> Result<&str, RouteError> {
     dagon_topology::reach_root(t).ok_or(RouteError::Connected { nodes: Vec::new() })
 }

@@ -131,7 +131,10 @@ fn i2c_raw_and_subctl_rules_match_the_sim() {
     // The ROM loader answers on the I2C link: its buffer is the limit.
     let i2c = RELAY_LINKS.iter().position(|l| l.id == I2C).unwrap();
     let (link, limit) = (RELAY_LINKS[i2c], RELAY_LINK_BUFFERS[i2c]);
-    let rule = |p: &[u8], high| cmd::i2c_raw(p, high, &link).err();
+    let rule = |p: &[u8], high| {
+        let checked = I2cRaw::parse(p).and_then(|raw| cmd::i2c_raw(&raw, high, &link));
+        checked.err()
+    };
 
     // BOOT0 low.
     assert_eq!(

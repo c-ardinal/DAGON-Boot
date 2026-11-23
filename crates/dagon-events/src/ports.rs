@@ -24,7 +24,8 @@ impl Trust {
     }
 }
 
-/// The kinds of service a sandboxed handler calls (4.2 of the design).
+/// The kinds of service a sandboxed handler calls (the service ABI, a part
+/// the design no longer has; the limitations page lists it).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Service {
     Return,
@@ -52,6 +53,20 @@ impl Service {
     }
 }
 
+/// Whether this tree has a part of the design. A port is a trait DAGON
+/// calls (2.1 of the design); the limitations page lists every record
+/// that lacks.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum InTree {
+    /// The code that carries it, as `crate::Item` paths: for a port, the
+    /// trait a replacement implements.
+    Has(&'static [&'static str]),
+    /// This tree lacks it: for a port, there is no trait to implement. The
+    /// text says more where the absence alone does not (required for a
+    /// part that is not a port).
+    Lacks(&'static str),
+}
+
 /// A layer the port exists in, and DAGON's implementation there.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PortDefault {
@@ -71,6 +86,7 @@ pub struct Port {
     /// The services a sandboxed implementation calls. Privileged
     /// (trusted-only) and host implementations call none.
     pub services: &'static [Service],
+    pub in_tree: InTree,
 }
 
 impl Port {
@@ -95,6 +111,7 @@ const fn port(
     trust: Trust,
     note: &'static str,
     services: &'static [Service],
+    in_tree: InTree,
 ) -> Port {
     Port {
         id,
@@ -103,6 +120,7 @@ const fn port(
         trust,
         note,
         services,
+        in_tree,
     }
 }
 
@@ -114,7 +132,11 @@ const FLASH: &str = "the MCU definition's flash layout";
 const RECOVERY: &str = "BOOTSEL/UF2, factory, ROM entry as the MCU and board define";
 const BOARD: &str = "the board definition's";
 const KEY: &str = "file key pair";
+const KEY_FILE_ONLY: &str = "The CLI reads the signing key only from a file: `--key` and `DAGON_SIGNING_KEY` each name a file's path.";
+const NO_BOOT_RECORD: &str = "The firmware writes no boot record: its format exists only in the executable model (`dagon-retained-model`).";
+const NO_SANDBOX: &str = "There is no sandbox at run time (Service ABI, Entry Gate, Operation Cancellation, Fault Unwind, Lockup Fuse, Reset Cleanup, SandboxArch). Definitions are checked and protection maps are generated.";
 
+use InTree::{Has, Lacks};
 use Layer::{App, Boot, Host, Relay};
 use Service as S;
 use Trust::{Additive, Never, TrustedOnly, Untrusted};
@@ -130,6 +152,7 @@ pub const PORTS: &[Port] = &[
         Untrusted,
         "",
         &[S::Return, S::Transport, S::Dma, S::Time, S::Memory],
+        Has(&["dagon_port::Link", "dagon_host::Transport"]),
     ),
     port(
         "UpdateProtocol",
@@ -138,6 +161,7 @@ pub const PORTS: &[Port] = &[
         Untrusted,
         "it cannot skip a guard: the session machine runs the guards, not the protocol",
         SANDBOXED,
+        Lacks(""),
     ),
     port(
         "ImageVerifier",
@@ -149,6 +173,7 @@ pub const PORTS: &[Port] = &[
         TrustedOnly,
         "",
         &[],
+        Has(&["dagon_format::SigVerifier"]),
     ),
     port(
         "Digest",
@@ -157,6 +182,7 @@ pub const PORTS: &[Port] = &[
         TrustedOnly,
         "",
         &[],
+        Lacks(""),
     ),
     port(
         "CryptoProvider",
@@ -165,6 +191,7 @@ pub const PORTS: &[Port] = &[
         TrustedOnly,
         "",
         &[],
+        Lacks(""),
     ),
     port(
         "DecisionPolicy",
@@ -176,6 +203,7 @@ pub const PORTS: &[Port] = &[
         TrustedOnly,
         "",
         &[],
+        Lacks(""),
     ),
     port(
         "WatchdogDriver",
@@ -184,6 +212,7 @@ pub const PORTS: &[Port] = &[
         TrustedOnly,
         "",
         &[],
+        Has(&["dagon_port::Watchdog"]),
     ),
     port(
         "SlotStore",
@@ -192,6 +221,7 @@ pub const PORTS: &[Port] = &[
         TrustedOnly,
         "",
         &[],
+        Has(&["dagon_agent::SlotStore"]),
     ),
     port(
         "LogStorage",
@@ -200,6 +230,7 @@ pub const PORTS: &[Port] = &[
         TrustedOnly,
         "",
         &[],
+        Lacks(""),
     ),
     port(
         "Recovery",
@@ -208,6 +239,7 @@ pub const PORTS: &[Port] = &[
         Additive,
         "an extension adds a path, never removes DAGON's",
         &[S::Return, S::Transport, S::Time, S::Memory],
+        Lacks(""),
     ),
     port(
         "Diagnostics",
@@ -216,6 +248,7 @@ pub const PORTS: &[Port] = &[
         Untrusted,
         "",
         SANDBOXED,
+        Lacks(""),
     ),
     port(
         "Display",
@@ -231,6 +264,7 @@ pub const PORTS: &[Port] = &[
         Untrusted,
         "at boot it runs in the sandbox with the declared pins and buses",
         &[S::Return, S::Pins, S::Buses, S::Time, S::Memory],
+        Lacks(""),
     ),
     port(
         "LogSink",
@@ -239,6 +273,7 @@ pub const PORTS: &[Port] = &[
         Untrusted,
         "",
         &[S::Return, S::Events, S::Time, S::Memory],
+        Lacks(""),
     ),
     port(
         "SelfCheck",
@@ -247,6 +282,7 @@ pub const PORTS: &[Port] = &[
         Untrusted,
         "a decision point, 3",
         SANDBOXED,
+        Has(&["dagon_events::Extension"]),
     ),
     port(
         "BoardBringUp",
@@ -255,6 +291,7 @@ pub const PORTS: &[Port] = &[
         Untrusted,
         "",
         &[S::Return, S::Pins, S::Buses, S::Time, S::Memory],
+        Has(&["dagon_events::BoardBringUp"]),
     ),
     port(
         "NodeLink",
@@ -263,6 +300,7 @@ pub const PORTS: &[Port] = &[
         Untrusted,
         "",
         &[S::Return, S::Buses, S::Transport, S::Dma, S::Time, S::Memory],
+        Has(&["dagon_port::NodeLink"]),
     ),
     port(
         "Signer",
@@ -271,6 +309,7 @@ pub const PORTS: &[Port] = &[
         Untrusted,
         "the host is trusted by definition; the device verifies",
         &[],
+        Lacks(""),
     ),
     port(
         "KeyStore",
@@ -279,6 +318,7 @@ pub const PORTS: &[Port] = &[
         Untrusted,
         "the host is trusted by definition; the device verifies",
         &[],
+        Lacks(KEY_FILE_ONLY),
     ),
     port(
         "BuildRunner",
@@ -287,6 +327,7 @@ pub const PORTS: &[Port] = &[
         Untrusted,
         "",
         &[],
+        Lacks(""),
     ),
     port(
         "Agent",
@@ -295,6 +336,7 @@ pub const PORTS: &[Port] = &[
         Untrusted,
         "",
         &[],
+        Lacks(""),
     ),
     port(
         "Action",
@@ -303,6 +345,7 @@ pub const PORTS: &[Port] = &[
         Untrusted,
         "",
         &[],
+        Lacks(""),
     ),
     port(
         "ImageLifecycle",
@@ -311,6 +354,7 @@ pub const PORTS: &[Port] = &[
         Never("the only writer of persistent image state; every change emits its event and keeps the confirm rule"),
         "",
         &[],
+        Has(&["dagon_agent::image"]),
     ),
     port(
         "SessionGuards",
@@ -319,6 +363,7 @@ pub const PORTS: &[Port] = &[
         Never("every protocol's triggers pass the same guards; replacing them would let a transport write what DAGON refuses"),
         "",
         &[],
+        Has(&["dagon_agent::session"]),
     ),
     port(
         "BootRecord",
@@ -327,6 +372,7 @@ pub const PORTS: &[Port] = &[
         Never("its format is DAGON's retained contract and it is never an input to a boot or confirm decision"),
         "",
         &[],
+        Lacks(NO_BOOT_RECORD),
     ),
     port(
         "Composition",
@@ -335,6 +381,7 @@ pub const PORTS: &[Port] = &[
         Never("it is what makes every extension see every event and keeps answers bounded"),
         "",
         &[],
+        Has(&["dagon_events::Composed"]),
     ),
     port(
         "Sandbox",
@@ -343,6 +390,7 @@ pub const PORTS: &[Port] = &[
         Never("it is what keeps extensions away from DAGON's state"),
         "",
         &[],
+        Lacks(NO_SANDBOX),
     ),
 ];
 
@@ -373,6 +421,15 @@ mod tests {
             assert_eq!(!p.services.is_empty(), sandboxed, "{}", p.id);
             if sandboxed {
                 assert!(p.services.contains(&Service::Return), "{}", p.id);
+            }
+        }
+    }
+
+    #[test]
+    fn a_part_that_is_not_a_port_says_what_it_lacks() {
+        for p in PORTS {
+            if let (Trust::Never(_), InTree::Lacks(why)) = (p.trust, p.in_tree) {
+                assert!(!why.is_empty(), "{}", p.id);
             }
         }
     }

@@ -1,4 +1,4 @@
-//! The part of a 構成 updating reaches: the first 親機 and the 子機
+//! The part of a 構成 updating reaches: the first coordinator and the nodes
 //! linked straight to it over I2C or UART, whichever end of the link each is
 //! listed as. Everything else is a valid definition that updating skips
 //! (V-23 tells why).
@@ -12,14 +12,14 @@ use crate::{check_with, Report};
 /// Why updating skips a node.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Skip {
-    /// A second 親機, or a node in a second 親機's tree.
+    /// A second coordinator, or a node in a second coordinator's tree.
     SecondHub,
-    /// Below a 子機 (孫機 and deeper).
+    /// Linked through another node (two or more links from the coordinator).
     Deep,
-    /// Linked to the 親機 by a kind the compiled topology cannot carry (CAN, Ethernet, ...).
+    /// Linked to the coordinator by a kind the compiled topology cannot carry (CAN, Ethernet, ...).
     LinkKind,
-    /// No chain of links up to the first 親機 (unlinked, a loop of 子機, or
-    /// no 親機 at all).
+    /// No chain of links up to the first coordinator (unlinked, a loop of nodes with `role: node`, or
+    /// no coordinator at all).
     Unreachable,
     /// The part updating would reach does not pass the checks on its own,
     /// so nothing is updated.
@@ -42,11 +42,11 @@ impl Skip {
     pub fn reason(self) -> &'static str {
         match self {
             Skip::SecondHub => {
-                "it is in a second 親機's tree; updating reaches the first 親機 only"
+                "it is in a second coordinator's tree; updating reaches the first coordinator only"
             }
-            Skip::Deep => "it is below a 子機; updating reaches the 親機's direct 子機 only",
-            Skip::LinkKind => "its link kind is not one updating can use yet (I2C or UART)",
-            Skip::Unreachable => "no chain of links leads to it from the first 親機",
+            Skip::Deep => "it is linked through another node; updating reaches only the nodes linked straight to the coordinator",
+            Skip::LinkKind => "its link is of a kind updating does not use (I2C and UART only)",
+            Skip::Unreachable => "no chain of links leads to it from the first coordinator",
             Skip::CutInvalid => {
                 "the part updating would reach does not pass `dagon topo check` on its own"
             }
@@ -99,8 +99,8 @@ fn checked(reg: &Registry, t: &Topology, sub: Topology, skipped: Vec<(String, Sk
     }
 }
 
-/// The 親機 the updatable part starts from: the node the PC reaches the
-/// others through (the first 親機 listed).
+/// The coordinator the updatable part starts from: the node the PC reaches the
+/// others through (the first coordinator listed).
 pub fn reach_root(t: &Topology) -> Option<&str> {
     t.nodes
         .iter()
@@ -109,13 +109,13 @@ pub fn reach_root(t: &Topology) -> Option<&str> {
 }
 
 /// The updatable part of `t` and the nodes it leaves out, in `nodes` order.
-/// The first 親機 is always in it; its direct I2C/UART 子機 follow in
+/// The first coordinator is always in it; the nodes linked straight to it over I2C/UART follow in
 /// `nodes` order. The part keeps `nodes` order, so
 /// a 構成 updating reaches whole compiles to the same bytes as before.
 /// Every node not in the part is skipped with a reason.
 pub fn updatable(t: &Topology) -> (Topology, Vec<(String, Skip)>) {
     let first = reach_root(t);
-    // The 親機 is reserved first, so 子機 listed before it never push it out.
+    // The coordinator is reserved first, so nodes listed before it never push it out.
     let mut keep: BTreeSet<&str> = first.into_iter().collect();
     let mut skipped = Vec::new();
     for n in &t.nodes {
@@ -134,7 +134,7 @@ pub fn updatable(t: &Topology) -> (Topology, Vec<(String, Skip)>) {
     let kept = |id: &String| keep.contains(id.as_str());
     let sub = Topology {
         nodes: t.nodes.iter().filter(|n| kept(&n.id)).cloned().collect(),
-        // Only the first 親機's own links: a link between two reached 子機
+        // Only the first coordinator's own links: a link between two reached nodes
         // is not one updating runs over.
         links: t
             .links
@@ -181,7 +181,7 @@ pub fn updatable(t: &Topology) -> (Topology, Vec<(String, Skip)>) {
     (sub, skipped)
 }
 
-/// Ok when `id` is the first 親機 or one of its direct I2C/UART 子機; else why not.
+/// Ok when `id` is the first coordinator or a node linked straight to it over I2C/UART; else why not.
 fn skip_of(t: &Topology, first: Option<&str>, id: &str) -> Result<(), Skip> {
     let n = t.node(id).ok_or(Skip::Unreachable)?;
     if n.role == Role::Coordinator {
@@ -191,7 +191,7 @@ fn skip_of(t: &Topology, first: Option<&str>, id: &str) -> Result<(), Skip> {
             Err(Skip::SecondHub)
         };
     }
-    // No 親機 over any chain of links (unlinked, or 子機 only) is unreachable.
+    // No coordinator over any chain of links (unlinked, or only nodes with `role: node`) is unreachable.
     let (hub, hops) = nearest_hub(t, first, n).ok_or(Skip::Unreachable)?;
     if Some(hub) != first {
         return Err(Skip::SecondHub);
@@ -206,8 +206,8 @@ fn skip_of(t: &Topology, first: Option<&str>, id: &str) -> Result<(), Skip> {
     Ok(())
 }
 
-/// The 親機 nearest to `from` over links, whichever end each lists first, and
-/// how many links away; of two at the same distance the first 親機.
+/// The coordinator nearest to `from` over links, whichever end each lists first, and
+/// how many links away; of two at the same distance the first coordinator.
 fn nearest_hub<'t>(
     t: &'t Topology,
     first: Option<&str>,
@@ -263,7 +263,7 @@ mod tests {
         let node = |id: &str, role: &str| {
             format!("  - id: {id}\n    mcu: rp2040\n    role: {role}\n    port: self-boot\n    tag: {id}\n")
         };
-        // Each link once with the 親機 or the upper node listed first, once the other way.
+        // Each link once with the coordinator or the node nearer the PC listed first, once the other way.
         let link = |a: &str, b: &str, kind: &str, flip: bool| {
             let port = if kind == "uart" { "uart0" } else { "usb" };
             let (a, b) = if flip { (b, a) } else { (a, b) };
@@ -316,8 +316,8 @@ nodes:
         assert!(sub.links.iter().all(|l| l.end("hub").is_some()));
     }
 
-    /// The sample's 親機 and bus with `children` NUCLEO-F401RE 子機 on I2C,
-    /// listed before the 親機 when `hub_last`.
+    /// The sample's coordinator and bus with `children` NUCLEO-F401RE nodes on I2C,
+    /// listed before the coordinator when `hub_last`.
     fn fan(children: usize, hub_last: bool) -> String {
         let hub = "  - id: hub
     mcu: rp2040
@@ -441,7 +441,7 @@ links:
 
     #[test]
     fn a_part_that_does_not_pass_on_its_own_is_never_updatable() {
-        // No 親機 at all: the part is empty of one, so nothing is updatable and every node says why.
+        // No coordinator at all: the part is empty of one, so nothing is updatable and every node says why.
         let t = parse_str(&fan(2, false).replace("role: coordinator", "role: node")).unwrap();
         let cut = cut_with(Registry::builtin(), &t);
         assert!(cut.topology.is_none());
@@ -457,7 +457,7 @@ links:
 
     #[test]
     fn a_loop_of_children_beside_the_hub_is_unreachable_not_reached() {
-        // a - b - c - a: each has its links (V-05 passes), and no chain reaches a 親機.
+        // a - b - c - a: each has its links (V-05 passes), and no chain reaches a coordinator.
         let uart = |a: &str, b: &str| {
             format!("  - kind: uart\n    iface: hw-uart0\n    ends:\n      - {{ node: {a}, port: uart0, pins: {{ tx: 0, rx: 1 }} }}\n      - {{ node: {b}, port: uart1 }}\n    control:\n      kind: cooperative\n      rom_entry: force-download-boot\n")
         };
@@ -507,7 +507,7 @@ links:
 
     #[test]
     fn a_topology_that_passes_with_a_part_that_does_not_reports_nothing_updatable() {
-        // The part is broken by hand (its 親機 taken out): the checked cut refuses it whole.
+        // The part is broken by hand (its coordinator taken out): the checked cut refuses it whole.
         let t = parse_str(&fan(2, false)).unwrap();
         assert!(check_with(Registry::builtin(), &t).is_pushable());
         let (mut sub, skipped) = updatable(&t);
@@ -538,9 +538,9 @@ links:
         assert_eq!(all, ids);
     }
 
-    /// A generated 構成: `count` nodes (the first `hubs` are 親機), each
-    /// 子機 linked from a random node (loops possible), listed shuffled with
-    /// h0 kept the first 親機.
+    /// A generated 構成: `count` nodes (the first `hubs` are coordinators), each
+    /// other node linked from a random node (loops possible), listed shuffled with
+    /// h0 kept the first coordinator.
     fn generated(next: &mut impl FnMut(usize) -> usize) -> String {
         // A link of `kind` (with any lines that follow it) joining two ends
         // (node, port, more fields), listed in either order.

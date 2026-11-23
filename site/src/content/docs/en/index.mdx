@@ -6,28 +6,22 @@ hero:
   tagline: The distributed microcontroller designs of professionals, in more people's hands. As microcontrollers are added, writing takes no more work, and it stays safe.
 ---
 
-:::caution
-As of November 8, 2026, this is an alpha that supports only three kinds of microcontroller, made for "Built with Claude: Japan 2026". Please understand that breaking changes may be made before the official release.
-:::
-
 Try the [DAGON Console demo](~/demo/) in the browser.
 
-A beautiful design with a muddy operation.
-Every time a program changes, you take things apart, swap cables and use one write tool per MCU.
+**A beautiful design with a muddy operation.**
 
-DAGON makes the distributed multi-microcontroller designs of professionals and specialists easy for a wide range of people, from those starting electronics with AI to individual developers who care for compactness and finish.
+A product can give each of its microcontrollers the role that suits it best and have them work together well. Even so, changing a program can mean taking the product apart and swapping cables, or struggling with a different write tool for each microcontroller.
 
-Before assembly, you write each node directly once.
-After that, one connection writes every node.
+DAGON makes the distributed microcontroller designs that professionals and specialists use workable for a wide range of people, from those starting electronics with AI to individual developers who do not compromise on design.
+
+The first time only, you connect each microcontroller directly, one at a time, and write its factory image. After that, one connection is enough, and you do not need to connect them one at a time.
 If that port is outside the case, the case stays closed.
 Otherwise the case is opened only for that one connection.
-Through the hub on your PC, you write to the children beyond it with the same operation as one node.
-More nodes take more time; the operation does not grow.
+Through one microcontroller connected to your PC, you write to the microcontrollers beyond it with a single operation. More microcontrollers take more time; the operation does not grow.
 
-Every image is signed.
-A node runs a new version on trial and goes back by itself to the previous one, where a slot holds it, when it does not work.
+Update images are all signed and written safely. A microcontroller starts a new version on trial and goes back by itself to the previous version, where a slot holds one, if it does not work.
 
-Mixed MCUs are handled by drawing the 構成 (the setup).
+DAGON handles mixed kinds of microcontroller once you draw the setup.
 
 Applications are written in Rust.
 

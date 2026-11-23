@@ -254,6 +254,19 @@ pub const MCU: &[Requirement<McuCheck>] = &[
         check: relay_firmware,
     },
     Requirement {
+        engine: "codec budget check (scripts/codec_budget.py, CI)",
+        fields: &[
+            "codec.bootcore.flash_bytes",
+            "codec.bootcore.stack_bytes",
+            "codec.bootcore.ram_bytes",
+            "codec.relay.flash_bytes",
+            "codec.relay.stack_bytes",
+            "codec.relay.ram_bytes",
+        ],
+        rule: "[codec.bootcore] only with a [[slot_layout]] of target bootcore, [codec.relay] only with [[relay_link]]; stack_bytes and ram_bytes up to the MCU's RAM (ram.size, when given)",
+        check: codec_budgets,
+    },
+    Requirement {
         engine: "topology check V-27, compiled topology (a link end's port index)",
         fields: &["link_port[].index"],
         rule: "index and name each used once; name a-z, 0-9 and '-'",
@@ -934,13 +947,38 @@ fn relay_firmware(m: &McuDef) -> Result<(), String> {
     })
 }
 
+fn codec_budgets(m: &McuDef) -> Result<(), String> {
+    let Some(c) = m.codec else {
+        return Ok(());
+    };
+    let boots = m
+        .slot_layouts
+        .iter()
+        .any(|s| s.target == slot_layout::TargetName::Bootcore);
+    fail(c.bootcore.is_some() && !boots, || {
+        "[codec.bootcore] is for an MCU with a boot core: it has no [[slot_layout]] of target bootcore"
+            .into()
+    })?;
+    fail(c.relay.is_some() && m.relay_links.is_empty(), || {
+        "[codec.relay] is for an MCU that relays: it has no [[relay_link]]".into()
+    })?;
+    let ram = m.ram.map_or(u32::MAX, |r| r.size);
+    for (image, b) in [("bootcore", c.bootcore), ("relay", c.relay)] {
+        let Some(b) = b else { continue };
+        fail(b.stack_bytes > ram || b.ram_bytes > ram, || {
+            format!("codec.{image}: stack_bytes and ram_bytes are at most the RAM, {ram}")
+        })?;
+    }
+    Ok(())
+}
+
 fn hub_pins(b: &BoardDef, m: &McuDef) -> Result<(), String> {
     let Some(h) = &b.coordinator else {
         return Ok(());
     };
     fail(m.coordinator.is_none(), || {
         format!(
-            "coordinator pins on a board whose MCU {} cannot be the 親機",
+            "coordinator pins on a board whose MCU {} cannot be the coordinator",
             m.id
         )
     })?;

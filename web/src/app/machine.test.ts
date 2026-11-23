@@ -57,7 +57,7 @@ describe('operating-mode state machine', () => {
     expect([...seen].sort()).toEqual([...STATES].sort());
   });
 
-  test('a lost device ends in lost from every connected state except the hub restart (hubRestarting, reconnectNeeded)', () => {
+  test('a lost device ends in lost from every connected state except the restart of the node connected to the PC (hubRestarting, reconnectNeeded)', () => {
     for (const s of STATES) {
       const connected = !['idle', 'lost'].includes(hubOf(s));
       const want = connected && s !== 'hubRestarting' && s !== 'reconnectNeeded' ? 'lost' : s;

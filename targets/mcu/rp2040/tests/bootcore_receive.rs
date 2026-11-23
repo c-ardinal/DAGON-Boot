@@ -24,7 +24,7 @@ use dagon_events::{compose, Bounds, Composed, Layer, Nop, Published, Watchdog};
 use dagon_format::statelog::FaceHeader;
 use dagon_mcu_rp2040::bl::{self, HandOverError};
 use dagon_mcu_rp2040::boot_receive::{
-    link_addr, pump, receive_step, serve, Entry, Links, Mailbox, PumpPort, Sleep,
+    link_addr, pump, receive_step, serve, Entry, Links, Mailbox, PumpPort, Sleep, BOOT_LINKS,
 };
 use dagon_mcu_rp2040::layout::{APP_LOG_LAYOUT, MIN_FLASH_SIZE, SECTOR, XIP_BASE};
 use dagon_port::{Flash, FlashRegion, Link, LinkError, LinkKind, Reconnect};
@@ -173,7 +173,9 @@ impl Link for TestLink {
             next => {
                 let due = next.map_or(u64::MAX, |&(at, _)| at);
                 tick().await;
-                self.clock.set(due.min(now + TICK_MS));
+                // Links that share the clock never move it back.
+                let to = due.min(now + TICK_MS);
+                self.clock.set(self.clock.get().max(to));
                 Err(LinkError::Timeout)
             }
         }
@@ -242,7 +244,7 @@ fn verify_tick() {
 
 type Chain = Composed<&'static Published<(), 4>, Nop, Nop, fn() -> u64>;
 type Verifier = Ed25519Small<fn()>;
-type CoreAgent = Agent<SimStore, Chain, Verifier, BootCore>;
+type CoreAgent = Agent<SimStore, Chain, Verifier, BootCore, BOOT_LINKS>;
 
 /// The boot core's session in `entry`'s mode over the hub's store, as the
 /// boot core builds it: an app chain without app extensions, the verifier
@@ -262,7 +264,7 @@ fn session(store: SimStore, entry: Entry, links: &TestLinks) -> CoreAgent {
         max_payload: links.max_payload() as u16,
         ..hub_config()
     };
-    Agent::for_writer(
+    Agent::with_links(
         cfg,
         Ed25519Small::with_tick(sample::PUBKEY, verify_tick as fn()),
         store,
@@ -349,7 +351,7 @@ fn boot(link: TestLink, flash: &mut SimFlash, store: SimStore, recovery: bool) -
             };
             let p = pin!(pump(&mut l, &mb));
             let mut port = PumpPort::new(p, &mb, NoSleep);
-            let first = stay.as_ref().map(Stay::frame);
+            let first = stay.as_ref();
             let exit = serve(
                 &mut port,
                 &mut agent,
@@ -661,6 +663,114 @@ fn a_write_through_update_and_recovery_mode_on_each_rp2040_link_kind() {
             assert_eq!(st.slots[0].state, SlotState::Trying, "{kind:?} {recovery}");
         }
     }
+}
+
+/// Update mode on the I2C and UART links at once, each fed `(ms,
+/// request)`: the replies each link got, by link, once the boot core left.
+fn update_on_two(i2c: Vec<(u64, Vec<u8>)>, uart: Vec<(u64, Vec<u8>)>) -> [Vec<Vec<u8>>; 2] {
+    let clock = Rc::new(Cell::new(0));
+    let mut a = TestLink::new(LinkKind::I2c, &clock);
+    let mut b = TestLink::new(LinkKind::Uart, &clock);
+    a.incoming.extend(i2c);
+    b.incoming.extend(uart);
+    let written = [a.written.clone(), b.written.clone()];
+    let mut l: TestLinks = Links::new(None, Some(a), Some(b));
+    let mut agent = session(hub().store().clone(), Entry::HandOver, &l);
+    let mb = Mailbox::new();
+    let p = pin!(pump(&mut l, &mb));
+    let mut port = PumpPort::new(p, &mb, NoSleep);
+    let mut now = move || clock.get() * 1000;
+    let exit = serve(
+        &mut port,
+        &mut agent,
+        &mut now,
+        FEED_EVERY_MS,
+        &mut || {},
+        Entry::HandOver,
+        None,
+    );
+    assert_eq!(exit, Exit::Idle);
+    written.map(|w| w.borrow().clone())
+}
+
+fn hello_max(seq: u8, max: usize) -> Vec<u8> {
+    let mut p = [0u8; 32];
+    let n = HelloReq {
+        proto_ver: dagon_proto::PROTO_VERSION as u32,
+        max_payload: max as u16,
+    }
+    .encode(&mut p)
+    .unwrap();
+    request(seq, Cmd::Hello, &p[..n])
+}
+
+fn statuses(w: &[Vec<u8>]) -> Vec<Status> {
+    w.iter().map(|f| reply(f).1).collect()
+}
+
+/// The boot core's links are each another requester: a request over one
+/// is not a repeat of the other's with the same seq and command, and each
+/// has the ceiling its own HELLO named.
+#[test]
+fn each_boot_core_link_has_its_own_requester() {
+    let small = max_payload::SMALLEST;
+    // UART's STATUS, then I2C's with the same seq: no repeat for I2C.
+    let [i2c, uart] = update_on_two(
+        vec![
+            (10, hello_max(1, small)),
+            (30, request(9, Cmd::Status, &[])),
+        ],
+        vec![
+            (15, hello_max(3, max_payload::UART)),
+            (20, request(9, Cmd::Status, &[])),
+        ],
+    );
+    assert_eq!(statuses(&uart), [Status::Ok, Status::Ok]);
+    assert_eq!(
+        statuses(&i2c),
+        [Status::Ok, Status::Arg],
+        "I2C got UART's reply as a repeat"
+    );
+    // I2C's small HELLO, then UART's requests.
+    let [i2c, uart] = update_on_two(
+        vec![
+            (10, hello_max(1, small)),
+            (30, request(9, Cmd::Status, &[])),
+        ],
+        vec![
+            (20, request(9, Cmd::Status, &[])),
+            (40, request(2, Cmd::Status, &[])),
+        ],
+    );
+    assert_eq!(
+        statuses(&i2c),
+        [Status::Ok, Status::Arg],
+        "I2C's STATUS is its own request, over its own ceiling"
+    );
+    assert_eq!(
+        statuses(&uart),
+        [Status::Ok, Status::Ok],
+        "I2C's HELLO does not lower UART's ceiling"
+    );
+}
+
+/// A transfer's idle deadline on the boot core runs on the link it was
+/// begun over: the other link's requests do not keep it.
+#[test]
+fn a_boot_core_transfer_times_out_on_its_own_link() {
+    let idle = u64::from(dagon_agent::IDLE_TIMEOUT_MS);
+    let w = write_requests();
+    let (begin, hdr) = (w[0].clone(), w[1].clone());
+    let i2c = (1..=4)
+        .map(|i| (100 + i * idle / 3, request(i as u8, Cmd::Status, &[])))
+        .collect();
+    let [i2c, uart] = update_on_two(i2c, vec![(100, begin), (200 + 4 * idle / 3, hdr)]);
+    assert_eq!(statuses(&i2c), [Status::Ok; 4]);
+    assert_eq!(
+        statuses(&uart),
+        [Status::Ok, Status::State],
+        "I2C's requests kept UART's transfer"
+    );
 }
 
 /// The request payload `enc` writes.

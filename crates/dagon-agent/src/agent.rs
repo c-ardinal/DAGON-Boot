@@ -660,28 +660,45 @@ impl<S: SlotStore, X: AppChain, V: SigVerifier, W: Writer, const L: usize> Agent
             if self.keeps(req.target) && (req.slot == st.active || req.slot == st.confirmed) {
                 return Err(Status::State);
             }
-            if self.only_core_on_trial(req.target) {
+            if req.target == target::BOOTCORE && self.trials_overlap(req.target) {
                 return Err(Status::State);
             }
         }
         Ok(body_len)
     }
 
-    /// `t` is the MCU's one boot core slot, written in place by an app
-    /// that is on trial: the slot is not written or set pending then.
-    /// Stage0 starts no app while an APP trial is open, so a write of the
-    /// only core cut by a power loss would leave nothing to start; the app
-    /// is confirmed or rolled back first. The boot core's writes of the
-    /// app are not held back by the app's trial: it writes the app in
-    /// update mode because that app does not answer.
-    fn only_core_on_trial(&mut self, t: u8) -> bool {
-        if t != target::BOOTCORE || self.keeps(t) {
+    /// With one boot core slot, a boot core trial and an app trial never
+    /// overlap: the app's agent neither writes nor sets pending the only
+    /// core while an app is pending or on trial, nor sets an app pending
+    /// unless that core is confirmed: not while it is pending, nor while
+    /// a cut write left it empty, as no core would then start the app's
+    /// trial and the held-back core write could never repair it. The core
+    /// is written in place, so stage0
+    /// has no other core to fall back to, and it starts the confirmed app
+    /// only while no APP trial is open. Each start of a new core that
+    /// fails would also start a pending app's trial (the core decides the
+    /// app before it settles its own trial), so once stage0 gave the core
+    /// up the open app trial would leave nothing to start. The app is
+    /// confirmed or rolled back first, or the core settles first. The boot
+    /// core's writes are not held back: it writes the app in update mode
+    /// because that app does not answer.
+    fn trials_overlap(&mut self, t: u8) -> bool {
+        if !W::APP || self.images.slot_count(target::BOOTCORE) != 1 {
             return false;
         }
-        let st = self.images.status();
-        st.slots
-            .get(usize::from(st.active))
-            .is_some_and(|s| s.state == SlotState::Trying)
+        let open = |st: &StatusResp| {
+            st.slots
+                .iter()
+                .any(|s| matches!(s.state, SlotState::Pending | SlotState::Trying))
+        };
+        match t {
+            target::BOOTCORE => open(&self.images.status()),
+            target::APP => self
+                .images
+                .target_status(target::BOOTCORE)
+                .is_some_and(|st| !st.slots.iter().any(|s| s.state == SlotState::Confirmed)),
+            _ => false,
+        }
     }
 
     /// Whether the running and the confirmed slot of `t` are kept from
@@ -862,7 +879,7 @@ impl<S: SlotStore, X: AppChain, V: SigVerifier, W: Writer, const L: usize> Agent
         }
         self.end_session(AbortCause::NewRequest);
         let st = self.images.target_status(t).ok_or(Status::Unsupported)?;
-        if (self.keeps(t) && req.slot == st.active) || self.only_core_on_trial(t) {
+        if (self.keeps(t) && req.slot == st.active) || self.trials_overlap(t) {
             return Err(Status::State);
         }
         self.images.read_header(t, req.slot, &mut self.hdr)?;

@@ -74,6 +74,28 @@ jobs:
           GIT_COMMITTER_EMAIL: ci@example.invalid
         run: node --test plugin/hooks/guard.test.mjs
 
+  # Kani proofs of stage0's decision (crates/dagon-core/src/proofs.rs):
+  # stage0 is never updated, so it must not panic on any flash or retained
+  # content. Kani brings its own nightly toolchain (`cargo kani setup`).
+  kani:
+    name: kani (stage0's decision)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Rust from rust-toolchain.toml
+        shell: bash
+        run: |
+          rustup toolchain install
+          rustup default "$(sed -n 's/^channel = "\([^"]*\)".*/\1/p' rust-toolchain.toml)"
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+      - name: Kani
+        run: |
+          cargo install --locked kani-verifier --version 0.68.0
+          cargo kani setup
+      - name: Prove
+        working-directory: crates/dagon-core
+        run: cargo kani -Z stubbing
+
   plan:
     name: standalone packages
     runs-on: ubuntu-24.04

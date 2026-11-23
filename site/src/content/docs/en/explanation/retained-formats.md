@@ -138,6 +138,16 @@ The MCU definitions' sweeps (`a_power_cut_at_every_flash_step_leaves_a_bootable_
 add the flash side: a cut at every flash operation of a write,
 compaction of the state log included.
 
+Kani proofs (`crates/dagon-core/src/proofs.rs`) check stage0's decision
+for every input: the cell's properties (at most 15 counted, an update cut
+between its two stores never lowers the count, a cell for another image
+counts nothing), the plan and settle rules, and that reading the state
+log and the assembly of the decision (`bootcore::start`) do not panic on
+any flash and retained content (the image checks replaced by any result). The F401 package's exhaustive search
+(`targets/mcu/stm32f401re/tests/explore.rs`) checks the whole node's
+combinations. [Working on DAGON itself: formal verification](/en/explanation/repository/#formal-verification)
+says how to run them.
+
 A cell that does not hold what is
 written to it at all is found by `bootcore::cell_holds`, run by the
 started boot loader and by the app: such a node takes no boot loader, and a

@@ -6,11 +6,11 @@
 /// The watchdog is armed, the state log is read.
 pub const STARTING: &str = "起動しています";
 /// Before the boot core decides (it checks the image's signature and hash).
-pub const CHECKING: &str = "ファームウェアを確かめています";
+pub const CHECKING: &str = "ファームウェアを検証しています";
 /// A confirmed image is chosen.
 pub const CONFIRMED: &str = "確定したバージョンで起動します";
 /// A new image is chosen on trial.
-pub const TRIAL: &str = "新しいバージョンを試します";
+pub const TRIAL: &str = "新規バージョンを試行します";
 
 // The app's home screen: the state of this node, one word each.
 
@@ -19,11 +19,11 @@ pub const HOME_STARTING: &str = "起動中";
 /// The running image is confirmed.
 pub const HOME_CONFIRMED: &str = "確定";
 /// A new image is being written to this node.
-pub const HOME_WRITING: &str = "書き込み中";
+pub const HOME_WRITING: &str = "書込中";
 /// The written image is being checked.
 pub const HOME_VERIFYING: &str = "検証中";
 /// The new image is written and checked.
-pub const HOME_WRITTEN: &str = "書き込み済み";
+pub const HOME_WRITTEN: &str = "書込済";
 /// The new image starts at the next reboot.
 pub const HOME_PENDING: &str = "再起動待ち";
 /// The node reboots into the new image.
@@ -31,7 +31,7 @@ pub const HOME_REBOOTING: &str = "再起動";
 /// The running image is on trial.
 pub const HOME_TRIAL: &str = "試行中";
 /// The trial failed; the previous image runs again.
-pub const HOME_ROLLED_BACK: &str = "巻き戻し";
+pub const HOME_ROLLED_BACK: &str = "ロールバック";
 /// A write was refused, failed its checks or was dropped.
 pub const HOME_FAILED: &str = "失敗";
 

@@ -22,8 +22,8 @@ screen and does not assume a node has one.
   PC tells the node, else the bytes received).
 - The nodes this node's links reach: `wiring::REACHED`, up to three of
   them, each with the port its link runs on.
-- The state in Japanese below the ring (起動中, 確定, 書き込み中, 検証中,
-  書き込み済み, 再起動待ち, 再起動, 試行中, 巻き戻し, 失敗), so colour is
+- The state in Japanese below the ring (起動中, 確定, 書込中, 検証中,
+  書込済, 再起動待ち, 再起動, 試行中, ロールバック, 失敗), so colour is
   never the only cue; "TEST KEY" at the bottom of a build with the public
   test key.
 

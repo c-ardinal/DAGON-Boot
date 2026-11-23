@@ -27,14 +27,14 @@ fn each_boot_step_has_its_gauge_step_and_text() {
     }
     assert_eq!(STEPS, 4);
     assert_eq!(texts::STARTING, "起動しています");
-    assert_eq!(texts::CHECKING, "ファームウェアを確かめています");
+    assert_eq!(texts::CHECKING, "ファームウェアを検証しています");
     assert_eq!(texts::CONFIRMED, "確定したバージョンで起動します");
-    assert_eq!(texts::TRIAL, "新しいバージョンを試します");
+    assert_eq!(texts::TRIAL, "新規バージョンを試行します");
 }
 
 #[test]
 fn the_screen_uses_the_defined_words() {
-    // DAGON's screen words: バージョン, never 版; ノード, never 台; 書き込む
+    // DAGON's screen words: バージョン, never 版; ノード, never 台; 書込
     // for writing to a node, never 更新.
     for w in texts::WORDS {
         assert!(

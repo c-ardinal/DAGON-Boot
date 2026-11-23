@@ -277,6 +277,21 @@ impl Log {
         Ok(log)
     }
 
+    /// [`Log::load`], or, only when neither face has a valid header, a new
+    /// empty log in face 0 (erased, generation 1): what recovery mode
+    /// writes into when the log itself was lost. A flash error is returned
+    /// as it is, never taken as leave to erase.
+    pub fn load_or_create<F: Flash>(flash: &mut F, layout: &LogLayout) -> Result<Log, LogError> {
+        match Log::load(flash, layout) {
+            Err(LogError::NoValidFace) => {
+                flash.erase(layout.faces[0], layout.face_len)?;
+                flash.write(layout.faces[0], &FaceHeader { generation: 1 }.to_bytes())?;
+                Log::load(flash, layout)
+            }
+            other => other,
+        }
+    }
+
     /// Appends one APP record and folds it into `state`, compacting into the
     /// other face first when this one cannot take it.
     pub fn append<F: Flash>(

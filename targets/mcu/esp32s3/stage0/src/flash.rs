@@ -75,6 +75,10 @@ impl Flash for RomFlash {
             return Err(FlashError::Range);
         }
         for s in (addr..end).step_by(SECTOR as usize) {
+            // A slot's erase outlasts the trial period (a sector takes up to
+            // 400 ms): the boot core, the only image that erases, feeds at
+            // every sector.
+            crate::wdt::feed();
             // SAFETY: a sector inside the flash.
             if unsafe { rom::esp_rom_spiflash_erase_sector(s / SECTOR) } != 0 {
                 return Err(FlashError::Hw);

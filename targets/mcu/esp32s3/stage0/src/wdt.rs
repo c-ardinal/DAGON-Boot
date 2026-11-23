@@ -70,7 +70,8 @@ pub fn arm(period_ms: u32, slow_hz: u32) {
     reg_write(WDTWPROTECT, 0);
 }
 
-/// Feeds the RTC watchdog (the boot core's run; stage0 never feeds).
+/// Feeds the RTC watchdog (the boot core's run and its erases; stage0
+/// never erases, so it never feeds).
 #[allow(dead_code)]
 pub fn feed() {
     reg_write(WDTWPROTECT, WDT_KEY);

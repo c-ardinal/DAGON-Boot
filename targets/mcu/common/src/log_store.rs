@@ -87,7 +87,31 @@ impl<F: Flash, M: LogMcu> LogStore<F, M> {
         running: u8,
     ) -> Result<Self, LogError> {
         let log = Log::load(&mut flash, log)?;
-        Ok(LogStore {
+        Ok(Self::over(flash, log, slots, regions, running))
+    }
+
+    /// [`LogStore::load`] over [`Log::load_or_create`]: a log with no
+    /// valid face is created empty, so a boot core's recovery mode can
+    /// write the app even when the log was lost.
+    pub fn load_or_create(
+        mut flash: F,
+        log: &LogLayout,
+        slots: SlotLayout<'static>,
+        regions: &'static [EraseRegion],
+        running: u8,
+    ) -> Result<Self, LogError> {
+        let log = Log::load_or_create(&mut flash, log)?;
+        Ok(Self::over(flash, log, slots, regions, running))
+    }
+
+    fn over(
+        flash: F,
+        log: Log,
+        slots: SlotLayout<'static>,
+        regions: &'static [EraseRegion],
+        running: u8,
+    ) -> Self {
+        LogStore {
             flash,
             log,
             running,
@@ -97,7 +121,7 @@ impl<F: Flash, M: LogMcu> LogStore<F, M> {
             regions,
             tail: Tail::default(),
             mcu: PhantomData,
-        })
+        }
     }
 
     /// The boot core slots (start, length, A first) this store also

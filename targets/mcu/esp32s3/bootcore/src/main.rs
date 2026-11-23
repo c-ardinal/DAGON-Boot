@@ -186,12 +186,13 @@ pub extern "C" fn core_start() -> ! {
     reset()
 }
 
-/// The boot core's session in `entry`'s mode over the app log and slots;
-/// `None` when the app log does not load (nothing to write into).
+/// The boot core's session in `entry`'s mode over the app log and slots,
+/// the log created empty when neither face is valid (so recovery mode can
+/// write the app); `None` on a flash error.
 fn session(flash: RomFlash, entry: Entry) -> Option<&'static mut Session> {
     static mut EVENTS: MaybeUninit<Published<(), 4>> = MaybeUninit::uninit();
     static mut AGENT: MaybeUninit<Session> = MaybeUninit::uninit();
-    let store = LogStore::load(
+    let store = LogStore::load_or_create(
         flash,
         &layout::APP_LOG,
         SlotLayout {

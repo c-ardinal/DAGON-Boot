@@ -2,9 +2,9 @@
 //! behind stage0 in the emulator, talked to over UART0 as a host talks to
 //! a node: a STAY in its listen window keeps it in update mode, the app's
 //! hand-over (an UPDATE_STAY in the app log) does so without a STAY, an
-//! erased APP slot puts it in recovery mode, where the host writes the app
-//! and the next start runs it; with nothing to serve the core asks stage0
-//! for the app. Its ELF is `DAGON_ESP32S3_BOOTCORE_ELF` (the CI job
+//! erased APP slot (or a lost app log) puts it in recovery mode, where the
+//! host writes the app and the next start runs it; with nothing to serve
+//! the core asks stage0 for the app. Its ELF is `DAGON_ESP32S3_BOOTCORE_ELF` (the CI job
 //! `stage0-qemu` builds it with the test key and the tag [`TAG`]).
 
 use super::*;
@@ -18,6 +18,8 @@ use std::sync::{Arc, Mutex};
 
 /// How long one request may wait for its answer (an erase included).
 const ANSWER: Duration = Duration::from_secs(20);
+/// How long a request waits for its answer before it is sent again.
+const RESEND: Duration = Duration::from_secs(2);
 /// A body chunk of XFER_DATA.
 const CHUNK: usize = 512;
 
@@ -86,10 +88,16 @@ impl Running {
 
     fn send(&mut self, cmd: Cmd, payload: &[u8]) -> u8 {
         self.seq = self.seq.wrapping_add(1);
+        self.put(self.seq, cmd, payload);
+        self.seq
+    }
+
+    /// The request `seq` (`cmd`) written to the node.
+    fn put(&mut self, seq: u8, cmd: Cmd, payload: &[u8]) {
         let mut b = vec![0u8; payload.len() + 64];
         let n = Frame {
             flags: 0,
-            seq: self.seq,
+            seq,
             cmd: cmd as u8,
             payload,
         }
@@ -97,7 +105,6 @@ impl Running {
         .unwrap();
         self.to.write_all(&b[..n]).unwrap();
         self.to.flush().unwrap();
-        self.seq
     }
 
     /// The next response to `seq` (`cmd`) from what the node sent past
@@ -133,11 +140,20 @@ impl Running {
         self.ok_within(cmd, payload, ANSWER)
     }
 
+    /// `cmd` answered OK within `wait`. Like a host, it sends the request
+    /// again (the same seq) every [`RESEND`] without an answer: the node
+    /// drops a frame its bytes reach with a gap (20 ms), which a loaded
+    /// emulator makes, and answers a repeat from its last reply.
     fn ok_within(&mut self, cmd: Cmd, payload: &[u8], wait: Duration) -> Result<Vec<u8>, String> {
+        let until = Instant::now() + wait;
         let seq = self.send(cmd, payload);
-        match self.answer(cmd, seq, wait) {
-            Some((Status::Ok, body)) => Ok(body),
-            other => Err(format!("{cmd:?}: {other:?}")),
+        loop {
+            let slice = until.saturating_duration_since(Instant::now()).min(RESEND);
+            match self.answer(cmd, seq, slice) {
+                Some((Status::Ok, body)) => return Ok(body),
+                None if Instant::now() < until => self.put(seq, cmd, payload),
+                other => return Err(format!("{cmd:?}: {other:?}")),
+            }
         }
     }
 
@@ -281,8 +297,21 @@ fn repair_from_recovery() -> Result<(), String> {
     let mut n = node();
     n.app_named = false;
     n.app_erased = true;
+    repair(n, "recovery")
+}
+
+/// Neither face of the app log valid: recovery mode creates the log and
+/// takes the app all the same.
+fn repair_without_a_log() -> Result<(), String> {
+    let mut n = node();
+    n.app_erased = true;
+    n.app_log_erased = true;
+    repair(n, "no-log")
+}
+
+fn repair(n: Node, case: &str) -> Result<(), String> {
     let (hdr, body) = (n.app_hdr, n.app.clone());
-    let mut r = Running::boot(&n, "recovery");
+    let mut r = Running::boot(&n, case);
     let h = r.hello_until(Duration::from_secs(20))?;
     if h.mode != mode::RECOVERY {
         return Err(format!("HELLO mode {} with no app", h.mode));
@@ -304,7 +333,7 @@ fn nothing_to_serve() -> Result<(), String> {
 #[test]
 #[ignore = "needs QEMU and the images the CI job stage0-qemu builds"]
 fn esp32s3_bootcore_in_qemu() {
-    let cases: [(&str, Case); 4] = [
+    let cases: [(&str, Case); 5] = [
         (
             "nothing to serve: the core asks for the app",
             nothing_to_serve,
@@ -315,6 +344,7 @@ fn esp32s3_bootcore_in_qemu() {
             "recovery mode: the host writes the app",
             repair_from_recovery,
         ),
+        ("recovery mode with the app log lost", repair_without_a_log),
     ];
     let mut failed = Vec::new();
     for (name, run) in cases {

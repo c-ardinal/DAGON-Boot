@@ -174,6 +174,8 @@ struct Node {
     app_stay: bool,
     /// APP slot A and its header are erased.
     app_erased: bool,
+    /// Both faces of the app log are erased.
+    app_log_erased: bool,
 }
 
 impl Node {
@@ -195,6 +197,7 @@ impl Node {
             app_named: true,
             app_stay: false,
             app_erased: false,
+            app_log_erased: false,
         }
     }
 
@@ -228,7 +231,9 @@ impl Node {
                 .to_bytes(),
             );
         }
-        put(APP_LOG, &log);
+        if !self.app_log_erased {
+            put(APP_LOG, &log);
+        }
         f
     }
 

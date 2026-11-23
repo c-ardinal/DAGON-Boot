@@ -151,6 +151,8 @@ export const BAND_FOR = {
   stoppedAt: (stuck: string) => ({ pair: ['推定', '約1分'] as const, sentence: `${stuck}の修正後に未書込ノードへの書込が可能です。` }),
   /** done when doneAll is not true: the nodes that did not answer were not updated. */
   doneSome: (n: number) => ({ sentence: `応答なしの${n}ノードは旧バージョンのままのため、電源と配線の確認後に書込を実行してください。` }),
+  /** done when dagon-host sent nothing to nodes that answered nothing (needsFirstWrite): their first write goes from their card. */
+  doneFirst: (n: number) => ({ sentence: `応答なしの${n}ノードへの送信はありません。各ノードの「${WRITE.run}」で初回の書込を実行してください。` }),
   /** done after 「前のバージョンへの復元」. */
   /** done when some nodes were already on the package. */
   donePart: (wrote: number, same: number) => ({ sentence: `${wrote}ノードへの書込が完了し、同一内容の${same}ノードは書込を省略しました。` }),

@@ -519,6 +519,18 @@ describe('update from the page with dagon-host apply against the mock PC-connect
     expect(b.sentence).not.toBe(BAND.doneAll.sentence);
   }, 60_000);
 
+  test('a checked node that has answered nothing since connecting is sent nothing, the others are written, and done names its first write', async () => {
+    const { t, op } = await sentTo({ quiet: ['i2c:66'] });
+    op.takeFile('sample-1.1.0.dgb', RELEASE);
+    op.choose('seg', true);
+    expect(op.targets).toContain('seg');
+    await op.update();
+    expect(t.reboots).toEqual(['uart', 'hub']);
+    expect([op.state, op.progress.seg.stage, op.live.seg.responding]).toEqual(['done', 'silent', false]);
+    expect(op.finished).toMatchObject({ kind: 'updated', firstWrite: 1 });
+    expect(bandOf(op.state, op.ctx, { finish: op.finished }).sentence).toBe(BAND_FOR.doneFirst(1).sentence);
+  }, 60_000);
+
   test('done after 「前のバージョンへの復元」: says the node runs its previous version', async () => {
     const { op } = await sentTo();
     op.takeFile('sample-1.1.0.dgb', RELEASE);

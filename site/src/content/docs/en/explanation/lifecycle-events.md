@@ -285,7 +285,7 @@ build runner are ports (2.1).
 | `host.node.discovered` | discovery | `target`, identity |
 | `host.node.step` | every phase for a node (TRANSFER, VERIFY, REBOOT, CONFIRM, REJECTED, FAILED, ROM) | `node`, `target`, `phase`, `percent`, `version` |
 | `host.node.reconnecting` | waiting for the version after reboot | `node`, `elapsed_ms`, `other_version?` |
-| `host.node.result` | | `node`, `Done(v) \| Failed(reason, status?) \| NotStarted` |
+| `host.node.result` | | `node`, `Done(v) \| Failed(reason, status?) \| NotStarted \| NeedsFirstWrite` (`NeedsFirstWrite`: the relaying node reported that the node did not answer; nothing was sent to it and the other nodes are written; it takes its first write directly) |
 | `host.confirm.result` | | `Confirmed \| NotOnTrial \| NeedsChoice` |
 | `host.rollback.*`, `host.recover.*` | same shape as deploy | |
 | `host.provision.started` / `host.provision.recorded` | first install through the ROM; the installed boot image identity recorded | `node`, `boot_sha256` |

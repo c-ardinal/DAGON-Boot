@@ -787,6 +787,58 @@ fn node_that_falls_back_stops_the_run_and_confirm_rule() {
     assert!(matches!(r, Err(Error::NoPreviousVersion)));
 }
 
+/// A node added to the configuration since the last write runs no DAGON
+/// yet: it answers nothing. A write of every node gives it its own outcome,
+/// sends it nothing, and writes the others.
+#[test]
+fn a_node_that_was_never_written_does_not_stop_the_others() {
+    let mut hub = demo_hub(*key().pk, 7);
+    hub.node
+        .provision(&hub_img(0, Version::new(1, 0, 0)), 0)
+        .unwrap();
+    let s = sim_of(hub);
+    let mut h = host(&s);
+    let out =
+        block_on(h.apply(&release(), &topology(&yaml()), &key().pk, None, &mut |_| {})).unwrap();
+    assert_eq!(out[0].node, SEG);
+    assert!(
+        matches!(out[0].outcome, Outcome::NeedsFirstWrite),
+        "{out:?}"
+    );
+    assert!(
+        matches!(out[1].outcome, Outcome::Done(v) if v == Version::new(1, 1, 0)),
+        "{out:?}"
+    );
+    let xfers = s
+        .faults
+        .borrow()
+        .seen
+        .iter()
+        .filter(|c| c.0 == Cmd::XferBegin as u8)
+        .count();
+    assert_eq!(xfers, 1, "only the relaying node took a transfer");
+}
+
+/// A node that answered in this session ran DAGON: silent now, it fails and
+/// stops the run as any written node that fails.
+#[test]
+fn a_node_that_answered_and_went_silent_stops_the_run() {
+    let s = sim();
+    let mut h = host(&s);
+    block_on(h.hello(seg_at())).unwrap();
+    wipe_seg(&s);
+    let out =
+        block_on(h.apply(&release(), &topology(&yaml()), &key().pk, None, &mut |_| {})).unwrap();
+    assert!(
+        matches!(
+            out[0].outcome,
+            Outcome::Failed(Error::Relay(Status::Timeout))
+        ),
+        "{out:?}"
+    );
+    assert!(matches!(out[1].outcome, Outcome::NotStarted), "{out:?}");
+}
+
 #[test]
 fn old_hub_firmware_answering_after_reboot_is_waited_out() {
     let mut s = sim();

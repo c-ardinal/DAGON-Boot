@@ -113,7 +113,7 @@ export function waterOf(progress: Record<string, Progress>): Record<string, numb
  * node rolled back to its previous version, or a node recovered.
  */
 export type Finish =
-  | { kind: 'updated'; left: number; leftOut?: number; wrote?: number; same?: number }
+  | { kind: 'updated'; left: number; leftOut?: number; wrote?: number; same?: number; firstWrite?: number }
   | { kind: 'rolledBack'; name: string; version: string }
   | { kind: 'recovered'; name: string; version: string };
 
@@ -325,6 +325,8 @@ export class Operate {
   private updated = new Set<string>();
   /** Nodes this run really wrote an image to; the others among `updated` were already on it. */
   private wrote = new Set<string>();
+  /** Nodes of the last update that answered nothing and were sent nothing (dagon-host's needsFirstWrite). */
+  private firstWrite = 0;
   /** The run hubRestarting / reconnectNeeded belong to, so done says what it did. */
   private running: 'update' | 'recover' | 'rollback' = 'update';
 
@@ -743,6 +745,7 @@ export class Operate {
     this.sentVersion = {};
     this.coreSent = {};
     this.wrote = new Set();
+    this.firstWrite = 0;
     this.progress = Object.fromEntries(this.targets.map((id) => [id, { stage: 'waiting', percent: 0 }]));
     this.track = Object.fromEntries(this.targets.map((id) => [id, { ...NO_TRACK }]));
     // topology node index = position in reach (true for the sample, which follows its YAML).
@@ -862,18 +865,26 @@ export class Operate {
     for (const r of results) {
       const id = reach[r.node]?.id;
       if (id && r.outcome === 'notStarted') this.progress[id] = { stage: 'unwritten', percent: 0 };
+      // The relaying node said the node answered nothing and dagon-host sent it nothing: its card takes the first write.
+      if (id && r.outcome === 'needsFirstWrite') {
+        this.progress[id] = { stage: 'silent', percent: 0 };
+        this.live[id] = { ...(this.live[id] ?? UNKNOWN), responding: false };
+      }
       // A confirmed node runs the new version now, also when a later node stops the run.
       const hello = id ? this.live[id]?.hello : null;
       if (id && hello && r.outcome === 'done' && r.version !== null) {
         this.live[id] = { ...this.live[id]!, hello: { ...hello, activeVersion: r.version, trial: false } };
       }
     }
-    const stop = results.find((r) => r.outcome === 'failed');
+    this.firstWrite = results.filter((r) => r.outcome === 'needsFirstWrite').length;
+    const stop = results.find((r) => r.outcome === 'failed' || r.outcome === 'unknown');
     if (!stop) return this.done();
     const n = reach[stop.node];
     if (this.isLocal(n) && this.state === 'hubRestarting' && stop.failure?.reason === 'NO ANSWER') return this.autoFailed();
     const why = stop.failure;
-    const f = why?.running != null ? { stage: 'previous' as const } : failureStage(why?.reason ?? 'NO ANSWER');
+    // A result this page does not name leaves the node unconfirmed: shown as a refusal, as an unnamed failure is.
+    const f =
+      stop.outcome === 'unknown' ? { stage: 'cannotFix' as const, reason: undefined } : why?.running != null ? { stage: 'previous' as const } : failureStage(why?.reason ?? 'NO ANSWER');
     // A stopped update has no "cannot fix" yet: an unnamed failure is a refusal of the update.
     this.stopAt(n.id, f.stage === 'cannotFix' ? 'refused' : f.stage, f.reason);
     if (why?.running != null) this.backRead = this.recordBack(n.id, why.running, why.reason);
@@ -913,6 +924,7 @@ export class Operate {
       wrote: this.wrote.size,
       same: this.reach.filter((n) => this.updated.has(n.id) && !this.wrote.has(n.id)).length,
       ...(this.skip.size ? { leftOut: this.skip.size } : {}),
+      ...(this.firstWrite ? { firstWrite: this.firstWrite } : {}),
     };
     this.go(this.state === 'hubRestarting' ? 'confirmed' : this.state === 'reconnectNeeded' ? 'reconnected' : 'doneNoHub');
     this.startWatching();

@@ -31,7 +31,7 @@
 "The body or its header did not verify, or could not be stored." = "本体かそのヘッダの検証に失敗したか、保存に失敗しました。"
 "The body read back matches its digest." = "再読込した本体がダイジェストと一致しました。"
 "The body verified and the header written and read back: the slot holds an image." = "本体を検証し、ヘッダを書込して再読込しました。スロットにイメージがあります。"
-"The boot core rolled the slot back (attempts exhausted, or the pending image failed its check) and started `to`. `version` names the image rolled back: the marker is that image's (a new image in the slot clears it), so a consumer tells a new rollback from the one replayed at every start." = "ブートローダがスロットをロールバックし（試行回数の上限に到達したか、待機中のイメージが検査に失敗しました）、`to`を起動しました。`version`はロールバック対象のイメージの版です。ロールバック表示は該当イメージ専用で（スロットへの新規イメージ書き込みで解除）、消費側は新規のロールバックと起動ごとに再生される既存のロールバックを識別できます。"
+"The boot core rolled the slot back (attempts exhausted, or the pending image failed its check) and started `to`. `version` names the image rolled back: the marker is that image's (a new image in the slot clears it), so a consumer tells a new rollback from the one replayed at every start." = "ブートローダがスロットをロールバックし（試行回数の上限に到達したか、待機中のイメージが検査に失敗しました）、`to`を起動しました。`version`はロールバック対象のイメージの版です。ロールバック表示は該当イメージ専用で（スロットへの新規イメージ書込で解除）、消費側は新規のロールバックと起動ごとに再生される既存のロールバックを識別可能です。"
 "The boot core started the pending slot on trial (`attempt` boots so far, of the `max` its boot core allows)." = "ブートローダが待機中のスロットを試行として起動しました（これまでのブート回数は`attempt`回で、ブートローダの許可する上限は`max`回）。"
 "The boot core stays here for good." = "ブートローダはこの状態で恒久的に停止します。"
 "The boot core's sequence from the armed watchdog to the jump or the halt. Its events reach the boot core's extensions as they happen; nothing an extension does changes the decision." = "ウォッチドッグの有効化からジャンプか停止までの、ブートローダの手順です。そのイベントは発生時にブートローダの拡張へ到達します。拡張の動作に関係なく、判断は変化しません。"

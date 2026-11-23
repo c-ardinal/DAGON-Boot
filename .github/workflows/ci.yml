@@ -357,7 +357,11 @@ jobs:
   # app (targets/mcu/esp32s3/stage0-qemu): a good app mapped from flash
   # through a PADDING segment, a bad signature, a tampered body, a signed
   # app with a segment in stage0's window, no app, and no boot core that
-  # passes (crates/dagon-cli/src/esp_image_qemu.rs).
+  # passes (crates/dagon-cli/src/esp_image_qemu.rs); then the ESP32-S3 boot
+  # core (targets/mcu/esp32s3/bootcore, the same layout) behind stage0, talked
+  # to over UART0: its listen window, the app's hand-over, recovery mode
+  # where the host writes the app, and the app it asks stage0 for
+  # (crates/dagon-cli/src/esp_image_qemu_bootcore.rs).
   stage0-qemu:
     runs-on: ubuntu-24.04
     steps:
@@ -381,6 +385,7 @@ jobs:
             .
             targets/mcu/esp32s3/stage0
             targets/mcu/esp32s3/stage0-qemu
+            targets/mcu/esp32s3/bootcore
       - name: Espressif QEMU
         env:
           RELEASE: esp-develop-9.2.2-20250817
@@ -402,13 +407,16 @@ jobs:
         run: |
           (cd targets/mcu/esp32s3/stage0 && cargo build --release --locked --features qemu-layout)
           (cd targets/mcu/esp32s3/stage0-qemu && cargo build --release --locked)
+          (cd targets/mcu/esp32s3/bootcore && cargo build --release --locked --features qemu-layout)
       - name: Boot in QEMU
         run: |
           out=xtensa-esp32s3-none-elf/release
           export DAGON_STAGE0_ELF="$PWD/targets/mcu/esp32s3/stage0/target/$out/dagon-esp32s3-stage0"
           export DAGON_QEMU_CORE_ELF="$PWD/targets/mcu/esp32s3/stage0-qemu/target/$out/core"
           export DAGON_QEMU_APP_ELF="$PWD/targets/mcu/esp32s3/stage0-qemu/target/$out/app"
+          export DAGON_ESP32S3_BOOTCORE_ELF="$PWD/targets/mcu/esp32s3/bootcore/target/$out/dagon-esp32s3-bootcore"
           cargo test -p dagon-cli --locked --bin dagon esp32s3_stage0_in_qemu -- --ignored --nocapture
+          cargo test -p dagon-cli --locked --bin dagon esp32s3_bootcore_in_qemu -- --ignored --nocapture
 
   # `dagon new` and `dagon gen`, then each self-boot node's generated boot
   # crate built for both boot core slots and signed for each, as a release

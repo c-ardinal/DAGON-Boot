@@ -169,12 +169,22 @@ struct Node {
     app_hdr: [u8; HEADER_SIZE],
     /// The app log names the app.
     app_named: bool,
+    /// The app log holds the app's hand-over (UPDATE_STAY) after the
+    /// record naming it.
+    app_stay: bool,
+    /// APP slot A and its header are erased.
+    app_erased: bool,
 }
 
 impl Node {
     fn good() -> Node {
+        Node::with_core("DAGON_QEMU_CORE_ELF")
+    }
+
+    /// The good node with the boot core the ELF that `core_elf` names.
+    fn with_core(core_elf: &str) -> Node {
         let stage0 = build_image(&env_file("DAGON_STAGE0_ELF"), s3(), "16mb").unwrap();
-        let core = build_image(&env_file("DAGON_QEMU_CORE_ELF"), s3(), "16mb").unwrap();
+        let core = build_image(&env_file(core_elf), s3(), "16mb").unwrap();
         let app = app_image(&env_file("DAGON_QEMU_APP_ELF"));
         Node {
             core_hdr: header(image_kind::BOOTCORE, CORE.1, &core, ""),
@@ -183,6 +193,8 @@ impl Node {
             core,
             app,
             app_named: true,
+            app_stay: false,
+            app_erased: false,
         }
     }
 
@@ -192,14 +204,31 @@ impl Node {
         put(0, &self.stage0);
         put(CORE.0, &self.core_hdr);
         put(CORE.1, &self.core);
-        put(APP.0, &self.app_hdr);
-        put(APP.1, &self.app);
-        put(CORE_LOG, &face(target::BOOTCORE, &self.core_hdr));
-        if self.app_named {
-            put(APP_LOG, &face(target::APP, &self.app_hdr));
-        } else {
-            put(APP_LOG, &FaceHeader { generation: 1 }.to_bytes());
+        if !self.app_erased {
+            put(APP.0, &self.app_hdr);
+            put(APP.1, &self.app);
         }
+        put(CORE_LOG, &face(target::BOOTCORE, &self.core_hdr));
+        let mut log = if self.app_named {
+            face(target::APP, &self.app_hdr)
+        } else {
+            FaceHeader { generation: 1 }.to_bytes().to_vec()
+        };
+        if self.app_stay {
+            log.extend(
+                Record {
+                    kind: kind::UPDATE_STAY,
+                    target: target::APP,
+                    slot: dagon_format::statelog::slot::NONE,
+                    reason: reason::NONE,
+                    seq: 2,
+                    version: Version::default(),
+                    digest16: [0; 16],
+                }
+                .to_bytes(),
+            );
+        }
+        put(APP_LOG, &log);
         f
     }
 
@@ -349,6 +378,9 @@ fn esp32s3_stage0_in_qemu() {
     case("bad-core", &n, &[APP_RUNS]);
     assert!(failed.is_empty(), "{failed:#?}");
 }
+
+#[path = "esp_image_qemu_bootcore.rs"]
+mod bootcore;
 
 /// `img` with one more segment (`addr`, `data`) first, then padding to a
 /// whole MMU page, resealed.

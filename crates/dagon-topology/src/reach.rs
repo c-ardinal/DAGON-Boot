@@ -480,14 +480,17 @@ links:
             )
             .replace("order: [n0, hub]", "order: [n0, a, b, c, hub]");
         // a, b and c name no board, so their apps run on the RP2040's ring
-        // oscillator; a project bounds it (1 %) so their UART links check.
+        // oscillator; a project bounds it (1 %) so their UART links check,
+        // and keeps the crystal setup the hub's board runs its I2C bus on.
         let dir = std::env::temp_dir().join(format!("dagon-reach-loop-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let toml = dir.join("dagon.toml");
         std::fs::write(
             &toml,
             "format = 1\n[[mcu_override.rp2040.app.clock]]\nsource = \"internal\"\n\
-             out_hz = 6_500_000\ntolerance_ppm = 10_000\n",
+             out_hz = 6_500_000\ntolerance_ppm = 10_000\n\n\
+             [[mcu_override.rp2040.app.clock]]\nsource = \"crystal\"\nin_hz = 12_000_000\n\
+             out_hz = 125_000_000\npll = { refdiv = 1, fbdiv = 125, postdiv1 = 6, postdiv2 = 2 }\n",
         )
         .unwrap();
         let reg = Registry::load(&[crate::defs::Source::Project(&toml)]).unwrap();

@@ -20,11 +20,6 @@ pub const SCHEMA_VERSION: u32 = 2;
 use dagon_format::topology::MAX_NODES;
 const MAX_ID_LEN: usize = 15;
 const MAX_TAG_LEN: usize = 16;
-/// How far each end of a UART link may be from its `baud`. The two ends'
-/// errors add up; an 8N1 receiver that samples mid-bit loses the frame at
-/// half a bit over its 10 bits, 5 % between the ends, and 2 % a side keeps
-/// a margin for clock tolerance and edge timing below that.
-use crate::defs::MAX_BAUD_ERROR;
 /// Standard and fast mode; each ROM I2C bootloader's `max_hz` caps it further.
 const I2C_ADDR_MIN: u8 = 0x08;
 const I2C_ADDR_MAX: u8 = 0x77;
@@ -216,6 +211,20 @@ struct Ctx<'a> {
     t: &'a Topology,
     reg: &'a Registry,
     issues: Vec<Issue>,
+}
+
+/// What a clock's tolerance adds to a rate `error` off, as a check message
+/// states it after the error ("" on an exact clock).
+fn with_tolerance(error: f64, tolerance: f64) -> String {
+    if tolerance > 0.0 {
+        format!(
+            ", up to {:.2} % including its clock's {:.2} %",
+            (error.abs() + tolerance) * 100.0,
+            tolerance * 100.0
+        )
+    } else {
+        String::new()
+    }
 }
 
 fn link_path(i: usize) -> String {
@@ -1179,6 +1188,26 @@ impl<'a> Ctx<'a> {
                     });
                 }
             }
+            // On a speed every node runs, each node that drives the bus
+            // makes SCL from its clock: the end the other reaches at an
+            // address is the target, the other end the controller.
+            if named.as_ref().is_none_or(|n| n.contains(&speed)) {
+                let mut seen: Vec<&str> = Vec::new();
+                for l in &on_bus {
+                    if !l.ends.iter().any(|e| e.addr.is_some()) {
+                        continue;
+                    }
+                    for e in l.ends.iter().filter(|e| e.addr.is_none()) {
+                        if seen.contains(&e.node.as_str()) {
+                            continue;
+                        }
+                        seen.push(&e.node);
+                        if let Some(what) = self.scl_fault(&e.node, speed) {
+                            self.err("V-20", path.clone(), format!("speed_hz {speed}: {what}"));
+                        }
+                    }
+                }
+            }
             let over_cap = rom_cap.is_some_and(|r| speed > r.max_hz);
             if named.as_ref().is_some_and(|n| !n.contains(&speed)) || over_cap {
                 let limit = rom_cap.map_or(String::new(), |r| {
@@ -1201,6 +1230,40 @@ impl<'a> Ctx<'a> {
                 );
             }
         }
+    }
+
+    /// Why the controller `id` cannot drive its bus at `speed` (from its
+    /// MCU's `[link_i2c.controller]` on the clock its node's app runs on, as
+    /// V-26 takes a UART's), or `None` when it can. A node whose firmware
+    /// runs no I2C link is V-23's.
+    fn scl_fault(&self, id: &str, speed: u32) -> Option<String> {
+        let n = self.t.node(id)?;
+        let m = self.reg.mcu(&n.mcu)?;
+        if !links::runs_in(self.reg, &m.id, LinkKind::I2c) {
+            return None;
+        }
+        let c = m.link_i2c.as_ref()?.controller.as_ref();
+        let board = n.board.as_deref().and_then(|b| self.reg.board(b));
+        let what = match m.i2c_controller_clock(board) {
+            Err(why) => why,
+            Ok(clock) => {
+                let c = c?;
+                match c
+                    .actual_hz(clock.hz, speed)
+                    .zip(c.hz_error(clock.hz, speed))
+                {
+                    Some((_, e)) if c.limit().admits(e, clock.tolerance) => return None,
+                    Some((a, e)) => format!(
+                        "runs SCL at {a:.0} Hz, {:+.2} %{}; the bus controller must run it {}",
+                        e * 100.0,
+                        with_tolerance(e, clock.tolerance),
+                        c.limit().describe()
+                    ),
+                    None => "cannot make it as the bus controller".into(),
+                }
+            }
+        };
+        Some(format!("{id} ({}) {what}", m.name))
     }
 
     /// A UART link's speed on each end whose firmware runs it, from its
@@ -1232,7 +1295,7 @@ impl<'a> Ctx<'a> {
                 let board = n.board.as_deref().and_then(|b| self.reg.board(b));
                 let clock = m.uart_clock(board);
                 let u = m.link_uart.as_ref().zip(clock.as_ref().ok());
-                let at = |u: &crate::defs::LinkUart, c: &crate::defs::UartClockOn| {
+                let at = |u: &crate::defs::LinkUart, c: &crate::defs::LinkClockOn| {
                     (
                         u.runs(baud),
                         u.actual_baud(c.hz, baud),
@@ -1240,22 +1303,19 @@ impl<'a> Ctx<'a> {
                     )
                 };
                 let tolerance = clock.as_ref().map_or(0.0, |c| c.tolerance);
+                let limit = m.link_uart.as_ref().map(crate::defs::LinkUart::limit);
                 let what = match u.map(|(u, c)| at(u, c)) {
                     None => clock.err().unwrap_or_default(),
-                    Some((_, Some(a), Some(e))) if e.abs() + tolerance > MAX_BAUD_ERROR => format!(
-                        "runs at {a:.0} bit/s, {:+.2} %{}; each end of a UART link must be within {:.0} %",
-                        e * 100.0,
-                        if tolerance > 0.0 {
-                            format!(
-                                ", up to {:.2} % including its clock's {:.2} %",
-                                (e.abs() + tolerance) * 100.0,
-                                tolerance * 100.0
-                            )
-                        } else {
-                            String::new()
-                        },
-                        MAX_BAUD_ERROR * 100.0
-                    ),
+                    Some((_, Some(a), Some(e)))
+                        if !limit.is_some_and(|r| r.admits(e, tolerance)) =>
+                    {
+                        format!(
+                            "runs at {a:.0} bit/s, {:+.2} %{}; each end of a UART link must be {}",
+                            e * 100.0,
+                            with_tolerance(e, tolerance),
+                            limit.map(|r| r.describe()).unwrap_or_default()
+                        )
+                    }
                     Some((false, Some(_), Some(_))) => format!(
                         "is not a speed its firmware runs the link at; its definition names {:?}",
                         u.map(|(u, _)| u.bauds.as_slice()).unwrap_or(&[])

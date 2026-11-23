@@ -231,14 +231,21 @@ pub const MCU: &[Requirement<McuCheck>] = &[
             "link_uart.clocks_per_bit",
             "link_uart.frac_bits",
             "link_uart.bauds[]",
+            "link_uart.fast_ppm",
+            "link_uart.slow_ppm",
         ],
-        rule: "exactly one of clock_hz >= 1 and clock = \"app\" (with [[app.clock]]); clocks_per_bit >= 1; frac_bits <= 24; bauds not empty, each one the UART makes within 2 % on clock_hz (on clock = \"app\" V-26 checks each node's)",
+        rule: "exactly one of clock_hz >= 1 and clock = \"app\" (with [[app.clock]]); clocks_per_bit >= 1; frac_bits <= 24; bauds not empty, each one the UART makes within fast_ppm and slow_ppm on clock_hz (on clock = \"app\" V-26 checks each node's); slow_ppm <= 1000000",
         check: link_uart,
     },
     Requirement {
         engine: "topology check V-20",
-        fields: &["link_i2c.hzs[]"],
-        rule: "hzs not empty",
+        fields: &[
+            "link_i2c.hzs[]",
+            "link_i2c.controller.min_period",
+            "link_i2c.controller.fast_ppm",
+            "link_i2c.controller.slow_ppm",
+        ],
+        rule: "hzs not empty; controller: exactly one of clock_hz >= 1 and clock = \"app\" (with [[app.clock]]), min_period >= 1, slow_ppm <= 1000000, each of hzs one it makes within fast_ppm and slow_ppm on clock_hz (on clock = \"app\" V-20 checks each node's)",
         check: link_i2c,
     },
     Requirement {
@@ -812,19 +819,40 @@ pub(crate) fn default_link_baud(b: &BoardDef, m: &McuDef) -> Result<(), String> 
     })
 }
 
+/// A link section's clock: exactly one of `clock_hz` (at least 1) and
+/// `clock = "app"` (with `[[app.clock]]`).
+fn link_clock(
+    m: &McuDef,
+    section: &str,
+    clock_hz: Option<u32>,
+    clock: Option<super::LinkClock>,
+) -> Result<(), String> {
+    fail(clock_hz.is_some() == clock.is_some(), || {
+        format!("{section} takes exactly one of clock_hz (a fixed clock) and clock = \"app\" (the app's core clock)")
+    })?;
+    fail(
+        clock.is_some() && m.clock_setups(super::ClockStage::App).is_none(),
+        || format!("{section}.clock = \"app\" needs [[app.clock]]"),
+    )?;
+    fail(clock_hz == Some(0), || {
+        format!("{section}.clock_hz must be at least 1")
+    })
+}
+
+/// A rate limit's slow side: no rate runs more than 100 % slow.
+fn slow_side(section: &str, slow_ppm: u32) -> Result<(), String> {
+    fail(slow_ppm > 1_000_000, || {
+        format!("{section}.slow_ppm must be at most 1000000 (100 %)")
+    })
+}
+
 fn link_uart(m: &McuDef) -> Result<(), String> {
     let Some(u) = &m.link_uart else {
         return Ok(());
     };
-    fail(u.clock_hz.is_some() == u.clock.is_some(), || {
-        "link_uart takes exactly one of clock_hz (a fixed clock) and clock = \"app\" (the app's core clock)".into()
-    })?;
-    fail(
-        u.clock.is_some() && m.clock_setups(super::ClockStage::App).is_none(),
-        || "link_uart.clock = \"app\" needs [[app.clock]]".into(),
-    )?;
-    fail(u.clock_hz == Some(0) || u.clocks_per_bit == 0, || {
-        "link_uart.clock_hz and clocks_per_bit must be at least 1".into()
+    link_clock(m, "link_uart", u.clock_hz, u.clock)?;
+    fail(u.clocks_per_bit == 0, || {
+        "link_uart.clocks_per_bit must be at least 1".into()
     })?;
     fail(u.frac_bits > 24, || {
         "link_uart.frac_bits must be at most 24".into()
@@ -832,6 +860,7 @@ fn link_uart(m: &McuDef) -> Result<(), String> {
     fail(u.bauds.is_empty(), || {
         "link_uart.bauds must name at least one bit rate".into()
     })?;
+    slow_side("link_uart", u.slow_ppm)?;
     // On the app's clock the rate depends on the node's board: V-26 checks
     // each node's.
     let Some(hz) = u.clock_hz else {
@@ -839,22 +868,48 @@ fn link_uart(m: &McuDef) -> Result<(), String> {
     };
     let off = u.bauds.iter().find(|&&b| {
         !u.baud_error(hz, b)
-            .is_some_and(|e| e.abs() <= super::MAX_BAUD_ERROR)
+            .is_some_and(|e| u.limit().admits(e, 0.0))
     });
     fail(off.is_some(), || {
         format!(
-            "link_uart.bauds: this UART cannot run at {} within {:.0} %",
+            "link_uart.bauds: this UART cannot run at {} {}",
             off.unwrap(),
-            super::MAX_BAUD_ERROR * 100.0
+            u.limit().describe()
         )
     })
 }
 
 fn link_i2c(m: &McuDef) -> Result<(), String> {
-    fail(
-        m.link_i2c.as_ref().is_some_and(|u| u.hzs.is_empty()),
-        || "link_i2c.hzs must name at least one bus speed".into(),
-    )
+    let Some(l) = &m.link_i2c else {
+        return Ok(());
+    };
+    fail(l.hzs.is_empty(), || {
+        "link_i2c.hzs must name at least one bus speed".into()
+    })?;
+    let Some(c) = &l.controller else {
+        return Ok(());
+    };
+    link_clock(m, "link_i2c.controller", c.clock_hz, c.clock)?;
+    fail(c.min_period == 0, || {
+        "link_i2c.controller.min_period must be at least 1".into()
+    })?;
+    slow_side("link_i2c.controller", c.slow_ppm)?;
+    // On the app's clock SCL depends on the node's board: V-20 checks each
+    // node's.
+    let Some(hz) = c.clock_hz else {
+        return Ok(());
+    };
+    let off = l
+        .hzs
+        .iter()
+        .find(|&&s| !c.hz_error(hz, s).is_some_and(|e| c.limit().admits(e, 0.0)));
+    fail(off.is_some(), || {
+        format!(
+            "link_i2c.hzs: this I2C controller cannot run SCL at {} {}",
+            off.unwrap(),
+            c.limit().describe()
+        )
+    })
 }
 
 fn link_ports(m: &McuDef) -> Result<(), String> {

@@ -10,6 +10,7 @@ pub mod codegen;
 pub mod dma;
 pub mod execution;
 pub mod isolation;
+mod link_rate;
 mod load;
 pub mod merge;
 mod overrides;
@@ -51,6 +52,7 @@ pub use board_boot::{BoardBoot, BoardBus, BoardDevice, BoardPeripheral, BoardPin
 pub use clock::{BoardClock, ClockKind, ClockSetup, ClockSource, ClockStage, StageClocks};
 pub use execution::{BoardFlash, Conformance, EraseRegionDef, Execution, Fact, FlashOp, OpenFact};
 pub use isolation::{Core, Isolation, McuBoot, PeriodRange, Peripheral, RecordPlacement, Watchdog};
+pub use link_rate::{I2cController, LinkClock, LinkClockOn, LinkI2c, LinkUart, RateLimit};
 pub use load::{DefError, DefSource, Source, BUILTIN_FILES};
 pub use slot_layout::{HeaderDef, OwnedLayout, SlotLayoutDef, SlotName, TargetName};
 
@@ -335,118 +337,6 @@ pub struct Coordinator {
     pub uart0_rx: Vec<u8>,
 }
 
-/// How the UART the MCU package's firmware runs DAGON's UART links on makes
-/// a bit rate: its clock divided by `clocks_per_bit` times a divider with
-/// `frac_bits` fraction bits, the divider rounded down (as the HAL the
-/// package builds with computes it). Its clock is `clock_hz`, a frequency
-/// no setup changes, or `clock = "app"`, the core clock of the
-/// `[[app.clock]]` setup the definitions choose for the node. `bauds` lists
-/// the bit rates that firmware runs its link at: a link's `baud` must be
-/// one of them on both ends (V-26), and the Console offers only those, so
-/// no speed the definition does not name can be set or built.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct LinkUart {
-    pub clock_hz: Option<u32>,
-    pub clock: Option<UartClock>,
-    pub clocks_per_bit: u32,
-    pub frac_bits: u8,
-    pub bauds: Vec<u32>,
-}
-
-/// `[link_uart] clock`: the clock a UART's rate comes from.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum UartClock {
-    /// The core clock of the node's `[[app.clock]]` setup.
-    App,
-}
-
-/// The clock a node's UART runs on: its frequency and how far it may be off
-/// (a fraction).
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct UartClockOn {
-    pub hz: u32,
-    pub tolerance: f64,
-}
-
-/// The I2C bus speeds the MCU package's firmware runs DAGON's I2C link at,
-/// as controller or target. A bus's `speed_hz` must be one of them on every
-/// node on the bus (V-20), and the Console offers only those, so no speed
-/// the definition does not name can be set or built.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct LinkI2c {
-    pub hzs: Vec<u32>,
-}
-
-/// How far a UART end may run from the link's `baud` (a fraction): each
-/// end of a link must be within it.
-pub const MAX_BAUD_ERROR: f64 = 0.02;
-
-impl LinkUart {
-    /// Whether `baud` is one this firmware runs its link at.
-    pub fn runs(&self, baud: u32) -> bool {
-        self.bauds.contains(&baud)
-    }
-
-    /// The bit rate this UART runs at on a `clock_hz` clock when asked for
-    /// `baud`; `None` when it cannot divide its clock down to it (0, or
-    /// faster than the clock).
-    pub fn actual_baud(&self, clock_hz: u32, baud: u32) -> Option<f64> {
-        let per_bit = u64::from(self.clocks_per_bit) * u64::from(baud);
-        let steps = (u64::from(clock_hz) << self.frac_bits).checked_div(per_bit)?;
-        if steps >> self.frac_bits == 0 {
-            return None;
-        }
-        let divider = steps as f64 / f64::from(1u32 << self.frac_bits);
-        Some(f64::from(clock_hz) / (f64::from(self.clocks_per_bit) * divider))
-    }
-
-    /// How far [`LinkUart::actual_baud`] is from `baud`, as a fraction
-    /// (+0.0122 is 1.22 % fast).
-    pub fn baud_error(&self, clock_hz: u32, baud: u32) -> Option<f64> {
-        self.actual_baud(clock_hz, baud)
-            .map(|a| a / f64::from(baud) - 1.0)
-    }
-}
-
-/// The UART clock an app setup gives: its core clock, bounded by its
-/// tolerance; an internal oscillator that states none is refused.
-fn uart_clock_of(s: &ClockSetup) -> Result<UartClockOn, String> {
-    match (s.source, s.tolerance_ppm) {
-        (ClockKind::Internal, None) => Err(
-            "runs its UART on the internal oscillator, whose frequency no tolerance bounds; \
-             a board that states its crystal ([clock] source) can run the link"
-                .into(),
-        ),
-        (_, ppm) => Ok(UartClockOn {
-            hz: s.out_hz,
-            tolerance: f64::from(ppm.unwrap_or(0)) / 1e6,
-        }),
-    }
-}
-
-impl McuDef {
-    /// The clock this MCU's UART runs on for a node on `board` (the board
-    /// the node names; `None`: no board, so the internal oscillator); an
-    /// error says why it has none a link can rely on.
-    pub fn uart_clock(&self, board: Option<&BoardDef>) -> Result<UartClockOn, String> {
-        let u = self
-            .link_uart
-            .as_ref()
-            .ok_or("cannot be checked: its MCU definition has no [link_uart]")?;
-        match (u.clock_hz, u.clock) {
-            (Some(hz), _) => Ok(UartClockOn { hz, tolerance: 0.0 }),
-            (None, Some(UartClock::App)) => self
-                .clock_for(ClockStage::App, board)
-                .ok_or_else(|| "cannot be checked: its MCU definition has no [[app.clock]]".into())
-                .and_then(uart_clock_of),
-            (None, None) => Err("cannot be checked: its [link_uart] names no clock".into()),
-        }
-    }
-}
-
 /// The pins a board wires new links to when it is the coordinator (numbered
 /// GPIOs, as the topology's `buses[]` and `links[].pins` take them).
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -687,7 +577,7 @@ pub struct McuDef {
     /// `usb_postdiv2`, giving 48 MHz) gives the app its USB clock; an app without one builds
     /// only without a USB uplink. The internal setup may state `tolerance_ppm`, how far the
     /// oscillator may run from `out_hz`; a node whose app runs on an internal setup without it
-    /// runs no UART link on that clock (V-26).
+    /// runs no UART link (V-26) and drives no I2C bus (V-20) on that clock.
     pub app: Option<StageClocks>,
     /// `image` (`app`, `bootcore`, `agent`, `stage0`), `binding` (`a`, `b`, `any`), `header`
     /// (`inline`, `trailer`, `detached`); the region is `at` + `size` or `partition`; a detached
@@ -716,16 +606,22 @@ pub struct McuDef {
     /// or `clock = "app"` (the core clock of the node's `[[app.clock]]` setup, which V-26 takes
     /// for each node; a node on an internal setup without `tolerance_ppm` runs no UART link),
     /// exactly one of them. `bauds` lists the bit rates the firmware runs its link at;
-    /// the topology check (V-26) refuses a link `baud` that either end's list does not name or
-    /// that either end makes more than 2 % off, and DAGON Console offers only the speeds both
-    /// ends name. Required on an MCU whose `[links]` has `uart`: without it, every UART link
-    /// that MCU's firmware runs is refused, since no speed on it is known to work.
+    /// `fast_ppm` and `slow_ppm` bound how far its bit rate may run from a link's `baud`, its
+    /// clock's tolerance included. The topology check (V-26) refuses a link `baud` that either
+    /// end's list does not name or that either end makes outside its bounds, and DAGON Console
+    /// offers only the speeds both ends name. Required on an MCU whose `[links]` has `uart`:
+    /// without it, every UART link that MCU's firmware runs is refused, since no speed on it is
+    /// known to work.
     pub link_uart: Option<LinkUart>,
     /// The I2C bus speeds the MCU package's firmware runs DAGON's I2C link at, as controller or
     /// target: `hzs`. The topology check (V-20) refuses a bus `speed_hz` that any node's list does
     /// not name, and DAGON Console offers only the speeds every node on the bus names. Required on
     /// an MCU whose `[links]` has `i2c`: without it, every I2C bus that MCU's firmware is on is
-    /// refused, since no speed on it is known to work.
+    /// refused, since no speed on it is known to work. `[link_i2c.controller]`: how the firmware
+    /// makes SCL when the node drives the bus (`clock_hz` or `clock = "app"`, as `[link_uart]`'s;
+    /// `min_period`, the fewest clock cycles a period the HAL takes; `fast_ppm` and `slow_ppm`);
+    /// V-20 refuses a bus whose controller's SCL runs outside those bounds on its clock, and a
+    /// bus driven by a node whose MCU states none.
     pub link_i2c: Option<LinkI2c>,
     /// ROM I2C bootloader (`stm32-i2c-rom`): `name` (as check messages call it), `addr`, `max_hz`,
     /// `erase_sectors`, `pairs = [{ controller, sda, scl }]` it listens on.

@@ -145,8 +145,15 @@ fn p1_coordinator_chosen_by_mcu_is_checked_by_its_gpio_range() {
     // Without a named board the hub is checked against RP2040 GPIO0-29, not a board header.
     let by_mcu = mutate("    board: waveshare-rp2040-touch-lcd-1.28\n", "");
     let r = check_str(&by_mcu);
-    // Its only issue: its UART runs on the ring oscillator (V-26).
-    assert!(r.issues.iter().all(|i| i.rule == "V-26"), "{:?}", r.issues);
+    // Its only issues: its UART and its I2C controller run on the ring
+    // oscillator (V-26, V-20).
+    assert!(
+        r.issues
+            .iter()
+            .all(|i| i.rule == "V-26" || i.rule == "V-20"),
+        "{:?}",
+        r.issues
+    );
     assert!(!error_rules(&by_mcu.replacen("nrst: 18", "nrst: 20", 1)).contains("V-07"));
     assert_fires(&by_mcu.replacen("nrst: 18", "nrst: 30", 1), "V-07");
     assert_fires(&DEMO.replacen("nrst: 18", "nrst: 20", 1), "V-07");
@@ -618,7 +625,7 @@ fn v26_refuses_a_uart_end_whose_mcu_states_no_link_uart() {
     // An ESP32-S3 definition without [link_uart]: its firmware runs the
     // UART link, but no speed on it is known to work, so none is accepted,
     // the default included.
-    let block = "[link_uart]\\nbauds = [115200, 230400, 460800, 921600]\\nclock_hz = 40000000\\nclocks_per_bit = 1\\nfrac_bits = 4\\n";
+    let block = "[link_uart]\\nbauds = [115200, 230400, 460800, 921600]\\nclock_hz = 40000000\\nclocks_per_bit = 1\\nfast_ppm = 20000\\nfrac_bits = 4\\nslow_ppm = 20000\\n";
     let json = Registry::builtin().to_json();
     assert!(json.contains(block), "the esp32s3 [link_uart] block moved");
     let reg = Registry::from_json(&json.replacen(block, "", 1)).unwrap();
@@ -709,6 +716,64 @@ fn v26_takes_each_ends_uart_clock_from_its_app_clock_setup() {
         "{got:?}"
     );
     assert!(got[0].contains("including its clock's 1.00 %"), "{got:?}");
+}
+
+fn v20_with(reg: &Registry, yaml: &str) -> Vec<String> {
+    check_str_with(reg, yaml)
+        .errors()
+        .filter(|i| i.rule == "V-20")
+        .map(|i| i.message.clone())
+        .collect()
+}
+
+/// The bus controller makes SCL from the clock the definitions choose for
+/// its node's app, as a UART end its bit rate (V-26): the hub's board
+/// crystal, no board (the internal oscillator, whose frequency no tolerance
+/// bounds), and a project's overrides of the MCU's clock and of its
+/// `[link_i2c.controller]` bounds.
+#[test]
+fn v20_takes_the_bus_controllers_scl_from_its_app_clock_setup() {
+    // A crystal: 125 MHz / 313 cycles = 399361 Hz at 400 kHz, 125 MHz /
+    // 1250 = 100 kHz exactly.
+    assert!(messages(DEMO, "V-20").is_empty());
+    assert!(messages(&mutate("speed_hz: 400000", "speed_hz: 100000"), "V-20").is_empty());
+    // The internal setup: the hub named by MCU alone.
+    let by_mcu = mutate("    board: waveshare-rp2040-touch-lcd-1.28\n", "");
+    assert_eq!(
+        messages(&by_mcu, "V-20"),
+        [
+            "speed_hz 400000: hub (RP2040) runs its I2C controller on the internal oscillator, \
+          whose frequency no tolerance bounds; a board that states its crystal ([clock] source) \
+          can run the link"
+        ]
+    );
+    // A project override of the MCU: the hub's app on an internal setup
+    // bounded to 1 %. At 100 kHz SCL is exact on 6.5 MHz but may run 1 %
+    // fast, past the mode's highest SCL; at 400 kHz a period is 16 cycles,
+    // under the 20 the HAL takes.
+    let internal = "[[mcu_override.rp2040.app.clock]]\nsource = \"internal\"\nout_hz = 6_500_000\n\
+                    tolerance_ppm = 10_000\n\n\
+                    [board_override.\"waveshare-rp2040-touch-lcd-1.28\".clock]\nsource = \"internal\"\n";
+    let reg = with_overrides("v20-mcu", internal);
+    let slow = mutate("speed_hz: 400000", "speed_hz: 100000");
+    assert_eq!(
+        v20_with(&reg, &slow),
+        [
+            "speed_hz 100000: hub (RP2040) runs SCL at 100000 Hz, +0.00 %, up to 1.00 % including \
+          its clock's 1.00 %; the bus controller must run it from -100 % to +0 %"
+        ]
+    );
+    assert_eq!(
+        v20_with(&reg, DEMO),
+        ["speed_hz 400000: hub (RP2040) cannot make it as the bus controller"]
+    );
+    // The bounds are the definition's: a project that lets SCL run 2 %
+    // fast runs the bus at 100 kHz on that clock.
+    let reg = with_overrides(
+        "v20-bounds",
+        &format!("{internal}\n[mcu_override.rp2040.link_i2c.controller]\nfast_ppm = 20_000\n"),
+    );
+    assert_eq!(v20_with(&reg, &slow), Vec::<String>::new());
 }
 
 #[test]

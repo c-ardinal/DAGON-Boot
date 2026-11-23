@@ -176,12 +176,31 @@ clocks_per_bit = 8
 frac_bits = 0
 # Bit rates the firmware runs the link at: a link's baud is one of these on both ends.
 bauds = [115_200, 230_400]
+# How far each end's bit rate may run from baud, its clock's tolerance
+# included. The two ends' errors add up; an 8N1 receiver that samples
+# mid-bit loses the frame at half a bit over its 10 bits, 5 % between the
+# ends, and 2 % a side keeps a margin for edge timing below that.
+fast_ppm = 20_000
+slow_ppm = 20_000
 
 # Bus speeds the firmware runs DAGON's I2C link at (template/src/board.rs
 # i2c::Config.frequency): standard mode 100 kHz and fast mode 400 kHz (RP2040
 # datasheet 4.3, I2C). A bus's speed_hz is one of these on every node on it.
 [link_i2c]
 hzs = [100_000, 400_000]
+
+# SCL as the bus controller (embassy-rp 0.10 i2c.rs, Config.frequency):
+# clk_peri / speed_hz rounded to the nearest whole cycle a period, 3/5 of
+# it low and 2/5 high, each at least 8 cycles, so the HAL refuses a period
+# under 20 cycles. clk_peri runs on clk_sys, the core clock of the node's
+# [[app.clock]] setup. speed_hz is its mode's highest SCL (100 kHz standard,
+# 400 kHz fast mode), which SCL must not pass; the mode has no lowest one
+# (I2C-bus specification UM10204 table 10, fSCL from 0 Hz).
+[link_i2c.controller]
+clock = "app"
+min_period = 20
+fast_ppm = 0
+slow_ppm = 1_000_000
 
 # Link kinds the firmware implements (src/kinds.rs LINK_KINDS).
 [links]

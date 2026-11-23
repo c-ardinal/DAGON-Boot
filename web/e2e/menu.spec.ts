@@ -327,3 +327,22 @@ test('the table above covers every item the menu shows, linked or not', async ({
   }
   expect([...shown].sort()).toEqual(Object.keys(ITEMS).sort());
 });
+
+test('Alt + arrow moves only the card that has the focus, not the one behind a focused card check', async ({ page }) => {
+  await start(page);
+  await page.getByRole('radio', { name: '書込', exact: true }).click();
+  await settled(page);
+  const boxesNow = () => page.locator('.node').evaluateAll((ns) => ns.map((n) => { const r = n.getBoundingClientRect(); return [Math.round(r.x), Math.round(r.y)]; }));
+  const card = page.locator('.node').nth(1);
+  await card.click();
+  const check = page.locator('.check').first();
+  await check.focus();
+  const before = await boxesNow();
+  await page.keyboard.press('Alt+ArrowRight');
+  await page.waitForTimeout(100);
+  expect(await boxesNow()).toEqual(before);
+  // The card itself still steps.
+  await card.focus();
+  await page.keyboard.press('Alt+ArrowRight');
+  expect(await boxesNow()).not.toEqual(before);
+});

@@ -395,9 +395,11 @@
   function onKey(e: KeyboardEvent) {
     const step = stepOf(e);
     if (step) {
-      if (!focusKey.startsWith('node:')) return;
+      // The card that has the focus itself: not its check or a link chip, whose keys reach the canvas too.
+      const key = (e.target as HTMLElement).dataset.key;
+      if (!key?.startsWith('node:')) return;
       e.preventDefault();
-      const id = focusKey.slice(5);
+      const id = key.slice(5);
       const from = pos[id];
       stepped = id;
       if (from) moveTo(id, { x: from.x + step.x, y: from.y + step.y });

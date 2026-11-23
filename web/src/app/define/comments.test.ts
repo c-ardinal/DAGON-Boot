@@ -22,6 +22,11 @@ describe('hand-written YAML comments across a save', () => {
     expect(keepComments(source, 'x:\n  n: 3\ny:\n  n: 3\nz: "a #b"\n')).toBe(source);
   });
 
+  test('a line the page writes in another style is a changed line: its comment goes, the blank lines follow the page', () => {
+    const source = "a: 'x'  # quoted\n\nb: [1, 2]  # flow\n";
+    expect(keepComments(source, 'a: x\nb:\n  - 1\n  - 2\n')).toBe('a: x\nb:\n  - 1\n  - 2\n');
+  });
+
   test('without comments the generated text is unchanged', () => {
     expect(keepComments('a: 1\n', 'a: 2\n')).toBe('a: 2\n');
   });

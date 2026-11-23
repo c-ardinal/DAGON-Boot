@@ -1,9 +1,9 @@
-//! The link kinds this package offers, by direction, for ESP32-S3 (a 子機: no downlinks):
+//! The link kinds this package offers, by direction, for ESP32-S3 (it relays to no other node: no downlinks):
 //!
 //! README.md, "Links", shows the matrix (generated from `LINK_KINDS`;
 //! a kind the table leaves out is `No`).
 //!
-//! `NotYet`: the 構成 may name it, but a project asking for it does not
+//! `NotYet`: the topology may name it, but a project asking for it does not
 //! build yet (`require_uplink` / `require_downlinks` say which hop).
 
 pub use dagon_mcu_common::link::{Dir, Kind, KindInfo, Link, LinkError, Reconnect, Support};
@@ -207,8 +207,8 @@ mod node_links {
     impl Link for UsbCdc {
         /// The UART's limit, not `max_payload::USB`: this port shares the
         /// UART's receive path (`Rx`, frames up to `MAX_UART_FRAME`). Only
-        /// a 親機's usb-cdc carries `max_payload::USB` (dagon-host's serial
-        /// Transport); the ESP32-S3 cannot be the 親機 (no `[coordinator]` in
+        /// a relaying node's usb-cdc carries `max_payload::USB` (dagon-host's serial
+        /// Transport); the ESP32-S3 cannot be a relaying node (no `[coordinator]` in
         /// its definition), so nothing sends it frames that large.
         fn max_payload(&self) -> usize {
             dagon_proto::max_payload::UART

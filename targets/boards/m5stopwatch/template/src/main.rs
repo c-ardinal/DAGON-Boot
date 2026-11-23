@@ -16,7 +16,7 @@ use esp_hal::timer::timg::TimerGroup;
 
 esp_bootloader_esp_idf::esp_app_desc!();
 
-/// The hops of this node, from the 構成 (dagon gen writes them): the
+/// The hops of this node, from the topology (dagon gen writes them): the
 /// build stops here, naming the hop, if a kind is not available yet. The
 /// node serves UART and USB Serial/JTAG at once, whichever is the uplink.
 #[rustfmt::skip]

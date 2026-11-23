@@ -64,8 +64,8 @@ use {defmt_rtt as _, panic_probe as _};
 
 // DAGON's link is guard task 0, app.rs's tasks follow. Unconfirmed images
 // never feed: they reset after the boot core's trial period unless the
-// 親機 confirmed them.
-// The hops, as dagon gen writes them from the 構成.
+// relaying node confirmed them.
+// The hops, as dagon gen writes them from the topology.
 const UPLINK: Kind = Kind::I2c;
 const DOWNLINKS: &[Kind] = &[];
 const _: () = links::require_uplink(UPLINK);
@@ -83,7 +83,7 @@ static GUARD: Guard<TASKS> = Guard::new(node::levels::<TASKS>(), Trial::NeverFee
 async fn main(spawner: Spawner) {
     let (dagon, io) = Board::split(embassy_stm32::init(CLOCK.hal_config()));
     let tag = dagon_mcu_stm32f401re::target_tag!();
-    // The node's I2C address from the 構成 (dagon gen writes it into
+    // The node's I2C address from the topology (dagon gen writes it into
     // wiring.rs), else the board's [default_link] addr.
     board::start(spawner, dagon, &GUARD, tag, app::dagon(), UPLINK, wiring::LINK_ADDR).ok();
     app::start(spawner, io, &GUARD, node::APP_TASKS);
@@ -102,7 +102,7 @@ core's period, opens the board's I2C target, spawns the serving task (guard
 task `node::DAGON_TASK`, 0, `Preempting`) on DAGON's high-priority executor
 (`exec`, an interrupt executor on the unused USART6 vector at P6) and the
 feeder on `spawner`. The app's tasks run in thread mode below it, so the
-親機 is answered whatever they do. The node's tag comes from
+relaying node is answered whatever they do. The node's tag comes from
 `DAGON_TARGET_TAG` in `.cargo/config.toml`
 (`DAGON_TARGET_TAG = { value = "my-node", force = true }` under `[env]`);
 the `App` gives the self-check (whether a version on trial may be
@@ -144,13 +144,13 @@ kinds this package offers (`links::LINK_KINDS`):
 
 ### Generator contract
 
-The kind names are exactly the 構成's: `usb-cdc`, `uart`, `i2c`, `ble`,
+The kind names are exactly the topology's: `usb-cdc`, `uart`, `i2c`, `ble`,
 `wifi-tcp`, `ethernet`, `can`. In a project template:
 
 - `{{uplink}}` renders to one Rust path naming the node's uplink kind:
   `dagon_mcu_stm32f401re::links::Kind::<Variant>`;
 - `{{downlinks}}` renders to the downlink kinds, comma-separated (empty
-  for a 子機): `dagon_mcu_stm32f401re::links::Kind::<Variant>, ...`.
+  for a node that relays to no other node): `dagon_mcu_stm32f401re::links::Kind::<Variant>, ...`.
 
 Variants by name: `usb-cdc` `UsbCdc`, `uart` `Uart`, `i2c` `I2c`, `ble`
 `Ble`, `wifi-tcp` `WifiTcp`, `ethernet` `Ethernet`, `can` `Can`. The
@@ -169,7 +169,7 @@ const _: () = links::require_uplink(UPLINK);
 const _: () = links::require_downlinks(DOWNLINKS);
 ```
 
-The board package's `start` takes `UPLINK` (a 子機 has no downlinks) and
+The board package's `start` takes `UPLINK` (a node that relays to no other node has no downlinks) and
 builds the link on the board's pins; link types are constructed as
 `dagon_mcu_stm32f401re::links::<Kind>::new(..)`.
 

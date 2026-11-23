@@ -4,7 +4,7 @@
 //! (`LINK_KINDS`) and constructs them as `links::<Kind>::new(..)`; a board
 //! package names the pins (`uplink_<kind>()` / `downlink_<kind>()`).
 //!
-//! The kind names are the 構成's, from the one list of link kinds
+//! The kind names are the topology's, from the one list of link kinds
 //! (`dagon_format::with_link_kinds!`). Kinds without an implementation
 //! exist in the tables as names only ([`Support::NotYet`]); a project that asks for
 //! one fails to build with a message naming the hop.
@@ -38,9 +38,9 @@ impl Support {
 /// Direction of a hop seen from this node.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Dir {
-    /// Towards the PC (the 親機's PC link, a 子機's link to its parent).
+    /// Towards the PC (the relaying node's PC link, or a node's link to the node that relays to it).
     Up,
-    /// Towards a child node (only a 親機 has these).
+    /// Towards a child node (only a relaying node has these).
     Down,
 }
 

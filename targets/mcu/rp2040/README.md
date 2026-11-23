@@ -20,7 +20,7 @@ extension), which every MCU package shares, and [`BoardDef`]
 needs only its own `BoardCore` and `BoardDef` and links (see
 `template/src/board.rs`).
 
-## A 親機 with your own task
+## A relaying node with your own task
 
 This is what `dagon new` generates for the Waveshare board
 (`../../boards/waveshare-rp2040-touch-lcd-1.28/template`, its manifest kept
@@ -49,7 +49,7 @@ use dagon_mcu_rp2040::links::{self, Kind};
 use dagon_mcu_rp2040::relay::{self, Setup};
 use dagon_mcu_rp2040::watchdog::{now_ms, Guard, Trial};
 
-// The hops, as dagon gen writes them from the 構成.
+// The hops, as dagon gen writes them from the topology.
 const UPLINK: Kind = Kind::UsbCdc;
 const DOWNLINKS: &[Kind] = &[Kind::I2c, Kind::Uart];
 const _: () = links::require_uplink(UPLINK);
@@ -73,7 +73,7 @@ async fn main(spawner: embassy_executor::Spawner) {
     let (dagon, io) = Board::split(embassy_rp::init(CLOCK.hal_config()));
     let setup = Setup {
         tag: dagon_mcu_rp2040::target_tag!(),
-        // The role the 構成 gives this node (wiring.rs).
+        // The role the topology gives this node (wiring.rs).
         role: if wiring::NODE.hub { relay::role::HUB } else { relay::role::NODE },
         name: "my-hub",
         app: app::dagon(),
@@ -149,7 +149,7 @@ kinds this package offers (`links::LINK_KINDS`):
 | `ethernet` | NotYet | NotYet |
 | `can` | NotYet | NotYet |
 
-- Up `usb-cdc`: the PC link of the 親機 (`links::UsbCdc`, the USB CDC
+- Up `usb-cdc`: the PC link of the relaying node (`links::UsbCdc`, the USB CDC
   device; `Reconnect::Reenumerates`).
 - Down `i2c`: I2C0 controller with the DAGON mailbox (`links::I2c`), and
   down `uart`: a PIO UART (`links::Uart`); the board package names the
@@ -157,13 +157,13 @@ kinds this package offers (`links::LINK_KINDS`):
 
 ### Generator contract
 
-The kind names are exactly the 構成's: `usb-cdc`, `uart`, `i2c`, `ble`,
+The kind names are exactly the topology's: `usb-cdc`, `uart`, `i2c`, `ble`,
 `wifi-tcp`, `ethernet`, `can`. In a project template:
 
 - `{{uplink}}` renders to one Rust path naming the node's uplink kind:
   `dagon_mcu_rp2040::links::Kind::<Variant>`;
 - `{{downlinks}}` renders to the downlink kinds, comma-separated (empty
-  for a 子機): `dagon_mcu_rp2040::links::Kind::<Variant>, ...`.
+  for a node that relays to no other node): `dagon_mcu_rp2040::links::Kind::<Variant>, ...`.
 
 Variants by name: `usb-cdc` `UsbCdc`, `uart` `Uart`, `i2c` `I2c`, `ble`
 `Ble`, `wifi-tcp` `WifiTcp`, `ethernet` `Ethernet`, `can` `Can`. The

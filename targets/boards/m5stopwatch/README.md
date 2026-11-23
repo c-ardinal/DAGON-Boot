@@ -13,7 +13,7 @@ block types and `take!`.
 | Rear pins UART/USB switch | device `ioe`, M5IOE1 IO expander (`IOE`), PYG1 driven low at bring-up (`route_rear_uart`) |
 | Power manager | device `pmic`, M5PM1 (`PMIC`); ENTER_ROM method 2 only with the `pmic-download` feature (the command byte 0xA3 is an unconfirmed assumption) |
 | Flash | 16 MB (`FLASH_SIZE`, espflash `--flash-size 16mb`); partition table from the MCU crate |
-| Node tag | `TARGET_TAG`: `DAGON_TARGET_TAG` at build time (the node's tag in the 構成; the build fails without it) |
+| Node tag | `TARGET_TAG`: `DAGON_TARGET_TAG` at build time (the node's tag in the topology; the build fails without it) |
 
 `start` opens the internal bus and puts it into `SYS_I2C`
 (`dagon_events::Shared`); DAGON's bring-up (`M5StopWatch`, the

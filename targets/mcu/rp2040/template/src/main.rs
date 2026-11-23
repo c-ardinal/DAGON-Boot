@@ -1,5 +1,5 @@
-//! Start-up written by `dagon new`: your board (board.rs), the DAGON 親機
-//! (PC link, relaying to the 子機) and your application in app.rs. You do
+//! Start-up written by `dagon new`: your board (board.rs), the DAGON relay
+//! (PC link, relaying to the other nodes) and your application in app.rs. You do
 //! not need to change this file.
 //!
 //! DAGON's relay runs on a high-priority interrupt executor; your tasks in
@@ -20,7 +20,7 @@ use dagon_mcu_rp2040::BoardDef;
 use embassy_executor::Spawner;
 use panic_halt as _;
 
-/// The hops of this node, from the 構成 (dagon gen writes them): the
+/// The hops of this node, from the topology (dagon gen writes them): the
 /// build stops here, naming the hop, if a kind is not available yet.
 #[rustfmt::skip]
 const UPLINK: Kind = {{uplink}};
@@ -50,7 +50,7 @@ async fn main(spawner: Spawner) {
     let setup = Setup {
         // DAGON_TARGET_TAG in .cargo/config.toml (the boot core uses it too).
         tag: dagon_mcu_rp2040::target_tag!(),
-        // The role the 構成 gives this node (wiring.rs).
+        // The role the topology gives this node (wiring.rs).
         role: if wiring::NODE.hub {
             relay::role::HUB
         } else {

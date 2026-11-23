@@ -5,7 +5,7 @@ each step. This tests DAGON together with the sample apps on this one setup
 configuration; it is a sample, not part of DAGON. Python 3.11+ standard
 library only; Windows (the hub identity check uses PowerShell).
 
-The setup: 親機 Waveshare RP2040-Touch-LCD-1.28 on USB (`hub`), NUCLEO-F401RE
+The setup: the relaying node, a Waveshare RP2040-Touch-LCD-1.28, on USB (`hub`), NUCLEO-F401RE
 + X-NUCLEO-53L0A1 on I2C 0x42 (`seg`), M5StopWatch on UART (`watch`), all
 connected; a DAGON project for it (`topology.yaml` as
 `topology/sample.yaml`, `dagon.toml` with `[build.hub]`, `[build.seg]`,
@@ -132,5 +132,5 @@ crates from this DAGON: run `dagon gen` first.
 - F401 ROM write: `dagon deploy` uses the ROM path only for an F401
   that does not answer; making it silent needs an erase outside the normal
   confirmation.
-- Interrupting by resetting the 親機: the CLI has no command that resets the
+- Interrupting by resetting the relaying node: the CLI has no command that resets the
   hub on its own; the interrupt is the CLI killed mid-transfer.

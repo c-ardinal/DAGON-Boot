@@ -61,7 +61,7 @@ DAGON updates the node:
 | failed | `FAIL` for 5 s, then the version |
 | starting, idle | the version |
 
-Features: `slot-b` links for APP-B; `confirm` confirms a version on trial at start-up, without a 親機 (the public start's `Confirm::Own`); `no-confirm` makes the self-check fail
+Features: `slot-b` links for APP-B; `confirm` confirms a version on trial at start-up, without a relaying node (the public start's `Confirm::Own`); `no-confirm` makes the self-check fail
 (the trial always rolls back); `conform` is the conformance build (below).
 
 ## Build

@@ -1,6 +1,6 @@
-//! Your board, for DAGON: the 親機's links to the 子機. Written once by
-//! `dagon new` with this node's links in the 構成 (an I2C bus and a PIO
-//! UART, on the pins the 構成 gives); edit it for your board (dagon gen
+//! Your board, for DAGON: the relaying node's links to the other nodes. Written once by
+//! `dagon new` with this node's links in the topology (an I2C bus and a PIO
+//! UART, on the pins the topology gives); edit it for your board (dagon gen
 //! never rewrites it). The flash size is the one given for this board in
 //! dagon.toml, else the least the MCU's layout needs.
 
@@ -36,10 +36,10 @@ bind_interrupts!(struct PioIrqs {
     PIO0_IRQ_0 => pio::InterruptHandler<PIO0>;
 });
 
-/// I2C speed to the 子機 (from the 構成).
+/// I2C speed to the other nodes (from the topology).
 #[cfg({{if_down_i2c}})]
 const I2C_HZ: u32 = {{down_i2c_hz}};
-/// UART speed to the 子機 (from the 構成).
+/// UART speed to the other nodes (from the topology).
 #[cfg({{if_down_uart}})]
 const UART_BAUD: u32 = {{down_uart_baud}};
 
@@ -90,7 +90,7 @@ impl BoardDef for Board {
     }
 }
 
-/// The relay's links for the 構成's hops (the uplink is the USB CDC
+/// The relay's links for the topology's hops (the uplink is the USB CDC
 /// device, built by the relay; no STM32 recovery lines on this wiring),
 /// and what is left for the app.
 pub fn links(io: Io, uplink: Kind, downlinks: &[Kind]) -> (Links, Spare) {

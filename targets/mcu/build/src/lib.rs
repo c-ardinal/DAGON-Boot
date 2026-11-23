@@ -754,7 +754,7 @@ fn relay_links_rs(t: &toml::Table) -> String {
                 panic!("dagon-mcu.toml: relay_link port '{name}' is no [[link_port]]")
             });
         let index = int(port.get("index").expect("[[link_port]] index"), "index");
-        // The kind's name in the 構成 (`usb-cdc`) as its variant (`UsbCdc`).
+        // The kind's name in the topology (`usb-cdc`) as its variant (`UsbCdc`).
         let kind: String = text(port, "kind", "[[link_port]]")
             .split('-')
             .map(|w| w[..1].to_uppercase() + &w[1..])

@@ -23,7 +23,7 @@ use esp_hal::uart::Uart;
 
 esp_bootloader_esp_idf::esp_app_desc!();
 
-/// The hops of this node, from the 構成 (dagon gen writes them): the
+/// The hops of this node, from the topology (dagon gen writes them): the
 /// build stops here, naming the hop, if a kind is not available yet. The
 /// node serves UART and USB Serial/JTAG at once, whichever is the uplink.
 #[rustfmt::skip]
@@ -33,10 +33,10 @@ const DOWNLINKS: &[Kind] = &[{{downlinks}}];
 const _: () = links::require_uplink(UPLINK);
 const _: () = links::require_downlinks(DOWNLINKS);
 
-/// The bit rate of this node's UART link, from the 構成 (wiring.rs).
+/// The bit rate of this node's UART link, from the topology (wiring.rs).
 const LINK_BAUD: u32 = match wiring::NODE.link {
     wiring::Link::Uart { baud } => baud,
-    _ => panic!("this start-up serves a UART link to the 親機"),
+    _ => panic!("this start-up serves a UART link to the relaying node"),
 };
 
 /// Every task of the application registers here; the watchdog is fed only
@@ -50,7 +50,7 @@ async fn main(spawner: Spawner) {
     esp_rtos::start(TimerGroup::new(p.TIMG0).timer0, p.FROM_CPU_INTR0);
     // The DAGON link: UART0 on its IO MUX pins, U0TXD = GPIO43 and
     // U0RXD = GPIO44 (function 0; Espressif's esp-metadata for the
-    // ESP32-S3), at the bit rate of this node's link in the 構成. A board
+    // ESP32-S3), at the bit rate of this node's link in the topology. A board
     // that wires the hub to other pins moves them here.
     let uart = Uart::new(p.UART0, link::uart_config(LINK_BAUD))
         .unwrap_or_else(|_| esp_hal::system::software_reset())

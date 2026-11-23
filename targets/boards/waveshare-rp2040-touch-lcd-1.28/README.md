@@ -47,5 +47,5 @@ pins are wired on the board itself:
 | GPIO29 | battery voltage (ADC3, through a divider) |
 
 Features: `relay` (default), `slot-b`, `diag-panic` (forwarded to the MCU
-package). `template/` is the project `dagon new` generates for a 親機 on
+package). `template/` is the project `dagon new` generates for a relaying node on
 this board. See `../../mcu/rp2040/README.md` for a complete app.

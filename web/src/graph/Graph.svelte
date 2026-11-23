@@ -519,15 +519,20 @@
     return n.id === firstHub ? by : `${by}${CANVAS.notThisPc}`;
   }
 
-  function spokenName(n: Node, m: Mark, version: string): string {
+  function spokenName(n: Node, m: Mark, version: string, slots: { row: string; text: string }[] | null): string {
+    const mark = m && m !== 'skeleton' ? m : null;
     return NODE.name({
+      no: n.no,
       name: n.name,
-      product: n.product,
-      mcu: n.mcu,
       role: roleOf(n),
-      via: n.role === 'hub' ? hubVia(n) : NODE.viaName(n.via),
-      state: m && m !== 'skeleton' ? m.spoken : '',
       version,
+      product: n.product,
+      meta: metaOf(n),
+      slots: (slots ?? []).map((sl) => `${sl.row} ${sl.text}`).join(' '),
+      chip: mark?.chip ?? '',
+      note: compact ? '' : (mark?.note ?? ''),
+      // A state no chip shows (応答あり, 応答なし) is said after the words.
+      state: mark && !mark.chip ? mark.spoken : '',
     });
   }
 
@@ -657,6 +662,7 @@
           class:err={m !== null && m !== 'skeleton' && m.silent}
           class:drop={dropOn === n.id}
           class:checkable={check !== undefined}
+          class:filling={level !== undefined}
           style:left="{at(n.id).x}px"
           style:top="{at(n.id).y}px"
           style:width="{NODE_W}px"
@@ -664,7 +670,7 @@
           data-avoid=""
           tabindex={focusKey === key ? 0 : -1}
           aria-pressed={selected === key}
-          aria-label="{spokenName(n, m, v)}、{STATE[states[n.id]]}"
+          aria-label="{spokenName(n, m, v, slots)}、{STATE[states[n.id]]}"
           bind:offsetHeight={heights[n.id]}
           onpointerdown={(e) => cardDown(e, n.id)}
           onclick={() => pick(key)}
@@ -678,7 +684,7 @@
             </span>
           {/if}
           <span class="hd">
-            <b>[{n.no}] {n.name}</b><span class="role">{roleOf(n)}</span>
+            <b>[{n.no}] {n.name}</b> <span class="role">{roleOf(n)}</span>
             {#if v}{#key v}<span in:rise={{ dur: '--dur-quick' }} class="ver" translate="no">{v}</span>{/key}{:else if m === 'skeleton'}<span class="skeleton ver-sk"></span>{/if}
             {#key states[n.id]}<span in:rise={{ dur: '--dur-quick' }} class="state" title={STATE[states[n.id]]}><Icon name={STATE_ICON[states[n.id]]} size="var(--i-state)" /><span class="visually-hidden">{STATE[states[n.id]]}</span></span>{/key}
           </span>
@@ -686,9 +692,9 @@
             <span class="prod" translate="no" title={n.product}>{n.product}</span>
             <span class="meta" translate="no">{metaOf(n)}</span>
             <!-- Its row, and the chip's below it, are always there: no card changes height when one fills. -->
-            <span class="slotline" translate="no">{#each slots ?? [] as sl (sl.row)}<span class:on={sl.on}>{sl.row} {sl.text}</span>{/each}</span>
+            <span class="slotline" translate="no">{#each slots ?? [] as sl (sl.row)}<span class:on={sl.on}>{sl.row} {sl.text}</span> {/each}</span>
             <span class="chips"
-              >{#if m === 'skeleton'}<span class="skeleton chip-sk"></span>{:else if m?.chip}<span in:rise={{ dur: '--dur-quick' }} out:lateFade class="chip" class:silent={m.silent} class:uns={!!n.skip && m.chip === NODE.skipped}>{m.chip}</span>{/if}{#if m && m !== 'skeleton' && m.note}<span class="note" title={m.note}>{m.note}</span>{/if}</span
+              >{#if m === 'skeleton'}<span class="skeleton chip-sk"></span>{:else if m?.chip}<span in:rise={{ dur: '--dur-quick' }} out:lateFade class="chip" class:silent={m.silent} class:uns={!!n.skip && m.chip === NODE.skipped}>{m.chip}</span>{/if} {#if m && m !== 'skeleton' && m.note}<span class="note" title={m.note}>{m.note}</span>{/if}</span
             >
           </span>
           {#if level !== undefined}<span in:fade out:lateFade={{ shown: confirmedOf(n.id) ? 100 : undefined }} class="pct" aria-hidden="true" style:--shown={Math.round(level)}></span>{/if}
@@ -1207,6 +1213,10 @@
   }
 
   /* Water gauge: the level moves by transform; the edge is a CSS mask (no drawn illustration). */
+  /* The water lies under the card's words: muted words lighten on it to hold 4.5:1 (WCAG 1.4.3). */
+  .node.filling :is(.role, .meta, .slotline, .note) {
+    color: color-mix(in srgb, var(--c-paper) 50%, var(--c-muted));
+  }
   .water {
     position: absolute;
     inset: 0;

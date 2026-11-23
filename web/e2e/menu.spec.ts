@@ -202,6 +202,20 @@ const ITEMS: Record<string, { query?: string; check: (p: Page) => Promise<void> 
       expect(await p.evaluate(() => navigator.clipboard.readText())).toBe(await p.evaluate(() => location.href));
     },
   },
+  'トラブル対処/アニメーションの停止と再開': {
+    query: 'sim&agent=linked',
+    check: async (p) => {
+      const state = () => p.locator('.dagon .mark img').evaluate((e) => getComputedStyle(e).animationPlayState);
+      expect(await state()).toBe('running');
+      await press(p, 'トラブル対処', 'アニメーションの停止と再開');
+      expect(await state()).toBe('paused');
+      // Kept across a reload, and pressed again it runs.
+      await start(p, 'sim&agent=linked');
+      expect(await state()).toBe('paused');
+      await press(p, 'トラブル対処', 'アニメーションの停止と再開');
+      expect(await state()).toBe('running');
+    },
+  },
   'プロジェクト/リスタート': {
     check: async (p) => {
       await press(p, 'プロジェクト', 'リスタート');

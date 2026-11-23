@@ -69,7 +69,7 @@
         {@render row(i)}
       {/each}
       {#if shown.items.some((i) => i.danger)}
-        <li class="sep" role="separator"></li>
+        <li class="sep" aria-hidden="true"></li>
         {#each shown.items.filter((i) => i.danger) as i (i.label)}
           {@render row(i)}
         {/each}

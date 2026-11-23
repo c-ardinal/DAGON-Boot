@@ -470,6 +470,9 @@ export const DRAWER = {
   outputNone: '出力はありません。',
   /** The handle on the open drawer's top edge. */
   resize: 'パネルのサイズ変更（ドラッグ）',
+  /** The button beside the tabs that sets the height without a drag. */
+  raise: 'パネルの最大化',
+  lower: 'パネルの最小化',
 } as const;
 
 /** Canvas: uplink cards, the empty canvas, dot numbers. */
@@ -554,10 +557,12 @@ export const NODE = {
   respondingName: '応答あり',
   silentName: '応答なし、2回連続で応答なし',
   trialName: '確認待機',
-  /** Spoken name of a node: the visible short chips spelled out. */
-  name: (p: { name: string; product: string; mcu: string; role: string; via: string; state: string; version: string }) =>
-    [p.name, `${p.product} · ${p.mcu}`, p.role, p.via, p.state, p.version && `バージョン${p.version}`].filter(Boolean).join('、'),
-  viaName: (via: string) => `PC側のノードと${via}`,
+  /**
+   * Spoken name of a node: the card's visible words in their order, nothing put between them
+   * (WCAG 2.5.3: the visible label is a run of the name), then what only the marks show.
+   */
+  name: (p: { no: number; name: string; role: string; version: string; product: string; meta: string; slots: string; chip: string; note: string; state: string }) =>
+    [`[${p.no}] ${p.name}`, p.role, p.version, p.product, p.meta, p.slots, p.chip, p.note, p.state].filter(Boolean).join('、'),
   /** A node updating skips: a calm note, not a fault. */
   skipped: '◇ 書込不可',
   skippedWhy: {
@@ -716,8 +721,8 @@ export const HELP = {
     ['Ctrl + Z', '取消'],
     ['Ctrl + Shift + Z', '再実行'],
     ['Ctrl + J', '下部パネルの表示・非表示'],
-    ['L', 'PC側のノードの選択'],
-    ['F', 'キャンバス全体の表示'],
+    ['L', 'PC側のノードの選択（キャンバス上）'],
+    ['F', 'キャンバス全体の表示（キャンバス上）'],
     ['Ctrl+ホイール', 'キャンバスの拡大・縮小'],
     ['ドラッグ', 'キャンバスやノードの移動'],
   ],
@@ -1208,6 +1213,8 @@ export const MENU = {
   keys: 'キー操作',
   copyLog: '記録のコピー',
   copyUrl: 'このURLのコピー',
+  /** Every looping motion (the mark, the water, the attention light) paused or running again (WCAG 2.2.2). */
+  motion: 'アニメーションの停止と再開',
   copied: 'コピー完了',
   /** What each item does, under its name (a first-time user reads it before pressing). */
   hint: {
@@ -1234,6 +1241,8 @@ export const MENU = {
     keys: 'キーボードでの操作の一覧',
     copyLog: '下部の「記録」の内容をクリップボードにコピーします',
     copyUrl: 'このページのアドレスをコピーします',
+    motionStop: '繰り返し動作するアニメーションを停止します',
+    motionResume: '停止中のアニメーションを再開します',
     restart: 'このページの記録を削除し、開始画面へ移動します',
   },
   /** Why an item cannot be used now. */

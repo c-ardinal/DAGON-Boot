@@ -25,6 +25,7 @@
   import { agentMock } from './app/agentMock.ts';
   import Dagon from './screens/Dagon.svelte';
   import LinkDialog from './screens/LinkDialog.svelte';
+  import { lockAria } from './app/lockAria.ts';
   import Detail from './screens/Detail.svelte';
   import { Define, type Operable } from './app/define/define.svelte.ts';
   import { topoDiff } from './app/define/diff.ts';
@@ -514,7 +515,9 @@
       return pickTab(drawerTab ?? 'problems');
     }
     const t = e.target as HTMLElement;
-    if (screen === 'work' && (agentLinked || simulated) && e.key === '/' && !/^(INPUT|SELECT|TEXTAREA)$/.test(t.tagName)) {
+    // A single-character key acts only with the focus on the canvas (WCAG 2.1.4): spoken words typed into the page elsewhere press nothing.
+    const onCanvas = !!t.closest?.('#canvas') && !/^(INPUT|SELECT|TEXTAREA)$/.test(t.tagName);
+    if (screen === 'work' && (agentLinked || simulated) && e.key === '/' && onCanvas) {
       e.preventDefault();
       return void dagonOpen++;
     }
@@ -528,7 +531,7 @@
       return closeSheet();
     }
     if (screen === 'work' && !/^(INPUT|SELECT|TEXTAREA)$/.test(t.tagName)) {
-      if (e.key.toLowerCase() === 'f' && !e.ctrlKey && !e.metaKey) return graph?.fit();
+      if (e.key.toLowerCase() === 'f' && !e.ctrlKey && !e.metaKey && onCanvas) return graph?.fit();
       if ((e.ctrlKey || e.metaKey) && (e.key === '+' || e.key === '=' || e.key === '-')) {
         e.preventDefault();
         return graph?.zoomBy(e.key === '-' ? 1 / ZOOM_LIMITS.step : ZOOM_LIMITS.step);
@@ -991,34 +994,25 @@
     e.preventDefault();
     e.stopImmediatePropagation();
   }
-  /**
-   * The public demo page keeps controls stopped for good (files, devices, keys), so their reason is also the
-   * hover text and the accessible description, not only the note shown on press. The control's own title comes back once it is usable.
-   */
-  function lockHint(e: Event) {
-    const el = (e.target as Element | null)?.closest?.<HTMLElement>('[data-control]');
-    if (!el) return;
-    const r = lockedBy(el.dataset.control as Control);
-    if (r) {
-      el.dataset.title ??= el.title;
-      el.title = r;
-    } else if (el.dataset.title !== undefined) {
-      el.title = el.dataset.title;
-      delete el.dataset.title;
-    }
-  }
   // On the window in the capture phase: ahead of every handler on the page (Svelte delegates clicks to its root).
   $effect(() => {
     addEventListener('click', lockClick, true);
     addEventListener('keydown', lockKeys, true);
-    addEventListener('pointerover', lockHint, true);
-    addEventListener('focusin', lockHint, true);
     return () => {
       removeEventListener('click', lockClick, true);
       removeEventListener('keydown', lockKeys, true);
-      removeEventListener('pointerover', lockHint, true);
-      removeEventListener('focusin', lockHint, true);
     };
+  });
+  // A stopped control is disabled for assistive technology too, not only dimmed, and gives its reason on hover (WCAG 4.1.2).
+  let lockSync: (() => void) | undefined;
+  $effect(() => {
+    const l = lockAria(document.body, (c) => lockedBy(c as Control));
+    lockSync = l.sync;
+    return l.stop;
+  });
+  $effect(() => {
+    void locksNow;
+    lockSync?.();
   });
   // The models check the lock table inside their actions: any path to them (key, double-click, drag) is stopped.
   d.guard = (k) => stopped(k);
@@ -1152,6 +1146,23 @@
   const selectedNode = $derived(op.selected?.startsWith('node:') ? op.selected.slice(5) : null);
   const lastProposal = $derived(agent.messages.map((m) => !!m.proposal && !m.applied).lastIndexOf(true));
   const idle = $derived(WRITABLE.has(op.state));
+  /** Looping motion paused from the menu (WCAG 2.2.2), kept across reloads; base.css pauses it under `data-still`. */
+  const MOTION_KEY = 'dagon-motion-still';
+  let motionStill = $state(((): boolean => {
+    try {
+      return localStorage.getItem(MOTION_KEY) === '1';
+    } catch {
+      return false;
+    }
+  })());
+  $effect(() => {
+    document.documentElement.toggleAttribute('data-still', motionStill);
+    try {
+      localStorage.setItem(MOTION_KEY, motionStill ? '1' : '0');
+    } catch {
+      // Storage may be off: the choice then lasts for this page only.
+    }
+  });
   /** The ☰ menu: only operations that run here; a group's items by how often they are used. */
   const menuGroups = $derived<MenuGroup[]>([
     {
@@ -1203,6 +1214,7 @@
         { label: MENU.keys, hint: MENU.hint.keys, run: () => ((helpKeys = true), (helpOpen = true)) },
         { label: MENU.copyLog, hint: MENU.hint.copyLog, off: notes.length ? null : MENU.off.noLog, run: () => void copyText(notes.map((n) => `${n.at} ${n.text}`).join('\n')) },
         { label: MENU.copyUrl, hint: MENU.hint.copyUrl, run: () => void copyText(location.href) },
+        { label: MENU.motion, hint: motionStill ? MENU.hint.motionResume : MENU.hint.motionStop, run: () => (motionStill = !motionStill) },
       ],
     },
   ]);

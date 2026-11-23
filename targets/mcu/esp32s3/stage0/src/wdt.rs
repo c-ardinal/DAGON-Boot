@@ -4,7 +4,8 @@
 //! and keeps the RTC domain, where the retained cell lives, so a trial
 //! image that is not confirmed in time comes back to stage0 with its start
 //! counted. Registers as esp-hal 1.2's `Rwdt` and `Swd` (ESP32-S3 PAC
-//! 0.36).
+//! 0.36). The boot core (../bootcore) takes this module too: it arms the
+//! RTC watchdog for its own run and feeds it.
 
 use crate::rom::{reg_read, reg_write};
 
@@ -65,6 +66,14 @@ pub fn arm(period_ms: u32, slow_hz: u32) {
             | RESET_LENGTH << CPU_RESET_LENGTH_SHIFT
             | RESET_LENGTH << SYS_RESET_LENGTH_SHIFT,
     );
+    reg_write(WDTFEED, WDT_FEED);
+    reg_write(WDTWPROTECT, 0);
+}
+
+/// Feeds the RTC watchdog (the boot core's run; stage0 never feeds).
+#[allow(dead_code)]
+pub fn feed() {
+    reg_write(WDTWPROTECT, WDT_KEY);
     reg_write(WDTFEED, WDT_FEED);
     reg_write(WDTWPROTECT, 0);
 }

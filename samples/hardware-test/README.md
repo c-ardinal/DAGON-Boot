@@ -17,6 +17,8 @@ connected; a DAGON project for it (`topology.yaml` as
 - `hwt.toml`: the setup's data (`[setup]`: nodes, coordinator, hub USB id,
   self-check switch name, settle timing, which sample feeds which node) and
   the scenarios, in order.
+- `hwt-one-slot.toml`: a second setup, hub and seg with one app slot
+  each (see One app slot).
 - `deploy-plan.txt`: the plan `dagon deploy` prints before it asks, as the
   CLI printed it (two nodes on 2.0.7, the package path shown as
   `<release>`); `selftest` checks the plan reader against it. DAGON's own
@@ -223,6 +225,48 @@ tried by hand through the USB hub on a build from before the node
 re-attaches by itself (the first parent of merge 337eeaaf): a reset by the
 RUN pin, and the restart after `dagon rollback hub`; for each, whether the
 PC sees the hub again. (A REBOOT without an update has no CLI command.)
+
+## One app slot
+
+A node whose MCU definition gives the app one slot cannot have its app
+write the slot it runs from: the host asks the app to hand over (REBOOT
+mode 1), the boot core starts in update mode, writes the slot and sets it
+pending, and the new app is tried and confirmed as usual. In the simulator
+`cargo test -p dagon-host --test sim hand_over` checks this, a power cut
+at every flash step included; `hwt-one-slot.toml` checks it on the boards.
+
+Setup: a copy of the project whose `dagon.toml` leaves app slot B out on
+both MCUs, then `dagon gen` and a first write of every node (their flash
+layout changes):
+
+```toml
+[[mcu_override.rp2040.slot]]
+image = "app"
+binding = "b"
+dagon-remove = true
+[[mcu_override.rp2040.slot_layout]]
+target = "app"
+slot = "b"
+dagon-remove = true
+[[mcu_override.stm32f401re.slot]]
+image = "app"
+binding = "b"
+dagon-remove = true
+[[mcu_override.stm32f401re.slot_layout]]
+target = "app"
+slot = "b"
+dagon-remove = true
+```
+
+```sh
+python samples/hardware-test/hwt.py run --setup samples/hardware-test/hwt-one-slot.toml --project <one-slot project> --dagon <dagon.exe> --key <key> --port <COMn>
+```
+
+Each deploy passes when the node is confirmed on the new version in the
+same slot (`active` unchanged). The hub re-enumerates twice per update
+(into its boot core, then into the new app). Restoring after a failure
+uses the last release every node took; there is no other slot to roll
+back to.
 
 ## Measurements
 

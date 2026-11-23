@@ -522,7 +522,8 @@ class Run:
             expect(rc == 0, f"deploy rc={rc}")
             st = self.status(f"{name}-after")
             for k in nodes:
-                check_on(st, k, v, flipped_from=before[k]["active"])
+                check_on(st, k, v, flipped_from=before[k]["active"],
+                         in_place=self.setup.get("one_slot", False))
             unchanged(before, st, [k for k in self.nodes if k not in nodes])
             if sorted(nodes) == sorted(self.nodes):
                 good = self.out / f"known-good-v{v}.dgb"
@@ -846,10 +847,15 @@ def check_core_back(n, was):
     expect(b[other]["state"] != "Confirmed", f"the failing boot core is confirmed: {b}")
 
 
-def check_on(st, node, v, flipped_from):
+def check_on(st, node, v, flipped_from, in_place=False):
+    """`node` on `v`, confirmed, from the other slot; `in_place`: from the
+    same one (a node with one app slot, written by its boot core)."""
     n = st[node]
     expect(settled(n) and n["version"] == v, f"{node}: want {v} confirmed, got {core(n)}")
-    expect(n["active"] != flipped_from, f"{node}: active slot did not change")
+    if in_place:
+        expect(n["active"] == flipped_from, f"{node}: active slot changed on a one-slot node")
+    else:
+        expect(n["active"] != flipped_from, f"{node}: active slot did not change")
 
 
 def unchanged(before, after, nodes, slots=False):
@@ -953,6 +959,7 @@ def selftest():
         pass
     selftest_rom()
     selftest_rom_run()
+    selftest_one_slot()
     selftest_tamper()
     selftest_plan()
     selftest_crate_version()
@@ -1191,6 +1198,25 @@ def selftest_rom_run():
             assert "erase" not in json.loads(state.read_text())["calls"]
         finally:
             erase_command = real
+
+
+def selftest_one_slot():
+    """A one-slot node is on the new version in the same slot; the setup
+    file runs every node in place, with no step that needs a second slot."""
+    on = parse_status("seg: version 2.0.40, mcu 0x0002, active 0, confirmed 0, attempts 0, "
+                      "last reason 0, [A:Confirmed 2.0.40, B:Empty 0.0.0, F:Empty 0.0.0]\n")
+    check_on(on, "seg", "2.0.40", flipped_from=0, in_place=True)
+    for in_place, was in ((True, 1), (False, 0)):
+        try:
+            check_on(on, "seg", "2.0.40", flipped_from=was, in_place=in_place)
+            raise AssertionError(f"slot check passed: in_place={in_place}, was={was}")
+        except Fail:
+            pass
+    data = tomllib.loads((HERE / "hwt-one-slot.toml").read_text(encoding="utf-8"))
+    assert data["setup"]["one_slot"] is True and "watch" not in data["setup"]["nodes"]
+    steps = [st for sc in data["scenario"] for st in sc["steps"]]
+    assert {st["do"] for st in steps} <= {"status", "deploy"}, steps
+    assert all(st.get("expect", "ok") == "ok" and "interrupt_at" not in st for st in steps), steps
 
 
 def selftest_tamper():

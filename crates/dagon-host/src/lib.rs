@@ -150,6 +150,12 @@ pub enum Error<E> {
     AppOnTrial {
         running: Version,
     },
+    /// The node's app was asked to hand over to its boot core (REBOOT
+    /// mode 1) to write the one slot it runs from, and kept answering in
+    /// HELLO mode `mode` instead of update mode.
+    NotHandedOver {
+        mode: u8,
+    },
     Unsupported,
 }
 

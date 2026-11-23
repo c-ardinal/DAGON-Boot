@@ -531,6 +531,12 @@ impl<T: Transport, C: HostClock> Host<T, C> {
         let slots = slots_of(b, node, image_kind::APP);
         let slot = free_slot(&slots, &st.status).ok_or(Error::NoImage { node })?;
         let img = image_for(b, node, slot).ok_or(Error::NoImage { node })?;
+        // The app never writes the slot it runs from: its boot core does.
+        let hello = if runs_from(st, slot) {
+            self.hand_over(to).await?
+        } else {
+            st.hello
+        };
         // Unverified releases reach here too: check the length, not assume.
         let raw: &[u8; HEADER_SIZE] = img
             .get(..HEADER_SIZE)
@@ -547,10 +553,29 @@ impl<T: Transport, C: HostClock> Host<T, C> {
             body,
             show: Some((node, v)),
         };
-        let times = self.transfer(to, &st.hello, xfer, on_event).await?;
+        let times = self.transfer(to, &hello, xfer, on_event).await?;
         self.report_verified(on_event, node, v, times);
         self.switch_and_confirm(to, slot, v, node, on_event).await?;
         Ok(v)
+    }
+
+    /// REBOOT mode 1: the app hands over to its boot core's update mode
+    /// (DES-RB-030); the boot core's HELLO once it answers in that mode.
+    async fn hand_over(&mut self, to: Target) -> Result<HelloResp, T::Error> {
+        let p = request(|b| payload::encode_reboot(reboot_mode::UPDATE, b));
+        // Not resent, as REBOOT mode 0: the HELLO polls settle a lost reply.
+        match self.call(to, Cmd::Reboot, &p, REQUEST_MS).await {
+            Ok(_) | Err(Error::Timeout | Error::Relay(Status::Timeout)) => {}
+            Err(e) => return Err(e),
+        }
+        match self
+            .await_hello(to, |h| h.mode == payload::mode::UPDATE)
+            .await?
+        {
+            Ok(h) => Ok(h),
+            Err(Some(h)) => Err(Error::NotHandedOver { mode: h.mode }),
+            Err(None) => Err(Error::Timeout),
+        }
     }
 
     /// SET_PENDING `slot`, REBOOT, wait for `v` on trial, CONFIRM.
@@ -616,6 +641,25 @@ impl<T: Transport, C: HostClock> Host<T, C> {
 
     /// Polls HELLO after REBOOT until `v` answers (hub: reopening the port).
     async fn await_version(&mut self, to: Target, v: Version) -> Result<HelloResp, T::Error> {
+        match self.await_hello(to, |h| h.active_version == v).await? {
+            Ok(h) => Ok(h),
+            Err(Some(h)) => Err(Error::WrongVersion {
+                expected: v,
+                running: h.active_version,
+                trial: h.trial,
+            }),
+            Err(None) => Err(Error::Timeout),
+        }
+    }
+
+    /// Polls HELLO after REBOOT until one answers as `want` (hub: reopening
+    /// the port); at the end of the window, `Err` with the last HELLO that
+    /// answered otherwise, if any.
+    async fn await_hello(
+        &mut self,
+        to: Target,
+        want: impl Fn(&HelloResp) -> bool,
+    ) -> Result<core::result::Result<HelloResp, Option<HelloResp>>, T::Error> {
         let (limit, pause) = match to {
             Target::Local => (HUB_RECONNECT_MS, REOPEN_MS),
             _ => (REBOOT_WAIT_MS, self.node_poll_ms),
@@ -635,21 +679,14 @@ impl<T: Transport, C: HostClock> Host<T, C> {
                 || self.reopen().await.is_ok();
             if reopened {
                 match self.hello_within(to, REQUEST_MS).await {
-                    Ok(h) if h.active_version == v => return Ok(h),
+                    Ok(h) if want(&h) => return Ok(Ok(h)),
                     Ok(h) => other = Some(h),
                     Err(Error::Transport(_) | Error::Timeout | Error::Relay(_)) => {}
                     Err(e) => return Err(e),
                 }
             }
             if self.clock.now_ms() >= deadline {
-                return Err(match other {
-                    Some(h) => Error::WrongVersion {
-                        expected: v,
-                        running: h.active_version,
-                        trial: h.trial,
-                    },
-                    None => Error::Timeout,
-                });
+                return Ok(Err(other));
             }
             self.clock.sleep_ms(pause).await;
         }
@@ -1145,6 +1182,7 @@ pub fn reason<E>(e: &Error<E>) -> &'static str {
         Error::BootCoreRolledBack { .. } => "BOOT CORE ROLLED BACK",
         Error::BootCoreRefused => "NO BOOT CORE TRIAL",
         Error::AppOnTrial { .. } => "APP ON TRIAL",
+        Error::NotHandedOver { .. } => "NOT HANDED OVER",
         Error::DigestMismatch => "E_DIGEST",
         Error::NoImage { .. } => "NO IMAGE",
         Error::RomNotConfirmed { .. } => "ROM NOT CONFIRMED",
@@ -1246,6 +1284,12 @@ fn slots_settled(st: &StatusResp) -> bool {
             .slots
             .iter()
             .any(|s| matches!(s.state, SlotState::Pending | SlotState::Trying))
+}
+
+/// Whether the node's app runs from `slot`, so only its boot core may
+/// write it (a node with one slot).
+fn runs_from(st: &NodeState, slot: u8) -> bool {
+    st.hello.mode == payload::mode::APP && st.status.active == slot
 }
 
 /// Of the node's `slots`, the one to write: one neither running nor

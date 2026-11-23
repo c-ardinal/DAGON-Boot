@@ -7,7 +7,7 @@ use dagon_agent::writer::BootCore;
 use dagon_agent::Agent;
 use dagon_ed25519::Ed25519Compact;
 use dagon_events::{compose, Bounds, Composed, Layer, Nop, Published, Watchdog};
-use dagon_proto::payload::{mode, target, SetPending, XferBegin, XferChunk};
+use dagon_proto::payload::{mode, reboot_mode, target, SetPending, XferBegin, XferChunk};
 use dagon_proto::{split_status, Cmd, Frame, Status};
 use dagon_sim::{hub_config, listen, sample, Layout, Run, SimFlash, SimNode};
 use dagon_topology::defs::Registry;
@@ -148,4 +148,144 @@ fn the_rp2040_boot_core_writes_the_app() {
     assert_eq!(node.run(), Run::App(0));
     let st = node.status();
     assert_eq!(st.slots[0].state, dagon_proto::payload::SlotState::Trying);
+}
+
+/// One request frame of `cmd` with payload `p`; the reply's status and
+/// payload after it.
+fn ask(node: &mut SimNode, seq: u8, cmd: Cmd, p: &[u8], now: u64) -> (Status, Vec<u8>) {
+    let mut buf = [0u8; 700];
+    let n = Frame {
+        flags: 0,
+        seq,
+        cmd: cmd as u8,
+        payload: p,
+    }
+    .encode(&mut buf)
+    .unwrap();
+    let reply = node.handle_frame(&buf[..n], now).expect("an answer");
+    let (f, _) = Frame::decode(&reply, 1200).unwrap();
+    let (s, rest) = split_status(f.payload).unwrap();
+    (s, rest.to_vec())
+}
+
+fn hello_mode(node: &mut SimNode, now: u64) -> u8 {
+    let req = dagon_proto::payload::HelloReq {
+        proto_ver: dagon_proto::PROTO_VERSION as u32,
+        max_payload: 1024,
+    };
+    let mut p = [0u8; 16];
+    let n = req.encode(&mut p).unwrap();
+    let (s, body) = ask(node, 9, Cmd::Hello, &p[..n], now);
+    assert_eq!(s, Status::Ok);
+    dagon_proto::payload::HelloResp::parse(&body).unwrap().mode
+}
+
+fn hub() -> SimNode {
+    let mut node = SimNode::new(
+        hub_config(),
+        sample::PUBKEY,
+        SimFlash::rp2040_2m(7),
+        Layout::RP2040_HUB,
+    );
+    node.provision(sample::HUB_1_0_0, 0).unwrap();
+    node
+}
+
+/// REBOOT mode 1: the app records the hand-over and resets; the boot core
+/// consumes it and answers in update mode, then leaves after
+/// `EXIT_IDLE_MS` without a request (a normal start: the app again, no
+/// stay left to take).
+#[test]
+fn the_app_hands_over_and_the_boot_core_leaves_update_mode_when_idle() {
+    use dagon_agent::update_mode::EXIT_IDLE_MS;
+    let mut node = hub();
+    let mut p = [0u8; 8];
+    let n = dagon_proto::payload::encode_reboot(reboot_mode::UPDATE, &mut p).unwrap();
+    assert_eq!(ask(&mut node, 1, Cmd::Reboot, &p[..n], 0).0, Status::Ok);
+    assert_eq!(node.run(), Run::BootCore(mode::UPDATE));
+    assert_eq!(hello_mode(&mut node, 10), mode::UPDATE);
+    let st = node.status();
+    assert_eq!(st.active, dagon_format::statelog::slot::NONE, "no app runs");
+    // A REBOOT mode 1 in update mode stays there.
+    assert_eq!(ask(&mut node, 2, Cmd::Reboot, &p[..n], 20).0, Status::Ok);
+    assert_eq!(node.run(), Run::BootCore(mode::UPDATE));
+    let idle = u64::from(EXIT_IDLE_MS);
+    node.tick(20 + idle - 1);
+    assert_eq!(node.run(), Run::BootCore(mode::UPDATE));
+    node.tick(20 + idle);
+    assert_eq!(node.run(), Run::App(0));
+    node.reset(20 + idle + 1);
+    assert_eq!(node.run(), Run::App(0), "the stay was taken once");
+}
+
+/// No app to start (both app slots erased): the boot core serves in
+/// recovery mode, which no idle time ends.
+#[test]
+fn nothing_to_start_keeps_the_boot_core_in_recovery_mode() {
+    use dagon_port::Flash;
+    let mut node = hub();
+    for &(at, len) in Layout::RP2040_HUB.slots {
+        node.flash().erase(at, len).unwrap();
+    }
+    node.reset(0);
+    assert_eq!(node.run(), Run::BootCore(mode::RECOVERY));
+    assert_eq!(hello_mode(&mut node, 1), mode::RECOVERY);
+    node.tick(10 * 60_000);
+    assert_eq!(node.run(), Run::BootCore(mode::RECOVERY));
+}
+
+/// Stage0 present but no boot core it can start (both core slots and
+/// both app slots erased): nothing serves, recovery mode included.
+#[test]
+fn no_boot_core_to_start_serves_no_recovery_mode() {
+    use dagon_port::Flash;
+    let mut node = hub();
+    let layout = Layout::RP2040_HUB;
+    for &(at, len) in layout.slots.iter().chain(layout.cores.unwrap().slots) {
+        node.flash().erase(at, len).unwrap();
+    }
+    node.reset(0);
+    assert!(!matches!(node.run(), Run::BootCore(_)), "{:?}", node.run());
+}
+
+/// A transfer the boot core heard nothing of for `IDLE_TIMEOUT_MS` is
+/// dropped, as `update_mode::serve_in` drops it: its next chunk is
+/// refused.
+#[test]
+fn the_boot_core_drops_a_transfer_left_idle() {
+    use dagon_port::Flash;
+    let mut node = hub();
+    for &(at, len) in Layout::RP2040_HUB.slots {
+        node.flash().erase(at, len).unwrap();
+    }
+    node.reset(0);
+    assert_eq!(node.run(), Run::BootCore(mode::RECOVERY));
+    let img = sample::HUB_1_0_0;
+    let mut p = [0u8; 600];
+    let n = XferBegin {
+        target: target::APP,
+        slot: 0,
+        total_len: img.len() as u32,
+        hdr_len: 512,
+    }
+    .encode(&mut p)
+    .unwrap();
+    assert_eq!(ask(&mut node, 1, Cmd::XferBegin, &p[..n], 1).0, Status::Ok);
+    let chunk = |offset: usize, p: &mut [u8]| {
+        XferChunk {
+            offset: offset as u32,
+            data: &img[offset..offset + 32],
+        }
+        .encode(p)
+        .unwrap()
+    };
+    let n = chunk(0, &mut p);
+    assert_eq!(ask(&mut node, 2, Cmd::XferHdr, &p[..n], 2).0, Status::Ok);
+    let idle = u64::from(dagon_agent::IDLE_TIMEOUT_MS);
+    node.tick(2 + idle);
+    let n = chunk(32, &mut p);
+    assert_ne!(
+        ask(&mut node, 3, Cmd::XferHdr, &p[..n], 3 + idle).0,
+        Status::Ok
+    );
 }

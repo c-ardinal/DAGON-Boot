@@ -9,7 +9,7 @@
 use crate::log::{Log, SlotRef};
 use dagon_format::header::{header_digest16, image_kind, placement, verify_header, HEADER_SIZE};
 use dagon_format::statelog::{kind, reason, target};
-use dagon_format::{Sha256, SigVerifier};
+use dagon_format::SigVerifier;
 use dagon_port::Flash;
 
 /// Where one slot's image lies, as its MCU definition places the header:
@@ -193,23 +193,11 @@ fn check<F: Flash, V: SigVerifier + ?Sized>(
     if !fits {
         return Err(reason::SIG_INVALID);
     }
-    if body_sha256(flash, body, h.payload_size)? != h.payload_sha256 {
+    let digest = flash
+        .sha256(body, h.payload_size)
+        .map_err(|_| reason::HASH_MISMATCH)?;
+    if digest != h.payload_sha256 {
         return Err(reason::HASH_MISMATCH);
     }
     Ok(body)
-}
-
-fn body_sha256<F: Flash>(flash: &mut F, start: u32, len: u32) -> Result<[u8; 32], u8> {
-    let mut sha = Sha256::new();
-    let mut buf = [0u8; 256];
-    let mut done = 0u32;
-    while done < len {
-        let n = (len - done).min(buf.len() as u32) as usize;
-        flash
-            .read(start + done, &mut buf[..n])
-            .map_err(|_| reason::HASH_MISMATCH)?;
-        sha.update(&buf[..n]);
-        done += n as u32;
-    }
-    Ok(sha.finalize())
 }

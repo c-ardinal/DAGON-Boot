@@ -183,6 +183,22 @@ title = "F401 written through the hub's ROM path"
 steps = [{ do = "skip", reason = "dagon deploy takes the ROM path only when the F401 does not answer HELLO; no CLI step makes a healthy F401 silent without a write the normal confirmation does not allow" }]
 
 [[scenario]]
+id = "hub-x10"
+title = "the hub updates itself ten times and is seen again each time (connected through a USB hub, or directly)"
+steps = [
+  { do = "deploy", version = "2.0.20", nodes = ["hub"] },
+  { do = "deploy", version = "2.0.21", nodes = ["hub"] },
+  { do = "deploy", version = "2.0.22", nodes = ["hub"] },
+  { do = "deploy", version = "2.0.23", nodes = ["hub"] },
+  { do = "deploy", version = "2.0.24", nodes = ["hub"] },
+  { do = "deploy", version = "2.0.25", nodes = ["hub"] },
+  { do = "deploy", version = "2.0.26", nodes = ["hub"] },
+  { do = "deploy", version = "2.0.27", nodes = ["hub"] },
+  { do = "deploy", version = "2.0.28", nodes = ["hub"] },
+  { do = "deploy", version = "2.0.29", nodes = ["hub"] },
+]
+
+[[scenario]]
 id = "final"
 title = "every node on a confirmed known-good version"
 steps = [{ do = "deploy", version = "2.0.17" }]

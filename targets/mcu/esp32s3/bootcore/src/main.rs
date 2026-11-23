@@ -58,6 +58,7 @@ use dagon_format::header::{mcu_id, port_kind};
 use dagon_mcu_common::handed::{begin, CellIo, Logs, Next, Window};
 use dagon_mcu_common::log_store::{LogMcu, LogStore};
 use dagon_mcu_esp32s3::{PUBKEY, TRIAL_ATTEMPTS, TRIAL_WDT_MS};
+use dagon_port::{Flash, FlashError, FlashRegion};
 use dagon_proto::max_payload;
 use dagon_proto::payload::role;
 use flash::RomFlash;
@@ -96,7 +97,43 @@ impl LogMcu for Esp32s3 {
 }
 
 type Chain = Composed<&'static Published<(), 4>, Nop, Nop, fn() -> u64>;
-type Session = Agent<LogStore<RomFlash, Esp32s3>, Chain, Ed25519Small<fn()>, BootCore>;
+type Session = Agent<LogStore<Fed, Esp32s3>, Chain, Ed25519Small<fn()>, BootCore>;
+
+/// The ROM's flash, feeding the watchdog before every operation and every
+/// erased sector: a slot's erase (up to 400 ms a sector) and the session's
+/// read-back hash of a large image outlast the trial period.
+struct Fed(RomFlash);
+
+const SECTOR: u32 = 0x1000;
+
+impl Flash for Fed {
+    fn geometry(&self) -> &[FlashRegion] {
+        self.0.geometry()
+    }
+    fn read(&mut self, addr: u32, buf: &mut [u8]) -> Result<(), FlashError> {
+        wdt::feed();
+        self.0.read(addr, buf)
+    }
+    fn erase(&mut self, addr: u32, len: u32) -> Result<(), FlashError> {
+        if !len.is_multiple_of(SECTOR) {
+            return Err(FlashError::Align);
+        }
+        let end = addr.checked_add(len).ok_or(FlashError::Range)?;
+        for s in (addr..end).step_by(SECTOR as usize) {
+            wdt::feed();
+            self.0.erase(s, SECTOR)?;
+        }
+        Ok(())
+    }
+    fn write(&mut self, addr: u32, data: &[u8]) -> Result<(), FlashError> {
+        wdt::feed();
+        self.0.write(addr, data)
+    }
+    fn sha256(&mut self, addr: u32, len: u32) -> Result<[u8; 32], FlashError> {
+        wdt::feed();
+        self.0.sha256(addr, len)
+    }
+}
 
 struct NoIrq;
 critical_section::set_impl!(NoIrq);
@@ -171,7 +208,7 @@ pub extern "C" fn core_start() -> ! {
         Next::Serve(entry, stay) => (entry, stay),
         Next::AskForApp | Next::Reset => reset(),
     };
-    let Some(agent) = session(f, entry) else {
+    let Some(agent) = session(Fed(f), entry) else {
         reset()
     };
     serve_in(
@@ -189,7 +226,7 @@ pub extern "C" fn core_start() -> ! {
 /// The boot core's session in `entry`'s mode over the app log and slots,
 /// the log created empty when neither face is valid (so recovery mode can
 /// write the app); `None` on a flash error.
-fn session(flash: RomFlash, entry: Entry) -> Option<&'static mut Session> {
+fn session(flash: Fed, entry: Entry) -> Option<&'static mut Session> {
     static mut EVENTS: MaybeUninit<Published<(), 4>> = MaybeUninit::uninit();
     static mut AGENT: MaybeUninit<Session> = MaybeUninit::uninit();
     let store = LogStore::load_or_create(

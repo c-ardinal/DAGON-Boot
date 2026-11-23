@@ -762,6 +762,12 @@ impl SimStore {
         self.stay_waiting() && self.append_marker(kind::UPDATE_DONE).is_ok()
     }
 
+    /// No app runs (the boot core serves instead): STATUS reports no
+    /// active slot, as the boot core's own store is opened with none.
+    pub fn run_no_app(&self) {
+        self.running.store(statelog::slot::NONE, Ordering::Relaxed);
+    }
+
     /// The key the boot stages verify images under.
     pub fn pubkey(&self) -> [u8; 32] {
         self.pubkey

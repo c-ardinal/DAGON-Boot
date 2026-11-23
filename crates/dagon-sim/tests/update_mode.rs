@@ -204,6 +204,8 @@ fn the_app_hands_over_and_the_boot_core_leaves_update_mode_when_idle() {
     assert_eq!(ask(&mut node, 1, Cmd::Reboot, &p[..n], 0).0, Status::Ok);
     assert_eq!(node.run(), Run::BootCore(mode::UPDATE));
     assert_eq!(hello_mode(&mut node, 10), mode::UPDATE);
+    let st = node.status();
+    assert_eq!(st.active, dagon_format::statelog::slot::NONE, "no app runs");
     // A REBOOT mode 1 in update mode stays there.
     assert_eq!(ask(&mut node, 2, Cmd::Reboot, &p[..n], 20).0, Status::Ok);
     assert_eq!(node.run(), Run::BootCore(mode::UPDATE));

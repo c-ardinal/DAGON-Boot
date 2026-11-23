@@ -295,6 +295,7 @@ impl SimNode {
             mode: in_mode,
             ..self.cfg.clone()
         };
+        self.store.run_no_app();
         let verifier = Ed25519Compact::new(self.store.pubkey());
         self.core = Some(Agent::for_writer(
             cfg,

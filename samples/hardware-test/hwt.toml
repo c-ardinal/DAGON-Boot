@@ -20,6 +20,9 @@ poll_s = 5
 status_tries = 6
 # `sync`: the sample each node's package is refreshed from.
 sync = { seg = "f401-app", watch = "esp32s3-app" }
+# Nodes a run may erase whole through their debug probe (probe-rs chip name),
+# with `run --erase-probe <VID:PID[:serial]>` only: the F401's ST-LINK.
+erase = { seg = { chip = "STM32F401RETx" } }
 
 # Versions: a node's version is its crate's ([package] version in the
 # Cargo.toml of its [build.<id>] package). Each deploy step sets it there for
@@ -63,7 +66,20 @@ sync = { seg = "f401-app", watch = "esp32s3-app" }
 #                                             fails its own check); the CLI fails with
 #                                             BootCoreRolledBack; the core it ran is running and
 #                                             confirmed, the other is not; the node answers
+#   erase    node                            the node's whole flash erased through its probe
+#                                             ([setup.erase], --erase-probe); refused unless it
+#                                             is confirmed and out/provision/<node>/bootcore.img
+#                                             exists; then it must answer nothing
+#   deploy   version nodes rom = [nodes]      after an erase: the plan, then the ROM loader's
+#                                             question naming exactly `rom`, both answered y;
+#                                             those nodes on `version` in slot A, confirmed;
+#                                             the write time and the loader's figures (attempts,
+#                                             frames, longest round trip) go to <log>-rom.json,
+#                                             checked against dagon-romlink's FRAME_TIMEOUT_MS
+#                                             and ATTEMPTS
 #   skip     reason                          recorded as SKIPPED
+#
+# A scenario with needs = "erase-probe" is SKIPPED when run has no --erase-probe.
 
 [[scenario]]
 id = "status"
@@ -179,8 +195,12 @@ steps = [
 
 [[scenario]]
 id = "rom-recovery"
-title = "F401 written through the hub's ROM path"
-steps = [{ do = "skip", reason = "dagon deploy takes the ROM path only when the F401 does not answer HELLO; no CLI step makes a healthy F401 silent without a write the normal confirmation does not allow" }]
+title = "F401 erased whole, written again through the hub's ROM path"
+needs = "erase-probe"
+steps = [
+  { do = "erase", node = "seg" },
+  { do = "deploy", version = "2.0.18", nodes = ["seg"], rom = ["seg"] },
+]
 
 [[scenario]]
 id = "hub-x10"

@@ -7,7 +7,7 @@ last known-good release. See README.md.
 
     python hwt.py sync --project <project> --repo <DAGON-Boot clone> --dagon <exe>
     python hwt.py run  --project <project> --dagon <exe> --key <secret key file> --port <COMn>
-                       [--out <dir>] [--only <id>...] [--from <id>]
+                       [--out <dir>] [--only <id>...] [--from <id>] [--erase-probe <sel>]
     python hwt.py selftest
 """
 
@@ -49,6 +49,16 @@ PLAN_HEAD = re.compile(r"^deploy to (\d+) node\(s\) \((.+)\):$")
 PLAN_NODE = re.compile(r"^  (\S+)\s+(\S+) -> (\S+)$")
 # The version line of a crate's [package] table.
 PACKAGE_VERSION = re.compile(r'(?m)^(version\s*=\s*)"[^"]*"')
+# `dagon deploy`'s question before writing silent nodes through their ROM loader.
+ROM_ASK = re.compile(r"^No answer from (.+)\. Writing through the ROM loader rewrites all their contents\.")
+# A node written through its ROM loader, and the loader session's figures
+# when the CLI prints them (dagon-romlink's Stats).
+ROM_DONE = "{}: rewritten through the ROM loader, {}"
+ROM_STATS = re.compile(r"^(?P<id>[\w-]+): ROM loader: attempts (?P<attempts>\d+), frames (?P<frames>\d+), "
+                       r"max round trip (?P<max_rtt_ms>\d+) ms, elapsed (?P<elapsed_ms>\d+) ms")
+# dagon-romlink's limits the figures are checked against.
+ROMLINK = HERE.parent.parent / "crates" / "dagon-romlink" / "src" / "lib.rs"
+ROM_LIMITS = ("FRAME_TIMEOUT_MS", "FRAME_GAP_MS", "ATTEMPTS")
 
 
 def parse_status(text, coordinator="hub"):
@@ -114,6 +124,76 @@ def check_plan(text, version, nodes, release):
     if Path(path.replace("\\", "/")).resolve() != Path(release).resolve():
         return f"plan release {path}, want {release}"
     return None
+
+
+def check_rom_question(text, nodes):
+    """The ROM loader's question before PROMPT must name exactly `nodes`.
+    Returns the problem, or None."""
+    asks = [m for m in map(ROM_ASK.match, text.splitlines()) if m]
+    if not asks or not text.endswith(PROMPT):
+        return "no ROM loader question before the prompt"
+    named = [n.strip() for n in asks[-1][1].split(",")]
+    if sorted(named) != sorted(nodes):
+        return f"ROM question names {named}, want {nodes}"
+    return None
+
+
+def provision_dir(project):
+    """Where the first write left each node's files (`provision_dir` of
+    dagon.toml, else out/provision), as the CLI reads it for a ROM write."""
+    cfg = tomllib.loads((project / "dagon.toml").read_text(encoding="utf-8"))
+    return (project / cfg.get("provision_dir", "out/provision")).resolve()
+
+
+def erase_command(chip, probe):
+    """probe-rs erasing the whole flash of `chip` through the probe `probe`
+    (VID:PID[:serial]) only."""
+    return ["probe-rs", "erase", "--chip", chip, "--probe", probe]
+
+
+def rom_limits(src=ROMLINK):
+    """dagon-romlink's limits by name (ROM_LIMITS), read from its source;
+    {} without the repo next to this sample."""
+    if not Path(src).is_file():
+        return {}
+    text = Path(src).read_text(encoding="utf-8")
+    out = {}
+    for name in ROM_LIMITS:
+        m = re.search(rf"(?m)^pub const {name}: \w+ = ([\d_]+);", text)
+        if m:
+            out[name] = int(m[1].replace("_", ""))
+    return out
+
+
+def rom_figures(lines, node, version, limits=None):
+    """One ROM write of `node` from the CLI's timed lines [(ms, line)]: how
+    long from its first progress line to ROM_DONE, and the loader's figures
+    (ROM_STATS) when printed, against `limits`: every frame's round trip
+    under FRAME_TIMEOUT_MS, at most ATTEMPTS sessions."""
+    limits = rom_limits() if limits is None else limits
+    done = ROM_DONE.format(node, version)
+    end = next((ms for ms, l in lines if l == done), None)
+    first = next((ms for ms, l in lines if l.startswith(f"{node}: ") and l != done), None)
+    stats = next(({k: int(v) for k, v in m.groupdict().items() if k != "id"}
+                  for m in (ROM_STATS.match(l) for _, l in lines) if m and m["id"] == node), None)
+    out = {"write_ms": None if end is None or first is None else end - first, "stats": stats}
+    why = []
+    if end is None:
+        why.append(f"no '{done}'")
+    if stats and "FRAME_TIMEOUT_MS" in limits and stats["max_rtt_ms"] >= limits["FRAME_TIMEOUT_MS"]:
+        why.append(f"round trip {stats['max_rtt_ms']} ms >= FRAME_TIMEOUT_MS {limits['FRAME_TIMEOUT_MS']}")
+    if stats and "ATTEMPTS" in limits and not 1 <= stats["attempts"] <= limits["ATTEMPTS"]:
+        why.append(f"attempts {stats['attempts']} outside 1..{limits['ATTEMPTS']}")
+    out["verdict"] = "FAIL" if why else "PASS"
+    out["why"] = "; ".join(why) or None
+    return out
+
+
+def rom_note(f):
+    s = f["stats"]
+    figures = (f"attempts {s['attempts']}, {s['frames']} frames, max round trip {s['max_rtt_ms']} ms"
+               if s else "the CLI printed no loader figures")
+    return f"ROM write {f['write_ms']} ms, {figures}"
 
 
 def set_crate_version(manifest, version):
@@ -219,15 +299,20 @@ class Run:
         self.good = None  # (release copy, version, sha256) last applied to every node
         self.start_state = None  # every node's status when the run began
         self.wrote = False  # a MUTATING command has been started (set only by cli())
+        self.erase_probe = getattr(a, "erase_probe", None)  # probe-rs selector; None: no erase
+        self.erased = set()  # nodes this run erased (silent until written through their ROM)
+        self.lines = []  # the last CLI call's output lines, (ms from its start, line)
 
     # -- running the CLI ----------------------------------------------------
 
-    def cli(self, args, name, config=None, port=True, plan=None, interrupt=None):
+    def cli(self, args, name, config=None, port=True, plan=None, interrupt=None, rom=None):
         """Runs dagon; output in <out>/<nn>-<name>.log. `port`: pass --port.
         `plan=(version, nodes, release)`: answer the confirmation prompt y
         only when the listing is exactly that plan, else n (and fail).
-        `interrupt=(node, pct)`: kill the CLI when that node's transfer
-        reaches pct. Returns (rc, text, cmd, log)."""
+        `rom=[nodes]`: then answer the ROM loader's question y only when it
+        names exactly these nodes. `interrupt=(node, pct)`: kill the CLI
+        when that node's transfer reaches pct. Each output line's time from
+        the start goes to self.lines as (ms, line). Returns (rc, text, cmd, log)."""
         self.n += 1
         log = self.out / f"{self.n:03d}-{name}.log"
         cmd = [*self.dagon, *args]
@@ -242,22 +327,37 @@ class Run:
         p = subprocess.Popen(cmd, cwd=self.project, stdin=subprocess.PIPE,
                              stdout=subprocess.PIPE, stderr=subprocess.STDOUT, bufsize=0)
         dec = codecs.getincrementaldecoder("utf-8")("replace")
-        text, problem, answered, killed = "", None, False, False
+        text, problem, killed = "", None, False
+        # The prompts to answer, in order: the plan, then the ROM question.
+        checks = [lambda t: check_plan(t, *plan)] if plan else []
+        if rom is not None:
+            checks.append(lambda t: check_rom_question(t, rom))
+        asked, start, done = 0, time.monotonic(), 0
+        self.lines = []
         want = interrupt and f"{interrupt[0]}: transfer {interrupt[1]}%"
         while chunk := p.stdout.read(4096):
             text += dec.decode(chunk)
-            if not answered and text.endswith(PROMPT):
-                problem = check_plan(text, *plan) if plan else "unexpected prompt"
+            ms = round((time.monotonic() - start) * 1000)
+            *whole, _ = text[done:].split("\n")
+            for line in whole:
+                self.lines.append((ms, line.rstrip("\r")))
+                done += len(line) + 1
+            if not problem and text.endswith(PROMPT):
+                problem = checks[asked](text) if asked < len(checks) else "unexpected prompt"
+                asked += 1
+                last = problem or asked == len(checks)
                 p.stdin.write(b"n\n" if problem else b"y\n")
-                p.stdin.close()
-                answered = True
+                p.stdin.flush()
+                if last:
+                    p.stdin.close()
                 text += f"[hwt: answered {'n: ' + problem if problem else 'y'} {now()}]\n"
+                done = len(text)
             if want and any(l.startswith(want) for l in text.splitlines()):
                 p.kill()
                 killed = True
                 text += f"\n[hwt: killed the CLI at '{want}' {now()}]\n"
                 break
-        if not answered:
+        if not p.stdin.closed:
             p.stdin.close()
         p.stdout.close()
         rc = p.wait()
@@ -265,8 +365,8 @@ class Run:
                        encoding="utf-8")
         if problem:
             raise Fail(f"refused the CLI's plan: {problem} (see {log.name})")
-        if plan and not answered:
-            raise Fail(f"no confirmation prompt (rc={rc}, see {log.name})")
+        if asked < len(checks):
+            raise Fail(f"{len(checks)} prompt(s) expected, {asked} seen (rc={rc}, see {log.name})")
         if want and not killed:
             raise Fail(f"transfer never reached {interrupt[1]}% (see {log.name})")
         return rc, text, shown, log
@@ -342,6 +442,8 @@ class Run:
         if kind == "skip":
             return "-", None, None, None, s["reason"]
         before = self.status(f"{name}-before")
+        if kind == "erase":
+            return self.erase(name, s, before)
         if kind == "status":
             bad = [k for k in self.nodes if not settled(before[k])]
             if bad:
@@ -374,9 +476,38 @@ class Run:
         unchanged(before, st, [k for k in self.nodes if k != node])
         return rc, cmd, log, st
 
+    def erase(self, name, s, before):
+        """Erases the node's whole flash through its debug probe (`[setup.erase]`
+        names its probe-rs chip; `--erase-probe` the probe), so it answers
+        nothing and the next deploy goes through its ROM loader. Refused unless
+        the node is on a confirmed version and the first write left its boot
+        core, which that ROM write needs."""
+        node = s["node"]
+        chip = self.setup.get("erase", {}).get(node, {}).get("chip")
+        expect(chip, f"no [setup.erase.{node}] chip")
+        expect(self.erase_probe, "erase without --erase-probe")
+        expect(settled(before[node]), f"{node}: not on a confirmed version; not erased")
+        boot = provision_dir(self.project) / node / "bootcore.img"
+        expect(boot.is_file(), f"{boot} missing: the ROM write needs the boot core of the first write")
+        cmd = erase_command(chip, self.erase_probe)
+        self.wrote = True
+        self.erased.add(node)
+        self.n += 1
+        log = self.out / f"{self.n:03d}-{name}.log"
+        r = subprocess.run(cmd, cwd=self.project, capture_output=True, text=True, timeout=300)
+        log.write_text(f"$ {' '.join(cmd)}\n{r.stdout}{r.stderr}\n# rc={r.returncode} end {now()}\n",
+                       encoding="utf-8")
+        expect(r.returncode == 0, f"erase rc={r.returncode} (see {log.name})")
+        st = self.status(f"{name}-after")
+        expect(st[node] is None, f"{node} still answers after the erase: {core(st[node])}")
+        unchanged(before, st, [k for k in self.nodes if k != node])
+        return " ".join(cmd), r.returncode, log, st, f"{node} erased, silent"
+
     def deploy(self, name, s, before):
         nodes = s.get("nodes", self.nodes)
         v = s["version"]
+        if "rom" in s:
+            return self.rom_deploy(name, s, before)
         mode = s.get("expect", "unchanged" if "interrupt_at" in s else "ok")
         cfg = self.fail_config(nodes) if mode == "rolled-back" else None
         inter = (nodes[0], s["interrupt_at"]) if "interrupt_at" in s else None
@@ -412,6 +543,37 @@ class Run:
         for k in self.nodes:
             expect(core(st[k]) == core(before[k]), f"{k}: changed after the interrupt")
         return cmd, rc, log, st, f"killed at {inter[1]}%"
+
+    def rom_deploy(self, name, s, before):
+        """dagon deploy to nodes that answer nothing (`rom`, erased by this
+        run): the plan, then the ROM question naming exactly them, both
+        answered y. Each is then on `version` from slot A, confirmed; the
+        others unchanged. Records how long each ROM write took and the loader
+        session's figures, checked against dagon-romlink's limits."""
+        nodes, v, rom = s.get("nodes", self.nodes), s["version"], s["rom"]
+        for k in rom:
+            expect(k in nodes and before[k] is None, f"{k}: a ROM step needs it silent and deployed")
+        release = self.project / "out" / "deploy" / f"v{v}.dgb"
+        for k in nodes:
+            set_crate_version(self.crate(k), v)
+        args = ["deploy", *s.get("nodes", []), "--key", self.key]
+        rc, text, cmd, log = self.cli(args, name, plan=(v, nodes, release), rom=rom)
+        expect(rc == 0, f"deploy rc={rc}")
+        figures = {k: rom_figures(self.lines, k, v) for k in rom}
+        (self.out / f"{log.stem}-rom.json").write_text(json.dumps(
+            {"limits": rom_limits(), "nodes": figures}, indent=2), encoding="utf-8")
+        st = self.status(f"{name}-after")
+        for k in nodes:
+            if k in rom:
+                expect(settled(st[k]) and st[k]["version"] == v and st[k]["active"] == 0,
+                       f"{k}: want {v} confirmed in slot A, got {core(st[k])}")
+                self.erased.discard(k)
+            else:
+                check_on(st, k, v, flipped_from=before[k]["active"])
+        unchanged(before, st, [k for k in self.nodes if k not in nodes])
+        bad = {k: f["why"] for k, f in figures.items() if f["verdict"] == "FAIL"}
+        expect(not bad, f"ROM loader figures out of limits: {bad}")
+        return cmd, rc, log, st, "; ".join(f"{k}: {rom_note(f)}" for k, f in figures.items())
 
     def core_update(self, name, s, before):
         """Raises the node's boot crate to the step's version and writes the node
@@ -509,6 +671,10 @@ class Run:
                       "unverified: start state not acquired; nothing written by this run")
             return rec | {"result": result, "status": self.last_status()}
         try:
+            silent = sorted(self.erased)
+            if silent:  # only a ROM write brings them back; restore writes nothing
+                raise Fail(f"{silent} erased by this run and silent: write each with "
+                           "`dagon deploy <node>` (ROM loader) or `dagon flash <node>` (probe)")
             st = self.wait_settled({k: None for k in self.nodes}, "restore-wait")
             self.check_identity("restore")
             if self.good:
@@ -566,6 +732,11 @@ class Run:
             self.start_state = self.check_identity("run-start")
             for sc in scenarios:
                 verdict, i = "PASS", None
+                if sc.get("needs") == "erase-probe" and not self.erase_probe:
+                    self.record(sc["id"], 0, None, None, None, None, "SKIPPED", "no --erase-probe")
+                    self.results.append({"id": sc["id"], "title": sc["title"],
+                                         "result": "SKIPPED (no --erase-probe)"})
+                    continue
                 try:
                     self.check_identity(sc["id"])
                     for i, s in enumerate(sc["steps"]):
@@ -780,6 +951,8 @@ def selftest():
         raise AssertionError("change not seen")
     except Fail:
         pass
+    selftest_rom()
+    selftest_rom_run()
     selftest_tamper()
     selftest_plan()
     selftest_crate_version()
@@ -910,6 +1083,116 @@ def selftest_set_bin():
             assert cfg["build"]["seg"] == {"package": "nodes/seg", "bin": "keep"}
 
 
+def selftest_rom():
+    """The ROM question, the erase command, the loader figures against the
+    limits read from dagon-romlink, and the setups' ROM and erase steps."""
+    q = ("No answer from seg. Writing through the ROM loader rewrites all their contents. "
+         "A loose wire also stops an answer: check it first.\n" + PROMPT)
+    assert check_rom_question(q, ["seg"]) is None
+    assert "want" in check_rom_question(q.replace("seg.", "seg, seg2."), ["seg"])
+    assert check_rom_question(PROMPT, ["seg"]) is not None
+    assert erase_command("STM32F401RETx", "0483:374b:X") == [
+        "probe-rs", "erase", "--chip", "STM32F401RETx", "--probe", "0483:374b:X"]
+    limits = rom_limits()
+    assert limits == {"FRAME_TIMEOUT_MS": 500, "FRAME_GAP_MS": 500, "ATTEMPTS": 3}, limits
+    lines = [(100, "seg: erase 0% (2.0.18)"), (9000, "seg: write 50% (2.0.18)"),
+             (15100, "seg: ROM loader: attempts 1, frames 812, max round trip 41 ms, elapsed 14900 ms"),
+             (15200, "seg: rewritten through the ROM loader, 2.0.18")]
+    f = rom_figures(lines, "seg", "2.0.18", limits)
+    assert f["verdict"] == "PASS" and f["write_ms"] == 15100 and f["stats"]["frames"] == 812, f
+    slow = [(t, l.replace("41 ms", "500 ms").replace("attempts 1", "attempts 4")) for t, l in lines]
+    f = rom_figures(slow, "seg", "2.0.18", limits)
+    assert f["verdict"] == "FAIL" and "FRAME_TIMEOUT_MS" in f["why"] and "attempts 4" in f["why"], f
+    f = rom_figures([l for l in lines if "ROM loader:" not in l[1]], "seg", "2.0.18", limits)
+    assert f["verdict"] == "PASS" and f["stats"] is None and "no loader figures" in rom_note(f)
+    assert rom_figures(lines[:2], "seg", "2.0.18", limits)["verdict"] == "FAIL"
+    data = tomllib.loads((HERE / "hwt.toml").read_text(encoding="utf-8"))
+    sc = next(s for s in data["scenario"] if s["id"] == "rom-recovery")
+    assert sc["needs"] == "erase-probe" and [st["do"] for st in sc["steps"]] == ["erase", "deploy"]
+    erase, deploy = sc["steps"]
+    assert erase["node"] in data["setup"]["erase"] and deploy["rom"] == [erase["node"]] == deploy["nodes"]
+
+
+def selftest_rom_run():
+    """The erase and ROM deploy steps against the fake CLI: the erased seg
+    answers nothing, the deploy answers both prompts, seg is on the new
+    version in slot A with its figures recorded; a restore with an erased
+    seg still silent writes nothing; a ROM question naming another node is
+    answered n."""
+    setup = {"nodes": ["seg", "hub"], "coordinator": "hub", "hub_usb": "VID_C0DE",
+             "status_tries": 1, "poll_s": 0, "settle_timeout_s": 0,
+             "erase": {"seg": {"chip": "STM32F401RETx"}}}
+    node = {"version": "2.0.1", "active": 0, "slots": {"A": ["Confirmed", "2.0.1"], "B": ["Written", "1.0.0"]}}
+    global erase_command
+    real = erase_command
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        state = tmp / "state.json"
+        fake = [sys.executable, __file__, "_fake-dagon", str(state)]
+        (tmp / "seg").mkdir()
+        (tmp / "seg" / "Cargo.toml").write_text('[package]\nname = "seg"\nversion = "2.0.1"\n')
+        (tmp / "dagon.toml").write_text('format = 1\n[build.seg]\npackage = "seg"\n')
+        boot = tmp / "out" / "provision" / "seg" / "bootcore.img"
+        release = tmp / "out" / "deploy" / "v2.0.18.dgb"
+
+        def fresh(probe="0483:374b:X"):
+            state.write_text(json.dumps({"coordinator": "hub", "mcu": "0x0001", "calls": [],
+                                         "deploy_version": "2.0.18", "release": str(release),
+                                         "nodes": {"seg": dict(node), "hub": dict(node)}}))
+            a = argparse.Namespace(project=tmp, dagon=None, key="k", port="COMX", out=tmp / "o",
+                                   dagon_argv=fake, erase_probe=probe,
+                                   port_identity=lambda port: "USB\\VID_C0DE&PID_CAFE\\1")
+            r = Run(a, setup)
+            r.start_state = r.check_identity("start")
+            return r
+
+        erase_command = lambda chip, probe: [*fake, "erase", "seg"]  # noqa: E731
+        try:
+            r = fresh()
+            try:
+                r.step("rom", 0, {"do": "erase", "node": "seg"})
+                raise AssertionError("erased without the boot core of the first write")
+            except Fail as e:
+                assert "bootcore.img" in str(e) and "erase" not in json.loads(state.read_text())["calls"]
+            boot.parent.mkdir(parents=True)
+            boot.write_bytes(b"core")
+            cmd, rc, log, st, note = r.step("rom", 0, {"do": "erase", "node": "seg"})
+            assert st["seg"] is None and r.erased == {"seg"} and r.wrote, (st, note)
+            rec = r.restore()
+            assert "erased by this run" in rec["result"], rec
+            assert [c for c in json.loads(state.read_text())["calls"] if c != "status"] == ["erase"]
+            step = {"do": "deploy", "version": "2.0.18", "nodes": ["seg"], "rom": ["seg"]}
+            cmd, rc, log, st, note = r.step("rom", 1, step)
+            assert rc == 0 and st["seg"]["version"] == "2.0.18" and st["seg"]["active"] == 0, st
+            assert not r.erased and "attempts 1, 9 frames, max round trip 40 ms" in note, note
+            figures = json.loads((r.out / f"{log.stem}-rom.json").read_text())
+            assert figures["nodes"]["seg"]["verdict"] == "PASS" and figures["limits"]["ATTEMPTS"] == 3
+            assert figures["nodes"]["seg"]["write_ms"] >= 0, figures
+
+            r = fresh()
+            r.step("rom", 0, {"do": "erase", "node": "seg"})
+            try:
+                r.step("rom", 1, {**step, "rom": ["hub"], "nodes": ["seg", "hub"]})
+                raise AssertionError("a ROM step for a node that answers went ahead")
+            except Fail as e:
+                assert "hub: a ROM step" in str(e), e
+            try:
+                r.cli(["deploy", "seg", "--key", "k"], "rom-other", plan=("2.0.18", ["seg"], release),
+                      rom=["hub"])
+                raise AssertionError("a ROM question naming another node was answered y")
+            except Fail as e:
+                assert "ROM question names ['seg'], want ['hub']" in str(e), e
+            assert json.loads(state.read_text())["silent"] == ["seg"]
+
+            r = fresh(probe=None)
+            r.run([{"id": "rom-recovery", "title": "t", "needs": "erase-probe",
+                    "steps": [{"do": "erase", "node": "seg"}]}])
+            assert r.results[0]["result"].startswith("SKIPPED"), r.results
+            assert "erase" not in json.loads(state.read_text())["calls"]
+        finally:
+            erase_command = real
+
+
 def selftest_tamper():
     body = bytes(range(256)) * 4  # 512-byte header + 512-byte payload
     raw = bytearray(64) + body
@@ -991,6 +1274,9 @@ def fake_dagon(argv):
     nodes = st["nodes"]
     if args[0] == "status":
         for k, n in nodes.items():
+            if k in st.get("silent", []):
+                print(f"{k}: no answer (Timeout)")
+                continue
             slots = ", ".join(f"{s}:{n['slots'][s][0]} {n['slots'][s][1]}" for s in "AB")
             print(f"{'hub' if k == st['coordinator'] else k}: version {n['version']}, "
                   f"mcu {st['mcu']}, wire 1, active {n['active']}, confirmed {n['active']}, "
@@ -1001,6 +1287,30 @@ def fake_dagon(argv):
         n["slots"]["AB"[n["active"]]][0] = "Written"
         n["slots"]["AB"[other]][0] = "Confirmed"
         n["active"], n["version"] = other, n["slots"]["AB"[other]][1]
+    elif args[0] == "erase":  # stands in for probe-rs erase of node args[1]
+        st.setdefault("silent", []).append(args[1])
+    elif args[0] == "deploy":  # the ROM path only: plan, ROM question, ROM write of the silent nodes
+        names = args[1:args.index("--key")]
+        v = st["deploy_version"]
+        print(f"deploy to {len(names)} node(s) ({st['release']}):")
+        for k in names:
+            print(f"  {k}  {nodes[k]['version']} -> {v}")
+        print(PROMPT, end="", flush=True)
+        if sys.stdin.readline().strip() != "y":
+            return 1
+        silent = [k for k in names if k in st.get("silent", [])]
+        print(f"No answer from {', '.join(silent)}. Writing through the ROM loader rewrites all "
+              "their contents. A loose wire also stops an answer: check it first.")
+        print(PROMPT, end="", flush=True)
+        if sys.stdin.readline().strip() != "y":
+            return 1
+        for k in silent:
+            print(f"{k}: erase 0% ({v})", flush=True)
+            time.sleep(0.05)
+            print(f"{k}: ROM loader: attempts 1, frames 9, max round trip 40 ms, elapsed 60 ms")
+            print(f"{k}: rewritten through the ROM loader, {v}")
+            nodes[k] = {"version": v, "active": 0, "slots": {"A": ["Confirmed", v], "B": ["Empty", "0.0.0"]}}
+            st["silent"].remove(k)
     elif args[0] == "apply":
         rel = json.loads(Path(args[1]).read_text(encoding="utf-8"))
         v = rel["version"]
@@ -1132,6 +1442,8 @@ def main():
     r.add_argument("--out", help="log folder (default ~/dagon-hwt)")
     r.add_argument("--only", nargs="*", help="scenario ids to run")
     r.add_argument("--from", dest="start", help="start at this scenario id")
+    r.add_argument("--erase-probe", help="probe-rs probe (VID:PID[:serial]) that may erase the "
+                   "[setup.erase] nodes; without it, scenarios that need it are SKIPPED")
     for p in (s, r):
         p.add_argument("--setup", default=str(HERE / "hwt.toml"), help="setup data and scenarios")
     sub.add_parser("selftest")

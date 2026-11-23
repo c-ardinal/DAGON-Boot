@@ -772,6 +772,38 @@ def firmware_kinds(lang):
               f"- Firmware exists only for the link kinds {kind_list(lang, have, 'and')}. {kind_list(lang, lack, 'and')} have none.") + "\n"
 
 
+HWT = ROOT / "samples" / "hardware-test"
+
+
+def max_nodes():
+    """`MAX_NODES` of dagon-format's topology."""
+    src = (ROOT / "crates" / "dagon-format" / "src" / "topology.rs").read_text(encoding="utf-8")
+    return int(re.search(r"(?m)^pub const MAX_NODES: usize = (\d+);", src)[1])
+
+
+def hwt_nodes(name):
+    """The node count of a sample hardware test setup (`[setup] nodes`)."""
+    return len(tomllib.loads((HWT / name).read_text(encoding="utf-8"))["setup"]["nodes"])
+
+
+def node_count(lang):
+    """The node limit, and which tests write how many nodes on boards and in the simulator."""
+    n, base, fan = max_nodes(), hwt_nodes("hwt.toml"), hwt_nodes("hwt-fan.toml")
+    test = "one_write_reaches_every_node_of_a_topology_at_the_limit"
+    sim = (ROOT / "crates" / "dagon-host" / "tests" / "sim.rs").read_text(encoding="utf-8")
+    if f"fn {test}()" not in sim or "MAX_NODES - 1" not in sim:
+        raise SystemExit(f"dagon-host's sim tests no longer have {test} over MAX_NODES; fix node_count")
+    return tr(lang,
+              f"- 構成のノード数の上限は`MAX_NODES`の{n}です。ボードに書込するサンプルの試験の基本構成"
+              f"（`samples/hardware-test/hwt.toml`）は{base}ノードです。{base + 1}ノード以上の書込の試験は、"
+              f"{n}ノードのシミュレータの試験（`dagon-host`の`{test}`）と、"
+              f"{fan}ノードのボード用の試験構成（`hwt-fan.toml`）です。",
+              f"- A 構成 holds at most `MAX_NODES`, {n} nodes. The base setup of the sample test that writes boards "
+              f"(`samples/hardware-test/hwt.toml`) has {base} nodes. Writes to {base + 1} or more nodes are tested by "
+              f"a simulator test of {n} nodes (`{test}` in `dagon-host`) "
+              f"and by a board setup of {fan} nodes (`hwt-fan.toml`).") + "\n"
+
+
 REGION_BEGIN = "<!-- generated from {}: python site/scripts/gen.py -->\n"
 REGION_END = "<!-- end of generated table -->\n"
 # (hand-written page, what the region is generated from, the region's text); a page may hold several.
@@ -787,6 +819,7 @@ REGIONS = [
     ("how-to/swap-link.md", "dagon_format::with_link_kinds!", kinds_sentence),
     ("explanation/limitations.md", "the MCU definitions' [links]", firmware_kinds),
     ("explanation/limitations.md", "site/scripts/architecture.py", architecture.gap_list),
+    ("explanation/limitations.md", "MAX_NODES and the sample hardware test setups", node_count),
     ("explanation/index.md", "site/scripts/architecture.py", lambda lang: f"<div>{architecture.node_svg(lang)}</div>\n\n{architecture.component_table(lang)}"),
 ]
 

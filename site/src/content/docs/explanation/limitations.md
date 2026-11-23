@@ -63,6 +63,9 @@ description: "DAGONの設計上の範囲外、利用者の責任範囲、設計�
 
 値:
 
+<!-- generated from MAX_NODES and the sample hardware test setups: python site/scripts/gen.py -->
+- 構成のノード数の上限は`MAX_NODES`の32です。ボードに書込するサンプルの試験の基本構成（`samples/hardware-test/hwt.toml`）は3ノードです。4ノード以上の書込の試験は、32ノードのシミュレータの試験（`dagon-host`の`one_write_reaches_every_node_of_a_topology_at_the_limit`）と、4ノードのボード用の試験構成（`hwt-fan.toml`）です。
+<!-- end of generated table -->
 - DAGONのマイコン定義には、`unverified`とマークした値があります。
 - 実行モデルの上限（[11節](/explanation/lifecycle-events/#11-実行モデル)）は、11.3の手順で決定した値ではありません。
 

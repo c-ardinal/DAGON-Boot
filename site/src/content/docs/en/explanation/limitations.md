@@ -63,6 +63,9 @@ Identity and VERSION:
 
 Values:
 
+<!-- generated from MAX_NODES and the sample hardware test setups: python site/scripts/gen.py -->
+- A 構成 holds at most `MAX_NODES`, 32 nodes. The base setup of the sample test that writes boards (`samples/hardware-test/hwt.toml`) has 3 nodes. Writes to 4 or more nodes are tested by a simulator test of 32 nodes (`one_write_reaches_every_node_of_a_topology_at_the_limit` in `dagon-host`) and by a board setup of 4 nodes (`hwt-fan.toml`).
+<!-- end of generated table -->
 - DAGON's own MCU definitions hold values marked `unverified`.
 - The execution model's budgets ([section 11](/en/explanation/lifecycle-events/#11-execution-model)) are not set the way 11.3 says.
 

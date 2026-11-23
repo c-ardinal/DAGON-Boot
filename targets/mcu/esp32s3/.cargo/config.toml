@@ -3,11 +3,11 @@ target = "xtensa-esp32s3-none-elf"
 
 [target.xtensa-esp32s3-none-elf]
 # Literals next to the code: a function larger than l32r's reach (the Ed25519
-# field arithmetic inlined at opt-level "s") otherwise fails to link.
-rustflags = [
-    "-C", "link-arg=-nostartfiles", "-C", "link-arg=-Tlinkall.x",
-    "-C", "llvm-args=--mtext-section-literals",
-]
+# field arithmetic inlined at opt-level "s") otherwise fails to link. This
+# package links nothing itself (the firmware images are the board crates',
+# with their own linker flags); stage0/ below adds its own, and cargo joins
+# these flags to a deeper folder's, so none name a linker script here.
+rustflags = ["-C", "llvm-args=--mtext-section-literals"]
 
 [unstable]
 build-std = ["core"]

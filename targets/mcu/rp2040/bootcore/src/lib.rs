@@ -47,6 +47,12 @@
 //! checks fed through the same watchdog-feeding verifier; every wait
 //! sleeps until an interrupt.
 #![no_std]
+// A measuring build stops after the step it measures: the code after it
+// is unused there.
+#![cfg_attr(
+    any(feature = "listen-time", feature = "decide-time"),
+    allow(unreachable_code, unused_variables, unused_mut)
+)]
 
 mod receive;
 
@@ -56,6 +62,8 @@ use dagon_core::bootcore::CLEARED;
 use dagon_ed25519::Ed25519Small;
 use dagon_events::{compose_boot, BootExtension, Extension};
 use dagon_format::header::mcu_id;
+#[cfg(any(feature = "listen-time", feature = "decide-time"))]
+use dagon_mcu_common::boot_time;
 use dagon_mcu_rp2040::arm::{jump, led, step, trial};
 use dagon_mcu_rp2040::bl::{self, Settled};
 use dagon_mcu_rp2040::boot_receive::{self, Entry};
@@ -231,16 +239,23 @@ pub fn run<E: Extension>(chain: E, limits: &'static [BootExtension], link_addr: 
     let mut flash = RpFlash::new(p.FLASH);
     // The boot core's own run is timed like an image on trial.
     Watchdog::new(p.WATCHDOG).start(period());
+    // The boot core's start for the listen-time build (clock and watchdog set up).
+    #[cfg(feature = "listen-time")]
+    let started = now_us();
     let verifier = VERIFIER;
     step(8);
     let mut links = boot_receive::Links::new(None, open_i2c!(p, link_addr), open_uart!(p));
     if let Some((entry, stay)) = receive_step(&mut flash, &mut links) {
         receive::serve(p.USB, flash, links, entry, stay)
     }
+    #[cfg(feature = "listen-time")]
+    boot_time::hold(&boot_time::DAGON_LISTEN_US, now_us() - started, feed);
     // The window is over: the I2C target stops answering its address, so
     // the bus is not held while the slow checks below run.
     dagon_mcu_rp2040::boot_links::pause_i2c();
     let mut chain = compose_boot(chain, now_us, limits);
+    #[cfg(feature = "decide-time")]
+    let deciding = now_us();
     let mut boot = BootRun::start(
         &mut chain,
         &mut flash,
@@ -251,6 +266,8 @@ pub fn run<E: Extension>(chain: E, limits: &'static [BootExtension], link_addr: 
         watchdog_ms(true),
     );
     let decision = boot.decision();
+    #[cfg(feature = "decide-time")]
+    boot_time::hold(&boot_time::DAGON_DECIDE_US, now_us() - deciding, feed);
     // The decision verified the app it starts under this core's key.
     let healthy = !cfg!(feature = "no-confirm") && matches!(decision, Decision::Boot { .. });
     match bl::settle_core(

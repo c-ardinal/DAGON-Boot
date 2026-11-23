@@ -126,23 +126,26 @@ impl LogState {
         self.pending.is_some() && self.attempts > 0
     }
 
-    /// Slot running now: the pending slot while on trial, else the confirmed one.
-    pub fn active(&self) -> u8 {
-        match (self.on_trial(), self.pending, self.confirmed) {
-            (true, Some(p), _) => p.slot,
-            (_, _, Some(c)) => c.slot,
-            _ => slot::NONE,
-        }
+    /// True while `running`, the slot the caller runs from, is the pending
+    /// slot on trial. The log alone cannot tell which slot runs: a boot core
+    /// that cannot append its BOOT_ATTEMPT or ROLLBACK starts the confirmed
+    /// slot while the log still names an open trial, so only the running
+    /// image knows its own slot.
+    pub fn trying(&self, running: u8) -> bool {
+        self.on_trial() && self.pending.is_some_and(|p| p.slot == running)
     }
 
     /// STATUS of the slots of one image kind. `heads[s]`: the image header
     /// now in slot `s` as a reference (`slot = s`), `None` when it has none;
     /// one entry per slot the kind has, and a slot it does not have is sent
     /// as empty. A log reference counts for a slot only while that same
-    /// header is there.
-    pub fn status(&self, heads: &[Option<SlotRef>], active: u8, generation: u32) -> StatusResp {
+    /// header is there. `running`: the slot the image of this kind runs
+    /// from, as the running image itself knows it ([`slot::NONE`]: none
+    /// runs); the pending slot is Trying only while it is that slot, and
+    /// Pending otherwise (its trial did not start this boot).
+    pub fn status(&self, heads: &[Option<SlotRef>], running: u8, generation: u32) -> StatusResp {
         let mut st = StatusResp {
-            active,
+            active: running,
             confirmed: self.confirmed.map_or(slot::NONE, |c| c.slot),
             attempts: self.attempts,
             last_reason: self.last_reason,
@@ -152,7 +155,7 @@ impl LogState {
         for (info, head) in st.slots.iter_mut().zip(heads.iter().copied()) {
             let Some(h) = head else { continue };
             let state = if self.pending == Some(h) {
-                if self.attempts > 0 {
+                if self.trying(running) {
                     SlotState::Trying
                 } else {
                     SlotState::Pending
@@ -500,8 +503,9 @@ mod tests {
         Some(SlotRef::of(&rec(kind::PROVISION, slot)))
     }
 
-    fn states(s: &LogState, heads: [Option<SlotRef>; 2]) -> [SlotState; 2] {
-        let st = s.status(&heads, s.active(), 1);
+    /// STATUS of `heads` as the app running from `running` reports it.
+    fn states(s: &LogState, heads: [Option<SlotRef>; 2], running: u8) -> [SlotState; 2] {
+        let st = s.status(&heads, running, 1);
         [st.slots[0].state, st.slots[1].state]
     }
 
@@ -510,25 +514,49 @@ mod tests {
         let (a, b) = (head(0), head(1));
         let s = fold(&[rec(kind::PROVISION, 0)]);
         assert_eq!(
-            states(&s, [a, None]),
+            states(&s, [a, None], 0),
             [SlotState::Confirmed, SlotState::Empty]
         );
         assert_eq!(s.status(&[a, None], 0, 1).confirmed, 0);
         let s = s.apply(&rec(kind::SLOT_PENDING, 1));
         assert_eq!(
-            states(&s, [a, b]),
+            states(&s, [a, b], 0),
             [SlotState::Confirmed, SlotState::Pending]
         );
         let s = s.apply(&rec(kind::BOOT_ATTEMPT, 1));
         assert_eq!(
-            states(&s, [a, b]),
+            states(&s, [a, b], 1),
             [SlotState::Confirmed, SlotState::Trying]
         );
         assert_eq!(s.status(&[a, b], 1, 1).active, 1);
         let s = s.apply(&rec(kind::ROLLBACK, 0));
         assert_eq!(
-            states(&s, [a, b]),
+            states(&s, [a, b], 0),
             [SlotState::Confirmed, SlotState::Reverted]
+        );
+    }
+
+    /// A trial the log names open while the app runs from another slot
+    /// (the boot core could not append its BOOT_ATTEMPT and started the
+    /// confirmed slot): the running slot is the one STATUS reports, and
+    /// the pending slot is only pending, never Trying.
+    #[test]
+    fn an_open_trial_not_running_is_pending() {
+        let (a, b) = (head(0), head(1));
+        let s = fold(&[
+            rec(kind::PROVISION, 0),
+            rec(kind::SLOT_PENDING, 1),
+            rec(kind::BOOT_ATTEMPT, 1),
+        ]);
+        let st = s.status(&[a, b], 0, 1);
+        assert_eq!((st.active, st.confirmed, st.attempts), (0, 0, 1));
+        assert_eq!(
+            [st.slots[0].state, st.slots[1].state],
+            [SlotState::Confirmed, SlotState::Pending]
+        );
+        assert_eq!(
+            states(&s, [a, b], slot::NONE),
+            [SlotState::Confirmed, SlotState::Pending]
         );
     }
 
@@ -548,7 +576,7 @@ mod tests {
             ..head(1).unwrap()
         });
         assert_eq!(
-            states(&s, [head(0), new_b]),
+            states(&s, [head(0), new_b], 0),
             [SlotState::Confirmed, SlotState::Written]
         );
 
@@ -562,7 +590,7 @@ mod tests {
         assert_eq!(s.reverted, None);
         let s = s.apply(&rec(kind::CONFIRMED, 1));
         assert_eq!(
-            states(&s, [head(0), head(1)]),
+            states(&s, [head(0), head(1)], 1),
             [SlotState::Written, SlotState::Confirmed]
         );
     }
@@ -638,13 +666,14 @@ mod tests {
             rec(kind::BOOT_ATTEMPT, 1),
             rec(kind::BOOT_ATTEMPT, 1),
         ]);
-        assert_eq!((s.attempts, s.active(), s.on_trial()), (2, 1, true));
+        assert_eq!((s.attempts, s.on_trial()), (2, true));
+        assert!(s.trying(1) && !s.trying(0));
         let s = s.apply(&Record {
             reason: reason::TRIAL_EXHAUSTED,
             ..rec(kind::ROLLBACK, 0)
         });
         assert_eq!(s.pending, None);
-        assert_eq!(s.active(), 0);
+        assert!(!s.trying(1));
         assert_eq!(s.reverted.map(|r| r.slot), Some(1));
         assert_eq!(s.last_reason, reason::TRIAL_EXHAUSTED);
     }
@@ -658,14 +687,14 @@ mod tests {
             rec(kind::CONFIRMED, 1),
         ]);
         assert_eq!(s.confirmed.map(|c| c.slot), Some(1));
-        assert_eq!((s.pending, s.attempts, s.active()), (None, 0, 1));
+        assert_eq!((s.pending, s.attempts), (None, 0));
     }
 
     #[test]
     fn pending_not_started_runs_confirmed() {
         let s = fold(&[rec(kind::PROVISION, 0), rec(kind::SLOT_PENDING, 1)]);
         assert!(!s.on_trial());
-        assert_eq!(s.active(), 0);
+        assert!(!s.trying(1));
     }
 
     #[test]
@@ -678,12 +707,12 @@ mod tests {
             },
         ]);
         assert_eq!(s.confirmed.map(|c| c.slot), Some(0));
-        assert_eq!((s.attempts, s.active()), (2, 1));
+        assert_eq!((s.attempts, s.pending.map(|p| p.slot)), (2, Some(1)));
         let s = fold(&[Record {
             reason: 2,
             ..rec(kind::SNAPSHOT, 0)
         }]);
-        assert_eq!((s.attempts, s.active()), (0, 0));
+        assert_eq!((s.attempts, s.pending), (0, None));
     }
 
     #[test]
@@ -693,6 +722,5 @@ mod tests {
             ..rec(kind::PROVISION, 0)
         }]);
         assert_eq!(s, LogState::default());
-        assert_eq!(s.active(), slot::NONE);
     }
 }

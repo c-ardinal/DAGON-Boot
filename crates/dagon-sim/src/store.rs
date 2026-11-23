@@ -6,6 +6,7 @@
 //! A clone is another handle on the same flash: the agent holds one, the
 //! simulated board (its boot core, ROM loader, power) another.
 
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use crate::flash::SimFlash;
@@ -206,6 +207,9 @@ pub struct SimStore {
     /// when no boot core may; `None`: it starts none (a stage0 built
     /// without a node tag).
     pub stage0_node: Option<(u16, [u8; 16])>,
+    /// The APP slot the last reset started (`slot::NONE`: none), as the
+    /// running app knows its own slot; STATUS reports it as the active one.
+    running: Arc<AtomicU8>,
 }
 
 impl Default for SimStore {
@@ -223,6 +227,7 @@ impl SimStore {
             cell: Arc::new(Mutex::new(CLEARED)),
             broken_core: None,
             stage0_node: None,
+            running: Arc::new(AtomicU8::new(statelog::slot::NONE)),
         }
     }
 
@@ -240,6 +245,7 @@ impl SimStore {
     pub fn snapshot(&self) -> SimStore {
         SimStore {
             stage0_node: self.stage0_node,
+            running: Arc::new(AtomicU8::new(self.running.load(Ordering::Relaxed))),
             ..SimStore::new(self.flash().clone(), self.layout, self.pubkey)
         }
     }
@@ -589,8 +595,20 @@ impl SimStore {
     /// to; then start the confirmed slot while it holds its image (its
     /// header the one the log names, signature and body verified). Behind
     /// a stage0 with no boot core to start, stage0 starts the confirmed
-    /// app itself ([`SimStore::confirmed_app`]).
+    /// app itself ([`SimStore::confirmed_app`]). A BOOT_ATTEMPT or
+    /// ROLLBACK the log cannot take starts no trial: the confirmed slot
+    /// starts with the trial the log names left open.
     pub fn boot(&mut self) -> Boot {
+        let b = self.decide();
+        let running = match b {
+            Boot::Run(s) => s,
+            Boot::Nothing => statelog::slot::NONE,
+        };
+        self.running.store(running, Ordering::Relaxed);
+        b
+    }
+
+    fn decide(&mut self) -> Boot {
         if !self.bootcore_present() {
             return Boot::Nothing;
         }
@@ -602,16 +620,16 @@ impl SimStore {
         let (ls, _) = self.log_state();
         if let Some(p) = ls.pending {
             let why = if ls.attempts >= self.layout.trial_attempts() {
-                reason::TRIAL_EXHAUSTED
+                Some(reason::TRIAL_EXHAUSTED)
             } else if self.head(p.slot) == Some(p) && self.verified(p.slot).is_some() {
-                return match self.append_ref(kind::BOOT_ATTEMPT, p, reason::NONE) {
-                    Ok(()) => Boot::Run(p.slot),
-                    Err(_) => Boot::Nothing,
-                };
+                if self.append_ref(kind::BOOT_ATTEMPT, p, reason::NONE).is_ok() {
+                    return Boot::Run(p.slot);
+                }
+                None
             } else {
-                reason::HASH_MISMATCH
+                Some(reason::HASH_MISMATCH)
             };
-            if let Some(c) = ls.confirmed {
+            if let (Some(why), Some(c)) = (why, ls.confirmed) {
                 let back = SlotRef { slot: c.slot, ..p };
                 let _ = self.append_ref(kind::ROLLBACK, back, why);
             }
@@ -697,7 +715,8 @@ impl SlotStore for SimStore {
         let heads: Vec<_> = (0..self.layout.slots.len() as u8)
             .map(|s| self.head(s))
             .collect();
-        let mut st = ls.status(&heads, ls.active(), gen);
+        let running = self.running.load(Ordering::Relaxed);
+        let mut st = ls.status(&heads, running, gen);
         if let Some(f) = self.head(2) {
             st.slots[2] = SlotInfo {
                 state: SlotState::Written,

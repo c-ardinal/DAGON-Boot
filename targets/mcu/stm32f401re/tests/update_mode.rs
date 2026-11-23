@@ -43,9 +43,15 @@ fn verifier() -> Ed25519Small {
 /// The boot core's session in update mode, over `f`; `None` when the log
 /// does not load.
 fn session(f: &Cut) -> Option<Agent<KindSStore<Cut>, Chain, Ed25519Small, BootCore>> {
-    let store = KindSStore::load(f.clone(), &LOG, SLOTS, &ERASE_REGIONS)
-        .ok()?
-        .with_cores(&CORE_SLOTS, true);
+    let store = KindSStore::load(
+        f.clone(),
+        &LOG,
+        SLOTS,
+        &ERASE_REGIONS,
+        dagon_format::statelog::slot::NONE,
+    )
+    .ok()?
+    .with_cores(&CORE_SLOTS, true);
     let cfg = Config {
         mcu_id: MCU_ID,
         port_kind: port_kind::SELF_BOOT,

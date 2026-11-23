@@ -28,23 +28,32 @@ pub struct AppStore {
     pub(crate) task: usize,
     /// The erase regions the board returns (`BoardDef::ERASE_REGIONS`).
     pub(crate) regions: &'static [EraseRegion],
+    /// The APP slot the caller runs from (`slot::NONE`: no app runs).
+    pub(crate) running: u8,
 }
 
 impl AppStore {
     /// The slot store over `flash`, this MCU's flash driver. A long erase
     /// reports its progress to guard task `task` of `watch`; erases are
-    /// planned over `regions` (`BoardDef::ERASE_REGIONS`).
+    /// planned over `regions` (`BoardDef::ERASE_REGIONS`). `running`: the
+    /// APP slot the caller runs from, STATUS's active one (the app's own
+    /// link slot, [`ACTIVE`]; `slot::NONE` in the boot core, where no app
+    /// runs). The log cannot tell it: a boot core that could not append
+    /// its BOOT_ATTEMPT starts the confirmed slot with the trial the log
+    /// names left open.
     pub fn new(
         flash: SharedFlash,
         watch: &'static dyn Watch,
         task: usize,
         regions: &'static [EraseRegion],
+        running: u8,
     ) -> Self {
         AppStore {
             flash,
             watch,
             task,
             regions,
+            running,
         }
     }
 }
@@ -96,7 +105,7 @@ impl SlotStore for AppStore {
         let (state, generation) = Log::load(&mut self.flash, &APP_LOG_LAYOUT)
             .map_or((Default::default(), 0), |l| (l.state, l.generation));
         let heads = self.heads(target::APP, &StatusResp::default().slots);
-        state.status(&heads, ACTIVE, generation)
+        state.status(&heads, self.running, generation)
     }
 
     /// No boot core capacity while the trial cell does not hold: stage0

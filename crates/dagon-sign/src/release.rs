@@ -1,5 +1,7 @@
 //! `dagon release`: release checks, signed manifest and `.dgb` bundle with
-//! the topology canonical binary as the `dest = TOPOLOGY` item.
+//! the topology canonical binary as the `dest = TOPOLOGY` item, and the
+//! definition facts not checked against their source that its nodes are
+//! built with.
 
 use std::fmt;
 
@@ -7,7 +9,7 @@ use dagon_format::bundle::{self, dest, BundleItem, NO_ENTRY};
 use dagon_format::header::{image_kind, target_tag, ImageHeader, HEADER_SIZE};
 use dagon_format::manifest::{self, entry_flags, ManifestEntry, ManifestFields};
 use dagon_format::{crc32, header, key_id, sha256};
-use dagon_topology::defs::Registry;
+use dagon_topology::defs::{OpenFact, Registry};
 use dagon_topology::schema::{Constraint, Role, Topology};
 use ed25519_compact::KeyPair;
 
@@ -26,6 +28,46 @@ pub struct ReleaseItem<'a> {
 pub struct Release {
     pub manifest: Vec<u8>,
     pub bundle: Vec<u8>,
+    /// The facts not checked against their source that the release's
+    /// nodes are built with, in update order: what a release reports, and
+    /// what [`Release::require_checked_facts`] refuses.
+    pub open_facts: Vec<NodeFact>,
+}
+
+/// A fact not checked against its source in the definition a node of a
+/// release is built from ([`McuDef::open_facts_on`](dagon_topology::defs::McuDef::open_facts_on)).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NodeFact {
+    pub node: String,
+    pub mcu: String,
+    pub fact: OpenFact,
+}
+
+impl fmt::Display for NodeFact {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "node '{}' ({}): {}", self.node, self.mcu, self.fact)
+    }
+}
+
+impl Release {
+    /// RB-06: refuses the release while a node is built with a fact not
+    /// checked against its source (a value its definition marks
+    /// `{ unverified = N }` or `"unmeasured"`).
+    pub fn require_checked_facts(&self) -> Result<(), ReleaseError> {
+        if self.open_facts.is_empty() {
+            return Ok(());
+        }
+        let list: Vec<String> = self.open_facts.iter().map(|f| f.to_string()).collect();
+        Err(fail(
+            "RB-06",
+            "R-FACT",
+            format!(
+                "{} fact(s) not checked against their source: {}",
+                list.len(),
+                list.join("; ")
+            ),
+        ))
+    }
 }
 
 /// A failed release check: check ID, error code and what failed.
@@ -132,6 +174,7 @@ pub fn assemble(
     Ok(Release {
         manifest: man,
         bundle: out,
+        open_facts: Vec::new(),
     })
 }
 
@@ -195,7 +238,30 @@ pub fn build(
             },
         })
         .collect();
-    assemble(name, release_seq, &items, topology_bin, key)
+    let mut release = assemble(name, release_seq, &items, topology_bin, key)?;
+    release.open_facts = open_facts(reg, t, &placed);
+    Ok(release)
+}
+
+/// The open facts of each node `placed` holds an image for, in `placed` order.
+fn open_facts(reg: &Registry, t: &Topology, placed: &[Placed<'_>]) -> Vec<NodeFact> {
+    let mut nodes: Vec<usize> = placed.iter().map(|p| p.node).collect();
+    nodes.dedup();
+    nodes
+        .into_iter()
+        .flat_map(|i| {
+            let n = &t.nodes[i];
+            let facts = reg
+                .mcu(&n.mcu)
+                .map(|m| m.open_facts_on(reg.node_board(n)))
+                .unwrap_or_default();
+            facts.into_iter().map(|fact| NodeFact {
+                node: n.id.clone(),
+                mcu: n.mcu.clone(),
+                fact,
+            })
+        })
+        .collect()
 }
 
 /// RB-01 (signature, key), RB-02 (node match), RB-03 (slot budget), RB-04.

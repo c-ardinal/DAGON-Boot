@@ -741,6 +741,44 @@ fn board_flash_merges_as_a_table_and_a_new_part_brings_its_whole_table() {
 }
 
 #[test]
+fn open_facts_are_the_execution_facts_not_checked_on_the_nodes_flash() {
+    let mcu = "[mcu_override.esp32s3.execution]\nmasked_max_us = \"unmeasured\"\n\
+               [[mcu_override.esp32s3.execution.erase_regions]]\nstart = 0x0\n\
+               unit_max_ms = { unverified = 450 }\n";
+    let r = load("open", mcu).unwrap();
+    let m = r.mcu("esp32s3").unwrap();
+    let open = |key: &str, value| OpenFact {
+        key: key.into(),
+        value,
+    };
+    assert_eq!(
+        m.open_facts_on(None),
+        [
+            open("execution.masked_max_us", None),
+            open("execution.erase_regions[0].unit_max_ms", Some(450)),
+        ]
+    );
+    // A board with its own [flash] replaces the MCU's erase times.
+    let flash = "[board_override.m5stopwatch.flash]\npart = \"W25Q128JV\"\n\
+                 erase_regions = [{ start = 0x0, len = 0x100_0000, unit = 0x1000, unit_max_ms = 400 }]\n";
+    let r = load("open-board", &format!("{mcu}{flash}")).unwrap();
+    let m = r.mcu("esp32s3").unwrap();
+    let b = r.board("m5stopwatch");
+    assert_eq!(m.open_facts_on(b), [open("execution.masked_max_us", None)]);
+    let r = load(
+        "open-none",
+        "[mcu_override.esp32s3.execution]\nmasked_max_us = 20\n\
+         [[mcu_override.esp32s3.execution.erase_regions]]\nstart = 0x0\nunit_max_ms = 450\n",
+    )
+    .unwrap();
+    assert_eq!(r.mcu("esp32s3").unwrap().open_facts_on(None), []);
+    assert_eq!(
+        open("k", None).to_string() + " / " + &open("k", Some(5)).to_string(),
+        "k is unmeasured / k = 5 is not checked against its source"
+    );
+}
+
+#[test]
 fn the_merged_text_is_what_the_registry_stores_parses_and_sends() {
     let r = load(
         "text",

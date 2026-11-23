@@ -6,7 +6,7 @@
 
 use serde::Deserialize;
 
-use super::{McuDef, Region};
+use super::{BoardDef, McuDef, Region};
 
 /// The longest `masked_max_us` a definition may declare.
 pub const MASKED_MAX_US_LIMIT: u32 = 1_000;
@@ -68,6 +68,63 @@ impl<T: Copy> Fact<T> {
     /// The value is checked against its source.
     pub fn is_known(self) -> bool {
         matches!(self, Fact::Known(_))
+    }
+}
+
+/// A fact firmware is built with that is not checked against its source:
+/// where the definition states it and the value used (`None` while
+/// unmeasured).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OpenFact {
+    pub key: String,
+    pub value: Option<u32>,
+}
+
+impl std::fmt::Display for OpenFact {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.value {
+            Some(v) => write!(f, "{} = {v} is not checked against its source", self.key),
+            None => write!(f, "{} is unmeasured", self.key),
+        }
+    }
+}
+
+impl McuDef {
+    /// The `[execution]` facts firmware for this MCU on `board` is built
+    /// with that are not checked against their source: the masking budget
+    /// and every effective erase time (the board's `[flash]` when it has
+    /// one). They are what the MCU package's `MASKED_MAX_US_KNOWN` and
+    /// `ERASE_UNIT_MAX_MS_KNOWN` say; empty without `[execution]`.
+    pub fn open_facts_on(&self, board: Option<&BoardDef>) -> Vec<OpenFact> {
+        let mut out = Vec::new();
+        let mut note = |key: String, f: Fact| {
+            if !f.is_known() {
+                out.push(OpenFact {
+                    key,
+                    value: f.value(),
+                });
+            }
+        };
+        if let Some(e) = &self.execution {
+            note("execution.masked_max_us".into(), e.masked_max_us);
+        }
+        let flash = board.and_then(|b| Some((b.id.as_str(), b.flash.as_ref()?)));
+        let (key, regions) = match flash {
+            Some((id, f)) => (
+                format!("board {id} flash.erase_regions"),
+                &f.erase_regions[..],
+            ),
+            None => (
+                "execution.erase_regions".into(),
+                self.execution
+                    .as_ref()
+                    .map_or(&[][..], |e| e.erase_regions.as_slice()),
+            ),
+        };
+        for (i, r) in regions.iter().enumerate() {
+            note(format!("{key}[{i}].unit_max_ms"), r.unit_max_ms);
+        }
+        out
     }
 }
 

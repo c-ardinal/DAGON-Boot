@@ -169,7 +169,7 @@ fn check_inline_verifies_the_signature() {
     let mut m = Mem(vec![0xFF; 0x1000]);
     m.write(0, &h.to_bytes()).unwrap();
     m.write(0x200, &body).unwrap();
-    let slot = (0, 0x1000);
+    let slot = dagon_core::boot::Place::inline(0, 0x1000);
     let (mine, theirs) = (Ed25519Small::new(*signer.pk), Ed25519Small::new(*other.pk));
     assert_eq!(check_inline(&mut m, slot, 0, (None, &mine), 2), Ok(0x200));
     assert!(matches!(
@@ -414,4 +414,172 @@ fn one_log_holds_both_targets_through_compaction() {
     assert_eq!(back.state.pending, Some(ab));
     assert_eq!(back.state.confirmed, Some(aa));
     assert_eq!(back, log);
+}
+
+mod hand_off {
+    use dagon_core::bootcore::{
+        app_result, hand_off, result, take_request, trial_cell, tried, HandOff, Refusal, CLEARED,
+        START_APP,
+    };
+    use std::cell::Cell as C;
+
+    /// A two-word cell; `stuck` keeps it from taking writes.
+    struct Words {
+        v: C<[u32; 2]>,
+        stuck: bool,
+        stores: C<u8>,
+    }
+
+    impl Words {
+        fn new(v: [u32; 2]) -> Self {
+            Words {
+                v: C::new(v),
+                stuck: false,
+                stores: C::new(0),
+            }
+        }
+        fn take(&self) -> bool {
+            take_request(
+                || self.v.get(),
+                |i, w| {
+                    self.stores.set(self.stores.get() + 1);
+                    if !self.stuck {
+                        let mut v = self.v.get();
+                        v[i] = w;
+                        self.v.set(v);
+                    }
+                },
+            )
+        }
+    }
+
+    #[test]
+    fn stage0_takes_a_whole_request_once_and_clears_it() {
+        let w = Words::new(START_APP);
+        assert!(w.take());
+        assert_eq!(w.v.get(), CLEARED);
+        assert!(!w.take(), "taken once");
+    }
+
+    #[test]
+    fn half_a_request_is_none_and_is_left_alone() {
+        // A reset after the boot core's first store, or after stage0's
+        // first clearing store.
+        for cut in [[START_APP[0], 0], [0, START_APP[1]]] {
+            let w = Words::new(cut);
+            assert!(!w.take(), "{cut:x?}");
+            assert_eq!(w.v.get(), cut);
+            assert_eq!(w.stores.get(), 0);
+        }
+    }
+
+    #[test]
+    fn a_cell_that_takes_no_write_runs_no_decision() {
+        let w = Words {
+            stuck: true,
+            ..Words::new(START_APP)
+        };
+        assert!(!w.take());
+        assert!(!w.take());
+    }
+
+    #[test]
+    fn the_boot_core_stays_on_a_result_from_either_word_and_asks_otherwise() {
+        for r in [Refusal::NoImage, Refusal::Rejected] {
+            let v = app_result(r);
+            assert_eq!(hand_off(v), HandOff::Stay(r));
+            assert_eq!(hand_off([v[0], 0]), HandOff::Stay(r));
+            assert_eq!(hand_off([0, v[1]]), HandOff::Stay(r));
+            // A result with a flipped code check is none.
+            assert_eq!(result([v[0] ^ 1, v[1] ^ 1]), None);
+        }
+        assert_eq!(hand_off(CLEARED), HandOff::Request);
+        assert_eq!(hand_off(START_APP), HandOff::Request);
+        let p = super::r(0, 1);
+        assert_eq!(hand_off(trial_cell(&p, 2)), HandOff::Request);
+    }
+
+    #[test]
+    fn requests_and_results_count_no_trial_start() {
+        let p = super::r(0, 1);
+        assert_eq!(tried(START_APP, &p), 0);
+        assert_eq!(tried(app_result(Refusal::NoImage), &p), 0);
+        assert_eq!(tried(app_result(Refusal::Rejected), &p), 0);
+        assert!(!Words::new(trial_cell(&p, 1)).take());
+    }
+}
+
+/// A boot core whose MCU definition detaches its header: stage0 reads the
+/// header from its own sector and hashes the body where the definition
+/// puts it, and refuses a header made for another placement or linked
+/// for another body.
+#[test]
+fn check_inline_takes_a_detached_header_where_the_definition_puts_it() {
+    use dagon_core::boot::Place;
+    use dagon_core::bootcore::{check_inline, CoreFail};
+    use dagon_ed25519::Ed25519Small;
+    use dagon_format::header::*;
+    use ed25519_compact::{KeyPair, Seed};
+    let kp = KeyPair::from_seed(Seed::new([3; 32]));
+    let body = vec![9u8; 700];
+    // Body at 0x1000 (the whole region), header in the sector at 0x3000.
+    let place = Place::detached(0x3000, 0x1000, 0x2000);
+    let signed = |f: &dyn Fn(&mut ImageHeader)| {
+        let mut h = ImageHeader {
+            image_kind: image_kind::BOOTCORE,
+            port_kind: port_kind::SELF_BOOT,
+            mcu_id: 2,
+            slot_binding: 0,
+            placement: placement::DETACHED,
+            load_addr: 0x1000,
+            payload_size: body.len() as u32,
+            version: Version::new(1, 0, 0),
+            build_flags: build_flags::VERIFY_ENFORCED,
+            release_seq: 1,
+            min_bootcore_version: Version::default(),
+            payload_sha256: dagon_format::sha256(&body),
+            key_id: dagon_format::key_id(&kp.pk),
+            target_tag: [0; 16],
+            proto_version: 1,
+            capabilities: capabilities::SIG_VERIFIER,
+            signature: [0; 64],
+        };
+        f(&mut h);
+        let msg = [SIGN_DOMAIN, &h.to_bytes()[..SIGNED_LEN]].concat();
+        h.signature = *kp.sk.sign(msg, None);
+        let mut m = Mem(vec![0xFF; 0x4000]);
+        m.write(0x3000, &h.to_bytes()).unwrap();
+        m.write(0x1000, &body).unwrap();
+        m
+    };
+    let v = Ed25519Small::new(*kp.pk);
+    let check = |mut m: Mem| check_inline(&mut m, place, 0, (None, &v), 2);
+    assert_eq!(check(signed(&|_| {})), Ok(0x1000));
+    // The same image read as if its header were inline: no header there.
+    let mut m = signed(&|_| {});
+    assert_eq!(
+        check_inline(&mut m, Place::inline(0x1000, 0x3000), 0, (None, &v), 2),
+        Err(CoreFail::Header)
+    );
+    for (what, f) in [
+        (
+            "made inline",
+            &(|h: &mut ImageHeader| h.placement = placement::INLINE) as &dyn Fn(&mut ImageHeader),
+        ),
+        ("linked past its header", &|h: &mut ImageHeader| {
+            h.load_addr = 0x1200
+        }),
+    ] {
+        assert_eq!(check(signed(f)), Err(CoreFail::LoadAddr), "{what}");
+    }
+    // The body fills the region (no header room taken from it).
+    let mut big = signed(&|h| h.payload_size = 0x2000);
+    assert_eq!(
+        check_inline(&mut big, place, 0, (None, &v), 2),
+        Err(CoreFail::Body)
+    );
+    assert_eq!(
+        check(signed(&|h| h.payload_size = 0x2001)),
+        Err(CoreFail::Size)
+    );
 }

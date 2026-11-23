@@ -2,7 +2,7 @@
 //! boot tests run on (shared by dagon-core's and dagon-boot's tests).
 #![allow(dead_code, unused_imports)]
 
-pub use dagon_core::boot::{decide, BootConfig, Decision, SlotLayout};
+pub use dagon_core::boot::{decide, BootConfig, Decision, Place, SlotLayout};
 pub use dagon_core::log::{Log, LogError, LogLayout, SlotRef};
 pub use dagon_format::header::*;
 pub use dagon_format::statelog::{kind, reason, target, FaceHeader, Record};
@@ -22,7 +22,10 @@ pub const LOG: LogLayout = LogLayout {
     face_len: 0x4000,
 };
 pub const SLOTS: SlotLayout = SlotLayout {
-    slots: &[(0x0802_0000, 0x2_0000), (0x0804_0000, 0x2_0000)],
+    slots: &[
+        Place::inline(0x0802_0000, 0x2_0000),
+        Place::inline(0x0804_0000, 0x2_0000),
+    ],
 };
 pub const A: u8 = 0;
 pub const B: u8 = 1;
@@ -94,11 +97,7 @@ pub fn verifier() -> dagon_ed25519::Ed25519Compact {
 
 /// Signed image for `slot`; returns (header, body).
 pub fn image(slot: u8, minor: u8) -> ([u8; HEADER_SIZE], Vec<u8>) {
-    image_at(
-        slot,
-        minor,
-        SLOTS.slots[slot as usize].0 + HEADER_SIZE as u32,
-    )
+    image_at(slot, minor, SLOTS.slots[slot as usize].body)
 }
 
 pub fn image_at(slot: u8, minor: u8, load_addr: u32) -> ([u8; HEADER_SIZE], Vec<u8>) {
@@ -137,10 +136,10 @@ pub fn slot_ref(slot: u8, hdr: &[u8; HEADER_SIZE]) -> SlotRef {
 }
 
 pub fn install(m: &mut Mem, slot: u8, (hdr, body): &([u8; HEADER_SIZE], Vec<u8>)) -> SlotRef {
-    let (base, len) = SLOTS.slots[slot as usize];
-    m.erase(base, len).unwrap();
-    m.put(base, hdr);
-    m.put(base + HEADER_SIZE as u32, body);
+    let at = SLOTS.slots[slot as usize];
+    m.erase(at.header, at.room + HEADER_SIZE as u32).unwrap();
+    m.put(at.header, hdr);
+    m.put(at.body, body);
     slot_ref(slot, hdr)
 }
 
@@ -196,7 +195,7 @@ pub fn boot(m: &mut Mem) -> Decision {
 }
 
 pub fn entry(slot: u8) -> u32 {
-    SLOTS.slots[slot as usize].0 + HEADER_SIZE as u32
+    SLOTS.slots[slot as usize].body
 }
 
 pub fn state(m: &mut Mem) -> dagon_core::log::LogState {

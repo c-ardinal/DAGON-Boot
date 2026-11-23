@@ -23,10 +23,9 @@
 //! and more ([`start`]); that app writes the boot core again. It halts
 //! only when there is no such app.
 
+use crate::boot::Place;
 use crate::log::{Log, LogError, LogLayout, LogState, SlotRef};
-use dagon_format::header::{
-    header_digest16, image_kind, placement, verify_header, ImageHeader, HEADER_SIZE,
-};
+use dagon_format::header::{header_digest16, image_kind, verify_header, ImageHeader, HEADER_SIZE};
 use dagon_format::statelog::{
     kind, reason, target, FaceHeader, Record, FACE_HEADER_SIZE, RECORD_SIZE,
 };
@@ -167,6 +166,92 @@ pub fn cell_holds(read: impl Fn() -> [u32; 2], mut write: impl FnMut(usize, u32)
     probe_held && read() == was
 }
 
+/// The app hand-off through the cell, for a stage0 that starts the app
+/// itself (an MCU whose running boot core cannot map the app over its
+/// own image, so the boot core asks by reset). The cell holds one tagged
+/// value at a time: a trial count (tag `0xB7`), the boot core's
+/// [`START_APP`] request (`0xB8`) or stage0's [`app_result`] (`0xB9`).
+/// The boot core settles its own trial first, then writes the request and
+/// resets; stage0 takes it ([`take_request`]) before choosing a boot core
+/// and runs the app decision once; when that starts no app, it writes the
+/// result and starts the confirmed boot core, which reads it
+/// ([`hand_off`]), clears the cell and stays in recovery mode.
+///
+/// A request counts only when both words hold it, and stage0 clears word 0
+/// first: a reset inside either the write or the take leaves no request,
+/// so a request makes the decision run at most once and an unfinished
+/// write runs none (the boot core asks again at its next start). A result
+/// counts when either word holds it: it only keeps the boot core from
+/// asking, and a result lost to a reset costs one more decision.
+const REQUEST: u32 = 0xB8C3_3C5A;
+
+/// The boot core's request: stage0 runs the app decision once.
+pub const START_APP: [u32; 2] = [REQUEST, REQUEST];
+
+/// Marks a result word.
+const RESULT_TAG: u32 = 0xB9 << 24;
+
+/// Why stage0's app decision started no app.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
+pub enum Refusal {
+    /// The log names no app to start.
+    NoImage = 1,
+    /// The app the log names did not pass its checks.
+    Rejected = 2,
+}
+
+/// The cell stage0 leaves for the confirmed boot core when its decision
+/// started no app: the same self-checking word twice, the code and its
+/// complement in the low byte.
+pub const fn app_result(r: Refusal) -> [u32; 2] {
+    let c = r as u32;
+    let w = RESULT_TAG | 0x5A << 16 | 0xA5 << 8 | c << 4 | (!c & 0xF);
+    [w, w]
+}
+
+/// The result the cell holds, from either word.
+pub fn result(cell: [u32; 2]) -> Option<Refusal> {
+    [Refusal::NoImage, Refusal::Rejected]
+        .into_iter()
+        .find(|&r| cell.contains(&app_result(r)[0]))
+}
+
+/// What the boot core does once its trial is settled and it would start
+/// the app.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HandOff {
+    /// Write [`START_APP`] (word 0, then word 1) and reset.
+    Request,
+    /// Stage0's decision started no app: clear the cell and stay in
+    /// recovery mode until an image or the log's choice changes.
+    Stay(Refusal),
+}
+
+/// The boot core's hand-off from the cell it read at start.
+pub fn hand_off(cell: [u32; 2]) -> HandOff {
+    match result(cell) {
+        Some(r) => HandOff::Stay(r),
+        None => HandOff::Request,
+    }
+}
+
+/// Stage0 takes the boot core's request, before it chooses a boot core:
+/// when both words hold [`START_APP`] it clears the cell, word 0 first,
+/// one `write(index, word)` each, and runs the app decision (`true`) only
+/// when the cell then reads cleared, so a cell that does not hold what is
+/// written never runs it at every reset.
+pub fn take_request(read: impl Fn() -> [u32; 2], mut write: impl FnMut(usize, u32)) -> bool {
+    if read() != START_APP {
+        return false;
+    }
+    CLEARED
+        .into_iter()
+        .enumerate()
+        .for_each(|(i, w)| write(i, w));
+    read() == CLEARED
+}
+
 /// The boot core records of the log at `layout`, folded as [`Log::load`]
 /// folds them (newest valid face, records up to the first erased or
 /// corrupt one), without the writer's state: the part of `Log` a stage0
@@ -218,7 +303,8 @@ pub enum CoreFail {
     Size = 3,
     /// Not a boot core for this MCU bound to this slot.
     Kind = 4,
-    /// `load_addr` is not this slot's body.
+    /// `load_addr` is not this slot's body, or the header is placed
+    /// otherwise than the slot.
     LoadAddr = 5,
     /// Body digest differs from the header's.
     Body = 6,
@@ -236,8 +322,8 @@ impl CoreFail {
     }
 }
 
-/// Stage0's check of the boot core in the slot at `base` (`size` bytes,
-/// header inline at the start) as slot `slot`: its header parses and its
+/// Stage0's check of the boot core at `at` (its header inline or
+/// detached, as the MCU definition places it) as slot `slot`: its header parses and its
 /// signature verifies under `verifier` (stage0's, holding the key at the
 /// place its MCU definition names), it is the header `expect` names (when a
 /// record names one), it is a boot core for MCU `mcu_id` bound to this
@@ -245,7 +331,7 @@ impl CoreFail {
 /// header's digest. Returns the body address.
 pub fn check_inline<F: Flash, V: SigVerifier + ?Sized>(
     flash: &mut F,
-    at: (u32, u32),
+    at: Place,
     slot: u8,
     (expect, verifier): (Option<&SlotRef>, &V),
     mcu_id: u16,
@@ -258,13 +344,15 @@ pub fn check_inline<F: Flash, V: SigVerifier + ?Sized>(
 /// body address and the header.
 fn check_signed<F: Flash, V: SigVerifier + ?Sized>(
     flash: &mut F,
-    (base, size): (u32, u32),
+    at: Place,
     slot: u8,
     (expect, verifier): (Option<&SlotRef>, &V),
     (kind, mcu_id): (u8, u16),
 ) -> Result<(u32, ImageHeader), CoreFail> {
     let mut raw = [0u8; HEADER_SIZE];
-    flash.read(base, &mut raw).map_err(|_| CoreFail::Header)?;
+    flash
+        .read(at.header, &mut raw)
+        .map_err(|_| CoreFail::Header)?;
     // Parsed first, so a slot holding no core reads as one, not as a
     // signature that does not verify.
     ImageHeader::parse(&raw).map_err(|_| CoreFail::Header)?;
@@ -272,14 +360,14 @@ fn check_signed<F: Flash, V: SigVerifier + ?Sized>(
     if expect.is_some_and(|r| r.digest16 != header_digest16(&raw)) {
         return Err(CoreFail::Digest);
     }
-    let body = base + HEADER_SIZE as u32;
-    if h.payload_size > size - HEADER_SIZE as u32 {
+    let body = at.body;
+    if h.payload_size > at.room {
         return Err(CoreFail::Size);
     }
     if h.image_kind != kind || h.mcu_id != mcu_id || h.slot_binding != slot {
         return Err(CoreFail::Kind);
     }
-    if h.load_addr != body {
+    if h.load_addr != body || h.placement != at.placement {
         return Err(CoreFail::LoadAddr);
     }
     let mut sha = Sha256::new();
@@ -429,18 +517,18 @@ pub fn blink_code(
 }
 
 /// What stage0 knows of its MCU: the boot core log, the boot core slots
-/// (`(base, size)`, slot A first), the starts a pending core gets
+/// ([`Place`], slot A first), the starts a pending core gets
 /// (`trial_attempts`) and the MCU id a core's header names.
 #[derive(Clone, Copy, Debug)]
 pub struct Stage0<'a> {
     pub log: &'a LogLayout,
-    pub slots: &'a [(u32, u32)],
+    pub slots: &'a [Place],
     pub max: u8,
     pub mcu_id: u16,
 }
 
 /// The apps stage0 may start when no boot core may ([`start`]): the log
-/// holding the APP records, the APP slots (`(base, size)`, slot A first),
+/// holding the APP records, the APP slots ([`Place`], slot A first),
 /// the node's image target tag ([`NO_TAG`]: none, so no app starts), and
 /// how an app's entry point is read from
 /// the first 8 bytes of its body at the body's address (`entry(head,
@@ -448,7 +536,7 @@ pub struct Stage0<'a> {
 #[derive(Clone, Copy, Debug)]
 pub struct Apps<'a> {
     pub log: &'a LogLayout,
-    pub slots: &'a [(u32, u32)],
+    pub slots: &'a [Place],
     pub target_tag: [u8; 16],
     pub entry: fn([u8; 8], u32) -> u32,
 }
@@ -541,7 +629,7 @@ fn core_choice<F: Flash, V: SigVerifier + ?Sized>(
 /// core's checks under `verifier` (the record's header digest, the
 /// signature, an APP for MCU `mcu_id` bound to its slot, linked for its
 /// body and fitting the slot, the body's SHA-256), is built for this
-/// node's tag and inline, and its entry point lies inside its body. Its
+/// node's tag and made for its place, and its entry point lies inside its body. Its
 /// slot and body address; `None` when there is no such app.
 pub fn confirmed_app<F: Flash, V: SigVerifier + ?Sized>(
     flash: &mut F,
@@ -562,7 +650,7 @@ pub fn confirmed_app<F: Flash, V: SigVerifier + ?Sized>(
     let entry = (apps.entry)(head, body);
     let inside = entry >= body && entry - body < h.payload_size;
     let tagged = apps.target_tag != NO_TAG && h.target_tag == apps.target_tag;
-    (inside && tagged && h.placement == placement::INLINE).then_some((c.slot, body))
+    (inside && tagged).then_some((c.slot, body))
 }
 
 /// The trial cell as the boot core sees it at start.

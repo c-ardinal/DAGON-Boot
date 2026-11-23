@@ -15,7 +15,10 @@ use dagon_core::bootcore::{
 };
 use dagon_ed25519::Ed25519Small;
 
-const CORE_SLOTS: [(u32, u32); 2] = [(0x0802_0000, 0x2_0000), (0x0804_0000, 0x2_0000)];
+const CORE_SLOTS: [Place; 2] = [
+    Place::inline(0x0802_0000, 0x2_0000),
+    Place::inline(0x0804_0000, 0x2_0000),
+];
 const MAX: u8 = 3;
 const AT: Stage0<'static> = Stage0 {
     log: &LOG,
@@ -53,7 +56,7 @@ fn core(slot: u8, minor: u8, sig: Sig) -> ([u8; HEADER_SIZE], Vec<u8>) {
         mcu_id: mcu_id::STM32F401XE,
         slot_binding: slot,
         placement: placement::INLINE,
-        load_addr: CORE_SLOTS[usize::from(slot)].0 + HEADER_SIZE as u32,
+        load_addr: CORE_SLOTS[usize::from(slot)].body,
         payload_size: body.len() as u32,
         version: Version::new(1, minor, 0),
         build_flags: build_flags::VERIFY_ENFORCED,
@@ -75,7 +78,7 @@ fn core(slot: u8, minor: u8, sig: Sig) -> ([u8; HEADER_SIZE], Vec<u8>) {
 
 fn put_core(m: &mut Mem, slot: u8, minor: u8, sig: Sig) -> SlotRef {
     let (hdr, body) = core(slot, minor, sig);
-    let base = CORE_SLOTS[usize::from(slot)].0;
+    let base = CORE_SLOTS[usize::from(slot)].header;
     m.put(base, &hdr);
     m.put(base + HEADER_SIZE as u32, &body);
     slot_ref(slot, &hdr)
@@ -135,7 +138,7 @@ fn only_valid_starts(chosen: Chosen, sig: Sig, (slot, trial): (u8, bool), why: C
     match (sig, chosen) {
         (Sig::Valid, Ok(s)) => {
             assert_eq!((s.slot, s.trial), (slot, trial));
-            assert_eq!(s.body, CORE_SLOTS[usize::from(slot)].0 + HEADER_SIZE as u32);
+            assert_eq!(s.body, CORE_SLOTS[usize::from(slot)].body);
         }
         (Sig::Valid, Err(e)) => panic!("a validly signed core did not start: {e:?}"),
         (_, Ok(s)) => panic!("a {sig:?} core started: {s:?}"),

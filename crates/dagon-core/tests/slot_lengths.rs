@@ -4,16 +4,23 @@
 mod bench;
 
 use bench::*;
+use dagon_core::boot::Place;
 
 /// Slot A as on the bench; slot B just long enough for the bench image's
 /// 2048-byte body after its header.
 const ROOMY_B: SlotLayout = SlotLayout {
-    slots: &[(0x0802_0000, 0x2_0000), (0x0804_0000, 0xA00)],
+    slots: &[
+        Place::inline(0x0802_0000, 0x2_0000),
+        Place::inline(0x0804_0000, 0xA00),
+    ],
 };
 
 /// Slot B four bytes too short for that body; slot A unchanged.
 const TIGHT_B: SlotLayout = SlotLayout {
-    slots: &[(0x0802_0000, 0x2_0000), (0x0804_0000, 0x9FC)],
+    slots: &[
+        Place::inline(0x0802_0000, 0x2_0000),
+        Place::inline(0x0804_0000, 0x9FC),
+    ],
 };
 
 fn boot_with(m: &mut Mem, slots: &SlotLayout) -> Decision {

@@ -22,6 +22,8 @@ connected; a DAGON project for it (`topology.yaml` as
   `<release>`); `selftest` checks the plan reader against it. DAGON's own
   test of that plan is `the_plan_names_the_package_and_each_node_s_old_and_new_version`
   (`cargo test -p dagon-cli -- the_plan_names --nocapture` prints it).
+- `measure.py`: the measurements the firmware has a measuring build for
+  (see Measurements); `test_measure.py` its tests without hardware.
 
 ## Usage
 
@@ -104,7 +106,8 @@ three times; each boot core with a release, for seg and the coordinator (`core-s
 `core-hub`): raised, it goes to the idle slot and is confirmed; raised again,
 back to the other slot; a failing one goes back to the confirmed slot and the
 node still answers, all read from `dagon status`' versions lines; F401 ROM
-write (SKIPPED); a final good deploy.
+write (SKIPPED); the hub updating itself ten times (`hub-x10`); a final
+good deploy.
 
 Test versions are 2.0.N (the format is major.minor.patch only, no
 pre-release tags). A node's version is its crate's: before each deploy step
@@ -134,3 +137,75 @@ crates from this DAGON: run `dagon gen` first.
   confirmation.
 - Interrupting by resetting the coordinator: the CLI has no command that resets the
   coordinator on its own; the interrupt is the CLI killed mid-transfer.
+
+## The hub seen again after it updates itself
+
+An RP2040 hub reboots by its watchdog after each update; the PC must see it
+again, without replugging, for the update to reach confirm. `hub-x10`
+updates the hub alone ten times; each step passes only when the hub is back
+and confirmed on the new version. Run it twice: with the hub behind a USB
+hub, then plugged directly into the PC.
+
+```sh
+python samples/hardware-test/hwt.py run ... --only hub-x10 --out <log dir>   # through a USB hub
+python samples/hardware-test/hwt.py run ... --only hub-x10 --out <log dir>   # directly
+```
+
+Both `results.json` show `hub-x10` PASS (20 of 20 updates confirmed). Turn
+off Windows' USB selective suspend for the run, so a suspended port is not
+mistaken for the node's fault. If a step stays unseen, before replugging
+note what USBView shows for the port, then try Device Manager's "Scan for
+hardware changes", and record which one brought the hub back.
+
+To tell where a lost reconnect comes from, the same three restarts can be
+tried by hand through the USB hub on a build from before the node
+re-attaches by itself (the first parent of merge 337eeaaf): a reset by the
+RUN pin, and the restart after `dagon rollback hub`; for each, whether the
+PC sees the hub again. (A REBOOT without an update has no CLI command.)
+
+## Measurements
+
+`measure.py` takes the values the firmware has a measuring build for. It
+writes the node with that build through `dagon flash` (its plan and
+question come up as usual), reads the value, checks it against its limit,
+then writes the node's normal build back through `dagon flash` again. The
+node is erased by both writes: it comes back on its first-install state, so
+run `hwt.py` after measuring, not in between.
+
+```sh
+# stage0's signature check of the boot core (each built-in MCU with a stage0)
+python samples/hardware-test/measure.py stage0-verify --project <project> --dagon <dagon.exe> --node seg --key <secret key file> [--probe <sel>]
+python samples/hardware-test/measure.py stage0-verify --project <project> --dagon <dagon.exe> --node hub --key <secret key file> --drive <UF2 drive>
+
+# the STM32F401 boot core's listen window
+python samples/hardware-test/measure.py listen-time --project <project> --dagon <dagon.exe> --node seg --key <secret key file> [--probe <sel>]
+
+# a run stopped before it put a Cargo.toml back
+python samples/hardware-test/measure.py restore --project <project>
+
+# no hardware
+python samples/hardware-test/measure.py selftest
+```
+
+- `stage0-verify`: stage0 with `verify-time` times its check of the boot
+  core and starts no core. Through a debug probe (the node's writer is
+  probe-rs, or `--probe` is given) it reads `DAGON_VERIFY_CYCLES` and
+  `DAGON_VERIFY_COUNT` and gives the seconds at the clock the build chose
+  (`clock.rs` of the build). Without one it asks for the blink code on the
+  board's diagnostic output: the fast blinks between two dark pauses, in
+  tenths of a second, rounded up. The project must build from a DAGON clone
+  (`[dagon] path`): the feature goes into that clone's stage0 Cargo.toml.
+- `listen-time`: the boot core with `listen-time` keeps the microseconds
+  from its start to the end of the listen window in `DAGON_LISTEN_US` and
+  stays there. PASS when it is at most the node's `listen_window_ms` + 10 ms
+  (`boot/<id>/mcu.toml`, 50 when left out). The feature goes into the
+  node's boot crate (`boot/<id>/Cargo.toml`).
+
+The feature is named in the package's `default` features for the one
+write; the file is put back byte for byte afterwards, also on a failure or
+Ctrl-C (`Cargo.toml.measure-backup` holds the original until then).
+Records go to `<out>/<yyyymmdd-hhmmss>/` (default `~/dagon-measure/`):
+`steps.json` (each command, the ELF and the symbol addresses, the words
+read) and `result.json` (the value, its limit, PASS / FAIL, whether the
+normal build went back). Exit code: 0 PASS, 1 FAIL with the normal build
+back, 2 the normal build could not be written back.

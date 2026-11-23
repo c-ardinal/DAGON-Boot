@@ -32,6 +32,14 @@ export interface Node {
   skip?: Skip;
 }
 
+/** A coordinator: the one place a node's role is told apart on the page. */
+export const isHub = (n: Pick<Node, 'role'>): boolean => n.role === 'hub';
+
+/** The coordinator of `c`; with `reached`, only one updating reaches (the one the page talks to). */
+export function hubIn(c: Pick<Config, 'nodes' | 'reach'> | null | undefined, reached: boolean): Node | undefined {
+  return c?.nodes.find((n) => isHub(n) && (!reached || c.reach.includes(n.id)));
+}
+
 /** What drives a coordinator through its uplink. */
 export type UplinkHost = 'pc-cli' | 'browser' | 'embedded';
 

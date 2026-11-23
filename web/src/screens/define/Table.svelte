@@ -2,6 +2,7 @@
   import { INSPECT, TABLE, WIRING } from '../../app/copy.ts';
   import type { Define } from '../../app/define/define.svelte.ts';
   import { connect, linkIndexOf } from '../../app/define/model.ts';
+  import { isHub } from '../../app/sample.ts';
 
   interface Props {
     d: Define;
@@ -52,7 +53,7 @@
               <td>{n.no}</td>
               <th scope="row">{n.name}</th>
               <td class="product" translate="no" title="{n.product} · {n.mcu}">{n.product} · {n.mcu}</td>
-              <td>{INSPECT.roles[n.role === 'hub' ? 'coordinator' : 'node']}</td>
+              <td>{INSPECT.roles[isHub(n) ? 'coordinator' : 'node']}</td>
               <td translate="no">{n.via}</td>
               <td translate="no">{[n.reset, n.boot].filter(Boolean).join(' · ')}</td>
               <td class="ops">

@@ -36,7 +36,7 @@
   import Icon from '../screens/Icon.svelte';
   import { kindLabel, LinkKind } from '../app/define/model.ts';
   import type { Live } from '../app/operate.svelte.ts';
-  import type { Config, Link, Node } from '../app/sample.ts';
+  import { hubIn, isHub, type Config, type Link, type Node } from '../app/sample.ts';
   import { imageRows } from '../app/slots.ts';
   import { versionText } from '../wasm/dagon.ts';
   import { along, CableField, FrameLoop, restPoints, runLengths, strandPath } from './cable.ts';
@@ -135,7 +135,7 @@
 
   /** Card geometry of each class (normal, compact): width and gaps, in canvas px; the zoom alone scales them. The rows stand far apart: the links' length is what lets a cable sweep and read. */
   const sizes = (compact: boolean) => (compact ? { w: 208, gapX: 20, gapY: 80 } : { w: 260, gapX: 80, gapY: 128 });
-  const nodesOf = $derived((config?.nodes ?? []).map((n) => ({ id: n.id, hub: n.role === 'hub' })));
+  const nodesOf = $derived((config?.nodes ?? []).map((n) => ({ id: n.id, hub: isHub(n) })));
   const compact = $derived(nodesOf.length >= COMPACT_FROM || view.zoom * NAME_PX < NAME_MIN_PX);
   const S = $derived(sizes(compact));
   const NODE_W = $derived(S.w);
@@ -477,18 +477,18 @@
   }
 
   /** The card's one mono line: MCU and how it is reached. */
-  const metaOf = (n: Node) => [n.mcu, n.role === 'hub' ? hubVia(n) : n.via].filter(Boolean).join(' · ');
+  const metaOf = (n: Node) => [n.mcu, isHub(n) ? hubVia(n) : n.via].filter(Boolean).join(' · ');
 
   /** Coordinators nobody links to, each with its uplink (what drives it, as the 構成 writes it) above it. */
-  const tops = $derived((config?.nodes ?? []).filter((n) => n.role === 'hub' && tree.roots.includes(n.id)));
+  const tops = $derived((config?.nodes ?? []).filter((n) => isHub(n) && tree.roots.includes(n.id)));
   /** The coordinator this page connects to: the one updating reaches (the cut's), else the first one the 構成 names. */
   const firstHub = $derived(
-    config?.nodes.find((n) => n.role === 'hub' && config.reach.includes(n.id))?.id ?? config?.nodes.find((n) => n.role === 'hub')?.id,
+    (hubIn(config, true) ?? hubIn(config, false))?.id,
   );
 
   /** The role on the card: coordinator; links from the nearest coordinator above; or ノード when no coordinator is above it. */
   function roleOf(n: Node): string {
-    if (n.role === 'hub') return NODE.roleHub;
+    if (isHub(n)) return NODE.roleHub;
     if (!underCoordinator(n.id)) return NODE.roleOther;
     const d = belowHub(n.id);
     return d <= 1 ? NODE.roleNode : d === 2 ? NODE.roleGrandchild : NODE.roleDeeper(d);
@@ -498,7 +498,7 @@
   function belowHub(id: string, seen = new Set<string>()): number {
     const up = config?.links.find((l) => l.to === id)?.from;
     const p = config?.nodes.find((x) => x.id === up);
-    if (!p || p.role === 'hub' || seen.has(id)) return 1;
+    if (!p || isHub(p) || seen.has(id)) return 1;
     seen.add(id);
     return belowHub(p.id, seen) + 1;
   }
@@ -508,7 +508,7 @@
     const up = config?.links.find((l) => l.to === id)?.from;
     const p = config?.nodes.find((x) => x.id === up);
     if (!p || seen.has(id)) return false;
-    if (p.role === 'hub') return true;
+    if (isHub(p)) return true;
     seen.add(id);
     return underCoordinator(p.id, seen);
   }
@@ -715,7 +715,7 @@
             onclick={() => !checksLocked && oncheck?.(n.id)}><Icon name={check ? 'square-check' : 'square'} size="var(--i-state)" /></button
           >
         {/if}
-        {#if n.role !== 'hub' || linked}
+        {#if !isHub(n) || linked}
           <span transition:fade|global class="port in" class:linked aria-hidden="true" style:left="{at(n.id).x + NODE_W / 2}px" style:top="{at(n.id).y}px" class:ok={wire !== null && wire.from !== n.id && reasons[n.id] === null}></span>
         {/if}
         {#if onlink && !(config?.links ?? []).some((x) => x.from === n.id)}

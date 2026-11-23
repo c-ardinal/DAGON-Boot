@@ -706,6 +706,54 @@ impl SimStore {
     }
 }
 
+impl SimStore {
+    /// Whether the MCU's boot core receives on some link (its
+    /// definition's `[boot_receive]`), so the app may hand over to it.
+    pub fn boot_core_receives(&self) -> bool {
+        simulated_mcu(self.layout.mcu)
+            .boot_receive
+            .as_ref()
+            .is_some_and(|r| r.kinds.values().any(|&on| on))
+    }
+
+    /// An UPDATE_STAY no UPDATE_DONE has consumed (`Log::request_stay`).
+    fn stay_waiting(&mut self) -> bool {
+        let (_, _, recs) = self.records();
+        recs.iter()
+            .rev()
+            .find(|r| matches!(r.kind, kind::UPDATE_STAY | kind::UPDATE_DONE))
+            .is_some_and(|r| r.kind == kind::UPDATE_STAY)
+    }
+
+    fn append_marker(&mut self, k: u8) -> Result<(), StoreError> {
+        self.append(Record {
+            kind: k,
+            target: statelog::target::APP,
+            slot: statelog::slot::NONE,
+            reason: reason::NONE,
+            seq: 0,
+            version: Version::default(),
+            digest16: [0; 16],
+        })
+    }
+
+    /// The boot core's start (`Log::take_stay`): `true` when the app
+    /// handed over, its UPDATE_STAY now consumed by an UPDATE_DONE.
+    pub fn take_stay(&mut self) -> bool {
+        self.stay_waiting() && self.append_marker(kind::UPDATE_DONE).is_ok()
+    }
+
+    /// The key the boot stages verify images under.
+    pub fn pubkey(&self) -> [u8; 32] {
+        self.pubkey
+    }
+
+    /// Whether the boot stage is there to start anything at all.
+    pub fn has_boot_core(&mut self) -> bool {
+        self.bootcore_present()
+    }
+}
+
 impl SlotStore for SimStore {
     /// The log's fold mapped by dagon-core (a record counts only while
     /// its slot holds the header it names); the factory slot, which no
@@ -796,6 +844,18 @@ impl SlotStore for SimStore {
         _: &Transition,
     ) -> Result<(), StoreError> {
         self.append(Self::log_record(kind::CONFIRMED, slot, reason::NONE, hdr))
+    }
+
+    /// UPDATE_STAY for the boot core (`Log::request_stay`; this model's
+    /// one face makes no room); a stay already waiting is left as it is.
+    fn request_update_mode(&mut self) -> Result<(), StoreError> {
+        if !self.boot_core_receives() {
+            return Err(StoreError::Unsupported);
+        }
+        if self.stay_waiting() {
+            return Ok(());
+        }
+        self.append_marker(kind::UPDATE_STAY)
     }
 
     /// The boot core log keeps room for the trials it starts (the boot

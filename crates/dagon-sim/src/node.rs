@@ -9,6 +9,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, MutexGuard};
 
 use dagon_agent::snapshot::AppSnapshot;
+use dagon_agent::update_mode::EXIT_IDLE_MS;
+use dagon_agent::writer::BootCore;
 use dagon_agent::{Agent, Config, SlotStore, StoreError};
 use dagon_ed25519::Ed25519Compact;
 use dagon_events::{
@@ -18,7 +20,7 @@ use dagon_events::{
 use dagon_format::statelog::slot;
 use dagon_port::BusError;
 use dagon_proto::mailbox::{State, STATE_LEN};
-use dagon_proto::payload::{role, SlotState, StatusResp};
+use dagon_proto::payload::{mode, role, SlotState, StatusResp};
 use dagon_proto::{finish, flags, frame_len, max_payload, Frame, Status, HEADER_LEN};
 
 /// How an image running on trial behaves (confirmed images always work).
@@ -49,6 +51,10 @@ pub enum Run {
     Held,
     /// Nothing valid to run.
     Dead,
+    /// The boot core serves its session in this HELLO mode
+    /// (`payload::mode::UPDATE`: the app handed over; `RECOVERY`: no app
+    /// to start), as `dagon_agent::update_mode::serve_in` does.
+    BootCore(u8),
     /// Power was lost; see [`SimNode::power_on`].
     Off,
 }
@@ -96,12 +102,35 @@ fn chain(check: SimCheck) -> SimChain {
     )
 }
 
+/// The boot core's layer chain: no app events, no extensions.
+type CoreChain = Composed<&'static Published<(), 4>, Nop, Nop, fn() -> u64>;
+
+/// The boot core's session over the node's store.
+type CoreAgent = Agent<SimStore, CoreChain, Ed25519Compact, BootCore>;
+
+fn core_chain() -> CoreChain {
+    let events: &'static mut Published<(), 4> = Box::leak(Box::new(Published::new()));
+    let now: fn() -> u64 = || 0;
+    compose(
+        Layer::Boot,
+        events,
+        Nop,
+        Nop,
+        Bounds::new(now, Watchdog::new(TRIAL_WDT_MS, TRIAL_WDT_MS)),
+    )
+}
+
 /// Trial watchdog period of the simulated layer (the default of
 /// [`SimNode::trial_wdt_ms`]).
 const TRIAL_WDT_MS: u32 = 10_000;
 
 pub struct SimNode {
     agent: Agent<SimStore, SimChain, Ed25519Compact>,
+    /// The boot core's session while [`Run::BootCore`] (made at its start,
+    /// gone at the next reset).
+    core: Option<CoreAgent>,
+    /// When the boot core last served a request.
+    core_served_ms: u64,
     /// What the app's display tasks read.
     events: Reader<AppSnapshot, 8>,
     /// The board's own handle on the flash the agent's store uses: its
@@ -146,6 +175,8 @@ impl SimNode {
         let mut n = SimNode {
             agent: Agent::new(cfg.clone(), Ed25519Compact::new(pubkey), store.clone(), app),
             events,
+            core: None,
+            core_served_ms: 0,
             store,
             check,
             cfg,
@@ -217,6 +248,7 @@ impl SimNode {
     /// runs. RAM state (agent session, mailbox) is lost.
     pub fn reset(&mut self, now_ms: u64) {
         self.boots += 1;
+        self.core = None;
         self.reboot_after_read = false;
         self.busy_left = 0;
         self.check.set(true);
@@ -230,10 +262,49 @@ impl SimNode {
             self.rom.restart(now_ms);
             Run::Rom
         } else {
-            self.boot_app()
+            self.start(now_ms)
         };
         // The app starts over the store as the boot core left it.
         self.agent.restart();
+    }
+
+    /// The boot core's start: update mode when the app handed over
+    /// (consuming its UPDATE_STAY), else the boot decision.
+    fn start(&mut self, now_ms: u64) -> Run {
+        if self.store.has_boot_core() && self.store.take_stay() {
+            return self.serve_core(mode::UPDATE, now_ms);
+        }
+        if !self.flash().is_powered() {
+            return Run::Off;
+        }
+        match self.boot_app() {
+            Run::Dead | Run::App(slot::NONE) if self.recovers() => {
+                self.serve_core(mode::RECOVERY, now_ms)
+            }
+            run => run,
+        }
+    }
+
+    /// Whether a boot core that receives is there to enter recovery mode
+    /// when nothing can be started.
+    fn recovers(&mut self) -> bool {
+        self.store.boot_core_receives() && self.store.has_boot_core()
+    }
+
+    fn serve_core(&mut self, in_mode: u8, now_ms: u64) -> Run {
+        let cfg = Config {
+            mode: in_mode,
+            ..self.cfg.clone()
+        };
+        let verifier = Ed25519Compact::new(self.store.pubkey());
+        self.core = Some(Agent::for_writer(
+            cfg,
+            verifier,
+            self.store.clone(),
+            core_chain(),
+        ));
+        self.core_served_ms = now_ms;
+        Run::BootCore(in_mode)
     }
 
     fn boot_app(&mut self) -> Run {
@@ -302,6 +373,12 @@ impl SimNode {
             self.run = Run::Off;
             return;
         }
+        if self.run == Run::BootCore(mode::UPDATE)
+            && now_ms.saturating_sub(self.core_served_ms) >= u64::from(EXIT_IDLE_MS)
+        {
+            self.reset(now_ms);
+            return;
+        }
         if !matches!(self.run, Run::App(_)) || !self.on_trial {
             return;
         }
@@ -334,7 +411,17 @@ impl SimNode {
 
     /// Whether the application answers on its link right now.
     pub fn responsive(&self) -> bool {
-        matches!(self.run, Run::App(_)) && !(self.on_trial && self.trial_app == TrialApp::Silent)
+        match self.run {
+            Run::App(_) => !(self.on_trial && self.trial_app == TrialApp::Silent),
+            Run::BootCore(_) => true,
+            _ => false,
+        }
+    }
+
+    /// Whether its boot core serves (update or recovery mode): no app runs,
+    /// so nothing is relayed.
+    pub fn in_boot_core(&self) -> bool {
+        matches!(self.run, Run::BootCore(_))
     }
 
     /// One request, one response, no reboot yet. `None`: no answer.
@@ -346,13 +433,17 @@ impl SimNode {
         if let (true, TrialApp::ConfirmsAfter(ms)) = (self.on_trial, self.trial_app) {
             self.check.set(now_ms.saturating_sub(self.booted_ms) >= ms);
         }
-        if let Some(old) = self.predated(request) {
-            return Some((old, false));
-        }
-        let reply = self
-            .agent
-            .handle(request)
-            .map(|r| (r.frame.to_vec(), r.reboot));
+        let reply = if let Some(core) = self.core.as_mut() {
+            self.core_served_ms = now_ms;
+            core.handle(request).map(|r| (r.frame.to_vec(), r.reboot))
+        } else {
+            if let Some(old) = self.predated(request) {
+                return Some((old, false));
+            }
+            self.agent
+                .handle(request)
+                .map(|r| (r.frame.to_vec(), r.reboot))
+        };
         if !self.flash().is_powered() {
             self.run = Run::Off;
             return None;

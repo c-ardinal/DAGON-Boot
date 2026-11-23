@@ -116,6 +116,10 @@ class Verdicts(unittest.TestCase):
         self.assertEqual(measure.blink_verdict(4, 125_000_000)["verify_s_at_most"], 0.4)
         self.assertEqual(measure.blink_verdict(255, 6_500_000)["verdict"], "FAIL")
 
+    def test_decide(self):
+        self.assertEqual(measure.decide_verdict(412_000)["decide_s"], 0.412)
+        self.assertEqual(measure.decide_verdict(0)["verdict"], "FAIL")
+
     def test_listen(self):
         self.assertEqual(measure.listen_verdict(60_000, 50)["verdict"], "PASS")
         self.assertEqual(measure.listen_verdict(60_001, 50)["verdict"], "FAIL")
@@ -146,13 +150,18 @@ class StillTheFirmwares(unittest.TestCase):
             cargo = tomllib.loads((folder / "stage0/Cargo.toml").read_text(encoding="utf-8"))
             self.assertIn(m["feature"], cargo["features"], mcu)
 
-    def test_listen_time_boot_cores(self):
-        m = measure.MEASUREMENTS["listen-time"]
-        for mcu in m["mcus"]:
-            cargo = tomllib.loads((REPO / f"targets/mcu/{mcu}/bootcore/Cargo.toml").read_text(encoding="utf-8"))
-            lib, feature = measure.feature_of(m, mcu).split("/")
-            self.assertEqual(cargo["package"]["name"], lib)
-            self.assertIn(feature, cargo["features"])
+    def test_every_boot_core_has_the_measuring_builds(self):
+        cores = list(self.mcus_with("bootcore"))
+        self.assertTrue(cores)
+        for name in ["listen-time", "decide-time"]:
+            m = measure.MEASUREMENTS[name]
+            for mcu, folder in cores:
+                cargo = tomllib.loads((folder / "bootcore/Cargo.toml").read_text(encoding="utf-8"))
+                lib, feature = measure.feature_of(m, mcu).split("/")
+                self.assertEqual(cargo["package"]["name"], lib)
+                self.assertIn(feature, cargo["features"], mcu)
+                # Kept compiling by the firmware lint.
+                self.assertIn(feature, cargo["package"]["metadata"]["dagon"]["lint"]["features"], mcu)
 
     def test_symbols_are_kept_by_name(self):
         sources = "".join(
@@ -163,8 +172,8 @@ class StillTheFirmwares(unittest.TestCase):
                 self.assertRegex(sources, rf"#\[no_mangle\]\s*(pub )?static {s}:", s)
 
     def test_boot_crate_template_has_a_features_table(self):
-        for mcu in measure.MEASUREMENTS["listen-time"]["mcus"]:
-            tpl = (REPO / f"targets/mcu/{mcu}/bootcore/template/Cargo.toml.tpl").read_text(encoding="utf-8")
+        for mcu, folder in self.mcus_with("bootcore"):
+            tpl = (folder / "bootcore/template/Cargo.toml.tpl").read_text(encoding="utf-8")
             self.assertTrue(re.search(r"(?m)^\[features\]$", tpl))
 
 

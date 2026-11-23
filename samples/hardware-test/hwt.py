@@ -481,14 +481,18 @@ class Run:
         names its probe-rs chip; `--erase-probe` the probe), so it answers
         nothing and the next deploy goes through its ROM loader. Refused unless
         the node is on a confirmed version and the first write left its boot
-        core, which that ROM write needs."""
+        core and stage0, which that ROM write needs."""
         node = s["node"]
         chip = self.setup.get("erase", {}).get(node, {}).get("chip")
         expect(chip, f"no [setup.erase.{node}] chip")
         expect(self.erase_probe, "erase without --erase-probe")
         expect(settled(before[node]), f"{node}: not on a confirmed version; not erased")
-        boot = provision_dir(self.project) / node / "bootcore.img"
-        expect(boot.is_file(), f"{boot} missing: the ROM write needs the boot core of the first write")
+        # The ROM write needs the boot core and stage0 the first write left
+        # (Host::recover: NoImage without either; every erase node has a stage0).
+        for f in ("bootcore.img", "stage0.bin"):
+            path = provision_dir(self.project) / node / f
+            expect(path.is_file() and path.stat().st_size > 0,
+                   f"{path} missing or empty: the ROM write needs it from the first write")
         cmd = erase_command(chip, self.erase_probe)
         self.wrote = True
         self.erased.add(node)
@@ -1163,6 +1167,12 @@ def selftest_rom_run():
                 assert "bootcore.img" in str(e) and "erase" not in json.loads(state.read_text())["calls"]
             boot.parent.mkdir(parents=True)
             boot.write_bytes(b"core")
+            try:
+                r.step("rom", 0, {"do": "erase", "node": "seg"})
+                raise AssertionError("erased without the stage0 of the first write")
+            except Fail as e:
+                assert "stage0.bin" in str(e) and "erase" not in json.loads(state.read_text())["calls"]
+            (boot.parent / "stage0.bin").write_bytes(b"s0")
             cmd, rc, log, st, note = r.step("rom", 0, {"do": "erase", "node": "seg"})
             assert st["seg"] is None and r.erased == {"seg"} and r.wrote, (st, note)
             rec = r.restore()

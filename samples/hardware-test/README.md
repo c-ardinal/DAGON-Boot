@@ -68,8 +68,8 @@ python samples/hardware-test/hwt.py selftest
   nodes.
 - The one write outside the CLI is the `erase` step: only with
   `--erase-probe`, only a `[setup.erase]` node, only through that probe,
-  and only when the node is confirmed and its first write's boot core is
-  on disk.
+  and only when the node is confirmed and its first write's boot core and
+  stage0 are on disk.
 - `dagon rollback` and `apply` ask nothing; the harness checks
   what they will do before calling them (rollback: the other slot holds a
   confirmed version; apply: only the deliberately bad releases, which must
@@ -159,8 +159,8 @@ the seg silent first: its `erase` step erases the whole flash through the
 NUCLEO's ST-LINK (`probe-rs erase --chip STM32F401RETx --probe <sel>`, chip
 from `[setup.erase]`). The step runs only with `--erase-probe`, the probe
 selector `probe-rs list` prints, and only when the seg is confirmed and
-`out/provision/seg/bootcore.img` from its first write exists (the ROM write
-needs that boot core). After the erase, `dagon status` must show the seg
+`out/provision/seg/bootcore.img` and `stage0.bin` from its first write
+exist (the ROM write needs both). After the erase, `dagon status` must show the seg
 answering nothing.
 
 The deploy step then answers the plan and the ROM question (`No answer from

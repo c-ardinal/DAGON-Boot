@@ -33,4 +33,4 @@ enabled = true
 [[area]]
 name = "targets-samples-assets"
 paths = ["targets/*", "samples/*", "assets/*"]
-enabled = false
+enabled = true

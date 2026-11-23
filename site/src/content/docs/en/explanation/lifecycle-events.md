@@ -798,7 +798,14 @@ The one authentication rule, applied by every verifier
   (`Log::append_in_place`): the agent reserves room for the trials an
   image starts when it sets it pending (`Log::reserve`, `trial_room`),
   and the app's agent restores it at start (`SlotStore::keep_room`)
-  after a power cut tore a record. Erases run only in the app, under a
+  after a power cut tore a record. Until then the boot loader cannot append
+  to the torn log, so it starts no trial it cannot record and starts the
+  confirmed slot, the log still naming an open trial. The running slot is
+  therefore never inferred from the log: STATUS's `active` is the slot the
+  app itself knows it was started from (its link slot; the running
+  partition on the ESP32-S3), `Trying` is reported for that slot only, and
+  CONFIRM, which confirms only the running slot, never confirms an image
+  that did not start. Erases run only in the app, under a
   watchdog period the definition check proves long enough: both
   `[watchdog]` periods are at least twice each `[execution]
   erase_regions` entry's `unit_max_ms`.

@@ -33,6 +33,9 @@ struct Tail {
 pub struct KindSStore<F> {
     flash: F,
     log: Log,
+    /// The APP slot the running image was started from (`slot::NONE`:
+    /// no app runs, as in the boot core's update mode).
+    running: u8,
     slots: SlotLayout<'static>,
     /// Boot core slots (start, length), A first, header inline; `None`:
     /// the MCU keeps none.
@@ -47,17 +50,23 @@ pub struct KindSStore<F> {
 
 impl<F: Flash> KindSStore<F> {
     /// Loads the state log; fails when no log face is valid. `regions`:
-    /// what the board erases in (`BoardDef::ERASE_REGIONS`).
+    /// what the board erases in (`BoardDef::ERASE_REGIONS`). `running`:
+    /// the APP slot the caller runs from (the app's own link slot,
+    /// [`crate::LINKED_SLOT`]; `slot::NONE` when no app runs). The log
+    /// cannot tell it: a boot core that could not append its BOOT_ATTEMPT
+    /// starts the confirmed slot with the trial the log names left open.
     pub fn load(
         mut flash: F,
         log: &LogLayout,
         slots: SlotLayout<'static>,
         regions: &'static [EraseRegion],
+        running: u8,
     ) -> Result<Self, LogError> {
         let log = Log::load(&mut flash, log)?;
         Ok(KindSStore {
             flash,
             log,
+            running,
             slots,
             cores: None,
             cell_holds: false,
@@ -159,11 +168,13 @@ fn flash_err(_: FlashError) -> StoreError {
 
 impl<F: Flash> SlotStore for KindSStore<F> {
     /// Slots with a parsing header are Written; the log upgrades the slot
-    /// whose header it names (`LogState::status`).
+    /// whose header it names (`LogState::status`), the running slot the
+    /// active one.
     fn status(&mut self) -> StatusResp {
         let heads = self.heads(target::APP, &StatusResp::default().slots);
-        let ls = self.log.state;
-        ls.status(&heads, ls.active(), self.log.generation)
+        self.log
+            .state
+            .status(&heads, self.running, self.log.generation)
     }
 
     fn capacity(&self, t: u8, s: u8) -> u32 {

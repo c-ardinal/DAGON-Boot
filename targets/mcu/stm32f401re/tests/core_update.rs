@@ -28,12 +28,15 @@ use dagon_port::Flash;
 use dagon_proto::payload::{target, SlotState};
 use ed25519_compact::{KeyPair, Seed};
 
+/// The app runs from APP slot A throughout.
+const APP_RUNNING: u8 = 0;
+
 /// A core with this minor version fails its own check.
 const BROKEN: u8 = 9;
 
 /// What the app's agent does at start (`KindSStore::keep_room`).
 fn app_start(f: &Cut) {
-    if let Ok(s) = KindSStore::load(f.clone(), &LOG, SLOTS, &ERASE_REGIONS) {
+    if let Ok(s) = KindSStore::load(f.clone(), &LOG, SLOTS, &ERASE_REGIONS, APP_RUNNING) {
         let _ = s.with_cores(&CORE_SLOTS, true).keep_room();
     }
 }
@@ -64,7 +67,7 @@ fn until_settled(f: &mut Cut, cell: &mut [u32; 2]) -> u8 {
 /// The agent's XFER and SET_PENDING with target BOOTCORE through the store.
 fn agent_writes(f: &Cut, img: &[u8]) -> Option<()> {
     let t = Transition::for_store_tests();
-    let mut s = KindSStore::load(f.clone(), &LOG, SLOTS, &ERASE_REGIONS)
+    let mut s = KindSStore::load(f.clone(), &LOG, SLOTS, &ERASE_REGIONS, APP_RUNNING)
         .ok()?
         .with_cores(&CORE_SLOTS, true);
     let st = s.target_status(target::BOOTCORE)?;
@@ -149,7 +152,7 @@ fn update_from(mut f: Cut, minor: u8, cut: Option<(usize, bool)>) -> (Cut, u8) {
 fn a_new_core_is_tried_confirms_itself_and_the_app_records_stay() {
     let (f, running) = update(1, None);
     assert_eq!(running, 1);
-    let mut s = KindSStore::load(f.clone(), &LOG, SLOTS, &ERASE_REGIONS)
+    let mut s = KindSStore::load(f.clone(), &LOG, SLOTS, &ERASE_REGIONS, APP_RUNNING)
         .unwrap()
         .with_cores(&CORE_SLOTS, true);
     let c = s.target_status(target::BOOTCORE).unwrap();
@@ -167,12 +170,12 @@ fn a_new_core_is_tried_confirms_itself_and_the_app_records_stay() {
 #[test]
 fn without_a_holding_trial_cell_no_boot_core_is_taken() {
     let f = installed();
-    let s = KindSStore::load(f.clone(), &LOG, SLOTS, &ERASE_REGIONS)
+    let s = KindSStore::load(f.clone(), &LOG, SLOTS, &ERASE_REGIONS, APP_RUNNING)
         .unwrap()
         .with_cores(&CORE_SLOTS, false);
     assert_eq!(s.capacity(target::BOOTCORE, 1), 0);
     assert!(s.capacity(target::APP, 1) > 0);
-    let s = KindSStore::load(f, &LOG, SLOTS, &ERASE_REGIONS)
+    let s = KindSStore::load(f, &LOG, SLOTS, &ERASE_REGIONS, APP_RUNNING)
         .unwrap()
         .with_cores(&CORE_SLOTS, true);
     assert!(s.capacity(target::BOOTCORE, 1) > 0);
@@ -182,7 +185,7 @@ fn without_a_holding_trial_cell_no_boot_core_is_taken() {
 fn a_core_that_fails_its_check_falls_back_to_the_old_one() {
     let (f, running) = update(BROKEN, None);
     assert_eq!(running, 0);
-    let mut s = KindSStore::load(f, &LOG, SLOTS, &ERASE_REGIONS)
+    let mut s = KindSStore::load(f, &LOG, SLOTS, &ERASE_REGIONS, APP_RUNNING)
         .unwrap()
         .with_cores(&CORE_SLOTS, true);
     let c = s.target_status(target::BOOTCORE).unwrap();
@@ -212,7 +215,7 @@ fn a_power_cut_at_every_flash_step_leaves_a_bootable_core() {
         for n in 0..ops {
             for half in [false, true] {
                 let (f, running) = update_from(start(), minor, Some((n, half)));
-                let mut s = KindSStore::load(f, &LOG, SLOTS, &ERASE_REGIONS)
+                let mut s = KindSStore::load(f, &LOG, SLOTS, &ERASE_REGIONS, APP_RUNNING)
                     .unwrap()
                     .with_cores(&CORE_SLOTS, true);
                 let c = s.target_status(target::BOOTCORE).unwrap();
@@ -237,7 +240,7 @@ fn a_power_cut_at_every_flash_step_leaves_a_bootable_core() {
 #[test]
 fn every_slot_the_store_takes_has_one_planner_layout() {
     use dagon_agent::erase_plan;
-    let s = KindSStore::load(installed(), &LOG, SLOTS, &ERASE_REGIONS)
+    let s = KindSStore::load(installed(), &LOG, SLOTS, &ERASE_REGIONS, APP_RUNNING)
         .unwrap()
         .with_cores(&CORE_SLOTS, true);
     let layout = s.erase_layout().unwrap();
@@ -283,7 +286,7 @@ fn the_store_plans_over_its_boards_regions() {
     use dagon_agent::erase_plan;
     use dagon_port::timeout::EraseOp;
     let plan = |regions: &'static [dagon_port::timeout::EraseRegion]| -> Vec<EraseOp> {
-        let s = KindSStore::load(installed(), &LOG, SLOTS, regions).unwrap();
+        let s = KindSStore::load(installed(), &LOG, SLOTS, regions, APP_RUNNING).unwrap();
         let layout = s.erase_layout().unwrap();
         erase_plan(&layout, target::APP, 1, 0x1_0000)
             .unwrap()
@@ -329,7 +332,7 @@ enum Ran {
 /// slot, through the store.
 fn write_only_core(f: &Cut, img: &[u8]) -> Option<()> {
     let t = Transition::for_store_tests();
-    let mut s = KindSStore::load(f.clone(), &LOG, SLOTS, &ERASE_REGIONS)
+    let mut s = KindSStore::load(f.clone(), &LOG, SLOTS, &ERASE_REGIONS, APP_RUNNING)
         .ok()?
         .with_cores(&ONE_CORE, true);
     assert_eq!(s.capacity(target::BOOTCORE, 1), 0, "one boot core slot");
@@ -346,7 +349,7 @@ fn write_only_core(f: &Cut, img: &[u8]) -> Option<()> {
 
 /// What the app's agent does at start, over the one-slot store.
 fn one_core_app_start(f: &Cut) {
-    if let Ok(s) = KindSStore::load(f.clone(), &LOG, SLOTS, &ERASE_REGIONS) {
+    if let Ok(s) = KindSStore::load(f.clone(), &LOG, SLOTS, &ERASE_REGIONS, APP_RUNNING) {
         let _ = s.with_cores(&ONE_CORE, true).keep_room();
     }
 }

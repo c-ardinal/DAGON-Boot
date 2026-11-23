@@ -1,13 +1,15 @@
 //! The image machines, driven by [`ImageStore`] itself, agree with the
 //! state log's fold: every sequence of what the agent writes (transfers,
 //! switches, confirms, through `ImageStore`) and what the boot core writes
-//! (boot attempts, rollbacks, followed by a restart), from a provisioned
-//! device, leaves each slot's machine in the state STATUS shows. So no
-//! state the fold reaches exists without the transitions that lead there,
-//! and the agent takes them, the second slot's included. STATUS is the
-//! kind S stores' own mapping ([`LogState::status`]), so a rolled-back
-//! marker that outlives its image (a new image written into the slot, a
-//! confirmed image demoted after its re-trial was rolled back) fails here.
+//! (boot attempts, rollbacks, or nothing when it cannot append, followed
+//! by a restart), from a provisioned device, leaves each slot's machine in
+//! the state STATUS shows, and a CONFIRM confirms only the slot the boot
+//! core started. So no state the fold reaches exists without the
+//! transitions that lead there, and the agent takes them, the second
+//! slot's included. STATUS is the kind S stores' own mapping
+//! ([`LogState::status`]), so a rolled-back marker that outlives its image
+//! (a new image written into the slot, a confirmed image demoted after its
+//! re-trial was rolled back) fails here.
 
 extern crate std;
 
@@ -41,9 +43,13 @@ enum Op {
     Boot,
     /// A reset where the boot core refuses the pending image.
     Revert,
+    /// A reset where the boot core cannot append to the log (its tail cut
+    /// by a power loss) and starts the confirmed slot, the trial the log
+    /// names left open.
+    Stuck,
 }
 
-const OPS: [Op; 7] = [
+const OPS: [Op; 8] = [
     Op::Transfer(0),
     Op::Transfer(1),
     Op::SetPending(0),
@@ -51,15 +57,17 @@ const OPS: [Op; 7] = [
     Op::Confirm,
     Op::Boot,
     Op::Revert,
+    Op::Stuck,
 ];
 
 /// A kind S slot store over the state log's fold: a header per slot (its
 /// first byte stands for its digest; 0xFF = erased) and the log folded
-/// into [`LogState`].
+/// into [`LogState`], and the slot the boot core started.
 #[derive(Clone, Copy, Debug)]
 struct FoldStore {
     log: LogState,
     header: [u8; ROOM],
+    running: u8,
 }
 
 const ERASED: u8 = 0xFF;
@@ -81,6 +89,7 @@ impl FoldStore {
         FoldStore {
             log: LogState::default().apply(&record(kind::PROVISION, 0, 1, reason::NONE)),
             header: [1, ERASED],
+            running: 0,
         }
     }
 
@@ -90,16 +99,21 @@ impl FoldStore {
     }
 
     /// The boot core at a reset: start the pending slot (when its image is
-    /// intact, attempts are left and `start`), else roll it back.
-    fn boot(&mut self, start: bool) -> bool {
+    /// intact, attempts are left and `start`), else roll it back; `stuck`:
+    /// it appends nothing and starts the confirmed slot.
+    fn boot(&mut self, start: bool, stuck: bool) -> bool {
         let Some(p) = self.log.pending else {
             return false;
         };
+        let back = self.log.confirmed.map_or(log_slot::NONE, |c| c.slot);
         let intact = p.digest16 == [self.header[usize::from(p.slot)]; 16];
-        if start && intact && self.log.attempts < MAX {
+        if stuck {
+            self.running = back;
+        } else if start && intact && self.log.attempts < MAX {
             self.append(kind::BOOT_ATTEMPT, p.slot, reason::NONE);
+            self.running = p.slot;
         } else {
-            let back = self.log.confirmed.map_or(log_slot::NONE, |c| c.slot);
+            self.running = back;
             self.log = self
                 .log
                 .apply(&record(kind::ROLLBACK, back, 0, reason::TRIAL_EXHAUSTED));
@@ -127,7 +141,7 @@ impl SlotStore for FoldStore {
                 digest16: [d; 16],
             })
         });
-        self.log.status(&heads, self.log.active(), 0)
+        self.log.status(&heads, self.running, 0)
     }
 
     fn capacity(&self, t: u8, slot: u8) -> u32 {
@@ -260,12 +274,16 @@ impl Model {
                 if st.slots.get(usize::from(a)).map(|i| i.state) != Some(SlotState::Trying) {
                     return false;
                 }
+                // Only the image that runs is confirmed: never a pending
+                // one the boot core could not start.
+                assert_eq!(a, self.images.store().running, "confirm of {a}");
                 let hdr = self.images.store().header_bytes(a);
                 let r = self.images.confirm(a, &hdr, v, &mut out);
                 assert_eq!(r, Ok(()), "confirmed {a}");
             }
-            Op::Boot | Op::Revert => {
-                if !self.images.store().boot(matches!(op, Op::Boot)) {
+            Op::Boot | Op::Revert | Op::Stuck => {
+                let store = self.images.store();
+                if !store.boot(matches!(op, Op::Boot), matches!(op, Op::Stuck)) {
                     return false;
                 }
                 self.images.reopen();

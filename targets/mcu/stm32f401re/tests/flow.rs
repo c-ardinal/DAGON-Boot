@@ -12,7 +12,7 @@ use dagon_core::log::{Log, LogLayout, SlotRef};
 use dagon_ed25519::Ed25519Compact;
 use dagon_events::{compose, Bounds, Composed, Layer, Nop, Published, Watchdog};
 use dagon_format::header::*;
-use dagon_format::statelog::{kind, reason, FaceHeader};
+use dagon_format::statelog::{kind, reason, slot, FaceHeader, RECORD_SIZE};
 use dagon_format::{key_id, sha256, Version};
 use dagon_mcu_stm32f401re::{KindSStore, ERASE_REGIONS};
 use dagon_port::{Flash, FlashError, FlashRegion};
@@ -206,6 +206,8 @@ struct Node {
     agent: Agent<KindSStore<Shared>, Chain, Ed25519Compact>,
     flash: Shared,
     seq: u8,
+    /// The APP slot the boot core started.
+    running: u8,
 }
 
 impl Node {
@@ -231,11 +233,16 @@ impl Node {
                 &Ed25519Compact::new(*keypair().pk),
             )
         };
-        let store = KindSStore::load(flash.clone(), &LOG, SLOTS, &ERASE_REGIONS).unwrap();
+        let running = match d {
+            Decision::Boot { slot, .. } => slot,
+            Decision::NoImage => slot::NONE,
+        };
+        let store = KindSStore::load(flash.clone(), &LOG, SLOTS, &ERASE_REGIONS, running).unwrap();
         let node = Node {
             agent: Agent::new(config(), Ed25519Compact::new(*keypair().pk), store, chain()),
             flash,
             seq: 0,
+            running,
         };
         (node, d)
     }
@@ -311,9 +318,15 @@ impl Node {
     /// STATUS as a fresh store reads it from the flash; the agent's view
     /// agrees.
     fn status(&mut self) -> StatusResp {
-        let st = KindSStore::load(self.flash.clone(), &LOG, SLOTS, &ERASE_REGIONS)
-            .unwrap()
-            .status();
+        let st = KindSStore::load(
+            self.flash.clone(),
+            &LOG,
+            SLOTS,
+            &ERASE_REGIONS,
+            self.running,
+        )
+        .unwrap()
+        .status();
         assert_eq!(*self.agent.images().status(), st);
         st
     }
@@ -421,6 +434,49 @@ fn unconfirmed_trial_rolls_back_to_confirmed_slot() {
     panic!("no rollback");
 }
 
+/// A power loss cuts the record written after the log's last one: the log
+/// then takes no record until the agent compacts it.
+fn cut_log_tail(flash: &Shared) {
+    let m = &mut *flash.0.borrow_mut();
+    let log = Log::load(m, &LOG).unwrap();
+    assert_eq!(log.generation, 1, "the first face is still the active one");
+    let next = LOG.faces[0] + LOG.face_len - log.room() * RECORD_SIZE as u32;
+    m.write(next, &[0u8; RECORD_SIZE]).unwrap();
+}
+
+/// A boot core that cannot append the BOOT_ATTEMPT starts the confirmed
+/// slot with the trial the log names left open: the app reports the slot
+/// it runs from, and CONFIRM never confirms the image this boot did not
+/// start.
+#[test]
+fn an_open_trial_the_boot_core_did_not_start_is_never_confirmed() {
+    let (mut n, _) = Node::boot(provisioned());
+    assert_eq!(n.transfer(B, &image(B, 1)), Status::Ok);
+    assert_eq!(n.set_pending(B), Status::Ok);
+    let (n, d) = n.reboot();
+    assert_eq!(booted(d), (B, true));
+    cut_log_tail(&n.flash);
+    let (mut n, d) = Node::boot_shared(n.flash);
+    assert_eq!(booted(d), (A, false));
+
+    let h = n.hello();
+    assert_eq!((h.active_version, h.trial), (Version::new(1, 0, 0), false));
+    let st = n.status();
+    assert_eq!((st.active, st.confirmed, st.attempts), (A, A, 1));
+    assert_eq!(st.slots[B as usize].state, SlotState::Pending);
+    assert_eq!(
+        n.call(
+            Cmd::Confirm,
+            &wire(|b| dagon_proto::payload::encode_confirm(target::APP, b))
+        )
+        .0,
+        Status::Ok
+    );
+    let st = n.status();
+    assert_eq!(st.confirmed, A);
+    assert_eq!(st.slots[B as usize].state, SlotState::Pending);
+}
+
 /// A new image received into the rolled-back slot is written, not
 /// reverted: the rolled-back marker names the image it rolled back.
 #[test]
@@ -445,7 +501,7 @@ fn each_app_slot_has_its_own_capacity() {
     const UNEQUAL: SlotLayout = SlotLayout {
         slots: &[(0x0802_0000, 0x2_0000), (0x0804_0000, 0x1_0000)],
     };
-    let s = KindSStore::load(provisioned(), &LOG, UNEQUAL, &ERASE_REGIONS).unwrap();
+    let s = KindSStore::load(provisioned(), &LOG, UNEQUAL, &ERASE_REGIONS, A).unwrap();
     assert_eq!(s.capacity(target::APP, A), 0x2_0000 - HEADER_SIZE as u32);
     assert_eq!(s.capacity(target::APP, B), 0x1_0000 - HEADER_SIZE as u32);
 }
@@ -455,14 +511,14 @@ fn each_app_slot_has_its_own_capacity() {
 #[test]
 #[allow(deprecated)]
 fn reserved_target_is_unsupported() {
-    let s = KindSStore::load(provisioned(), &LOG, SLOTS, &ERASE_REGIONS).unwrap();
+    let s = KindSStore::load(provisioned(), &LOG, SLOTS, &ERASE_REGIONS, A).unwrap();
     assert_eq!(s.capacity(target::TOPOLOGY, 0), 0);
     assert_eq!(s.capacity(target::APP, 2), 0);
 }
 
 #[test]
 fn unaligned_chunks_are_buffered_and_flushed_padded() {
-    let mut s = KindSStore::load(provisioned(), &LOG, SLOTS, &ERASE_REGIONS).unwrap();
+    let mut s = KindSStore::load(provisioned(), &LOG, SLOTS, &ERASE_REGIONS, A).unwrap();
     let t = Transition::for_store_tests();
     let data: Vec<u8> = (1..=10).collect();
     s.erase(target::APP, B, 10, &t).unwrap();

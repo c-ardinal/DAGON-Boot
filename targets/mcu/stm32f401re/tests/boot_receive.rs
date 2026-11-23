@@ -183,9 +183,15 @@ fn chain() -> Chain {
 
 /// The session the boot core builds once it is in update mode.
 fn session(f: &Cut) -> Agent<KindSStore<Cut>, Chain, Verifier, BootCore> {
-    let store = KindSStore::load(f.clone(), &LOG, SLOTS, &ERASE_REGIONS)
-        .unwrap()
-        .with_cores(&CORE_SLOTS, true);
+    let store = KindSStore::load(
+        f.clone(),
+        &LOG,
+        SLOTS,
+        &ERASE_REGIONS,
+        dagon_format::statelog::slot::NONE,
+    )
+    .unwrap()
+    .with_cores(&CORE_SLOTS, true);
     let cfg = Config {
         mcu_id: MCU_ID,
         port_kind: port_kind::SELF_BOOT,

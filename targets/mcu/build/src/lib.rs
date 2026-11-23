@@ -330,6 +330,14 @@ pub struct Definition {
     partitions: Vec<Partition>,
 }
 
+/// Where a `[[slot]]` keeps its image header.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Header {
+    Inline,
+    Trailer,
+    Detached(u32),
+}
+
 impl Definition {
     /// `text`; `file` reads a file the definition names (its partition
     /// table), relative to the defining package.
@@ -358,6 +366,73 @@ impl Definition {
             .collect();
         out.sort_by_key(|(index, _)| *index);
         out.into_iter().map(|(_, place)| place).collect()
+    }
+
+    /// Where each slot of `image` holds its header and body, as the
+    /// `header` placement of its `[[slot]]` says, slot A first: (header,
+    /// body, body room, placement byte of the image header: 0 inline, 1
+    /// detached, 2 trailer).
+    pub fn places(&self, image: &str) -> Vec<(u32, u32, u32, u8)> {
+        let mut out: Vec<(u8, (u32, u32, u32, u8))> = self
+            .slot_rows()
+            .into_iter()
+            .zip(self.slot_headers())
+            .filter(|((i, _, _), _)| i == image)
+            .map(|((_, index, (start, size)), header)| {
+                let hs = 0x200;
+                let place = match header {
+                    Header::Inline => (start, start + hs, size - hs, 0),
+                    Header::Trailer => (start + size - hs, start, size - hs, 2),
+                    Header::Detached(at) => (at, start, size, 1),
+                };
+                (index, place)
+            })
+            .collect();
+        out.sort_by_key(|(index, _)| *index);
+        out.into_iter().map(|(_, place)| place).collect()
+    }
+
+    /// Every `[[slot]]`'s header placement, in table order (as
+    /// [`Self::slot_rows`]); `header_at`, or `header_partition` plus
+    /// `header_offset`, place a detached header.
+    fn slot_headers(&self) -> Vec<Header> {
+        let rows = self
+            .t
+            .get("slot")
+            .and_then(|v| v.as_array())
+            .map_or(&[][..], |v| v.as_slice());
+        rows.iter()
+            .map(|s| match s.get("header").and_then(|v| v.as_str()) {
+                None | Some("inline") => Header::Inline,
+                Some("trailer") => Header::Trailer,
+                Some("detached") => {
+                    let at = match (s.get("header_at"), s.get("header_partition")) {
+                        (Some(at), None) => int(at, "slot header_at"),
+                        (None, Some(name)) => {
+                            let name = name.as_str().expect("[[slot]] header_partition");
+                            let p = self
+                                .partitions
+                                .iter()
+                                .find(|p| p.name == name)
+                                .unwrap_or_else(|| {
+                                    panic!("[[slot]]: no partition '{name}' in the table")
+                                });
+                            let off = s
+                                .get("header_offset")
+                                .map_or(0, |v| int(v, "header_offset"));
+                            p.offset + off
+                        }
+                        _ => panic!(
+                            "[[slot]]: a detached header needs header_at or header_partition"
+                        ),
+                    };
+                    Header::Detached(at)
+                }
+                Some(other) => {
+                    panic!("[[slot]] header {other:?} is not inline, trailer or detached")
+                }
+            })
+            .collect()
     }
 
     /// Slot A (or B with `slot_b`) of `image`; a build for a slot the
@@ -509,6 +584,18 @@ impl Definition {
                 kind.to_ascii_uppercase().replace('-', "_"),
                 slots.len(),
                 slots.join(", ")
+            );
+            let places: Vec<String> = self
+                .places(&kind)
+                .into_iter()
+                .map(|(h, b, r, p)| format!("({h:#x}, {b:#x}, {r:#x}, {p})"))
+                .collect();
+            out += "    /// Its header and body: header, body, body room, placement.\n";
+            out += &format!(
+                "    pub const {}_PLACES: [(u32, u32, u32, u8); {}] = [{}];\n",
+                kind.to_ascii_uppercase().replace('-', "_"),
+                places.len(),
+                places.join(", ")
             );
         }
         out += "}\n";
@@ -1528,6 +1615,14 @@ mod tests {
             rs.contains("pub const APP: [(u32, u32); 1] = [(0x10030000, 0x10000)];"),
             "{rs}"
         );
+        // Inline headers: the body follows the header's 512 bytes.
+        assert!(
+            rs.contains(
+                "pub const BOOTCORE_PLACES: [(u32, u32, u32, u8); 2] = \
+                 [(0x10008000, 0x10008200, 0x1e00, 0), (0x10020000, 0x10020200, 0x3e00, 0)];"
+            ),
+            "{rs}"
+        );
         let d = layout();
         assert_eq!(
             d.slots("bootcore"),
@@ -1590,6 +1685,7 @@ mod tests {
         let def = "format = 3\nid = \"e\"\nwire_id = 3\npartitions = \"p.csv\"\n\
                    [[flash_map]]\nname = \"e-16m\"\nxip = false\nbase = 0x0\nbytes = 0x100_0000\n\
                    [[slot]]\nimage = \"app\"\nbinding = \"any\"\nheader = \"detached\"\npartition = \"ota_0\"\n\
+                   header_partition = \"dagon\"\nheader_offset = 0x1000\n\
                    [watchdog]\ntrial_attempts = 3\ntrial_ms = 4000\nconfirmed_ms = 4000\n\
                    range_ms = { min = 1, max = 9000 }\n\
                    [execution]\nmasked_max_us = 50\nwrite_unit = 4\nerased_value = 0xFF\n\
@@ -1606,6 +1702,14 @@ mod tests {
         let rs = d.rs();
         assert!(
             rs.contains("pub const APP: [(u32, u32); 1] = [(0x110000, 0x300000)];"),
+            "{rs}"
+        );
+        // The header in its own sector of the dagon partition; the body
+        // takes the whole slot.
+        assert!(
+            rs.contains(
+                "pub const APP_PLACES: [(u32, u32, u32, u8); 1] = [(0x711000, 0x110000, 0x300000, 1)];"
+            ),
             "{rs}"
         );
         for row in [

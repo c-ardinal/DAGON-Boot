@@ -7,6 +7,7 @@
 
 use crate::rom;
 use dagon_core::boot::Place;
+use dagon_format::header::{ImageHeader, HEADER_SIZE};
 use dagon_mcu_esp32s3::app_image::{plan, Bus, Plan, Refused};
 use dagon_port::Flash;
 
@@ -18,9 +19,16 @@ const SHUT_BUSES: u32 = 0b11;
 /// The MMU page in KiB, as the ROM's `*_MMU_Set` take it.
 const PAGE_KIB: u32 = 64;
 
-/// The plan of the ESP image whose body is at `at`.
+/// The plan of the ESP image whose body is at `at`, every segment inside
+/// the body its header signs (`payload_size`, within the slot): bytes past
+/// it are covered by no signature or digest, so none is loaded.
 pub fn plan_at<F: Flash>(flash: &mut F, at: Place) -> Result<Plan, Refused> {
-    plan(flash, at.body, at.body.saturating_add(at.room))
+    let mut raw = [0u8; HEADER_SIZE];
+    flash.read(at.header, &mut raw).map_err(|_| Refused::Read)?;
+    let signed = ImageHeader::parse(&raw)
+        .map_err(|_| Refused::Bounds)?
+        .payload_size;
+    plan(flash, at.body, at.body.saturating_add(signed.min(at.room)))
 }
 
 /// Copies and maps what `p` names, then runs its entry point.

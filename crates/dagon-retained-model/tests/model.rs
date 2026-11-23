@@ -3,6 +3,7 @@
 
 use dagon_retained_model::harness::{run_many, run_params, World};
 use dagon_retained_model::world_fuse::FuseWorld;
+use dagon_retained_model::world_hand_off::HandOffWorld;
 use dagon_retained_model::world_record::RecordWorld;
 use dagon_retained_model::world_trial::TrialWorld;
 
@@ -49,4 +50,15 @@ fn trial_default() {
 #[ignore = "full profile: cargo test --release -- --ignored"]
 fn trial_full() {
     go::<TrialWorld>("trial", FULL);
+}
+
+#[test]
+fn hand_off_default() {
+    go::<HandOffWorld>("hand_off", DEFAULT);
+}
+
+#[test]
+#[ignore = "full profile: cargo test --release -- --ignored"]
+fn hand_off_full() {
+    go::<HandOffWorld>("hand_off", FULL);
 }

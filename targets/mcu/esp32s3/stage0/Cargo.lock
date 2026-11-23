@@ -78,7 +78,7 @@ dependencies = [
 
 [[package]]
 name = "dagon-esp32s3-stage0"
-version = "0.1.0"
+version = "0.0.0"
 dependencies = [
  "dagon-core",
  "dagon-ed25519",

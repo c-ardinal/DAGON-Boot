@@ -240,7 +240,7 @@ fn a_power_cut_at_every_step_of_a_boot_core_write_leaves_every_state_recoverable
         expected.extend(slot_sites(target::APP, slot));
     }
     expected.push(record(target::APP, kind::SLOT_PENDING));
-    covered.check(&expected, &POWER_LOSS);
+    covered.check(&expected, &expected, &POWER_LOSS);
     Coverage::report(
         "update-mode",
         &format!(

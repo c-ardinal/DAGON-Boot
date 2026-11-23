@@ -781,9 +781,10 @@ fn short_log_node(cores: Cores) -> Node {
 /// Every flash operation a node of `cores` makes outside its first
 /// install: each slot's erase, body and header; each record the agent,
 /// the boot core and its settle append; with `compaction`, each step of
-/// a compaction with each record it carries. With one boot core slot no
-/// core is rolled back (no other core is left to start), so no core
-/// ROLLBACK is written.
+/// a compaction with each record it carries (a torn record ends the
+/// face's room, so a compaction can follow from any start). With one boot
+/// core slot no core is rolled back (no other core is left to start), so
+/// no core ROLLBACK is written.
 fn inventory(cores: Cores, compaction: bool) -> Vec<Site> {
     use dagon_format::statelog::kind::*;
     let two = cores.0.len() == 2;
@@ -818,14 +819,19 @@ fn inventory(cores: Cores, compaction: bool) -> Vec<Site> {
 }
 
 /// Searches `cores` from `node`, checks it cut every flash operation of
-/// the inventory every way (and no other), and writes the report section
-/// `name`.
+/// the inventory every way (the compaction's only when `compaction`: the
+/// start runs the log short) and none outside it, and writes the report
+/// section `name`.
 fn search(cores: Cores, node: Node, compaction: bool, name: &str, title: &str) {
     let b = bound();
     let (n, c) = explore(cores, node, b);
     eprintln!("{title}: {n} states, {} cuts", c.cuts());
     assert!(n > 100, "{n} states");
-    c.check(&inventory(cores, compaction), &ALL_WAYS);
+    c.check(
+        &inventory(cores, compaction),
+        &inventory(cores, true),
+        &ALL_WAYS,
+    );
     Coverage::report(
         name,
         &format!(

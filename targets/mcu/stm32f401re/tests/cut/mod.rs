@@ -406,11 +406,11 @@ impl Coverage {
         self.0.values().flat_map(|w| w.values()).sum()
     }
 
-    /// Fails naming each site of `expected` not cut in every one of
-    /// `ways`, and each site cut that is not expected.
-    pub fn check(&self, expected: &[Site], ways: &[Way]) {
+    /// Fails naming each site of `required` not cut in every one of
+    /// `ways`, and each site cut that is not in `inventory`.
+    pub fn check(&self, required: &[Site], inventory: &[Site], ways: &[Way]) {
         let mut wrong = Vec::new();
-        for s in expected {
+        for s in required {
             for w in ways {
                 if self.0.get(s).and_then(|m| m.get(w)).is_none() {
                     wrong.push(format!("not cut ({w:?}): {}", s.label()));
@@ -418,7 +418,7 @@ impl Coverage {
             }
         }
         for s in self.0.keys() {
-            if !expected.contains(s) {
+            if !inventory.contains(s) {
                 wrong.push(format!("cut but not in the inventory: {}", s.label()));
             }
         }

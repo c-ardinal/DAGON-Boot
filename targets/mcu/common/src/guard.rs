@@ -162,6 +162,9 @@ struct State<D, const N: usize> {
     dog: Option<D>,
     live: Liveness<N>,
     on_trial: bool,
+    /// Microseconds since boot, timing each section ([`Guard::time_masking`]).
+    #[cfg(any(test, feature = "masked-time"))]
+    clock: Option<fn() -> u64>,
 }
 
 /// Watchdog guard for `N` tasks (indexes `0..N`).
@@ -180,6 +183,8 @@ impl<D: Dog, const N: usize> Guard<D, N> {
                 dog: None,
                 live: Liveness::new(levels),
                 on_trial: true,
+                #[cfg(any(test, feature = "masked-time"))]
+                clock: None,
             })),
             trial,
             now_ms,
@@ -274,13 +279,32 @@ impl<D: Dog, const N: usize> Guard<D, N> {
         self.with_state(|s| s.dog.as_mut().map(f))
     }
 
+    /// Times each critical section of the guard from now on with `now_us`,
+    /// microseconds since boot, keeping the longest
+    /// ([`crate::masked_time`]): what an app built with `masked-time` does.
+    #[cfg(any(test, feature = "masked-time"))]
+    pub fn time_masking(&self, now_us: fn() -> u64) {
+        self.with_state(|s| s.clock = Some(now_us));
+    }
+
     /// The guard's state, shared by DAGON's tasks and the app's. The only
     /// place DAGON's own code masks interrupts: the closures above update a
     /// few fields or feed the watchdog (a register write), well inside
-    /// `[execution] masked_max_us`; none reaches the flash.
+    /// `[execution] masked_max_us`; none reaches the flash. An app built
+    /// with `masked-time` times each ([`crate::masked_time`]).
     #[allow(clippy::disallowed_methods)]
     fn with_state<R>(&self, f: impl FnOnce(&mut State<D, N>) -> R) -> R {
-        critical_section::with(|cs| f(&mut self.state.borrow_ref_mut(cs)))
+        critical_section::with(|cs| {
+            let mut s = self.state.borrow_ref_mut(cs);
+            #[cfg(any(test, feature = "masked-time"))]
+            if let Some(now) = s.clock {
+                let started = now();
+                let r = f(&mut s);
+                crate::masked_time::note(now().saturating_sub(started));
+                return r;
+            }
+            f(&mut s)
+        })
     }
 }
 

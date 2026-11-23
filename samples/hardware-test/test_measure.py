@@ -128,6 +128,13 @@ class Verdicts(unittest.TestCase):
             with self.assertRaises(ValueError):
                 measure.groups_us(bad)
 
+    def test_masked(self):
+        r = measure.masked_verdict(38, 12_000)
+        self.assertEqual((r["verdict"], r["definition"]), ("PASS", "masked_max_us = 38"))
+        self.assertEqual(measure.masked_verdict(1_000, 1)["verdict"], "PASS")
+        self.assertEqual(measure.masked_verdict(1_001, 1)["verdict"], "FAIL")
+        self.assertEqual(measure.masked_verdict(0, 0)["verdict"], "FAIL")
+
     def test_listen(self):
         self.assertEqual(measure.listen_verdict(60_000, 50)["verdict"], "PASS")
         self.assertEqual(measure.listen_verdict(60_001, 50)["verdict"], "FAIL")
@@ -146,7 +153,8 @@ class StillTheFirmwares(unittest.TestCase):
     def test_part_folders_are_where_dagon_flash_builds(self):
         flash = (REPO / "crates/dagon-cli/src/flash.rs").read_text(encoding="utf-8")
         self.assertIn('cfg.base.join("out/flash/target").join(&part.name)', flash)
-        mcus = {m["part"] for m in measure.MEASUREMENTS.values()}
+        # The app builds in its own crate's target folder, not a part's.
+        mcus = {m["part"] for m in measure.MEASUREMENTS.values() if m["package"] != "app"}
         for part in mcus:
             self.assertTrue(list(self.mcus_with(part)), part)
 
@@ -170,6 +178,21 @@ class StillTheFirmwares(unittest.TestCase):
                 self.assertIn(feature, cargo["features"], mcu)
                 # Kept compiling by the firmware lint.
                 self.assertIn(feature, cargo["package"]["metadata"]["dagon"]["lint"]["features"], mcu)
+
+    def test_the_app_packages_have_the_masking_build(self):
+        m = measure.MEASUREMENTS["masked-time"]
+        with_it = []
+        for d in sorted((REPO / "targets/mcu").glob("*/Cargo.toml")):
+            cargo = tomllib.loads(d.read_text(encoding="utf-8"))
+            mcu = cargo["package"].get("metadata", {}).get("dagon", {}).get("mcu")
+            if mcu is None or "masked-time" not in cargo.get("features", {}):
+                continue
+            with_it.append(mcu)
+            lib, feature = measure.feature_of(m, mcu).split("/")
+            self.assertEqual(cargo["package"]["name"], lib)
+            # Kept compiling by the firmware lint.
+            self.assertIn(feature, cargo["package"]["metadata"]["dagon"]["lint"]["features"], mcu)
+        self.assertEqual(with_it, ["rp2040", "stm32f401re"])
 
     def test_symbols_are_kept_by_name(self):
         sources = "".join(
@@ -278,6 +301,36 @@ class Runs(unittest.TestCase):
         self.assertEqual(self.run_it(self.args(proj, drive="E:"), name="listen-time", answer="5 2"), 0)
         self.assertEqual(self.reads, [])
         self.assertIn(b'"listen_us": 52000', next((self.root / "rec").glob("*/result.json")).read_bytes())
+
+    def app(self, proj):
+        """The node's app crate, `[build.n] package = "app"`, built."""
+        (proj / "dagon.toml").write_text('[dagon]\npath = "../src"\n\n[build.n]\npackage = "app"\n')
+        (proj / "app").mkdir()
+        self.app_cargo = proj / "app/Cargo.toml"
+        self.app_cargo.write_text('[package]\nname = "app"\n')
+        rel = proj / "app/target/thumb/release"
+        rel.mkdir(parents=True)
+        (rel / "app").write_bytes(elf32({"DAGON_MASKED_MAX_US": 0x20000020, "DAGON_MASKED_COUNT": 0x20000024}))
+
+    def test_masked_time_switches_the_app_and_reads_by_probe(self):
+        proj = self.project({"kind": "probe-rs", "chip": "STM32F401RETx"})
+        self.app(proj)
+        original = self.app_cargo.read_text()
+        self.cargo = self.app_cargo  # what each faked flash records
+        rc = self.run_it(self.args(proj, probe="0483:374b"), name="masked-time",
+                         words={0x20000020: 38, 0x20000024: 9_000}, answer="")
+        self.assertEqual(rc, 0)
+        (_, during), (_, after) = self.flashes
+        self.assertIn('default = ["dagon-mcu-stm32f401re/masked-time"]', during)
+        self.assertEqual(after, original)
+        result = next((self.root / "rec").glob("*/result.json")).read_text()
+        self.assertIn('"masked_max_us = 38"', result)
+
+    def test_masked_time_without_a_probe_writes_nothing(self):
+        proj = self.project({"kind": "uf2-drive"}, mcu="rp2040")
+        self.app(proj)
+        self.assertEqual(self.run_it(self.args(proj, drive="E:"), name="masked-time"), 1)
+        self.assertEqual(self.flashes, [])
 
     def test_a_probe_without_its_chip_is_refused_before_any_write(self):
         proj = self.project({"kind": "uf2-drive"}, mcu="rp2040")

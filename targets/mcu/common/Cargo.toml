@@ -26,6 +26,9 @@ verify-time = []
 # boot_time: a boot core built to measure its listen window or its boot
 # decision.
 boot-time = []
+# masked_time: an app built to measure how long DAGON's own code masks
+# interrupts.
+masked-time = []
 
 [dev-dependencies]
 critical-section = { version = "1", features = ["std"] }

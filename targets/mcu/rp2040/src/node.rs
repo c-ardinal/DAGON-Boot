@@ -139,6 +139,8 @@ pub(crate) fn open<B: BoardDef, const N: usize>(
     if let Some(gpio) = B::DIAG_LED {
         crate::arm::led::select(gpio, B::DIAG_LED_ACTIVE_HIGH);
     }
+    #[cfg(feature = "masked-time")]
+    guard.time_masking(|| embassy_time::Instant::now().as_micros());
     use dagon_mcu_common::shared::{driver, FlashDriver};
     static FLASH_DRIVER: StaticCell<FlashDriver<RpFlash>> = StaticCell::new();
     let mut chip = RpFlash::new(flash);

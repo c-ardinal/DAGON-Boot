@@ -10,6 +10,8 @@ normal build back. See README.md, "Measurements".
     python measure.py listen-time   --project <project> --dagon <exe> --node <id> --key <file>
                                     [--probe <sel>] [--chip <chip>] [--drive <dir>] [--out <dir>]
     python measure.py decide-time   (the same arguments as listen-time)
+    python measure.py masked-time   --project <project> --dagon <exe> --node <id> --key <file>
+                                    [--probe <sel>] [--chip <chip>] [--drive <dir>] [--out <dir>]
     python measure.py restore       --project <project>
     python measure.py selftest
 
@@ -37,8 +39,10 @@ BACKUP = ".measure-backup"
 
 # What each measurement builds and reads. `package` is where the feature
 # goes: "stage0" is targets/mcu/<mcu>/stage0 in the DAGON source, "boot" the
-# node's boot crate (<project>/boot/<id>). `part` is the folder dagon flash
-# builds that part in (<project>/out/flash/target/<part>).
+# node's boot crate (<project>/boot/<id>), "app" the node's app crate
+# (dagon.toml `[build.<id>] package`). `part` is the folder dagon flash
+# builds that part in (<project>/out/flash/target/<part>); the app builds in
+# its own crate's target folder.
 MEASUREMENTS = {
     "stage0-verify": {
         "package": "stage0",
@@ -65,9 +69,22 @@ MEASUREMENTS = {
         # Stage0's check and the decision's check of the app.
         "wait_s": 65,
     },
+    # The app times every critical section of DAGON's guard while it runs;
+    # the user drives the node in between (read only).
+    "masked-time": {
+        "package": "app",
+        "feature": "dagon-mcu-{mcu}/masked-time",
+        "part": None,
+        "symbols": ["DAGON_MASKED_MAX_US", "DAGON_MASKED_COUNT"],
+        # The boot to the app: stage0's check and the boot decision.
+        "wait_s": 65,
+    },
 }
 # The margin the listen window may add beyond itself.
 LISTEN_MARGIN_MS = 10
+# The longest `[execution] masked_max_us` a definition may state
+# (dagon-topology MASKED_MAX_US_LIMIT).
+MASKED_MAX_US_LIMIT = 1000
 
 
 # ---- files -------------------------------------------------------------
@@ -152,14 +169,33 @@ def node_definition(project, node):
     return tomllib.loads(path.read_text(encoding="utf-8"))
 
 
+def app_dir(project, node):
+    """The node's app crate: dagon.toml `[build.<node>] package`."""
+    cfg = tomllib.loads((Path(project) / "dagon.toml").read_text(encoding="utf-8"))
+    package = cfg.get("build", {}).get(node, {}).get("package")
+    if package is None:
+        raise SystemExit(f"dagon.toml has no [build.{node}] package: masked-time builds the node's app")
+    return Path(project) / package
+
+
 def package_file(project, node, m, mcu):
     if m["package"] == "boot":
         return Path(project) / "boot" / node / "Cargo.toml"
+    if m["package"] == "app":
+        return app_dir(project, node) / "Cargo.toml"
     return source_root(project) / "targets" / "mcu" / mcu / "stage0" / "Cargo.toml"
 
 
+def elf_folder(project, node, m):
+    """Where the measuring build's ELF is: the app crate's target folder,
+    else the part's folder under out/flash/target."""
+    if m["package"] == "app":
+        return app_dir(project, node) / "target"
+    return Path(project) / "out" / "flash" / "target" / m["part"]
+
+
 def feature_of(m, mcu):
-    return m["feature"].format(bootcore=f"dagon-{mcu}-bootcore")
+    return m["feature"].format(bootcore=f"dagon-{mcu}-bootcore", mcu=mcu)
 
 
 # ---- the built ELF -----------------------------------------------------
@@ -301,6 +337,27 @@ def listen_verdict(us, window_ms):
     }
 
 
+def masked_verdict(us, count):
+    """The longest time DAGON's own code masked interrupts: PASS when a
+    section was timed and the longest is within what a definition may
+    state; the value to write as `[execution] masked_max_us` goes in the
+    record."""
+    ok = count >= 1 and 0 < us <= MASKED_MAX_US_LIMIT
+    why = None
+    if count == 0:
+        why = "no critical section was timed (the app did not start?)"
+    elif not ok:
+        why = f"{us} us is not within 1..={MASKED_MAX_US_LIMIT} us"
+    return {
+        "masked_max_us": us,
+        "masked_count": count,
+        "limit_us": MASKED_MAX_US_LIMIT,
+        "definition": f"masked_max_us = {us}" if ok else None,
+        "verdict": "PASS" if ok else "FAIL",
+        "why": why,
+    }
+
+
 def decide_verdict(us):
     """The boot decision's time; it has no limit of its own (the boot
     core feeds its watchdog through the check), so only a taken decision
@@ -368,10 +425,12 @@ def measure(a, name, flash=run_flash, read=probe_read, wait=time.sleep, ask=inpu
         log({"command": cmd})
         flash(cmd, a.project)
 
-    part = Path(a.project) / "out" / "flash" / "target" / m["part"]
+    part = elf_folder(a.project, a.node, m)
     result = {"measurement": name, "node": a.node, "mcu": mcu}
     wrote = False
     try:
+        if name == "masked-time" and not chip:
+            raise SystemExit("masked-time reads the node by probe only: give --probe (and --chip on a UF2 node)")
         with Switched(package_file(a.project, a.node, m, mcu), feature_of(m, mcu)):
             wrote = True
             write()
@@ -395,6 +454,14 @@ def measure(a, name, flash=run_flash, read=probe_read, wait=time.sleep, ask=inpu
                 print("Count the fast blinks between two dark pauses on the board's diagnostic output.")
                 blinks = int(ask("blinks: ").strip())
                 result.update(blink_verdict(blinks, hz))
+        elif name == "masked-time":
+            print("Talk to the node for a while without writing it (e.g. `dagon status --port <COMn>` "
+                  "a few times, and let its app run), then press Enter.")
+            ask("done? ")
+            (us,), cmd = read(chip, a.probe, syms["DAGON_MASKED_MAX_US"])
+            (count,), _ = read(chip, a.probe, syms["DAGON_MASKED_COUNT"])
+            log({"command": cmd, "masked_max_us": us, "count": count})
+            result.update(masked_verdict(us, count))
         else:
             (symbol,) = m["symbols"]
             if chip:

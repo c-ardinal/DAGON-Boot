@@ -389,11 +389,14 @@
     overflow: auto;
     width: var(--w-bubble);
     display: grid;
+    /* One column no wider than the bubble: a long question or answer wraps instead of widening it past a narrow window. */
+    grid-template-columns: minmax(0, 1fr);
     gap: var(--s-2);
     padding: var(--s-3);
     border: 1px solid var(--c-line);
     border-radius: var(--r-m);
     background: var(--c-layer-1);
+    overflow-wrap: anywhere;
     box-shadow: 0 8px 24px rgb(0 0 0 / 0.45);
     transform-origin: right bottom;
   }
@@ -414,6 +417,7 @@
     gap: var(--s-2);
   }
   .q {
+    max-width: 100%;
     padding: var(--s-1) var(--s-2);
     border: 1px solid var(--c-line);
     border-radius: var(--r-full);

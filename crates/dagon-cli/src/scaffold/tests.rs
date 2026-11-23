@@ -835,9 +835,10 @@ fn sample_by_mcu() -> String {
 }
 
 /// `topology` (the sample's shape) without the watch and its UART link:
-/// the hub and seg over I2C. A UART link needs a clock with a known
-/// accuracy on each end (V-26), which a node without a board's crystal
-/// does not have.
+/// the hub and seg over I2C at 100 kHz. A UART link needs a clock with a
+/// known accuracy on each end (V-26), which a node without a board's
+/// crystal does not have; on the RP2040's 6.5 MHz ring oscillator a
+/// 400 kHz SCL period is 16 cycles, under the 20 its HAL takes (V-20).
 fn without_uart(topology: &str) -> String {
     let cut = |s: &str, from: &str, to: &str| {
         let a = s.find(from).unwrap_or_else(|| panic!("no {from:?}"));
@@ -852,16 +853,35 @@ fn without_uart(topology: &str) -> String {
     );
     let s = cut(&s, "  watch: [", "]\n");
     s.replacen("order: [seg, watch, hub]", "order: [seg, hub]", 1)
+        .replacen("speed_hz: 400000", "speed_hz: 100000", 1)
 }
+
+/// What a project adds to its dagon.toml so the RP2040 hub of
+/// [`without_uart`]`(`[`sample_by_mcu`]`)` may drive its I2C bus on the ring
+/// oscillator: it bounds the oscillator to 1 % and lets SCL run that much
+/// past `speed_hz`. Without them the topology check refuses the bus (V-20):
+/// the built-in definitions bound neither.
+const BOUNDED_RING: &str = "
+[[mcu_override.rp2040.app.clock]]
+source = \"internal\"
+out_hz = 6_500_000
+tolerance_ppm = 10_000
+
+[mcu_override.rp2040.link_i2c.controller]
+fast_ppm = 10_000
+";
 
 /// As [`new_gen_build`] for the sample with no board named, without its
 /// UART link: the node is generated from its MCU package's template.
 fn new_gen_build_by_mcu(node: &str) {
-    new_gen_build_from(
+    if let Err(log) = build_project(
         &without_uart(&sample_by_mcu()),
         node,
         &format!("e2e-mcu-{node}"),
-    );
+        BOUNDED_RING,
+    ) {
+        panic!("{log}");
+    }
 }
 
 fn new_gen_build_from(topology: &str, node: &str, name: &str) {
@@ -924,7 +944,7 @@ fn new_gen_build_esp32s3_node() {
 #[test]
 #[ignore = "builds firmware for the RP2040"]
 fn new_gen_build_rp2040_hub_by_mcu() {
-    let log = build_project(&without_uart(&sample_by_mcu()), "hub", "e2e-mcu-hub", "").unwrap_err();
+    let log = build_project(&without_uart(&sample_by_mcu()), "hub", "e2e-mcu-hub", BOUNDED_RING).unwrap_err();
     assert!(
         log.contains("node hub: its USB uplink needs the 48 MHz USB clock"),
         "{log}"
@@ -992,6 +1012,10 @@ fn gen_boot_core_slots_sign_from(topology: &str, node: &str, one_core: bool) {
     let dir = d.join("proj");
     new_project(&dir, "proj", topology, &d.join("keys"), &dev()).unwrap();
     let config = dir.join(crate::config::CONFIG_FILE);
+    if !by_mcu.is_empty() {
+        let text = std::fs::read_to_string(&config).unwrap();
+        std::fs::write(&config, format!("{text}\n{BOUNDED_RING}")).unwrap();
+    }
     gen_project(&config, &[node.to_string()], false).unwrap();
     let cfg = Config::load(Some(&config.to_string_lossy())).unwrap();
     let t = dagon_topology::parse_str(topology).unwrap();
@@ -1380,6 +1404,7 @@ fn a_project_override_of_unequal_f401_slots_reaches_the_firmware() {
     let config = dir.join(crate::config::CONFIG_FILE);
     let mut text = std::fs::read_to_string(&config).unwrap();
     text.push_str(UNEQUAL_F401);
+    text.push_str(BOUNDED_RING);
     std::fs::write(&config, text).unwrap();
     let lines = gen_project(&config, &["seg".to_string()], false).unwrap();
     assert!(!lines.iter().any(|l| l.starts_with("skipped")), "{lines:?}");

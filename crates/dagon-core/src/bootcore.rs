@@ -29,7 +29,7 @@ use dagon_format::header::{header_digest16, image_kind, verify_header, ImageHead
 use dagon_format::statelog::{
     kind, reason, target, FaceHeader, Record, FACE_HEADER_SIZE, RECORD_SIZE,
 };
-use dagon_format::{Sha256, SigVerifier};
+use dagon_format::SigVerifier;
 use dagon_port::Flash;
 
 /// What stage0 starts.
@@ -370,18 +370,10 @@ fn check_signed<F: Flash, V: SigVerifier + ?Sized>(
     if h.load_addr != body || h.placement != at.placement {
         return Err(CoreFail::LoadAddr);
     }
-    let mut sha = Sha256::new();
-    let mut buf = [0u8; 256];
-    let mut done = 0u32;
-    while done < h.payload_size {
-        let n = (h.payload_size - done).min(buf.len() as u32) as usize;
-        flash
-            .read(body + done, &mut buf[..n])
-            .map_err(|_| CoreFail::Body)?;
-        sha.update(&buf[..n]);
-        done += n as u32;
-    }
-    if sha.finalize() != h.payload_sha256 {
+    let digest = flash
+        .sha256(body, h.payload_size)
+        .map_err(|_| CoreFail::Body)?;
+    if digest != h.payload_sha256 {
         return Err(CoreFail::Body);
     }
     Ok((body, h))

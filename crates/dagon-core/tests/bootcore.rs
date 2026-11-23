@@ -583,3 +583,78 @@ fn check_inline_takes_a_detached_header_where_the_definition_puts_it() {
         Err(CoreFail::Size)
     );
 }
+
+/// A port whose hash peripheral digests the body: the check takes the
+/// body digest from [`Flash::sha256`], and the default equals the
+/// software SHA-256 of what [`Flash::read`] returns.
+#[test]
+fn the_body_digest_comes_from_the_ports_hash() {
+    use dagon_core::boot::Place;
+    use dagon_core::bootcore::{check_inline, CoreFail};
+    use dagon_ed25519::Ed25519Small;
+    use dagon_format::header::*;
+    use ed25519_compact::{KeyPair, Seed};
+
+    /// `Mem` whose hash answers `digest` for every range.
+    struct Peripheral(Mem, [u8; 32]);
+    impl Flash for Peripheral {
+        fn geometry(&self) -> &[FlashRegion] {
+            &[]
+        }
+        fn read(&mut self, addr: u32, buf: &mut [u8]) -> Result<(), FlashError> {
+            self.0.read(addr, buf)
+        }
+        fn erase(&mut self, addr: u32, len: u32) -> Result<(), FlashError> {
+            self.0.erase(addr, len)
+        }
+        fn write(&mut self, addr: u32, data: &[u8]) -> Result<(), FlashError> {
+            self.0.write(addr, data)
+        }
+        fn sha256(&mut self, _: u32, _: u32) -> Result<[u8; 32], FlashError> {
+            Ok(self.1)
+        }
+    }
+
+    let mut m = Mem((0..0x4000u32).map(|i| (i * 7 + i / 300) as u8).collect());
+    for (at, len) in [(0, 0), (1, 255), (0x100, 256), (3, 0x1001)] {
+        assert_eq!(
+            m.sha256(at, len),
+            Ok(dagon_format::sha256(&m.0[at as usize..][..len as usize])),
+            "{at:#x}+{len:#x}"
+        );
+    }
+
+    let kp = KeyPair::from_seed(Seed::new([4; 32]));
+    let mut h = ImageHeader {
+        image_kind: image_kind::BOOTCORE,
+        port_kind: port_kind::SELF_BOOT,
+        mcu_id: 2,
+        slot_binding: 0,
+        placement: placement::DETACHED,
+        load_addr: 0x1000,
+        payload_size: 0x700,
+        version: Version::new(1, 0, 0),
+        build_flags: build_flags::VERIFY_ENFORCED,
+        release_seq: 1,
+        min_bootcore_version: Version::default(),
+        payload_sha256: [0x5A; 32],
+        key_id: dagon_format::key_id(&kp.pk),
+        target_tag: [0; 16],
+        proto_version: 1,
+        capabilities: capabilities::SIG_VERIFIER,
+        signature: [0; 64],
+    };
+    let msg = [SIGN_DOMAIN, &h.to_bytes()[..SIGNED_LEN]].concat();
+    h.signature = *kp.sk.sign(msg, None);
+    let mut mem = Mem(vec![0xFF; 0x4000]);
+    mem.write(0x3000, &h.to_bytes()).unwrap();
+    let place = Place::detached(0x3000, 0x1000, 0x2000);
+    let v = Ed25519Small::new(*kp.pk);
+    let mut hw = Peripheral(mem, [0x5A; 32]);
+    assert_eq!(check_inline(&mut hw, place, 0, (None, &v), 2), Ok(0x1000));
+    hw.1[31] ^= 1;
+    assert_eq!(
+        check_inline(&mut hw, place, 0, (None, &v), 2),
+        Err(CoreFail::Body)
+    );
+}

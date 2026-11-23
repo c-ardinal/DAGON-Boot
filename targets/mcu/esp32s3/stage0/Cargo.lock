@@ -117,6 +117,7 @@ version = "0.1.0"
 dependencies = [
  "critical-section",
  "dagon-agent",
+ "dagon-core",
  "dagon-events",
  "dagon-format",
  "dagon-port",

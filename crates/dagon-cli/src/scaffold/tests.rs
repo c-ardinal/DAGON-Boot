@@ -944,7 +944,13 @@ fn new_gen_build_esp32s3_node() {
 #[test]
 #[ignore = "builds firmware for the RP2040"]
 fn new_gen_build_rp2040_hub_by_mcu() {
-    let log = build_project(&without_uart(&sample_by_mcu()), "hub", "e2e-mcu-hub", BOUNDED_RING).unwrap_err();
+    let log = build_project(
+        &without_uart(&sample_by_mcu()),
+        "hub",
+        "e2e-mcu-hub",
+        BOUNDED_RING,
+    )
+    .unwrap_err();
     assert!(
         log.contains("node hub: its USB uplink needs the 48 MHz USB clock"),
         "{log}"

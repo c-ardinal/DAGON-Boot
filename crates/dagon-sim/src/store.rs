@@ -523,7 +523,7 @@ impl SimStore {
             let settled = settle_log(
                 &mut Paged(self.flash()),
                 &c.log,
-                start.slot,
+                (start.slot, c.slots[usize::from(start.slot)].0),
                 Cell {
                     value: start.cell,
                     max,

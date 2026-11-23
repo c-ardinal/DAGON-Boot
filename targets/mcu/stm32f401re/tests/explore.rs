@@ -405,7 +405,8 @@ fn boot(cores: Cores, n: &mut Node) -> Result<(), Broke> {
             max: TRIAL_ATTEMPTS,
             holds: true,
         };
-        match bootcore::settle_log(&mut n.f, &LOG, start.slot, cell, healthy) {
+        let running = (start.slot, cores.0[usize::from(start.slot)].0);
+        match bootcore::settle_log(&mut n.f, &LOG, running, cell, healthy) {
             Ok(Settled::Nothing) => {}
             Ok(Settled::Confirmed | Settled::RolledBack) => {
                 if n.f.powered() {
@@ -991,4 +992,41 @@ fn a_confirmed_app_started_past_a_torn_attempt_is_not_on_trial() {
     let a = agent(cores, &n).unwrap();
     assert_eq!(a.images().active(), Some(0), "the app runs from slot 0");
     assert!(!a.images().on_trial(), "the confirmed app is not on trial");
+}
+
+/// Found by the search with three image writes: with one boot core slot,
+/// a good core written over a pending broken one, its SLOT_PENDING lost
+/// to a power cut, left the broken core's record pending for an image no
+/// longer in the slot. Stage0 gave that record up and started the
+/// confirmed core from the slot, which took itself for the pending one:
+/// it reset for ever when its CONFIRMED was torn, and would have
+/// confirmed the broken record when it landed. A core now settles a
+/// pending record only when its own header is that image.
+#[test]
+fn a_core_over_a_pending_one_whose_record_is_lost_settles_as_the_confirmed_core() {
+    let cores = ONE;
+    let broken = broken(cores);
+    for half in [false, true] {
+        let n = walk(
+            cores,
+            &[
+                (Op::Core { good: true }, None),
+                (Op::Boot, None),
+                (Op::Core { good: false }, None),
+                (
+                    Op::Core { good: true },
+                    Some(Fault {
+                        at: 6,
+                        half,
+                        keep: false,
+                    }),
+                ),
+            ],
+        );
+        holds(&n, &broken).unwrap_or_else(|e| panic!("half {half}: {}", e.0));
+        settles(cores, &n).unwrap_or_else(|e| panic!("half {half}: {}", e.0));
+        let mut m = n.copy();
+        boot(cores, &mut m).unwrap_or_else(|e| panic!("half {half}: {}", e.0));
+        holds(&m, &broken).unwrap_or_else(|e| panic!("half {half}: {}", e.0));
+    }
 }

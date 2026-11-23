@@ -110,7 +110,7 @@ fn boot(f: &mut Cut, cell: &mut [u32; 2]) -> u8 {
         match bootcore::settle_log(
             f,
             &LOG,
-            start.slot,
+            (start.slot, CORE_SLOTS[usize::from(start.slot)].0),
             bootcore::Cell {
                 value: *cell,
                 max: TRIAL_ATTEMPTS,
@@ -387,7 +387,7 @@ fn one_core_boot(f: &mut Cut, cell: &mut [u32; 2], lose: Option<usize>) -> Optio
                 let settled = bootcore::settle_log(
                     f,
                     &LOG,
-                    start.slot,
+                    (start.slot, CORE_SLOTS[usize::from(start.slot)].0),
                     bootcore::Cell {
                         value: *cell,
                         max: TRIAL_ATTEMPTS,

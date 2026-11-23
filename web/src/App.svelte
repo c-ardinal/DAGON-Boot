@@ -26,7 +26,8 @@
   import { BUSY, CONTROL_OF, stageWord, WRITABLE } from './app/console/states.ts';
   import { Workspace } from './app/console/workspace.svelte.ts';
   import { WriteFlow } from './app/console/writeFlow.svelte.ts';
-  import Graph, { COMPACT_FROM, ZOOM_LIMITS } from './graph/Graph.svelte';
+  import Graph, { COMPACT_FROM } from './graph/Graph.svelte';
+  import { ZOOM_LIMITS } from './graph/fit.ts';
   import BandButtons from './screens/BandButtons.svelte';
   import BuildFailureModal from './screens/BuildFailureModal.svelte';
   import ConfirmModal, { type Ask } from './screens/ConfirmModal.svelte';

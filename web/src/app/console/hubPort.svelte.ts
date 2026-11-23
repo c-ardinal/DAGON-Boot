@@ -25,13 +25,12 @@ export class HubPort {
   readonly op: Operate;
   /** The device the page opened as the node connected to the PC. */
   private opened: Transport | null = null;
-  private readonly ports: ReturnType<typeof webSerial>;
   private connecting: Promise<void> = Promise.resolve();
 
   constructor(deps: HubPortDeps) {
     const { stand, cli } = deps;
     const dev = stand !== null;
-    const ports = (this.ports = webSerial(deps.serial));
+    const ports = webSerial(deps.serial);
     this.op = new Operate({
       open: async () => {
         const t = stand?.transport ?? null;

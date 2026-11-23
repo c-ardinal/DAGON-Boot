@@ -23,24 +23,22 @@
   }
 
   export const newView = (): View => ({ zoom: 1, x: 0, y: 0, set: false });
-  /** The zoom's limits and one step of it. */
-  export const ZOOM_LIMITS = { min: 0.5, max: 2, step: 1.2 };
   /** From this many ノード the cards are compact whatever the zoom (name, version and state only). */
   export const COMPACT_FROM = 9;
 </script>
 
 <script lang="ts">
-  import { CANVAS, LINK, NODE, SLOT, STATE, WRITE } from '../app/copy.ts';
-  import { easeOut, fade, draw, lateFade, moves, rise, tokenMs, tokenNumber, waterEnd } from '../app/motion.ts';
-  import { lightsStill, nodeState, STATE_ICON, type NodeState } from '../app/nodeState.ts';
-  import Icon from '../screens/Icon.svelte';
-  import { kindLabel, LinkKind } from '../app/define/model.ts';
-  import type { Live } from '../app/operate.svelte.ts';
-  import { hubIn, isHub, type Config, type Link, type Node } from '../app/sample.ts';
-  import { imageRows } from '../app/slots.ts';
-  import { versionText } from '../wasm/dagon.ts';
-  import { along, CableField, FrameLoop, restPoints, runLengths, strandPath } from './cable.ts';
-  import { neighbour, pathD, tieLengths, verticalLink, wireOffsets, type Bezier, type Pt } from './geometry.ts';
+  import { CANVAS, LINK } from '../app/copy.ts';
+  import { easeOut, fade, draw, moves, tokenMs, tokenNumber } from '../app/motion.ts';
+  import { lightsStill, nodeState, type NodeState } from '../app/nodeState.ts';
+  import NodeCard from './NodeCard.svelte';
+  import { LinkKind } from '../app/define/model.ts';
+  import type { Live } from '../app/writeProgress.ts';
+  import { hubIn, isHub, type Config, type Node } from '../app/sample.ts';
+  import { bundleOf } from './bundles.ts';
+  import { CableField, FrameLoop, restPoints } from './cable.ts';
+  import { neighbour, pathD, verticalLink, type Bezier, type Pt } from './geometry.ts';
+  import { boundsOf, clampZoom, fitView, SIDE, ZOOM_LIMITS } from './fit.ts';
   import { treeLayout } from './layout.ts';
   import { untrack } from 'svelte';
 
@@ -114,17 +112,8 @@
   const NAME_PX = 14;
   /** Card heights before they are measured (px). */
   const EST_H = { normal: 140, compact: 56 };
-  /** Room above a top coordinator for its uplink card, and around the graph when fitting (px). */
+  /** Room above a top coordinator for its uplink card (px). */
   const UPLINK_ROOM = 84;
-  const SIDE = 24;
-  /** Between a bundle's outer strand and its chip, and the chip's height (px). */
-  const CHIP_CLEAR = 12;
-  const CHIP_H = 24;
-  /** How far from a leaning run a chip stands so the run passes clear over its whole height. */
-  const clearOf = (width: number, dir: Pt) => {
-    const down = Math.max(0.2, Math.abs(dir.y));
-    return (width / 2) / down + (CHIP_H / 2) * (Math.abs(dir.x) / down) + CHIP_CLEAR;
-  };
   /** A press moves this far before it is a drag, not a click (px). */
   const DRAG_PX = 4;
 
@@ -225,28 +214,17 @@
     const est = c ? EST_H.compact : EST_H.normal;
     const h = (id: string) => (c === compact ? hOf(id) : est);
     const t = treeLayout(nodesOf, config?.links ?? [], { ...s, h });
-    const cards = (config?.nodes ?? []).map((n) => {
-      const p = positions[n.id] ?? { x: t.at[n.id].x - t.width / 2, y: t.at[n.id].y };
-      return { ...p, w: s.w, h: h(n.id), top: tops.some((x) => x.id === n.id) ? UPLINK_ROOM : 0 };
-    });
-    const x = Math.min(...cards.map((c) => c.x));
-    const y = Math.min(...cards.map((c) => c.y - c.top));
-    return { x, y, w: Math.max(...cards.map((c) => c.x + c.w)) - x, h: Math.max(...cards.map((c) => c.y + c.h)) - y };
-  }
-  /** Everything placed, in canvas px. */
-  function bounds() {
-    const cards = (config?.nodes ?? []).map((n) => ({ ...pos[n.id], h: hOf(n.id), top: tops.some((t) => t.id === n.id) ? UPLINK_ROOM : 0 }));
-    const x = Math.min(...cards.map((c) => c.x));
-    const y = Math.min(...cards.map((c) => c.y - c.top));
-    return { x, y, w: Math.max(...cards.map((c) => c.x + NODE_W)) - x, h: Math.max(...cards.map((c) => c.y + c.h)) - y };
+    return boundsOf(
+      (config?.nodes ?? []).map((n) => {
+        const p = positions[n.id] ?? { x: t.at[n.id].x - t.width / 2, y: t.at[n.id].y };
+        return { ...p, w: s.w, h: h(n.id), top: tops.some((x) => x.id === n.id) ? UPLINK_ROOM : 0 };
+      }),
+    );
   }
 
   /** The canvas moves smoothly for a pressed fit or zoom; never for a drag or the wheel, which follow the hand. */
   let gliding = $state(false);
-  const clampZoom = (z: number) => Math.min(ZOOM_LIMITS.max, Math.max(ZOOM_LIMITS.min, z));
 
-  /** The zoom at which `b` fills `free`, at most `cap`. */
-  const zoomFor = (b: { w: number; h: number }, free: DOMRect, cap: number) => clampZoom(Math.min(cap, free.width / (b.w + 2 * SIDE), free.height / (b.h + 2 * SIDE)));
   /** The zoom under which the cards turn compact. */
   const COMPACT_ZOOM = NAME_MIN_PX / NAME_PX;
 
@@ -254,28 +232,18 @@
   export function fit(cap: number = firstZoom(), smooth = true) {
     if (!boxEl || !config?.nodes.length) return;
     const box = boxEl.getBoundingClientRect();
-    let free = freeArea?.() ?? box;
-    // The normal cards' bounds decide; when they would not fit at a zoom that keeps them normal, the compact layout is fitted and the zoom is held under the compact threshold so the result stays compact.
-    const many = nodesOf.length >= COMPACT_FROM;
-    let b = boundsAt(false);
-    let zoom = many ? 0 : zoomFor(b, free, cap);
-    // The room kept for a toast never turns the cards compact: the whole area is used then, and a toast stands over the fit.
-    const whole = wholeArea?.();
-    if (!many && zoom < COMPACT_ZOOM && whole && zoomFor(b, whole, cap) >= COMPACT_ZOOM) {
-      free = whole;
-      zoom = zoomFor(b, whole, cap);
-    }
-    if (zoom < COMPACT_ZOOM) {
-      b = boundsAt(true);
-      zoom = Math.min(zoomFor(b, free, cap), many ? cap : COMPACT_ZOOM * 0.99);
-    }
+    const fitted = fitView({
+      normal: boundsAt(false),
+      compact: () => boundsAt(true),
+      box,
+      free: freeArea?.() ?? box,
+      whole: wholeArea?.(),
+      cap,
+      compactZoom: COMPACT_ZOOM,
+      many: nodesOf.length >= COMPACT_FROM,
+    });
     gliding = smooth;
-    view = {
-      zoom,
-      x: free.left - box.left + (free.width - b.w * zoom) / 2 - b.x * zoom,
-      y: free.top - box.top + (free.height - b.h * zoom) / 2 - b.y * zoom,
-      set: true,
-    };
+    view = { ...fitted, set: true };
   }
 
   /** Zoom keeping the canvas point under (cx, cy) in place; by default the middle of the box. */
@@ -372,34 +340,9 @@
   const drawn = $derived(
     (config?.links ?? []).map((l) => {
       const key = `link:${l.to}`;
-      const open = selected === key;
-      const route = routes[key];
-      const points = shapes[key] ?? restPoints(route);
-      const lengths = runLengths(points);
-      const total = lengths[lengths.length - 1];
-      const gap = open ? 8 : 4;
-      const count = Math.max(1, l.wires.length);
-      const offsets = wireOffsets(count, gap);
-      const width = (count - 1) * gap;
-      const ties = open
-        ? []
-        : tieLengths(total).map((s) => {
-            const { p, dir } = along(points, lengths, s);
-            return { p, deg: (Math.atan2(dir.y, dir.x) * 180) / Math.PI - 90, len: width + 4 };
-          });
-      const { p: mid, dir: midDir } = along(points, lengths, total * 0.5);
-      // Beside the strands, on the side the cable leans out to.
-      const outward = route[3].x < route[0].x ? -1 : 1;
-      const label = bundleLabel(l);
-      return { l, key, open, outward, clear: clearOf(width, midDir), start: route[0], strands: offsets.map((o) => strandPath(points, o)), ties, mid, label, name: LINK.name(LINK.bundle(kindLabel(l.kind), l.wires.length, l.wires.filter((w) => w.shared).length, label.slice(kindLabel(l.kind).length + 1)), nameOf(l.from), nameOf(l.to), l.addr), skipped: !!config?.nodes.find((n) => n.id === l.to)?.skip };
+      return bundleOf(l, config, routes[key], shapes[key] ?? restPoints(routes[key]), selected === key);
     }),
   );
-
-  function bundleLabel(l: Link): string {
-    // The bus and its value: the strands show their count, and the words for it are in the name and the sheet.
-    const value = l.addr || config?.nodes.find((n) => n.id === l.to)?.via.split(' ')[1] || '';
-    return [kindLabel(l.kind), value].filter(Boolean).join(' ');
-  }
 
   /** Focus stops in screen order: nodes, then link chips. */
   const stops = $derived([
@@ -427,38 +370,6 @@
     onselect(key);
   }
 
-  type Mark = Chip | 'skeleton' | null;
-
-  function markOf(n: Node): Mark {
-    if (n.skip) {
-      const why = NODE.skippedWhy[n.skip] ?? '';
-      return { chip: NODE.skipped, spoken: NODE.skippedName(why), silent: false, note: compact ? undefined : why };
-    }
-    if (chips[n.id]) return chips[n.id];
-    if (!connected) return null;
-    const l = live[n.id];
-    if (!l || l.responding === null) return 'skeleton';
-    // 応答あり・応答なし are the state mark itself: no chip repeats them.
-    if (!l.responding) return { chip: '', spoken: NODE.silentName, silent: true };
-    if (l.hello?.trial) return { chip: NODE.trial, spoken: NODE.trialName, silent: false };
-    return { chip: '', spoken: NODE.respondingName, silent: false };
-  }
-
-  function versionOf(n: Node): string {
-    const h = connected ? live[n.id]?.hello : null;
-    return h ? versionText(h.activeVersion) : '';
-  }
-
-  /** The slot line (each app slot the node's definition gives, with its version, ▸ on the running one), from the node's last STATUS. */
-  function slotsOf(n: Node): { row: string; text: string; on: boolean }[] | null {
-    const st = connected ? live[n.id]?.status : null;
-    if (!st) return null;
-    return imageRows(n.mcuId).map((i) => {
-      const s = st.slots[i];
-      return { row: SLOT.rows[i], text: s.state === 0 ? SLOT.states[0] : versionText(s.version), on: st.active === i };
-    });
-  }
-
   /** Each node's state mark: from the page's chip, the water level and the watch. */
   const states = $derived(
     Object.fromEntries(
@@ -470,15 +381,6 @@
   );
   const still = $derived(lightsStill(Object.values(states)));
 
-  /** A coordinator's own connection line: its uplink as the 構成 writes it, or the link from the node above it. */
-  function hubVia(n: Node): string {
-    if (!n.uplink) return n.via || NODE.usb;
-    return NODE.uplinkVia(kindLabel(n.uplink.kind), n.uplink.host);
-  }
-
-  /** The card's one mono line: MCU and how it is reached. */
-  const metaOf = (n: Node) => [n.mcu, isHub(n) ? hubVia(n) : n.via].filter(Boolean).join(' · ');
-
   /** Coordinators nobody links to, each with its uplink (what drives it, as the 構成 writes it) above it. */
   const tops = $derived((config?.nodes ?? []).filter((n) => isHub(n) && tree.roots.includes(n.id)));
   /** The coordinator this page connects to: the one updating reaches (the cut's), else the first one the 構成 names. */
@@ -486,54 +388,10 @@
     (hubIn(config, true) ?? hubIn(config, false))?.id,
   );
 
-  /** The role on the card: coordinator; links from the nearest coordinator above; or ノード when no coordinator is above it. */
-  function roleOf(n: Node): string {
-    if (isHub(n)) return NODE.roleHub;
-    if (!underCoordinator(n.id)) return NODE.roleOther;
-    const d = belowHub(n.id);
-    return d <= 1 ? NODE.roleNode : d === 2 ? NODE.roleGrandchild : NODE.roleDeeper(d);
-  }
-
-  /** Links from the nearest coordinator above node `id` (1 for a node; a node no coordinator reaches counts as a node). */
-  function belowHub(id: string, seen = new Set<string>()): number {
-    const up = config?.links.find((l) => l.to === id)?.from;
-    const p = config?.nodes.find((x) => x.id === up);
-    if (!p || isHub(p) || seen.has(id)) return 1;
-    seen.add(id);
-    return belowHub(p.id, seen) + 1;
-  }
-
-  /** Whether the links above node `id` lead up to a coordinator (not to a node nobody links to, nor round a loop). */
-  function underCoordinator(id: string, seen = new Set<string>()): boolean {
-    const up = config?.links.find((l) => l.to === id)?.from;
-    const p = config?.nodes.find((x) => x.id === up);
-    if (!p || seen.has(id)) return false;
-    if (isHub(p)) return true;
-    seen.add(id);
-    return underCoordinator(p.id, seen);
-  }
-
   function l0Of(n: Node): string {
     if (connected && n.id === firstHub) return CANVAS.pc;
     const by = n.uplink ? (CANVAS.pcBy[n.uplink.host] ?? CANVAS.pc) : CANVAS.pc;
     return n.id === firstHub ? by : `${by}${CANVAS.notThisPc}`;
-  }
-
-  function spokenName(n: Node, m: Mark, version: string, slots: { row: string; text: string }[] | null): string {
-    const mark = m && m !== 'skeleton' ? m : null;
-    return NODE.name({
-      no: n.no,
-      name: n.name,
-      role: roleOf(n),
-      version,
-      product: n.product,
-      meta: metaOf(n),
-      slots: (slots ?? []).map((sl) => `${sl.row} ${sl.text}`).join(' '),
-      chip: mark?.chip ?? '',
-      note: compact ? '' : (mark?.note ?? ''),
-      // A state no chip shows (応答あり, 応答なし) is said after the words.
-      state: mark && !mark.chip ? mark.spoken : '',
-    });
   }
 
   /** Client point to canvas coordinates. */
@@ -647,74 +505,33 @@
 
       {#each config?.nodes ?? [] as n (n.id)}
         {@const key = `node:${n.id}`}
-        {@const m = markOf(n)}
-        {@const v = versionOf(n)}
-        {@const level = fill[n.id]}
         {@const linked = (config?.links ?? []).some((l) => l.to === n.id)}
-        {@const slots = slotsOf(n)}
         {@const check = checks[n.id]}
-        <button
-          transition:rise
-          class="node st-{states[n.id]}"
-          class:dragging={dragging === n.id}
-          class:still
-          class:uns={!!n.skip}
-          class:err={m !== null && m !== 'skeleton' && m.silent}
-          class:drop={dropOn === n.id}
-          class:checkable={check !== undefined}
-          class:filling={level !== undefined}
-          style:left="{at(n.id).x}px"
-          style:top="{at(n.id).y}px"
-          style:width="{NODE_W}px"
-          data-key={key}
-          data-avoid=""
-          tabindex={focusKey === key ? 0 : -1}
-          aria-pressed={selected === key}
-          aria-label="{spokenName(n, m, v, slots)}、{STATE[states[n.id]]}"
-          bind:offsetHeight={heights[n.id]}
+        <NodeCard
+          {n}
+          {config}
+          live={live[n.id]}
+          chip={chips[n.id]}
+          {connected}
+          {compact}
+          state={states[n.id]}
+          {still}
+          level={fill[n.id]}
+          confirmed={confirmedOf(n.id)}
+          dragging={dragging === n.id}
+          drop={dropOn === n.id}
+          {check}
+          {checksLocked}
+          oncheck={() => oncheck?.(n.id)}
+          at={at(n.id)}
+          width={NODE_W}
+          {key}
+          focused={focusKey === key}
+          pressed={selected === key}
+          bind:height={heights[n.id]}
           onpointerdown={(e) => cardDown(e, n.id)}
           onclick={() => pick(key)}
-        >
-          {#if level !== undefined}
-            <!-- The water rises with the node's progress; its edge is two CSS-masked strips drifting at different speeds. -->
-            <span in:fade out:lateFade class="water" aria-hidden="true">
-              <span out:waterEnd={{ confirmed: confirmedOf(n.id) }} class="level" style:transform="translateY({100 - Math.min(100, Math.max(0, level))}%)">
-                <span class="crest back"></span><span class="crest front"></span>
-              </span>
-            </span>
-          {/if}
-          <span class="hd">
-            <b>[{n.no}] {n.name}</b> <span class="role">{roleOf(n)}</span>
-            {#if v}{#key v}<span in:rise={{ dur: '--dur-quick' }} class="ver" translate="no">{v}</span>{/key}{:else if m === 'skeleton'}<span class="skeleton ver-sk"></span>{/if}
-            {#key states[n.id]}<span in:rise={{ dur: '--dur-quick' }} class="state" title={STATE[states[n.id]]}><Icon name={STATE_ICON[states[n.id]]} size="var(--i-state)" /><span class="visually-hidden">{STATE[states[n.id]]}</span></span>{/key}
-          </span>
-          <span class="bd">
-            <span class="prod" translate="no" title={n.product}>{n.product}</span>
-            <span class="meta" translate="no">{metaOf(n)}</span>
-            <!-- Its row, and the chip's below it, are always there: no card changes height when one fills. -->
-            <span class="slotline" translate="no">{#each slots ?? [] as sl (sl.row)}<span class:on={sl.on}>{sl.row} {sl.text}</span> {/each}</span>
-            <span class="chips"
-              >{#if m === 'skeleton'}<span class="skeleton chip-sk"></span>{:else if m?.chip}<span in:rise={{ dur: '--dur-quick' }} out:lateFade class="chip" class:silent={m.silent} class:uns={!!n.skip && m.chip === NODE.skipped}>{m.chip}</span>{/if} {#if m && m !== 'skeleton' && m.note}<span class="note" title={m.note}>{m.note}</span>{/if}</span
-            >
-          </span>
-          {#if level !== undefined}<span in:fade out:lateFade={{ shown: confirmedOf(n.id) ? 100 : undefined }} class="pct" aria-hidden="true" style:--shown={Math.round(level)}></span>{/if}
-        </button>
-        {#if check !== undefined}
-          <!-- Beside the card's button, never inside it: the check is its own control. -->
-          <button
-            in:fade
-            class="check"
-            role="checkbox"
-            aria-checked={check}
-            aria-label={WRITE.pick(`[${n.no}] ${n.name}`)}
-            aria-disabled={checksLocked}
-            title={checksLocked ? WRITE.checksLockedWhy : undefined}
-            data-avoid=""
-            style:left="{at(n.id).x}px"
-            style:top="{at(n.id).y}px"
-            onclick={() => !checksLocked && oncheck?.(n.id)}><Icon name={check ? 'square-check' : 'square'} size="var(--i-state)" /></button
-          >
-        {/if}
+        />
         {#if !isHub(n) || linked}
           <span transition:fade|global class="port in" class:linked aria-hidden="true" style:left="{at(n.id).x + NODE_W / 2}px" style:top="{at(n.id).y}px" class:ok={wire !== null && wire.from !== n.id && reasons[n.id] === null}></span>
         {/if}
@@ -894,369 +711,6 @@
     text-align: center;
   }
 
-  /* NodeCard: header (name, role, version, state mark), product, one mono line, chips.
-     The frame carries the state: 1 px when normal, 2 px in the state colour for 要確認 and エラー. */
-  .node {
-    position: absolute;
-    z-index: var(--z-node);
-    display: grid;
-    padding: 0;
-    border: var(--st-w-thin) solid var(--st-idle);
-    border-radius: var(--r-m);
-    background: var(--c-ink);
-    color: var(--c-paper);
-    text-align: left;
-    font: 400 var(--t-small) / 20px var(--f-ja);
-    cursor: pointer;
-    overflow: hidden;
-    transition:
-      box-shadow var(--dur-quick) var(--ease-out),
-      border-color var(--dur-ui) var(--ease-out),
-      background-color var(--dur-quick) var(--ease-out);
-  }
-  .node.st-alive,
-  .node.st-busy {
-    border-color: var(--st-alive);
-  }
-  .node.st-silent {
-    border-color: var(--st-silent);
-  }
-  .node.st-silent .prod {
-    color: var(--c-muted);
-  }
-  .node.st-attention {
-    border: var(--st-w-strong) solid var(--st-attention);
-  }
-  .node.st-error {
-    border: var(--st-w-strong) solid var(--st-error);
-  }
-  .state {
-    display: inline-flex;
-    flex: none;
-    align-self: center;
-    padding: var(--s-1);
-    color: var(--st-idle);
-  }
-  .st-alive .state {
-    color: var(--c-paper);
-  }
-  .st-silent .state {
-    color: var(--st-silent);
-  }
-  .st-busy .state {
-    color: var(--st-busy);
-  }
-  .st-attention .state {
-    color: var(--st-attention);
-  }
-  .st-error .state {
-    color: var(--st-error);
-  }
-  /* 作業中: a 48 px light runs once round the frame every 1.6 s; the only moving thing on the canvas. */
-  @property --orbit {
-    syntax: '<angle>';
-    inherits: false;
-    initial-value: 0deg;
-  }
-  .node.st-busy::after {
-    content: '';
-    position: absolute;
-    inset: 0;
-    z-index: 2;
-    padding: var(--st-w-strong);
-    border-radius: inherit;
-    background: conic-gradient(from var(--orbit), var(--st-busy) 0 30deg, transparent 30deg);
-    mask:
-      linear-gradient(#000 0 0) content-box exclude,
-      linear-gradient(#000 0 0);
-    pointer-events: none;
-    animation: orbit var(--dur-orbit) var(--ease-steady) infinite;
-  }
-  @keyframes orbit {
-    to {
-      --orbit: 360deg;
-    }
-  }
-  /* Standing still (reduced motion, or another node needs attention): a dashed light along the top edge. */
-  .node.st-busy.still::after {
-    inset: 0 0 auto;
-    height: var(--st-w-strong);
-    padding: 0;
-    mask: none;
-    background: repeating-linear-gradient(90deg, var(--st-busy) 0 12px, transparent 12px 20px);
-    animation: none;
-  }
-  @media (prefers-reduced-motion: reduce) {
-    .node.st-busy::after {
-      inset: 0 0 auto;
-      height: var(--st-w-strong);
-      padding: 0;
-      mask: none;
-      background: repeating-linear-gradient(90deg, var(--st-busy) 0 12px, transparent 12px 20px);
-      animation: none;
-    }
-  }
-  .node[aria-pressed='true'] {
-    box-shadow: 0 0 0 var(--st-w-thin) var(--c-paper);
-  }
-  .node.drop {
-    box-shadow: 0 0 0 2px var(--c-accent);
-  }
-  .node.uns {
-    border-style: dashed;
-  }
-  .node:focus-visible {
-    outline: var(--st-w-focus) solid var(--c-paper);
-    outline-offset: 2px;
-  }
-  @media (hover: hover) and (pointer: fine) {
-    .node:not([aria-pressed='true']):hover {
-      background: var(--c-layer-1);
-    }
-  }
-  .hd,
-  .bd,
-  .pct {
-    position: relative;
-    z-index: 1;
-  }
-  /* 書込: the card check sits at the card's top-left, in the header's padding. */
-  .check {
-    position: absolute;
-    /* Above its card (ports sit there too). */
-    z-index: calc(var(--z-node) + 1);
-    display: grid;
-    place-items: center;
-    width: calc(var(--i-state) + 2 * var(--s-2));
-    height: calc(var(--i-state) + 2 * var(--s-2));
-    margin: var(--s-1) 0 0 var(--s-1);
-    padding: 0;
-    border: 0;
-    background: none;
-    color: var(--c-muted);
-    cursor: pointer;
-  }
-  .check[aria-checked='true'] {
-    color: var(--c-accent);
-  }
-  .check[aria-disabled='true'] {
-    color: var(--c-muted);
-    cursor: default;
-  }
-  .check:focus-visible {
-    outline: var(--st-w-focus) solid var(--c-paper);
-  }
-  .node.checkable .hd {
-    padding-left: calc(var(--i-state) + 2 * var(--s-2) + var(--s-1));
-  }
-  .hd {
-    display: flex;
-    align-items: center;
-    gap: var(--s-2);
-    min-width: 0;
-    height: 40px;
-    padding: var(--s-2) var(--s-3);
-    background: var(--c-layer-1);
-  }
-  .hd b {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    font: 700 var(--t-small) / 20px var(--f-ja);
-  }
-  /* The card in the hand is over the others. */
-  .node.dragging {
-    z-index: var(--z-drag);
-    cursor: grabbing;
-  }
-  .role {
-    color: var(--c-muted);
-    font: 500 var(--t-caption) / 16px var(--f-ja);
-    white-space: nowrap;
-  }
-  .ver {
-    margin-left: auto;
-    font: 400 var(--t-version) / 24px var(--f-mono);
-    font-variant-numeric: tabular-nums;
-  }
-  .ver-sk {
-    width: 40px;
-    height: 16px;
-    margin-left: auto;
-  }
-  .state {
-    margin-left: auto;
-  }
-  .ver + .state,
-  .ver-sk + .state {
-    margin-left: 0;
-  }
-  .bd {
-    display: grid;
-    gap: 0;
-    min-width: 0;
-    padding: var(--s-3) var(--s-4);
-  }
-  .prod {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    font: 700 var(--t-body) / 24px var(--f-ja);
-  }
-  .meta {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    color: var(--c-muted);
-    font: 500 var(--t-mono) / 24px var(--f-mono);
-  }
-  .chips {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    min-width: 0;
-    min-height: 20px;
-    margin-top: 4px;
-  }
-  .chip {
-    display: inline-flex;
-    align-items: center;
-    height: 20px;
-    padding: 0 8px;
-    border: 1px solid var(--c-line);
-    border-radius: var(--r-full);
-    background: var(--c-ink);
-    font: 700 var(--t-caption) / 1 var(--f-ja);
-    white-space: nowrap;
-    transition:
-      border-color var(--dur-ui) var(--ease-out),
-      background-color var(--dur-ui) var(--ease-out),
-      color var(--dur-ui) var(--ease-out);
-  }
-  .slotline {
-    display: flex;
-    min-height: 16px;
-    gap: 8px;
-    color: var(--c-muted);
-    font: 500 var(--t-caption) / 20px var(--f-mono);
-  }
-  .slotline .on {
-    color: var(--c-paper);
-  }
-  .slotline .on::before {
-    content: '▸';
-    margin-right: var(--s-1);
-  }
-  .compact .slotline {
-    display: none;
-  }
-  .chip.silent {
-    border-color: var(--c-signal);
-    background: var(--c-signal);
-    color: var(--c-ink);
-  }
-  .chip.uns {
-    border-style: dashed;
-    border-color: var(--c-paper);
-  }
-  .chip-sk {
-    width: 72px;
-    height: 20px;
-    border-radius: var(--r-full);
-  }
-  .note {
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    color: var(--c-muted);
-    font: 400 var(--t-caption) / 16px var(--f-ja);
-  }
-  /* The number counts up with the water: the browser moves --shown between the values it is given. */
-  @property --shown {
-    syntax: '<integer>';
-    inherits: false;
-    initial-value: 0;
-  }
-  .pct {
-    position: absolute;
-    right: var(--s-3);
-    bottom: var(--s-3);
-    font: 400 var(--t-version) / 24px var(--f-mono);
-    counter-reset: shown var(--shown);
-    transition: --shown var(--dur-rise) var(--ease-steady);
-  }
-  .pct::before {
-    content: counter(shown) '%';
-  }
-  /* Compact (9 ノード and on, or when normal cards would shrink names under 13 px): name, version, state. */
-  .compact .prod,
-  .compact .meta,
-  .compact .role,
-  .compact .note {
-    display: none;
-  }
-  .compact .hd {
-    border-bottom: 0;
-  }
-  /* Past this zoom the name holds its 13 px on screen. */
-  .compact .hd b {
-    flex: 1;
-    min-width: 0;
-    font-size: max(var(--t-caption), calc(13 * var(--t-caption) / 12 / var(--zoom)));
-  }
-  .compact .bd {
-    padding-top: 0;
-  }
-  .compact .chips {
-    margin-top: var(--s-1);
-  }
-
-  /* Water gauge: the level moves by transform; the edge is a CSS mask (no drawn illustration). */
-  /* The water lies under the card's words: muted words lighten on it to hold 4.5:1 (WCAG 1.4.3). */
-  .node.filling :is(.role, .meta, .slotline, .note) {
-    color: color-mix(in srgb, var(--c-paper) 50%, var(--c-muted));
-  }
-  .water {
-    position: absolute;
-    inset: 0;
-    z-index: 0;
-    overflow: hidden;
-    border-radius: inherit;
-    pointer-events: none;
-    --wave-front: color-mix(in srgb, var(--c-accent) 32%, var(--c-ink));
-    --wave-back: color-mix(in srgb, var(--c-accent) 18%, var(--c-ink));
-  }
-  .level {
-    position: absolute;
-    inset: 0;
-    background: var(--wave-front);
-    transition: transform var(--dur-rise) var(--ease-steady);
-  }
-  .crest {
-    position: absolute;
-    left: 0;
-    width: 200%;
-    height: 12px;
-    -webkit-mask: radial-gradient(36px 9px at 50% 100%, #000 96%, transparent 100%) 0 0 / 64px 12px repeat-x;
-    mask: radial-gradient(36px 9px at 50% 100%, #000 96%, transparent 100%) 0 0 / 64px 12px repeat-x;
-  }
-  .crest.front {
-    top: -12px;
-    background: var(--wave-front);
-    animation: drift var(--dur-drift-front) var(--ease-steady) infinite;
-  }
-  .crest.back {
-    top: -16px;
-    background: var(--wave-back);
-    animation: drift var(--dur-drift-back) var(--ease-steady) infinite reverse;
-  }
-  @keyframes drift {
-    to {
-      transform: translateX(-50%);
-    }
-  }
-
   /* Ports: the lower one starts a drag, the upper one takes it. */
   /* Over the cards, also the one in the hand: a port is never half hidden. */
   .port {
@@ -1329,11 +783,5 @@
   }
   .link-chip:focus-visible {
     outline: 2px solid var(--c-paper);
-  }
-
-  @media (prefers-reduced-motion: reduce) {
-    .crest {
-      animation: none;
-    }
   }
 </style>

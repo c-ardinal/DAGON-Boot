@@ -5,7 +5,7 @@
   import { DIFF, FILE, NOTICE } from '../app/copy.ts';
   import type { DiffRow } from '../app/define/diff.ts';
   import type { Action } from '../app/machine.ts';
-  import type { ReleaseFile } from '../app/operate.svelte.ts';
+  import type { ReleaseFile } from '../app/writeProgress.ts';
   import BandButtons from './BandButtons.svelte';
   import Modal from './Modal.svelte';
 

@@ -2,7 +2,7 @@
 // named buttons the machine allows there.
 import { BAND, BAND_CHIP, BAND_FOR, BUTTON, BUTTON_FOR, DEFINE, SIM, WRITE, type BandCopy } from './copy.ts';
 import { view, type Action, type Ctx, type L } from './machine.ts';
-import type { Finish, Progress } from './operate.svelte.ts';
+import type { Finish, Progress } from './writeProgress.ts';
 import type { ReconnectNote } from '../serial/transport.ts';
 
 export interface Button {

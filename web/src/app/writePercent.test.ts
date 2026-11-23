@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { writePercent, type WriteTrack } from './operate.svelte.ts';
+import { writePercent, type WriteTrack } from './writeProgress.ts';
 
 // The number and its weights are dagon-host's (crates/dagon-host/src/percent.rs, tested there); the page reads the same calculation.
 describe('one % per node from transfer to confirmation', () => {

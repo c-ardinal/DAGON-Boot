@@ -4,7 +4,7 @@ import { NODE, WRITE } from '../copy.ts';
 import type { Control } from '../locks.ts';
 import type { Action } from '../machine.ts';
 import { resultChip } from '../nodeState.ts';
-import { writingTo, type Progress } from '../operate.svelte.ts';
+import { writingTo, type Progress } from '../writeProgress.ts';
 
 /** Buttons whose procedures this page runs; the others show as unavailable. */
 export const RUNS: ReadonlySet<Action> = new Set([

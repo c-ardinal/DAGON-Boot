@@ -1,6 +1,6 @@
 <script lang="ts">
   import { DETAIL, NODE, NODE_ACTION, SLOT, TRIAL_CHOICE, WIRING, WRITE } from '../app/copy.ts';
-  import type { Live } from '../app/operate.svelte.ts';
+  import type { Live } from '../app/writeProgress.ts';
   import type { Config, Link, Node } from '../app/sample.ts';
   import { appRows, coreRows, imageRows, previousVersion } from '../app/slots.ts';
   import { versionText, type RecoverResult, type StatusResp } from '../wasm/dagon.ts';

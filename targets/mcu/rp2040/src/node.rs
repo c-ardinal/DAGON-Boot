@@ -32,7 +32,7 @@ use crate::watchdog::{wdt, Guard};
 pub struct DagonParts {
     pub flash: Peri<'static, FLASH>,
     pub watchdog: Peri<'static, WATCHDOG>,
-    /// The DAGON link to the host or hub (USB CDC).
+    /// The DAGON link to the host or coordinator (USB CDC).
     pub usb: Peri<'static, USB>,
 }
 

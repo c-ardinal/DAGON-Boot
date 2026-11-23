@@ -123,7 +123,7 @@ pub mod led {
     }
 
     /// Repeats forever: `n` blinks, then a long dark pause. Counting the
-    /// blinks tells which code (see the hub README) stopped the board.
+    /// blinks tells which code (see the RP2040 README) stopped the board.
     pub fn code(n: u8) -> ! {
         codes(&[n])
     }
@@ -182,7 +182,7 @@ pub fn step(n: u8) {
     STEP.store(n, core::sync::atomic::Ordering::Relaxed);
 }
 
-/// With the `diag-panic` feature (the hub app enables it in every build,
+/// With the `diag-panic` feature (the coordinator app enables it in every build,
 /// stage0 and the boot core in their diag builds) a panic blinks the code
 /// of the last step reached on the LED named by [`led::select`] (or
 /// [`led::init`]); with none named it just stops.

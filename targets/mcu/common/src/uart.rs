@@ -1,4 +1,4 @@
-//! Request/response over a byte stream (the hub's PIO UART to the watch),
+//! Request/response over a byte stream (the coordinator's PIO UART to the watch),
 //! independent of the board so the framing runs in host tests:
 //! - every wait and the whole request write are bounded by the request's
 //!   deadline (the port bounds each written byte);
@@ -14,7 +14,7 @@ use crate::frames::{FrameReader, GAP_MS};
 use crate::link::{Kind, Link, LinkError, Reconnect};
 
 pub const UART_FRAME: usize = frame_len(max_payload::UART);
-/// Timeout of the hub's own display HELLO on the UART.
+/// Timeout of the coordinator's own display HELLO on the UART.
 pub const HELLO_TIMEOUT_MS: u16 = 200;
 
 /// The HELLO frame helpers keep their path here: they are public API of

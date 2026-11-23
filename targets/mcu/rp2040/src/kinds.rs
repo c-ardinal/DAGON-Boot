@@ -1,4 +1,4 @@
-//! The link kinds this package offers, by direction, for RP2040 (always a 親機):
+//! The link kinds this package offers, by direction, for RP2040 (always a coordinator):
 //!
 //! README.md, "Links", shows the matrix (generated from `LINK_KINDS`;
 //! a kind the table leaves out is `No`).

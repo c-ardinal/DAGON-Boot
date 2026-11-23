@@ -3,7 +3,7 @@
 
 #![allow(dead_code)]
 
-/// How this node reaches the hub (the hub itself: `Link::Hub`).
+/// How this node reaches the coordinator (the coordinator itself: `Link::Hub`).
 #[derive(Clone, Copy, Debug)]
 pub enum Link {
     Hub,

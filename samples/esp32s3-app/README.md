@@ -178,18 +178,18 @@ that key. Run from the repository root.
 The 2nd stage prints its boot log on UART0 and USB at every reset; the frame
 cutter skips it.
 
-## Conformance run through the hub (rear UART)
+## Conformance run through the coordinator (rear UART)
 
-The result that counts is the run through the hub. Same images and first
+The result that counts is the run through the coordinator. Same images and first
 install as above (steps 1 to 4, over USB-C), then:
 
-1. Wiring: hub PIO UART GPIO26 (TX) to the watch's rear G44 (RX), hub GPIO27
+1. Wiring: coordinator PIO UART GPIO26 (TX) to the watch's rear G44 (RX), coordinator GPIO27
    (RX) to rear G43 (TX), and GND. 115200 8N1. The app routes the rear pins
    to UART0 at start-up.
 2. Charge the watch, unplug USB-C (rear UART and USB are not used at the same
    time); the watch runs on its battery.
-3. With the hub app on USB to the PC: `dagon conform --node watch` (the node
-   id from the topology), images as in step 5 above. The hub relays every
+3. With the coordinator app on USB to the PC: `dagon conform --node watch` (the node
+   id from the topology), images as in step 5 above. The coordinator relays every
    request over the PIO UART, so `max_payload` matches the UART link.
    Expected as above; the run leaves the watch on the other slot, confirmed.
 4. Factory path: select factory (blank otadata, for example by

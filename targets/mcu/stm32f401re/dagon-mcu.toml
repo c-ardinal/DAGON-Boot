@@ -660,7 +660,7 @@ privileged_why = ["irq-routing", "core-control", "protection"]
 
 [connection]
 label = "ST-LINK"
-hint = "ST-LINK を USB でつないでから、書き込んでください。"
+hint = "ST-LINKをUSBで接続後、書込してください。"
 
 [[doctor]]
 what = "target thumbv7em-none-eabihf"

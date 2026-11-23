@@ -1,6 +1,6 @@
 //! Start-up written by `dagon gen` for an ESP32-S3 board chosen by MCU: the
 //! DAGON node (link, update receiver, trial and confirm) on the UART your
-//! board wires to the hub, and your application in app.rs. Set the link pins
+//! board wires to the coordinator, and your application in app.rs. Set the link pins
 //! below once; the rest needs no change.
 #![no_std]
 #![no_main]
@@ -36,7 +36,7 @@ const _: () = links::require_downlinks(DOWNLINKS);
 /// The bit rate of this node's UART link, from the 構成 (wiring.rs).
 const LINK_BAUD: u32 = match wiring::NODE.link {
     wiring::Link::Uart { baud } => baud,
-    _ => panic!("this start-up serves a UART link to the 親機"),
+    _ => panic!("this start-up serves a UART link to the node nearer the PC"),
 };
 
 /// Every task of the application registers here; the watchdog is fed only
@@ -51,7 +51,7 @@ async fn main(spawner: Spawner) {
     // The DAGON link: UART0 on its IO MUX pins, U0TXD = GPIO43 and
     // U0RXD = GPIO44 (function 0; Espressif's esp-metadata for the
     // ESP32-S3), at the bit rate of this node's link in the 構成. A board
-    // that wires the hub to other pins moves them here.
+    // that wires the coordinator to other pins moves them here.
     let uart = Uart::new(p.UART0, link::uart_config(LINK_BAUD))
         .unwrap_or_else(|_| esp_hal::system::software_reset())
         .with_tx(p.GPIO43)

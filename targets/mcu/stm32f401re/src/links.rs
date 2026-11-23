@@ -1,4 +1,4 @@
-//! The link kinds this package offers, by direction, for STM32F401RE (a 子機: no downlinks):
+//! The link kinds this package offers, by direction, for STM32F401RE (a node without downlinks):
 //!
 //! README.md, "Links", shows the matrix (generated from `LINK_KINDS`;
 //! a kind the table leaves out is `No`).

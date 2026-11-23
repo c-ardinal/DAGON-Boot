@@ -1,5 +1,5 @@
-//! Start-up written by `dagon new`: the board, the DAGON 親機 (PC link,
-//! relaying to the 子機, recovery) and your application in app.rs, which
+//! Start-up written by `dagon new`: the board, the DAGON node (PC link,
+//! relaying to the other nodes, recovery) and your application in app.rs, which
 //! gets the display's pins with the other spare ones. You do not need to change this file.
 //!
 //! DAGON's relay runs on a high-priority interrupt executor; your tasks in

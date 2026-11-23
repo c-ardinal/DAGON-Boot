@@ -3,9 +3,9 @@
 Drives the sample through the `dagon` CLI and checks every node after
 each step. This tests DAGON together with the sample apps on this one setup
 configuration; it is a sample, not part of DAGON. Python 3.11+ standard
-library only; Windows (the hub identity check uses PowerShell).
+library only; Windows (the coordinator identity check uses PowerShell).
 
-The setup: 親機 Waveshare RP2040-Touch-LCD-1.28 on USB (`hub`), NUCLEO-F401RE
+The setup: a Waveshare RP2040-Touch-LCD-1.28 on USB (`hub`), NUCLEO-F401RE
 + X-NUCLEO-53L0A1 on I2C 0x42 (`seg`), M5StopWatch on UART (`watch`), all
 connected; a DAGON project for it (`topology.yaml` as
 `topology/sample.yaml`, `dagon.toml` with `[build.hub]`, `[build.seg]`,
@@ -28,7 +28,7 @@ connected; a DAGON project for it (`topology.yaml` as
 ```sh
 # 1. once per code change: refresh the node crates from this repo's samples
 #    (seg = samples/f401-app, watch = samples/esp32s3-app, paths to this
-#    repo), give the hub app the self-check switch, dagon gen hub.
+#    repo), give the coordinator app the self-check switch, dagon gen hub.
 #    Point [dagon] path in the project's dagon.toml at this repo first.
 python samples/hardware-test/hwt.py sync --project <project> --repo <this repo> --dagon <dagon.exe>
 
@@ -50,7 +50,7 @@ python samples/hardware-test/hwt.py selftest
 
 - `--port` is required and passed to every CLI call that talks to the
   hub. At the start of each scenario the port must still be the same device
-  (Windows PnP id with `hub_usb`, and the hub's MCU id).
+  (Windows PnP id with `hub_usb`, and the coordinator's MCU id).
 - `dagon deploy` is never answered in advance: its plan (each node and the
   version it goes to, and the package file) is read first and must be
   exactly the step's; otherwise the harness answers `n` and fails.
@@ -64,7 +64,7 @@ python samples/hardware-test/hwt.py selftest
 - The status of every node at the start of the run is recorded
   (`start_state` in results.json).
 - On any failure (Ctrl-C included) the run stops and restores: it waits
-  out trials (reads only), checks the port is still the same hub (if not,
+  out trials (reads only), checks the port is still the same coordinator (if not,
   it writes nothing), then
   - applies the last release that reached every node in this run (only
     the recorded copy `known-good-v<version>.dgb`, unchanged since: its
@@ -95,12 +95,12 @@ Exit code: 0 all passed, 1 a scenario failed and the restore succeeded,
 
 status; batch update of all three; seg alone; watch alone; manual rollback
 of each node; a failing self-check image on each MCU (the deploy fails, the
-node rolls back by itself; the hub takes about 3.5 min); a transfer
+node rolls back by itself; the coordinator takes about 3.5 min); a transfer
 interrupted by killing the CLI at 30 % on each node (old version keeps
 running, the retry succeeds); a tampered release (plain, and with the item
 CRC recomputed) and a release signed with a throwaway key (refused by
 `dagon apply` before any write; every slot unchanged); A/B back and forth
-three times; each boot core with a release, for seg and the hub (`core-seg`,
+three times; each boot core with a release, for seg and the coordinator (`core-seg`,
 `core-hub`): raised, it goes to the idle slot and is confirmed; raised again,
 back to the other slot; a failing one goes back to the confirmed slot and the
 node still answers, all read from `dagon status`' versions lines; F401 ROM
@@ -116,8 +116,8 @@ set it in the crate itself.
 ## Test switches
 
 `no-confirm` makes the node's self-check fail: `samples/f401-app` and
-`samples/esp32s3-app` (cargo feature), and the hub app (`sync` patches the
-generated `self_check()` in the hub's `src/app.rs` and adds the feature).
+`samples/esp32s3-app` (cargo feature), and the coordinator app (`sync` patches the
+generated `self_check()` in the coordinator's `src/app.rs` and adds the feature).
 `run` builds failing images through a copy of dagon.toml,
 `dagon.hwt-fail.toml`, with `features = ["no-confirm"]` for the node.
 
@@ -132,5 +132,5 @@ crates from this DAGON: run `dagon gen` first.
 - F401 ROM write: `dagon deploy` uses the ROM path only for an F401
   that does not answer; making it silent needs an erase outside the normal
   confirmation.
-- Interrupting by resetting the 親機: the CLI has no command that resets the
-  hub on its own; the interrupt is the CLI killed mid-transfer.
+- Interrupting by resetting the coordinator: the CLI has no command that resets the
+  coordinator on its own; the interrupt is the CLI killed mid-transfer.

@@ -1,5 +1,5 @@
 //! One interface for every DAGON hop: [`Link`] carries whole frames up (to
-//! the PC or a parent node) or down (to a child node), whatever the medium.
+//! the PC) or down (away from it), whatever the medium.
 //! Each MCU package lists the link kinds it offers in a [`KindInfo`] table
 //! (`LINK_KINDS`) and constructs them as `links::<Kind>::new(..)`; a board
 //! package names the pins (`uplink_<kind>()` / `downlink_<kind>()`).
@@ -38,9 +38,9 @@ impl Support {
 /// Direction of a hop seen from this node.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Dir {
-    /// Towards the PC (the 親機's PC link, a 子機's link to its parent).
+    /// Towards the PC.
     Up,
-    /// Towards a child node (only a 親機 has these).
+    /// Away from the PC.
     Down,
 }
 

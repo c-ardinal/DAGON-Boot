@@ -159,7 +159,7 @@ sub = "stage0"
 name = "bootcore"
 sub = "bootcore"
 
-# What the coordinator (hub) rules check on this MCU.
+# What the coordinator rules check on this MCU.
 [coordinator]
 pio_state_machines = 8
 pio_uart_state_machines = 2
@@ -600,8 +600,8 @@ size = 0x10_0000
 privileged_why = ["irq-routing", "core-control", "protection"]
 
 [connection]
-label = "USB（BOOT を押しながら）"
-hint = "BOOT を押しながら USB をつないでから、書き込んでください。"
+label = "USB（BOOT押下）"
+hint = "BOOT押下の状態でUSBを接続後、書込してください。"
 
 [[doctor]]
 what = "target thumbv6m-none-eabi"

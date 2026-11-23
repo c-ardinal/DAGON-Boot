@@ -1,4 +1,4 @@
-//! Boot core A/B on the hub (`dagon_core::bootcore` over the hub layout):
+//! Boot core A/B on the coordinator (`dagon_core::bootcore` over the coordinator layout):
 //! stage0's choice of the boot core slot (or, with no core to start, of
 //! the confirmed app), and what the started boot core records about the
 //! trial before it starts the app. Only the boot core writes the boot core

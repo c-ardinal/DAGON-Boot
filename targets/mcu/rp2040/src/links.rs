@@ -30,7 +30,7 @@ const MAILBOX_POLL: Duration = Duration::from_millis(2);
 pub const I2C_FRAME: usize = frame_len(max_payload::I2C);
 /// Bound on one byte entering the PIO UART TX FIFO.
 const BYTE_WRITE_TIMEOUT: Duration = Duration::from_millis(5);
-/// Timeout of the hub's own display HELLO on I2C.
+/// Timeout of the coordinator's own display HELLO on I2C.
 const POLL_TIMEOUT_I2C_MS: u16 = 50;
 /// Bound on one I2C_RAW transaction (the PC's ROM frame deadline is 500 ms).
 const ROM_TIMEOUT: Duration = Duration::from_millis(500);

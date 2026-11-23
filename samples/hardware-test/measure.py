@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Hardware measurements the firmware has a measuring build for: writes a
 node with that build through `dagon flash`, reads the value it keeps (a
-debug probe reads it by symbol; a blink code where the board has no
-probe), checks it against its limit, records it, and writes the node's
+debug probe reads it by symbol; blinks on the board's LED where it has
+no probe), checks it against its limit, records it, and writes the node's
 normal build back. See README.md, "Measurements".
 
     python measure.py stage0-verify --project <project> --dagon <exe> --node <id> --key <file>
@@ -277,6 +277,17 @@ def blink_verdict(blinks, hz):
     }
 
 
+def groups_us(text):
+    """Microseconds from the blink groups a boot core's measuring build
+    shows on its boot LED: one count per decimal digit of the milliseconds,
+    ten for a 0. The milliseconds are rounded up, so this is at most 1 ms
+    over the value the node keeps."""
+    groups = [int(g) for g in text.split()]
+    if not groups or not all(1 <= g <= 10 for g in groups):
+        raise ValueError(f"{text!r}: give each group's count, 1 to 10 (10 for a 0)")
+    return int("".join(str(g % 10) for g in groups)) * 1000
+
+
 def listen_verdict(us, window_ms):
     limit_us = (window_ms + LISTEN_MARGIN_MS) * 1000
     ok = 0 < us <= limit_us
@@ -342,8 +353,6 @@ def measure(a, name, flash=run_flash, read=probe_read, wait=time.sleep, ask=inpu
     mcu = d["id"]
     writer = d.get("writer", {})
     chip = read_chip(a, writer)
-    if name != "stage0-verify" and chip is None:
-        raise SystemExit(f"{name} reads its value with a debug probe (--probe, and --chip on a UF2 node)")
     out = Path(a.out or Path.home() / "dagon-measure") / dt.datetime.now().strftime("%Y%m%d-%H%M%S")
     out.mkdir(parents=True)
     steps = []
@@ -385,15 +394,21 @@ def measure(a, name, flash=run_flash, read=probe_read, wait=time.sleep, ask=inpu
                 print("Count the fast blinks between two dark pauses on the board's diagnostic output.")
                 blinks = int(ask("blinks: ").strip())
                 result.update(blink_verdict(blinks, hz))
-        elif name == "listen-time":
-            window = d.get("boot_receive", {}).get("listen_window_ms", 50)
-            (us,), cmd = read(chip, a.probe, syms["DAGON_LISTEN_US"])
-            log({"command": cmd, "listen_us": us})
-            result.update(listen_verdict(us, window))
         else:
-            (us,), cmd = read(chip, a.probe, syms["DAGON_DECIDE_US"])
-            log({"command": cmd, "decide_us": us})
-            result.update(decide_verdict(us))
+            (symbol,) = m["symbols"]
+            if chip:
+                (us,), cmd = read(chip, a.probe, syms[symbol])
+                log({"command": cmd, "us": us})
+            else:
+                print("Count the blinks of each group on the boot LED, between two dark pauses "
+                      "(ten blinks for a 0), and give the counts in order, e.g. 5 2.")
+                us = groups_us(ask("groups: "))
+                log({"groups_us": us})
+            if name == "listen-time":
+                window = d.get("boot_receive", {}).get("listen_window_ms", 50)
+                result.update(listen_verdict(us, window))
+            else:
+                result.update(decide_verdict(us))
     except (Exception, KeyboardInterrupt, SystemExit) as e:
         # Recorded, and the exit code waits for the write back below.
         result["verdict"] = "FAIL"

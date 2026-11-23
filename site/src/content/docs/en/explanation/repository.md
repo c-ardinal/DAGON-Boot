@@ -48,7 +48,7 @@ DAGON_EXPLORE_STEPS=8 DAGON_EXPLORE_FAULTS=2 ...  # a wider bound (default: 6, 2
 DAGON_EXPLORE_KNOWN=1 ...                          # also the paths of the known defect
 ```
 
-CI runs both (the `kani` job of `.github/workflows/ci.yml`, and the F401 package's host tests).
+The workflow `.github/workflows/ci.yml` runs both: its `kani` job, and the F401 package's host tests.
 
 ### Building the release archives
 

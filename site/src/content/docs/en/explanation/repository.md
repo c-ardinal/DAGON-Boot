@@ -45,7 +45,6 @@ cargo kani -Z stubbing -p dagon-core          # Kani 0.68 or later
 cd targets/mcu/stm32f401re
 cargo test --no-default-features --target <host triple> --release --test explore
 DAGON_EXPLORE_STEPS=8 DAGON_EXPLORE_FAULTS=2 ...  # a wider bound (default: 6, 2 writes, 1 fault)
-DAGON_EXPLORE_KNOWN=1 ...                          # also the paths of the known defect
 ```
 
 The workflow `.github/workflows/ci.yml` runs both: its `kani` job, and the F401 package's host tests.

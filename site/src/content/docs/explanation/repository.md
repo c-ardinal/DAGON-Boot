@@ -45,7 +45,6 @@ cargo kani -Z stubbing -p dagon-core          # Kani 0.68以降
 cd targets/mcu/stm32f401re
 cargo test --no-default-features --target <host triple> --release --test explore
 DAGON_EXPLORE_STEPS=8 DAGON_EXPLORE_FAULTS=2 ...  # 上限の拡大（既定: 6、書込2、故障1）
-DAGON_EXPLORE_KNOWN=1 ...                          # 既知の不具合の経路も探索
 ```
 
 CIは両方を実行します（`.github/workflows/ci.yml`の`kani`と、F401のパッケージのホストテスト）。

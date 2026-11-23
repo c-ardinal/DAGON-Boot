@@ -36,6 +36,7 @@ use dagon_core::log::{Log, LogState};
 use dagon_ed25519::Ed25519Compact;
 use dagon_events::{compose, Bounds, Composed, Layer, Nop, Published, Watchdog};
 use dagon_format::header::*;
+use dagon_format::statelog::slot;
 use dagon_format::SigVerifier;
 use dagon_mcu_stm32f401re::layout::*;
 use dagon_mcu_stm32f401re::{KindSStore, ERASE_REGIONS, TRIAL_ATTEMPTS};
@@ -75,8 +76,10 @@ impl Cores {
             mcu_id: MCU_ID,
         }
     }
-    fn store(self, f: &Cut) -> Option<KindSStore<Cut>> {
-        KindSStore::load(f.clone(), &LOG, SLOTS, &ERASE_REGIONS)
+    /// The store of a node whose app runs from `running` (`slot::NONE`:
+    /// none runs).
+    fn store(self, f: &Cut, running: u8) -> Option<KindSStore<Cut>> {
+        KindSStore::load(f.clone(), &LOG, SLOTS, &ERASE_REGIONS, running)
             .ok()
             .map(|s| s.with_cores(self.0, true))
     }
@@ -181,6 +184,16 @@ enum Running {
     Silent,
 }
 
+impl Running {
+    /// The APP slot the app runs from, `slot::NONE` when none answers.
+    fn slot(self) -> u8 {
+        match self {
+            Running::App { slot } => slot,
+            _ => slot::NONE,
+        }
+    }
+}
+
 #[derive(Clone)]
 struct Node {
     f: Cut,
@@ -244,7 +257,7 @@ struct Fault {
 struct Broke(String);
 
 fn agent(cores: Cores, n: &Node) -> Option<NodeAgent> {
-    let store = cores.store(&n.f)?;
+    let store = cores.store(&n.f, n.running.slot())?;
     Some(Agent::new(config(), verifier(), store, chain()))
 }
 
@@ -318,7 +331,9 @@ fn idle(n: &Node, t: u8, cores: Cores) -> u8 {
     if t == target::BOOTCORE && cores.0.len() == 1 {
         return 0;
     }
-    let st = cores.store(&n.f).and_then(|mut s| s.target_status(t));
+    let st = cores
+        .store(&n.f, n.running.slot())
+        .and_then(|mut s| s.target_status(t));
     match st {
         Some(st) if st.active < 2 => 1 - st.active,
         _ => 1,
@@ -399,9 +414,7 @@ fn boot(cores: Cores, n: &mut Node) -> Result<(), Broke> {
         }
         n.running = match decision {
             Decision::Boot { slot, .. } => {
-                let good = minor_of(&mut n.f, SLOTS.slots[usize::from(slot)].0) != Some(BROKEN);
-                if good {
-                    let _ = agent(cores, n);
+                if minor_of(&mut n.f, SLOTS.slots[usize::from(slot)].0) != Some(BROKEN) {
                     Running::App { slot }
                 } else {
                     Running::Silent
@@ -409,6 +422,10 @@ fn boot(cores: Cores, n: &mut Node) -> Result<(), Broke> {
             }
             Decision::NoImage => Running::Silent,
         };
+        if matches!(n.running, Running::App { .. }) {
+            // The app's start (its agent makes the log's room).
+            let _ = agent(cores, n);
+        }
         return Ok(());
     }
     Err(Broke("a boot core resets for ever".into()))
@@ -444,13 +461,11 @@ fn step(cores: Cores, n: &mut Node, op: Op) -> Option<Result<(), Broke>> {
             if !a.images().on_trial() {
                 return None;
             }
-            // KNOWN: the agent takes the log's pending slot for the
-            // running one, so when the boot core could not record a
-            // BOOT_ATTEMPT (a torn record at the log's end) and started
-            // the confirmed app, CONFIRM confirms the pending image,
-            // which never ran (`known_confirm_of_an_image_that_never_ran`).
-            if a.images().active() != Some(slot) && !known_bugs() {
-                return None;
+            let active = a.images().active();
+            if active != Some(slot) {
+                return Some(Err(Broke(format!(
+                    "the agent takes slot {active:?} for the running one, {slot}"
+                ))));
             }
             call(
                 &mut a,
@@ -583,11 +598,6 @@ fn installed_node(cores: Cores) -> Node {
     assert_eq!(n.running, Running::App { slot: 0 });
     n.f = n.f.copy();
     n
-}
-
-/// `DAGON_EXPLORE_KNOWN=1`: explore the paths the KNOWN notes leave out.
-fn known_bugs() -> bool {
-    std::env::var_os("DAGON_EXPLORE_KNOWN").is_some()
 }
 
 /// How far the search goes.
@@ -792,15 +802,13 @@ fn a_confirmed_core_written_again_whose_record_is_torn_runs_the_app() {
     settles(cores, &n).unwrap_or_else(|e| panic!("{}", e.0));
 }
 
-/// Found by the search, not fixed yet (the KNOWN note in `step`): a
-/// broken app's second BOOT_ATTEMPT torn by a power loss; the boot core
+/// Found by the search: a broken app's second BOOT_ATTEMPT torn by a power loss; the boot core
 /// cannot record the next attempt, so it starts the confirmed app, whose
-/// agent takes the pending image for the running one: HELLO answers the
-/// new version, the app is "on trial", and CONFIRM confirms the broken
-/// image that never ran.
+/// agent must take the slot the boot core started for the running one,
+/// not the log's pending image, or CONFIRM confirms the broken image that
+/// never ran.
 #[test]
-#[ignore = "known: the agent takes the log's pending slot for the running one"]
-fn known_confirm_of_an_image_that_never_ran() {
+fn a_confirmed_app_started_past_a_torn_attempt_is_not_on_trial() {
     let cores = Cores(&CORE_SLOTS);
     let n = walk(
         cores,

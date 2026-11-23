@@ -34,7 +34,6 @@ For application developers, extension authors and DAGON contributors. The last s
 
 The hub and the boot:
 
-- With the state log's last record torn by a power loss, the boot loader cannot record a pending app's BOOT_ATTEMPT and starts the confirmed app. Its agent then takes the log's pending slot for the running one: HELLO answers the new version, and CONFIRM confirms the new image, which never ran (the exhaustive search's `known_confirm_of_an_image_that_never_ran`).
 - The relay (`dagon-relay`) does not depend on the MCU, and the `[coordinator]` section of an MCU definition decides whether that MCU may relay. A node relays over the links its MCU definition lists in `[[relay_link]]`, and the topology routes each node to one of them. The RP2040 is the only MCU with both that section and the code that runs the relay.
 - DAGON writes the hub and the children beyond it. Nothing beyond a child can be written.
 - Updating reaches the first coordinator and the nodes linked to it over I2C or UART. It skips a second coordinator and the nodes beyond it, and nodes linked by any other kind of link. The 構成 check tells them as information (◇).

@@ -131,9 +131,9 @@ impl Port for Link {
     }
 }
 
-struct Now(std::rc::Rc<RefCell<u64>>);
+struct Time(std::rc::Rc<RefCell<u64>>);
 
-impl Clock for Now {
+impl Clock for Time {
     fn now_us(&mut self) -> u64 {
         *self.0.borrow()
     }
@@ -164,7 +164,7 @@ fn start(f: &mut Mem, cell: [u32; 2], requests: &[Cmd]) -> (Next, [u32; 2], usiz
         answered: Vec::new(),
         now: now.clone(),
     };
-    let mut clock = Now(now.clone());
+    let mut clock = Time(now.clone());
     let mut fed = 0;
     let mut feed = || fed += 1;
     let next = begin(
@@ -299,7 +299,7 @@ fn a_pending_core_whose_cell_does_not_hold_resets() {
         },
         Window {
             port: &mut link,
-            clock: &mut Now(now),
+            clock: &mut Time(now),
             window_ms: WINDOW_MS,
             feed_every_ms: 10,
             feed: &mut || {},

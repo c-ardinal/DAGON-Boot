@@ -65,7 +65,10 @@ Full arguments: `$ARGUMENTS`
 3. **Implement the six traits** from `crates/dagon-port` for kind `$kind`, plus the linker
    script and boot glue the table requires. Build until clean.
 4. **Simulator.** Ask `conformance-judge` to run `dagon sim` scenarios S1 and S2 with this
-   layout. Fix failures before going to hardware.
+   layout. Then port `targets/mcu/stm32f401re/tests/explore.rs` and `update_mode.rs` (with
+   `tests/cut/`) to this layout and run them on the host: every flash operation of their
+   inventory must be cut every way with every state recovering (the power-cut acceptance
+   criterion). Fix failures before going to hardware.
 5. **Hardware conformance.** Ask `conformance-judge` to run `dagon conform` through the hub
    (all 12 normal-path tests). Hub access only inside the slot a human has granted.
 6. **Fix loop.** For each failing test, read the judge's reason, fix the target, commit on

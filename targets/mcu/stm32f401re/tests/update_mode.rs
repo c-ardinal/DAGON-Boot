@@ -20,6 +20,7 @@ use dagon_core::log::Log;
 use dagon_ed25519::Ed25519Small;
 use dagon_events::{compose, Bounds, Composed, Layer, Nop, Published, Watchdog};
 use dagon_format::header::*;
+use dagon_format::statelog::kind;
 use dagon_mcu_stm32f401re::layout::*;
 use dagon_mcu_stm32f401re::{KindSStore, ERASE_REGIONS, TRIAL_ATTEMPTS};
 use dagon_proto::payload::{mode, role, target, SetPending, XferBegin, XferChunk};
@@ -197,6 +198,7 @@ fn the_boot_core_writes_the_app_in_update_mode() {
 #[test]
 fn a_power_cut_at_every_step_of_a_boot_core_write_leaves_every_state_recoverable() {
     let mut cuts = 0;
+    let mut covered = Coverage::default();
     let mut unrecoverable = Vec::new();
     for (full, slot) in [(false, 1), (true, 1), (false, 0), (true, 0)] {
         let start = || if full { installed_full() } else { installed() };
@@ -216,6 +218,8 @@ fn a_power_cut_at_every_step_of_a_boot_core_write_leaves_every_state_recoverable
                 f.cut = Some((n, half));
                 let _ = write_in_update_mode(&f, slot, &app(slot));
                 cuts += 1;
+                let site = f.site(n).expect("operation n was asked for");
+                covered.add(site, Way { half, keep: false });
                 if let Err(why) = recoverable(&f, slot) {
                     unrecoverable
                         .push(format!("full={full} slot={slot} op={n} half={half}: {why}"));
@@ -228,4 +232,22 @@ fn a_power_cut_at_every_step_of_a_boot_core_write_leaves_every_state_recoverable
         unrecoverable.len()
     );
     assert!(unrecoverable.is_empty(), "{unrecoverable:#?}");
+    let mut expected = compaction_sites(&[
+        (target::BOOTCORE, kind::SNAPSHOT),
+        (target::APP, kind::SNAPSHOT),
+    ]);
+    for slot in [0, 1] {
+        expected.extend(slot_sites(target::APP, slot));
+    }
+    expected.push(record(target::APP, kind::SLOT_PENDING));
+    covered.check(&expected, &expected, &POWER_LOSS);
+    Coverage::report(
+        "update-mode",
+        &format!(
+            "## ブートローダの更新モードでのアプリの書込\n\n\
+             開始状態: 初回書込の直後、およびログの面の残量が試行の予約量未満（書込の開始時に圧縮）。\
+             書込先: APP スロット A と B。電断 {cuts} 件、復旧失敗 0 件。\n\n{}",
+            covered.table(&POWER_LOSS)
+        ),
+    );
 }

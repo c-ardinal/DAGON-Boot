@@ -73,7 +73,11 @@ pub fn settle_core<F: Flash>(
         max: TRIAL_ATTEMPTS,
         holds,
     };
-    bootcore::settle_log(flash, &BL_LOG_LAYOUT, running, cell, healthy)
+    // No such slot: no header there is the pending image.
+    let header = crate::layout::BOOTCORE_PLACES
+        .get(usize::from(running))
+        .map_or(u32::MAX, |p| p.header);
+    bootcore::settle_log(flash, &BL_LOG_LAYOUT, (running, header), cell, healthy)
 }
 
 /// Why the app does not hand over.

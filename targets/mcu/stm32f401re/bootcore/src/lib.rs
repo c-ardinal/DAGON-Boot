@@ -236,7 +236,10 @@ pub fn run<E: Extension>(chain: E, limits: &'static [BootExtension], link_addr: 
     let settled = settle_log(
         &mut flash,
         &board::LOG,
-        LINKED_SLOT,
+        (
+            LINKED_SLOT,
+            board::CORE_PLACES[usize::from(LINKED_SLOT)].header,
+        ),
         Cell {
             value: trial::read(),
             max: TRIAL_ATTEMPTS,

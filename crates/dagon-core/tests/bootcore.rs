@@ -7,6 +7,7 @@ use dagon_core::bootcore::{
     Plan, Settle, CLEARED,
 };
 use dagon_core::log::{Log, LogLayout, LogState, SlotRef};
+use dagon_format::header::{header_digest16, HEADER_SIZE};
 use dagon_format::statelog::{kind, reason, target, FaceHeader, Record};
 use dagon_format::Version;
 use dagon_port::{Flash, FlashError, FlashRegion};
@@ -247,10 +248,17 @@ fn a_pending_core_without_a_holding_cell_rolls_itself_back() {
         faces: [0, 0x400],
         face_len: 0x400,
     };
-    let mut m = Mem(vec![0xFF; 0x800]);
+    let mut m = Mem(vec![0xFF; 0x800 + HEADER_SIZE]);
     m.write(0, &FaceHeader { generation: 1 }.to_bytes())
         .unwrap();
-    let (a, b) = (r(0, 0), r(1, 1));
+    // The running core's header, at 0x800: the pending record names it.
+    let raw = [0x5A; HEADER_SIZE];
+    m.write(0x800, &raw).unwrap();
+    let a = r(0, 0);
+    let b = SlotRef {
+        digest16: header_digest16(&raw),
+        ..r(1, 1)
+    };
     let mut log = Log::load(&mut m, &layout).unwrap();
     log.append_core(&mut m, kind::PROVISION, a, 0).unwrap();
     log.append_core(&mut m, kind::SLOT_PENDING, b, 0).unwrap();
@@ -259,7 +267,10 @@ fn a_pending_core_without_a_holding_cell_rolls_itself_back() {
         max: MAX,
         holds: false,
     };
-    assert_eq!(settle_log(&mut m, &layout, 1, cell, true), Err(MustReset));
+    assert_eq!(
+        settle_log(&mut m, &layout, (1, 0x800), cell, true),
+        Err(MustReset)
+    );
     let st = Log::load(&mut m, &layout).unwrap().core;
     assert_eq!((st.confirmed, st.pending), (Some(a), None));
     assert_eq!(st.reverted, Some(b));

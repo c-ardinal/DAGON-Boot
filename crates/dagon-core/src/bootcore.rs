@@ -782,8 +782,14 @@ pub enum Settled {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct MustReset;
 
-/// The boot core running from slot `running` settles the boot core trial
-/// in the log at `layout` before it starts the app: the pending core
+/// The boot core running from slot `running.0`, its header at `running.1`,
+/// settles the boot core trial in the log at `layout` before it starts the
+/// app. A core is the pending one only when its header is the pending
+/// record's image: with one boot core slot the slot alone does not tell,
+/// because a core written into it whose SLOT_PENDING did not land leaves
+/// the older pending record naming an image no longer there, and stage0
+/// then starts the confirmed core from that slot. Such a core rolls the
+/// stale record back as an old core does. The pending core
 /// confirms itself only when `healthy` (its own check passed) and the
 /// record reads back (a pending core that is the confirmed image itself
 /// runs the app when its record does not land); the old core records the rollback, and runs the app
@@ -799,7 +805,7 @@ pub struct MustReset;
 pub fn settle_log<F: Flash>(
     flash: &mut F,
     layout: &LogLayout,
-    running: u8,
+    (running, header): (u8, u32),
     cell: Cell,
     healthy: bool,
 ) -> Result<Settled, MustReset> {
@@ -815,7 +821,14 @@ pub fn settle_log<F: Flash>(
         Err(_) => return Err(MustReset),
     };
     let n = log.core.pending.map_or(0, |p| tried(cell, &p));
-    match settle(&log.core, running, n, max) {
+    let settled = match settle(&log.core, running, n, max) {
+        Settle::Confirm(p) if !runs(flash, header, &p) => Settle::Rollback {
+            back: SlotRef { slot: running, ..p },
+            reason: reason::HASH_MISMATCH,
+        },
+        s => s,
+    };
+    match settled {
         Settle::Nothing => Ok(Settled::Nothing),
         Settle::Confirm(p) => {
             if !holds {
@@ -858,4 +871,10 @@ pub fn settle_log<F: Flash>(
             }
         }
     }
+}
+
+/// The header at `header` is the image `p` names.
+fn runs<F: Flash>(flash: &mut F, header: u32, p: &SlotRef) -> bool {
+    let mut raw = [0u8; HEADER_SIZE];
+    flash.read(header, &mut raw).is_ok() && header_digest16(&raw) == p.digest16
 }

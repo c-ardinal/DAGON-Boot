@@ -17,6 +17,7 @@ The layer figure is in [Explanation](/en/explanation/).
 6. Every MCU provides `template/`, from which `dagon gen` makes the node crates.
 7. Add the component to `compat.toml` ([Versions and releases](/en/explanation/versioning/)).
 8. Check with `dagon sim`, then run `dagon conform` through the hub.
+9. Check the power-cut acceptance criterion: port `targets/mcu/stm32f401re/tests/explore.rs` and `update_mode.rs` (with `tests/cut/`) to the new layout and run them on the host. Every flash operation (each slot's erase, body and header; each state log record; each step of a log compaction) is cut every way (not landed or half landed, with a power loss or a reset), and every state must recover. A flash operation the search does not cut, or one outside the inventory, fails the test. With the folder in `DAGON_POWERCUT_REPORT`, the tests write the cuts per flash operation as Markdown tables.
 
 `plugin/skills/dagon-port/SKILL.md` walks the same steps in Claude Code.
 

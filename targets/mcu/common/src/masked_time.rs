@@ -3,8 +3,11 @@
 //! guard's state ([`crate::guard`], the only place DAGON's own code masks
 //! interrupts) and keeps the longest in [`DAGON_MASKED_MAX_US`], with the
 //! number timed in [`DAGON_MASKED_COUNT`], for a debug probe to read by
-//! symbol while the app runs. The value is what `[execution]
-//! masked_max_us` of the MCU definition states.
+//! symbol while the app runs. The timing covers the work inside each
+//! section, not masking, the guard's borrow and unmasking around it, and
+//! the clock counts whole microseconds: the definition's `[execution]
+//! masked_max_us` is the worst value plus a margin (samples/hardware-test
+//! measure.py gives it).
 //!
 //! A board with no debug probe reads it off its `[boot] led` light
 //! instead: [`READOUT_AFTER_S`] after the start, the MCU package blinks

@@ -281,9 +281,11 @@ python samples/hardware-test/measure.py selftest
   on its board's diagnostic LED 180 s after it starts (the display
   backlight on the Waveshare hub; the groups the boot core
   measurements blink, the app still running) and the script asks for
-  the counts. PASS
-  when a section was timed and the longest is 1 to 1000 us; the record
-  gives the `[execution] masked_max_us` line for the MCU definition.
+  the counts. The firmware times the work inside each section, not the
+  masking around it, so the value to write is the worst plus a margin:
+  twice the worst, at least 10 us more. PASS when a section was timed and
+  that value is at most 1000 us; the record gives the
+  `[execution] masked_max_us` line for the MCU definition.
 
 The feature is named in the package's `default` features for the one
 write; the file is put back byte for byte afterwards, also on a failure or

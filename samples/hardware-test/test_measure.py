@@ -130,9 +130,11 @@ class Verdicts(unittest.TestCase):
 
     def test_masked(self):
         r = measure.masked_verdict(38, 12_000)
-        self.assertEqual((r["verdict"], r["definition"]), ("PASS", "masked_max_us = 38"))
-        self.assertEqual(measure.masked_verdict(1_000, 1)["verdict"], "PASS")
-        self.assertEqual(measure.masked_verdict(1_001, 1)["verdict"], "FAIL")
+        self.assertEqual((r["verdict"], r["definition"]), ("PASS", "masked_max_us = 76"))
+        # At least the minimum margin over a short worst value.
+        self.assertEqual(measure.masked_verdict(3, 1)["definition"], "masked_max_us = 13")
+        self.assertEqual(measure.masked_verdict(500, 1)["verdict"], "PASS")
+        self.assertEqual(measure.masked_verdict(501, 1)["verdict"], "FAIL")
         self.assertEqual(measure.masked_verdict(0, 0)["verdict"], "FAIL")
 
     def test_listen(self):
@@ -324,7 +326,7 @@ class Runs(unittest.TestCase):
         self.assertIn('default = ["dagon-mcu-stm32f401re/masked-time"]', during)
         self.assertEqual(after, original)
         result = next((self.root / "rec").glob("*/result.json")).read_text()
-        self.assertIn('"masked_max_us = 38"', result)
+        self.assertIn('"masked_max_us = 76"', result)
 
     def test_masked_time_without_a_probe_takes_the_led_groups(self):
         proj = self.project({"kind": "uf2-drive"}, mcu="rp2040")
@@ -332,7 +334,7 @@ class Runs(unittest.TestCase):
         self.cargo = self.app_cargo
         self.assertEqual(self.run_it(self.args(proj, drive="E:"), name="masked-time", answer="3 8"), 0)
         self.assertEqual(self.reads, [])
-        self.assertIn('"masked_max_us = 38"', next((self.root / "rec").glob("*/result.json")).read_text())
+        self.assertIn('"masked_max_us = 76"', next((self.root / "rec").glob("*/result.json")).read_text())
 
     def test_the_readout_delay_is_the_firmware_s(self):
         src = (REPO / "targets/mcu/common/src/masked_time.rs").read_text(encoding="utf-8")

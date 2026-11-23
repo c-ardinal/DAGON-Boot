@@ -88,6 +88,17 @@ MASKED_MAX_US_LIMIT = 1000
 # Seconds after the app starts at which a node with no probe blinks the
 # longest masking (dagon-mcu-common masked_time::READOUT_AFTER_S).
 MASKED_READOUT_AFTER_S = 180
+# The margin over the worst value measured (lifecycle-events 11.3: the
+# worst value plus a margin): the firmware times only the work inside each
+# critical section, not masking, the guard's borrow and unmasking around
+# it, and its clock counts whole microseconds. The definition takes twice
+# the worst, and at least MASKED_MIN_MARGIN_US more.
+MASKED_MIN_MARGIN_US = 10
+
+
+def masked_definition(us):
+    """The `masked_max_us` to write for a worst measured value `us`."""
+    return max(2 * us, us + MASKED_MIN_MARGIN_US)
 
 
 # ---- files -------------------------------------------------------------
@@ -348,20 +359,22 @@ def listen_verdict(us, window_ms):
 
 def masked_verdict(us, count):
     """The longest time DAGON's own code masked interrupts: PASS when a
-    section was timed and the longest is within what a definition may
-    state; the value to write as `[execution] masked_max_us` goes in the
-    record."""
-    ok = count >= 1 and 0 < us <= MASKED_MAX_US_LIMIT
+    section was timed and the worst plus its margin
+    ([`masked_definition`]) is within what a definition may state; that
+    value, to write as `[execution] masked_max_us`, goes in the record."""
+    value = masked_definition(us)
+    ok = count >= 1 and us > 0 and value <= MASKED_MAX_US_LIMIT
     why = None
-    if count == 0:
+    if count == 0 or us == 0:
         why = "no critical section was timed (the app did not start?)"
     elif not ok:
-        why = f"{us} us is not within 1..={MASKED_MAX_US_LIMIT} us"
+        why = f"{us} us with its margin, {value} us, is over {MASKED_MAX_US_LIMIT} us"
     return {
         "masked_max_us": us,
         "masked_count": count,
+        "with_margin_us": value,
         "limit_us": MASKED_MAX_US_LIMIT,
-        "definition": f"masked_max_us = {us}" if ok else None,
+        "definition": f"masked_max_us = {value}" if ok else None,
         "verdict": "PASS" if ok else "FAIL",
         "why": why,
     }

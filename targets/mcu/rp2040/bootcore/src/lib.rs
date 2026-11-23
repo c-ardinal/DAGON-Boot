@@ -125,6 +125,22 @@ fn led_init() {
     }
 }
 
+/// Ends a measuring build: keeps `us` in `record` for a debug probe and,
+/// on a board with a boot LED, also blinks its milliseconds as digit
+/// groups (`boot_time::ms_digits`), the watchdog stopped; without one it
+/// stays with the watchdog fed.
+#[cfg(any(feature = "listen-time", feature = "decide-time"))]
+fn measured(record: &core::sync::atomic::AtomicU32, us: u64) -> ! {
+    if board_def::BOOT_LED_GPIO.is_none() {
+        boot_time::hold(record, us, feed)
+    }
+    boot_time::keep(record, us);
+    with_wdt(Watchdog::stop);
+    led_init();
+    let (digits, n) = boot_time::ms_digits(us);
+    led::codes(&digits[..n])
+}
+
 /// Puts the clocks back the way the chip starts: clk_sys and clk_ref on the
 /// ring oscillator, the PLL-fed clocks off, both PLLs powered down. The app
 /// then sets its clocks up from the same state as after a cold reset. The
@@ -249,7 +265,7 @@ pub fn run<E: Extension>(chain: E, limits: &'static [BootExtension], link_addr: 
         receive::serve(p.USB, flash, links, entry, stay)
     }
     #[cfg(feature = "listen-time")]
-    boot_time::hold(&boot_time::DAGON_LISTEN_US, now_us() - started, feed);
+    measured(&boot_time::DAGON_LISTEN_US, now_us() - started);
     // The window is over: the I2C target stops answering its address, so
     // the bus is not held while the slow checks below run.
     dagon_mcu_rp2040::boot_links::pause_i2c();
@@ -267,7 +283,7 @@ pub fn run<E: Extension>(chain: E, limits: &'static [BootExtension], link_addr: 
     );
     let decision = boot.decision();
     #[cfg(feature = "decide-time")]
-    boot_time::hold(&boot_time::DAGON_DECIDE_US, now_us() - deciding, feed);
+    measured(&boot_time::DAGON_DECIDE_US, now_us() - deciding);
     // The decision verified the app it starts under this core's key.
     let healthy = !cfg!(feature = "no-confirm") && matches!(decision, Decision::Boot { .. });
     match bl::settle_core(

@@ -120,6 +120,14 @@ class Verdicts(unittest.TestCase):
         self.assertEqual(measure.decide_verdict(412_000)["decide_s"], 0.412)
         self.assertEqual(measure.decide_verdict(0)["verdict"], "FAIL")
 
+    def test_groups(self):
+        self.assertEqual(measure.groups_us("5 2"), 52_000)
+        self.assertEqual(measure.groups_us("1 2 10 5"), 1_205_000)
+        self.assertEqual(measure.groups_us("10"), 0)
+        for bad in ("", "0", "11", "5 x"):
+            with self.assertRaises(ValueError):
+                measure.groups_us(bad)
+
     def test_listen(self):
         self.assertEqual(measure.listen_verdict(60_000, 50)["verdict"], "PASS")
         self.assertEqual(measure.listen_verdict(60_001, 50)["verdict"], "FAIL")
@@ -209,7 +217,7 @@ class Runs(unittest.TestCase):
         base.update(kw)
         return measure.argparse.Namespace(**base)
 
-    def run_it(self, a, flash_fails=(), words=None):
+    def run_it(self, a, flash_fails=(), words=None, name="stage0-verify", answer="4"):
         self.flashes = []
 
         def flash(cmd, project):
@@ -223,8 +231,8 @@ class Runs(unittest.TestCase):
             self.reads.append((chip, probe, address))
             return [(words or {}).get(address, 0)], ["probe-rs"]
 
-        return measure.measure(a, "stage0-verify", flash=flash, read=read, wait=lambda s: None,
-                               ask=lambda q: "4")
+        return measure.measure(a, name, flash=flash, read=read, wait=lambda s: None,
+                               ask=lambda q: answer)
 
     def test_probe_rs_node_measured_and_written_back(self):
         proj = self.project({"kind": "probe-rs", "chip": "STM32F401RETx"})
@@ -259,6 +267,17 @@ class Runs(unittest.TestCase):
         proj = self.project({"kind": "uf2-drive"}, mcu="rp2040")
         self.assertEqual(self.run_it(self.args(proj, drive="E:")), 0)
         self.assertEqual(self.reads, [])
+
+    def test_boot_core_without_a_probe_takes_the_led_groups(self):
+        proj = self.project({"kind": "uf2-drive"}, mcu="rp2040")
+        boot = proj / "boot/n/Cargo.toml"
+        boot.write_text('[package]\nname = "n"\n\n[features]\n')
+        rel = proj / "out/flash/target/bootcore/thumb/release"
+        rel.mkdir(parents=True)
+        (rel / "bootcore").write_bytes(elf32({"DAGON_LISTEN_US": 0x20000010}))
+        self.assertEqual(self.run_it(self.args(proj, drive="E:"), name="listen-time", answer="5 2"), 0)
+        self.assertEqual(self.reads, [])
+        self.assertIn(b'"listen_us": 52000', next((self.root / "rec").glob("*/result.json")).read_bytes())
 
     def test_a_probe_without_its_chip_is_refused_before_any_write(self):
         proj = self.project({"kind": "uf2-drive"}, mcu="rp2040")

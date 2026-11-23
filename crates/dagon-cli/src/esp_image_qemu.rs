@@ -312,6 +312,22 @@ fn esp32s3_stage0_in_qemu() {
         &n,
         &[started, ASKS, result, &rejected],
     );
+    // A signed app with a RAM segment elsewhere in RTC slow memory: copied,
+    // and the app starts.
+    let mut n = Node::good();
+    n.app = with_segment(&n.app, 0x5000_1000, &[0; 8]);
+    n.app_hdr = header(image_kind::APP, APP.1, &n.app, TAG);
+    case("segment-in-rtc-memory", &n, &[started, ASKS, APP_RUNS]);
+    // A signed app with a RAM segment on the cell stage0 keeps across
+    // resets (RTC slow memory): planned, refused, the cell unchanged.
+    let mut n = Node::good();
+    n.app = with_segment(&n.app, 0x5000_1FF8, &[0; 8]);
+    n.app_hdr = header(image_kind::APP, APP.1, &n.app, TAG);
+    case(
+        "segment-on-the-cell",
+        &n,
+        &[started, ASKS, result, &rejected],
+    );
     // A signed body shorter than the image: its last segment runs past
     // what the signature covers, so it is refused, not loaded.
     let mut n = Node::good();
@@ -334,7 +350,8 @@ fn esp32s3_stage0_in_qemu() {
     assert!(failed.is_empty(), "{failed:#?}");
 }
 
-/// `img` with one more segment (`addr`, `data`) first, resealed.
+/// `img` with one more segment (`addr`, `data`) first, then padding to a
+/// whole MMU page, resealed.
 fn with_segment(img: &[u8], addr: u32, data: &[u8]) -> Vec<u8> {
     let body_end = {
         let mut at = HEADER_LEN;
@@ -344,14 +361,16 @@ fn with_segment(img: &[u8], addr: u32, data: &[u8]) -> Vec<u8> {
         at
     };
     let mut out = img[..HEADER_LEN].to_vec();
-    out[1] += 1;
+    out[1] += 2;
     out.extend(addr.to_le_bytes());
     out.extend((data.len() as u32).to_le_bytes());
     out.extend(data);
-    // Shifting by a whole MMU page keeps every mapped segment's offset.
-    out.resize(out.len() + PAGE - SEGMENT_HEADER_LEN - data.len(), 0);
-    out[HEADER_LEN + 4..HEADER_LEN + 8]
-        .copy_from_slice(&((PAGE - SEGMENT_HEADER_LEN) as u32).to_le_bytes());
+    // Then a PADDING segment, so the two shift the rest by a whole MMU
+    // page, which keeps every mapped segment's offset.
+    let pad = PAGE - 2 * SEGMENT_HEADER_LEN - data.len();
+    out.extend(0u32.to_le_bytes());
+    out.extend((pad as u32).to_le_bytes());
+    out.resize(out.len() + pad, 0);
     out.extend(&img[HEADER_LEN..body_end]);
     let checksum = out[HEADER_LEN..].iter().fold(CHECKSUM_SEED, |c, b| c ^ b);
     out.resize(out.len() + (15 - out.len() % 16), 0);

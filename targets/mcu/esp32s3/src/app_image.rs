@@ -162,7 +162,8 @@ pub enum Refused {
     /// segment takes.
     Range(u32),
     /// A mapped segment at `addr` whose flash offset does not agree with
-    /// its address below the MMU page.
+    /// its address below the MMU page, or a RAM segment at `addr` whose
+    /// address or length is not a multiple of 4 (copies are 32-bit stores).
     Unaligned(u32),
     /// More RAM or mapped segments than the plan holds.
     TooMany,
@@ -182,7 +183,8 @@ fn le32(b: &[u8], at: usize) -> u32 {
 /// (exclusive): every segment's data inside the slot, RAM segments inside
 /// [`IRAM`], [`DRAM`] or RTC memory without overlapping each other, IROM
 /// and DROM segments page-aligned with their flash offset and on MMU entries
-/// of their own, padding skipped,
+/// of their own, RAM segments word-aligned in address and length, padding
+/// skipped,
 /// and the entry point inside an IRAM copy or an IROM map. Nothing is
 /// written.
 pub fn plan<F: Flash>(flash: &mut F, at: u32, end: u32) -> Result<Plan, Refused> {
@@ -244,6 +246,10 @@ pub fn plan<F: Flash>(flash: &mut F, at: u32, end: u32) -> Result<Plan, Refused>
             *slot = map;
             plan.nmaps += 1;
         } else if RAM.iter().any(|&r| within(r, addr, len)) {
+            // Copied by 32-bit stores: a word at a time, ending on a word.
+            if addr % 4 != 0 || len % 4 != 0 {
+                return Err(Refused::Unaligned(addr));
+            }
             // Through either bus: SRAM1 has an address on each.
             let overlaps = plan
                 .copies()

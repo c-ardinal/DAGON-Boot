@@ -606,22 +606,26 @@ pub struct McuDef {
     /// or `clock = "app"` (the core clock of the node's `[[app.clock]]` setup, which V-26 takes
     /// for each node; a node on an internal setup without `tolerance_ppm` runs no UART link),
     /// exactly one of them. `bauds` lists the bit rates the firmware runs its link at;
-    /// `fast_ppm` and `slow_ppm` bound how far its bit rate may run from a link's `baud`, its
-    /// clock's tolerance included. The topology check (V-26) refuses a link `baud` that either
-    /// end's list does not name or that either end makes outside its bounds, and DAGON Console
-    /// offers only the speeds both ends name. Required on an MCU whose `[links]` has `uart`:
-    /// without it, every UART link that MCU's firmware runs is refused, since no speed on it is
-    /// known to work.
+    /// `fast_ppm` and `slow_ppm` (required) bound how far its bit rate may run above and below a
+    /// link's `baud`, its clock's tolerance included (`slow_ppm` at most 1000000). The topology
+    /// check (V-26) refuses a link `baud` that either end's list does not name or that either
+    /// end makes outside its bounds, and DAGON Console offers only the speeds both ends name.
+    /// Required on an MCU whose `[links]` has `uart`: without it, every UART link that MCU's
+    /// firmware runs is refused, since no speed on it is known to work.
     pub link_uart: Option<LinkUart>,
     /// The I2C bus speeds the MCU package's firmware runs DAGON's I2C link at, as controller or
     /// target: `hzs`. The topology check (V-20) refuses a bus `speed_hz` that any node's list does
     /// not name, and DAGON Console offers only the speeds every node on the bus names. Required on
     /// an MCU whose `[links]` has `i2c`: without it, every I2C bus that MCU's firmware is on is
-    /// refused, since no speed on it is known to work. `[link_i2c.controller]`: how the firmware
-    /// makes SCL when the node drives the bus (`clock_hz` or `clock = "app"`, as `[link_uart]`'s;
-    /// `min_period`, the fewest clock cycles a period the HAL takes; `fast_ppm` and `slow_ppm`);
-    /// V-20 refuses a bus whose controller's SCL runs outside those bounds on its clock, and a
-    /// bus driven by a node whose MCU states none.
+    /// refused, since no speed on it is known to work. `[link_i2c.controller]` states how the
+    /// firmware makes SCL when the node drives the bus, as its HAL computes it: its clock divided
+    /// by the bus speed's period rounded to the nearest whole cycle, which the HAL refuses under
+    /// `min_period` cycles. The clock is `clock_hz` or `clock = "app"`, as `[link_uart]`'s,
+    /// exactly one of them; `fast_ppm` and `slow_ppm` bound how far SCL may run above and below
+    /// `speed_hz`, its clock's tolerance included. V-20 refuses a bus whose controller (the end
+    /// its target does not reach at an address) runs SCL outside those bounds on its node's
+    /// clock, cannot make the speed, or runs on an internal setup without `tolerance_ppm`, and a
+    /// bus driven by a node whose MCU states no `[link_i2c.controller]`.
     pub link_i2c: Option<LinkI2c>,
     /// ROM I2C bootloader (`stm32-i2c-rom`): `name` (as check messages call it), `addr`, `max_hz`,
     /// `erase_sectors`, `pairs = [{ controller, sda, scl }]` it listens on.

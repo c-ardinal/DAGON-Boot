@@ -181,8 +181,8 @@ python samples/hardware-test/measure.py stage0-verify ... --node hub --drive <UF
 # each boot core's listen window and its boot decision
 python samples/hardware-test/measure.py listen-time --project <project> --dagon <dagon.exe> --node seg --key <secret key file> [--probe <sel>]
 python samples/hardware-test/measure.py decide-time --project <project> --dagon <dagon.exe> --node seg --key <secret key file> [--probe <sel>]
-python samples/hardware-test/measure.py listen-time ... --node hub --drive <UF2 drive> --probe <sel> --chip RP2040
-python samples/hardware-test/measure.py decide-time ... --node hub --drive <UF2 drive> --probe <sel> --chip RP2040
+python samples/hardware-test/measure.py listen-time ... --node hub --drive <UF2 drive>
+python samples/hardware-test/measure.py decide-time ... --node hub --drive <UF2 drive> [--probe <sel> --chip RP2040]
 
 # a run stopped before it put a Cargo.toml back
 python samples/hardware-test/measure.py restore --project <project>
@@ -210,9 +210,14 @@ python samples/hardware-test/measure.py selftest
   included, in `DAGON_DECIDE_US` and stays there: the time the boot core's
   check adds to every boot. It has no limit of its own (the check feeds the
   watchdog); PASS when a decision was taken, with the seconds recorded.
-- Both boot core measurements read through a debug probe only (on a UF2
-  node `--probe` with `--chip`), and their feature goes into the node's boot
-  crate (`boot/<id>/Cargo.toml`). They wait out stage0's check first, which
+- Both boot core measurements read the value through a debug probe (on a
+  UF2 node `--probe` with `--chip`). Without one, an RP2040 boot core with
+  a boot LED (the board's `[boot] led`) shows it there: the milliseconds,
+  rounded up, one blink group per decimal digit, most significant first,
+  ten blinks for a 0, groups apart by a short dark gap and the whole
+  number repeated after a long dark pause. The script asks for the counts
+  in order (`5 2` is 52 ms). Their feature goes into the node's boot crate
+  (`boot/<id>/Cargo.toml`). They wait out stage0's check first, which
   takes seconds on an RP2040 without a crystal.
 
 The feature is named in the package's `default` features for the one

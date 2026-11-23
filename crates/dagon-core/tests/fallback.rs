@@ -387,3 +387,162 @@ fn without_a_node_tag_no_app_starts() {
     );
     assert!(e.is_err(), "{e:?}");
 }
+
+/// The hand-off by reset (`start_handed`): a request the boot core wrote
+/// whole runs the app decision once; an app it chooses starts, on trial
+/// when pending; otherwise the result is left in the cell and only the
+/// confirmed boot core starts. Without a whole request it is `start`.
+mod handed {
+    use super::*;
+    use dagon_core::bootcore::{app_result, start_handed, Handed, Refusal, Start, START_APP};
+    use std::cell::Cell;
+
+    /// A valid boot core in the boot core slot.
+    fn good_core(m: &mut Mem) -> SlotRef {
+        let body = [0x5A; 64];
+        let mut core = app_header(A, &body);
+        core.image_kind = image_kind::BOOTCORE;
+        core.build_flags = build_flags::VERIFY_ENFORCED;
+        core.capabilities = capabilities::SIG_VERIFIER;
+        core.load_addr = CORE[0].body;
+        let hdr = signed(core, SEED);
+        m.put(CORE[0].header, &hdr);
+        m.put(CORE[0].body, &body);
+        slot_ref(A, &hdr)
+    }
+
+    /// Stage0's decision over `cell`, which it reads and writes.
+    fn handed(m: &mut Mem, cell: &Cell<[u32; 2]>) -> Result<Handed, NoCore<CoreFail>> {
+        let write = |i: usize, w: u32| {
+            let mut v = cell.get();
+            v[i] = w;
+            cell.set(v);
+        };
+        start_handed(
+            m,
+            (&AT, &APPS),
+            (|| cell.get(), write),
+            &stage0_verifier(),
+            &mut dagon_core::bootcore::NoDiag,
+        )
+    }
+
+    /// A good core and the app records `apps` in one log.
+    fn with_core(m: &mut Mem, apps: &[(u8, u8, SlotRef)]) -> SlotRef {
+        let c = good_core(m);
+        let mut recs = vec![(target::BOOTCORE, kind::PROVISION, c)];
+        recs.extend_from_slice(apps);
+        log(m, &recs);
+        c
+    }
+
+    fn core_with(cell: [u32; 2]) -> Handed {
+        Handed::Core(Start {
+            slot: A,
+            body: CORE[0].body,
+            trial: false,
+            cell,
+        })
+    }
+
+    #[test]
+    fn a_whole_request_starts_the_confirmed_app_once() {
+        let mut m = Mem::new();
+        let a = good_app(&mut m, A);
+        with_core(&mut m, &[(target::APP, kind::PROVISION, a)]);
+        let cell = Cell::new(START_APP);
+        assert_eq!(
+            handed(&mut m, &cell),
+            Ok(Handed::App {
+                slot: A,
+                body: entry_of(A),
+                trial: false
+            })
+        );
+        assert_eq!(cell.get(), CLEARED);
+        // The next reset has no request: the boot core starts.
+        assert_eq!(handed(&mut m, &cell), Ok(core_with(CLEARED)));
+    }
+
+    #[test]
+    fn a_pending_app_starts_on_trial_and_its_attempt_is_recorded() {
+        let mut m = Mem::new();
+        let a = good_app(&mut m, A);
+        let b = good_app(&mut m, B);
+        with_core(
+            &mut m,
+            &[
+                (target::APP, kind::PROVISION, a),
+                (target::APP, kind::SLOT_PENDING, b),
+            ],
+        );
+        let cell = Cell::new(START_APP);
+        assert_eq!(
+            handed(&mut m, &cell),
+            Ok(Handed::App {
+                slot: B,
+                body: entry_of(B),
+                trial: true
+            })
+        );
+        let st = Log::load(&mut m, &LOG).unwrap().state;
+        assert_eq!((st.pending, st.attempts), (Some(b), 1));
+    }
+
+    #[test]
+    fn an_app_that_fails_its_checks_leaves_the_result_and_the_confirmed_core_starts() {
+        let mut m = Mem::new();
+        let a = good_app(&mut m, A);
+        with_core(&mut m, &[(target::APP, kind::PROVISION, a)]);
+        // One body byte changed.
+        let at = entry_of(A) + 9;
+        let mut byte = [0u8];
+        m.read(at, &mut byte).unwrap();
+        m.put(at, &[byte[0] ^ 1]);
+        let cell = Cell::new(START_APP);
+        let left = app_result(Refusal::Rejected);
+        assert_eq!(handed(&mut m, &cell), Ok(core_with(left)));
+        assert_eq!(cell.get(), left);
+    }
+
+    #[test]
+    fn with_no_app_record_the_result_says_no_image() {
+        let mut m = Mem::new();
+        with_core(&mut m, &[]);
+        let cell = Cell::new(START_APP);
+        let left = app_result(Refusal::NoImage);
+        assert_eq!(handed(&mut m, &cell), Ok(core_with(left)));
+        assert_eq!(cell.get(), left);
+    }
+
+    #[test]
+    fn half_a_request_runs_no_decision() {
+        let mut m = Mem::new();
+        let a = good_app(&mut m, A);
+        with_core(&mut m, &[(target::APP, kind::PROVISION, a)]);
+        for half in [[START_APP[0], 0], [0, START_APP[1]]] {
+            let cell = Cell::new(half);
+            assert_eq!(handed(&mut m, &cell), Ok(core_with(CLEARED)));
+            assert_eq!(cell.get(), half, "left for the boot core");
+        }
+    }
+
+    #[test]
+    fn a_refused_request_without_a_core_starts_nothing() {
+        let mut m = Mem::new();
+        let a = good_app(&mut m, A);
+        let core = gone_core();
+        log(
+            &mut m,
+            &[
+                (target::BOOTCORE, kind::PROVISION, core),
+                (target::APP, kind::PROVISION, a),
+            ],
+        );
+        m.put(entry_of(A), &[0; 4]);
+        let cell = Cell::new(START_APP);
+        let no = handed(&mut m, &cell).unwrap_err();
+        assert!(no.named);
+        assert_eq!(cell.get(), app_result(Refusal::Rejected));
+    }
+}

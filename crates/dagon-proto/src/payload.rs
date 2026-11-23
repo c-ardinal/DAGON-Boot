@@ -493,10 +493,10 @@ pub fn encode_status_req(t: u8, out: &mut [u8]) -> Result<usize, FrameError> {
     Ok(w.len())
 }
 
-/// VERSION request: no field for the summary set. A selector (a boot
-/// record page, site/src/content/docs/en/explanation/lifecycle-events.md
-/// 5.4) is a must field, so an agent that keeps no boot record answers
-/// `Status::Field` with its number.
+/// VERSION request: no field
+/// (site/src/content/docs/en/explanation/lifecycle-events.md 5.4). A field
+/// the agent does not know is a must field it answers with
+/// `Status::Field` and its number.
 pub fn parse_version_req(b: &[u8]) -> Result<(), Status> {
     parse_empty(&Cmd::Version.spec().req, b)
 }

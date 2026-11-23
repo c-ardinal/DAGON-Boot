@@ -1,11 +1,11 @@
-//! The state log with keyed records, over byte-granular flash
-//! (retained-formats.md 8).
+//! The state log with keyed records, over byte-granular flash (faces and
+//! records: retained-formats.md 6; the keyed records are no longer in the
+//! design, the limitations page lists them).
 //!
 //! The faces, the face header, the 32-byte record with its CRC and the fold
 //! of the records the log holds for image slots are the production ones
 //! (`dagon_format::statelog`, `dagon_core::log::LogState`); loading,
-//! appending and compaction follow `dagon_core::log::Log` step for step,
-//! and `world_diag` checks them against that code on the same bytes.
+//! appending and compaction follow `dagon_core::log::Log` step for step.
 //!
 //! A keyed record is a record whose kind is `0x80..=0xFE`. Its fold needs
 //! no knowledge of what it means: the latest put of a key is the value of

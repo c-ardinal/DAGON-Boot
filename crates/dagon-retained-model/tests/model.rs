@@ -2,7 +2,6 @@
 //! test`, the full profile as `--ignored` (run it with `--release`).
 
 use dagon_retained_model::harness::{run_many, run_params, World};
-use dagon_retained_model::world_diag::DiagWorld;
 use dagon_retained_model::world_fuse::FuseWorld;
 use dagon_retained_model::world_record::RecordWorld;
 use dagon_retained_model::world_trial::TrialWorld;
@@ -50,15 +49,4 @@ fn trial_default() {
 #[ignore = "full profile: cargo test --release -- --ignored"]
 fn trial_full() {
     go::<TrialWorld>("trial", FULL);
-}
-
-#[test]
-fn diag_default() {
-    go::<DiagWorld>("diag", DEFAULT);
-}
-
-#[test]
-#[ignore = "full profile: cargo test --release -- --ignored"]
-fn diag_full() {
-    go::<DiagWorld>("diag", FULL);
 }

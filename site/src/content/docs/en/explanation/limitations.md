@@ -25,7 +25,7 @@ For application developers, extension authors and DAGON contributors. The last s
 ## The user's responsibility
 
 - How to protect the signing key is the user's choice. DAGON does not decide it. Whether to use a hardware root of trust (secure boot fuses, key storage in hardware) is part of that choice.
-- A trusted extension (`trusted = true`) runs privileged, outside what the sandbox protects. Reviewing the extension, the registry crates it depends on and any source it takes in from outside its folder is the user's responsibility (section 4.7 of [Lifecycle events and extensions](/en/explanation/lifecycle-events/)).
+- An extension is the user's own trusted code and runs in the app and the host only. DAGON does not isolate it. Reviewing an extension's content, the crates it depends on and the source it takes in is the user's responsibility.
 - An AI agent (a command agent connected through the serve API) runs with the user's rights. DAGON puts no sandbox around it; running it in an OS sandbox is the user's responsibility (see [Agent link: serve API](/en/reference/agent-api/)).
 - The USB VID:PID `c0de:cafe` is a test ID, fixed in the code. It is not an assigned one. Whether it may be used in a product is the user's decision.
 - Through some USB hubs, the PC does not see the hub again after it updates itself and restarts. Connect the hub directly to a USB port of the PC.
@@ -41,10 +41,14 @@ The hub and the boot:
 - The measured worst-case verify time of stage0 on the built-in MCUs is not recorded. [Stage0's clock and its verify time](/en/explanation/lifecycle-events/) gives an emulator's estimate for the Cortex-M0+; there is no estimate for the STM32F401's Cortex-M4.
 - On the RP2040, stage0, the boot loader and the app take their clock from a crystal or from the ring oscillator; they do not take an external clock driven into XIN.
 
-Extension isolation:
+Parts the design no longer has that the code still declares:
 
-- The ESP32-S3's isolation level is `none`. No code programs the PMS and WCL registers.
-- Protection maps can be generated only for the kinds `armv6m-mpu` and `armv7m-mpu`.
+- In `dagon_events::PORTS`: the boot layer, the trust policy (`trusted only` and so on) and services columns, the `Action` port, the note that `Display` runs in the sandbox at boot, and the `BootRecord` and `Sandbox` records. The table of section 2.1 of [Lifecycle events and extensions](/en/explanation/lifecycle-events/) is generated from them.
+- VERSION ids 0x07, 0x08, 0x09, 0x11 and 0x12 in `version_id::TABLE`. The table of section 5.4 equals it.
+- Boot-stage extensions: the `boot_extensions` machine (`boot.extension_overran`), `targets/boot-extension-template`, the manifest's `trusted`, `stack_bytes` and `ram_bytes`, and `dagon-extension`'s protection map generation and trusted-extension checks.
+- The MCU definitions' `[isolation]`, `[[peripheral]]` and `[boot.record]`. The design's `root_protection` is a table of its own; the code keeps it as a field of `[isolation]` and moves it to its own table with the code change.
+- The models of the boot record, the lockup fuse, the state log's keyed records and the link diagnostics (DTC) in `dagon-retained-model`.
+- `REPLAY`, the decoder for the boot record's replay that `state_machine!` generates.
 
 Links:
 
@@ -60,7 +64,7 @@ Identity and VERSION:
 Values:
 
 - DAGON's own MCU definitions hold values marked `unverified`.
-- The execution model's budgets ([section 12](/en/explanation/lifecycle-events/#12-execution-model)) are not set the way 12.3 says.
+- The execution model's budgets ([section 11](/en/explanation/lifecycle-events/#11-execution-model)) are not set the way 11.3 says.
 
 Parts of the design the code lacks, in whole or in part:
 
@@ -71,16 +75,7 @@ Parts of the design the code lacks, in whole or in part:
 - `Sandbox`: There is no sandbox at run time (Service ABI, Entry Gate, Operation Cancellation, Fault Unwind, Lockup Fuse, Reset Cleanup, SandboxArch). Definitions are checked and protection maps are generated.
 <!-- end of generated list -->
 <!-- generated from site/scripts/architecture.py: python site/scripts/gen.py -->
-- Host Extension Chain: Not in the code.
-- Action Definitions: Not in the code; nor is the action file's format number (`action-defs`) in `compat.toml`.
-- Host Machines: Not in the code.
 - AI Agent Link: `dagon serve` has no job that ports DAGON to a board: `POST /v1/ai/port` answers 501.
 - Boot Action Interpreter: Not in the code.
-- Coordinator: The hub runs no stored release: the PC drives a write through the hub.
-- Release Store: Not in the code.
-- Node Recovery: There is no bounded retry.
-- Bus Guardian: Not in the code.
-- Delivery Plan: The trial window and the promotion judgement are not in the code.
-- Recovery Policy: No recovery tier is chosen automatically.
-- Retained Codecs: The firmware has none of the retained codecs: the lockup fuse's format exists only in the executable model, `compat.toml` has no format number (`boot-record`) for the boot record and the fuse, and the topology body is `dagon-format`'s (a 32-byte head, 32-byte nodes), not the one in [Retained and persistent formats](/en/explanation/retained-formats/). The hub stores it in one region, with no two-bank replacement. The state log's keyed records and the link diagnostics records exist only in the executable model too: the log's compaction in `dagon-core` does not copy a keyed record.
+- Retained Codecs: The firmware has none of the retained codecs: the topology body is `dagon-format`'s (a 32-byte head, 32-byte nodes), not the one in [Retained and persistent formats](/en/explanation/retained-formats/). The hub stores it in one region, with no two-bank replacement.
 <!-- end of generated table -->

@@ -158,6 +158,13 @@ test('narrow windows: every control is reached without a sideways scroll, nothin
     const kept = await page.evaluate(() => Object.keys(localStorage).filter((k) => k.startsWith('dagon-pos:')));
     if (kept.length) faults.push(`${w}x${h}: a drag of the stacked mark kept a place (${kept.join(', ')})`);
     if (await page.locator('.bubble').count()) await page.keyboard.press('Escape');
+    // The pressed group's items stand under the whole list: the way down to them, over the other groups, keeps that group open.
+    await page.getByRole('button', { name: 'メニューの表示' }).click();
+    const list = page.locator('.panel').first();
+    await list.getByRole('button', { name: 'プロジェクト', exact: true }).click();
+    await list.getByRole('button', { name: 'トラブル対処', exact: true }).hover();
+    if ((await list.getByRole('button', { name: 'プロジェクト', exact: true }).getAttribute('aria-expanded')) !== 'true') faults.push(`${w}x${h}: passing over a menu group opened it in place of the pressed one`);
+    await page.keyboard.press('Escape');
   }
   expect([...new Set(faults)]).toEqual([]);
 });

@@ -22,6 +22,7 @@
 //! topology node tag; overrides the board crate's default).
 #![cfg_attr(not(test), no_std)]
 
+pub mod app_image;
 pub mod board;
 pub mod framer;
 pub mod layout;
@@ -142,6 +143,8 @@ const fn tag16(s: &str) -> [u8; 16] {
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_app_image;
 #[cfg(test)]
 mod tests_factory;
 #[cfg(test)]

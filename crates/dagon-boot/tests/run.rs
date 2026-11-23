@@ -332,7 +332,7 @@ fn pending_trial() -> Mem {
 /// the boot falls back to A.
 fn confirmed_fallback() -> Mem {
     let mut m = with_pending_b();
-    let body = SLOTS.slots[B as usize].0 + HEADER_SIZE as u32;
+    let body = SLOTS.slots[B as usize].body;
     m.put(body, &[0x5A; 16]);
     m
 }
@@ -363,7 +363,7 @@ fn corrupt_image() -> Mem {
     let mut m = Mem::new();
     let a = install(&mut m, A, &image(A, 0));
     write_log(&mut m, 0, 1, &[(kind::PROVISION, a), (kind::CONFIRMED, a)]);
-    let body = SLOTS.slots[A as usize].0 + HEADER_SIZE as u32;
+    let body = SLOTS.slots[A as usize].body;
     m.put(body, &[0xA5; 32]);
     m
 }

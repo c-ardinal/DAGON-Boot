@@ -159,9 +159,9 @@ pub fn head(img: &[u8], slot: u8) -> SlotRef {
 pub fn installed() -> Cut {
     let mut f = Cut::new();
     let core = signed(image_kind::BOOTCORE, 0, CORE_SLOTS[0].0, 0, 3000);
-    let app = signed(image_kind::APP, 0, SLOTS.slots[0].0, 0, 2000);
+    let app = signed(image_kind::APP, 0, SLOTS.slots[0].header, 0, 2000);
     f.write(CORE_SLOTS[0].0, &core).unwrap();
-    f.write(SLOTS.slots[0].0, &app).unwrap();
+    f.write(SLOTS.slots[0].header, &app).unwrap();
     f.write(LOG.faces[0], &FaceHeader { generation: 1 }.to_bytes())
         .unwrap();
     let mut log = Log::load(&mut f, &LOG).unwrap();
@@ -178,7 +178,7 @@ pub fn installed() -> Cut {
 /// other face, both targets' records carried, the face header last.
 pub fn installed_full() -> Cut {
     let mut f = installed();
-    let app = signed(image_kind::APP, 0, SLOTS.slots[0].0, 0, 2000);
+    let app = signed(image_kind::APP, 0, SLOTS.slots[0].header, 0, 2000);
     let mut log = Log::load(&mut f, &LOG).unwrap();
     while log.room() >= trial_room(TRIAL_ATTEMPTS) {
         log.append(&mut f, kind::CONFIRMED, head(&app, 0), 0)

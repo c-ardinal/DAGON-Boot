@@ -11,6 +11,8 @@
 //! - the cell counts at most [`bootcore::MAX_COUNT`] starts, a cell
 //!   update cut between its two stores never lowers the count, and a cell
 //!   written for another image counts nothing;
+//! - the trial count, the app request and the app result never read as
+//!   each other, and a request cut half-way is none;
 //! - stage0 tries a pending core only while its starts last, and starts
 //!   no core that the log does not name, nor one in a slot the MCU
 //!   definition does not give.
@@ -28,6 +30,7 @@
 //! are bounded; the loop bodies are the same for every iteration, so the
 //! bound does not hide a path.
 
+use crate::boot::Place;
 use crate::bootcore::{self, Apps, Boot, Diag, Plan, Settle, Stage0, CLEARED, MAX_COUNT};
 use crate::log::{LogLayout, LogState, SlotRef};
 use dagon_format::header::HEADER_SIZE;
@@ -125,8 +128,14 @@ const LOG: LogLayout = LogLayout {
     face_len: FACE_HEADER_SIZE as u32 + RECORDS * RECORD_SIZE as u32,
 };
 const SLOT_LEN: u32 = HEADER_SIZE as u32 + BODY;
-const CORE_SLOTS: [(u32, u32); 2] = [(0x0801_0000, SLOT_LEN), (0x0806_0000, SLOT_LEN)];
-const APP_SLOTS: [(u32, u32); 2] = [(0x0802_0000, SLOT_LEN), (0x0804_0000, SLOT_LEN)];
+const CORE_SLOTS: [Place; 2] = [
+    Place::inline(0x0801_0000, SLOT_LEN),
+    Place::inline(0x0806_0000, SLOT_LEN),
+];
+const APP_SLOTS: [Place; 2] = [
+    Place::inline(0x0802_0000, SLOT_LEN),
+    Place::inline(0x0804_0000, SLOT_LEN),
+];
 
 /// The Cortex-M entry point: the reset vector, the second word of the body.
 fn entry(head: [u8; 8], _: u32) -> u32 {
@@ -173,6 +182,48 @@ fn a_cell_for_another_image_counts_nothing() {
     let n: u8 = kani::any();
     assert_eq!(bootcore::tried(bootcore::trial_cell(&q, n), &p), 0);
     assert_eq!(bootcore::tried(CLEARED, &p), 0);
+}
+
+/// The cell's tagged values never read as each other: whatever retained
+/// memory holds, a cell holding the app request or a result counts no
+/// trial start, the request is no result, and a cut write or take of the
+/// request (one word new, one old) is no request.
+#[kani::proof]
+// The array comparisons run memcmp over the cell's 8 bytes.
+#[kani::unwind(9)]
+fn the_cell_values_never_read_as_each_other() {
+    let p = any_ref();
+    let other: u32 = kani::any();
+    let refusal = if kani::any() {
+        bootcore::Refusal::NoImage
+    } else {
+        bootcore::Refusal::Rejected
+    };
+    let res = bootcore::app_result(refusal);
+    assert_eq!(bootcore::tried(bootcore::START_APP, &p), 0);
+    assert_eq!(bootcore::tried(res, &p), 0);
+    assert_eq!(bootcore::result(bootcore::START_APP), None);
+    assert_eq!(bootcore::result(res), Some(refusal));
+    // One word of a result still counts it (the other word holding no
+    // result, or this one); one word of a request does not.
+    let codes = [bootcore::Refusal::NoImage, bootcore::Refusal::Rejected];
+    if codes
+        .iter()
+        .all(|&r| r == refusal || bootcore::app_result(r)[0] != other)
+    {
+        assert_eq!(bootcore::result([res[0], other]), Some(refusal));
+    }
+    kani::assume(other != bootcore::START_APP[0]);
+    let cut = [bootcore::START_APP[0], other];
+    assert_eq!(
+        bootcore::hand_off(cut) == bootcore::HandOff::Request,
+        bootcore::result(cut).is_none()
+    );
+    assert!(!bootcore::take_request(|| cut, |_, _| {}));
+    assert!(!bootcore::take_request(
+        || [other, bootcore::START_APP[1]],
+        |_, _| {}
+    ));
 }
 
 /// Stage0's plan tries the pending core only while the cell counts fewer
@@ -271,13 +322,13 @@ fn the_log_fold_never_panics() {
 
 fn check_inline_stub<F: Flash, V: SigVerifier + ?Sized>(
     _: &mut F,
-    (base, _): (u32, u32),
+    at: Place,
     _: u8,
     _: (Option<&SlotRef>, &V),
     _: u16,
 ) -> Result<u32, bootcore::CoreFail> {
     if kani::any() {
-        Ok(base + HEADER_SIZE as u32)
+        Ok(at.body)
     } else if kani::any() {
         Err(bootcore::CoreFail::Header)
     } else {
@@ -297,7 +348,7 @@ fn confirmed_app_stub<F: Flash, V: SigVerifier + ?Sized>(
 ) -> Option<(u8, u32)> {
     let slot: u8 = kani::any();
     kani::assume(usize::from(slot) < APP_SLOTS.len());
-    kani::any::<bool>().then(|| (slot, APP_SLOTS[usize::from(slot)].0 + HEADER_SIZE as u32))
+    kani::any::<bool>().then(|| (slot, APP_SLOTS[usize::from(slot)].body))
 }
 
 /// The whole of stage0's decision ([`bootcore::start`]) with its parts
@@ -333,12 +384,10 @@ fn stage0_decision_never_panics() {
     let cell: [u32; 2] = kani::any();
     match bootcore::start(&mut AnyFlash, &at, &apps, cell, &AnyVerifier, &mut NoDiag) {
         Ok(Boot::Core(s)) => {
-            let (base, _) = at.slots[usize::from(s.slot)];
-            assert_eq!(s.body, base + HEADER_SIZE as u32);
+            assert_eq!(s.body, at.slots[usize::from(s.slot)].body);
         }
         Ok(Boot::App { slot, body }) => {
-            let (base, _) = APP_SLOTS[usize::from(slot)];
-            assert_eq!(body, base + HEADER_SIZE as u32);
+            assert_eq!(body, APP_SLOTS[usize::from(slot)].body);
         }
         Err(_) => {}
     }

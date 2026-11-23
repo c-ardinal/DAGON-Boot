@@ -159,6 +159,49 @@ nothing over it; only a cell counting nothing gets a probe (a value no
 cell word takes) and its old value back, word by word, each read back, so
 a reset inside the check never leaves the cell counting fewer starts.
 
+### 5.1 App hand-off
+
+An executing ESP image cannot map the app over itself, so on ESP32-S3
+stage0 starts the app and the boot loader asks for it by reset. The request
+and the result use the trial cell's two words; the cell holds one tagged
+value at a time.
+
+| Tag | Value | Written by | Counts when |
+|---|---|---|---|
+| `0xB7` | trial count (above) | stage0 | either word holds it |
+| `0xB8` | `START_APP`: the fixed word `0xB8C33C5A` twice | boot loader | both words hold it |
+| `0xB9` | `app_result`: `0xB9 << 24 \| 0x5A << 16 \| 0xA5 << 8 \| c << 4 \| (!c & 0xF)` twice (`c` 1: `NoImage`, 2: `Rejected`) | stage0 | either word holds it |
+
+The boot loader settles its own trial, writes `START_APP` (word 0, then
+word 1) and resets. Stage0 takes the request before it chooses a boot
+loader (`take_request`): it clears the cell, word 0 first, and runs the app
+decision once, only when the cell then reads cleared. When the decision
+starts no app, stage0 writes the result and starts only the confirmed
+boot loader, which reads it (`hand_off`), clears the cell and stays in
+recovery mode until an image or the log's choice changes.
+
+A request counts only when both words hold it, so a reset inside its
+write or its take leaves none: one request runs the decision at most
+once, and an unfinished write runs none (the boot loader asks again at its
+next start). A result only keeps the boot loader from asking, so either
+word counts it; a result lost to a reset costs one more decision.
+Requests and results count no trial start and never read as each other
+(Kani proof `the_cell_values_never_read_as_each_other`).
+
+The executable model is `dagon-retained-model`'s `world_hand_off`: the
+production rules (`take_request`, `app_result`, `hand_off`,
+`cell_holds`, and `choose`'s cell for the confirmed core) with a reset or
+a power loss after every store of the request, the take, the result, the
+confirmed core's start, the cell checks and the clearing of a result, and
+the app made good, absent or broken. Its properties, checked after every
+operation:
+
+| Id | Property |
+|---|---|
+| H1 | Stage0 runs the app decision only on a request the boot loader wrote whole, at most once for each. |
+| H2 | With no further fault, one boot ends with the app running when it is good, and otherwise with the boot loader in recovery mode, after at most two decisions. |
+| H3 | The boot loader stays in recovery only on a result stage0 wrote for the app as it is. |
+
 Limit of the claims: that each place keeps its value across the resets
 named is the vendor's documented behaviour.
 

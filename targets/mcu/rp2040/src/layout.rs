@@ -4,7 +4,7 @@
 //! build is given (the generated constants: `crate::slots`,
 //! `crate::STAGE0_REGION` and the others); nothing here is a second copy.
 
-use dagon_core::boot::SlotLayout;
+use dagon_core::boot::{places, Place, SlotLayout};
 use dagon_core::log::LogLayout;
 use dagon_format::header::HEADER_SIZE;
 
@@ -56,10 +56,13 @@ pub const APP_LOG_LAYOUT: LogLayout = LogLayout {
     faces: APP_LOG,
     face_len: LOG_FACE_SIZE,
 };
-/// Each with its own length: `(start, length)`, A first.
-pub const APP_SLOTS: SlotLayout = SlotLayout {
-    slots: &crate::slots::APP,
-};
+/// The APP slots' places (header inline), A first, each with its own
+/// length.
+pub const APP_PLACES: [Place; crate::slots::APP.len()] = places(crate::slots::APP_PLACES);
+/// The boot core slots' places, A first.
+pub const BOOTCORE_PLACES: [Place; crate::slots::BOOTCORE.len()] =
+    places(crate::slots::BOOTCORE_PLACES);
+pub const APP_SLOTS: SlotLayout = SlotLayout { slots: &APP_PLACES };
 
 /// Body capacity of a slot of `slot_size` bytes.
 pub const fn body_capacity(slot_size: u32) -> u32 {

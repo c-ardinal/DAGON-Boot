@@ -14,10 +14,10 @@ use crate::layout::{APP_LOG_LAYOUT, BL_LOG_LAYOUT};
 use crate::TRIAL_ATTEMPTS;
 
 /// What stage0 knows of this MCU (`dagon_core::bootcore::decide`): the boot
-/// core slots `(base, size)`, slot A first, from the generated definition.
+/// core slots' places, slot A first, from the generated definition.
 pub const STAGE0: Stage0<'static> = Stage0 {
     log: &BL_LOG_LAYOUT,
-    slots: &crate::slots::BOOTCORE,
+    slots: &crate::layout::BOOTCORE_PLACES,
     max: TRIAL_ATTEMPTS,
     mcu_id: crate::MCU_WIRE_ID,
 };
@@ -28,7 +28,7 @@ pub const STAGE0: Stage0<'static> = Stage0 {
 /// entry point.
 pub const APPS: Apps<'static> = Apps {
     log: &APP_LOG_LAYOUT,
-    slots: &crate::slots::APP,
+    slots: &crate::layout::APP_PLACES,
     target_tag: crate::tag::stage0_tag(crate::TARGET_TAG),
     entry: dagon_mcu_common::vector::entry,
 };

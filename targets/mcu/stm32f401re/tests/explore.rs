@@ -71,7 +71,11 @@ impl Cores {
     fn stage0(self) -> Stage0<'static> {
         Stage0 {
             log: &LOG,
-            slots: self.0,
+            slots: if self.0.len() == 1 {
+                &CORE_PLACES[..1]
+            } else {
+                &CORE_PLACES
+            },
             max: TRIAL_ATTEMPTS,
             mcu_id: MCU_ID,
         }
@@ -153,7 +157,7 @@ type NodeAgent = Agent<KindSStore<Cut>, Chain, Verifier>;
 fn image(kind_: u8, cores: Cores, slot: u8, minor: u8) -> Vec<u8> {
     let base = match kind_ {
         image_kind::BOOTCORE => cores.0[usize::from(slot)].0,
-        _ => SLOTS.slots[usize::from(slot)].0,
+        _ => SLOTS.slots[usize::from(slot)].header,
     };
     signed(kind_, slot, base, minor, BODY)
 }
@@ -366,7 +370,8 @@ fn boot(cores: Cores, n: &mut Node) -> Result<(), Broke> {
         let start = match started {
             Ok(Boot::Core(s)) => s,
             Ok(Boot::App { slot, .. }) => {
-                let good = minor_of(&mut n.f, SLOTS.slots[usize::from(slot)].0) != Some(BROKEN);
+                let good =
+                    minor_of(&mut n.f, SLOTS.slots[usize::from(slot)].header) != Some(BROKEN);
                 n.running = if good {
                     Running::App { slot }
                 } else {
@@ -414,7 +419,7 @@ fn boot(cores: Cores, n: &mut Node) -> Result<(), Broke> {
         }
         n.running = match decision {
             Decision::Boot { slot, .. } => {
-                if minor_of(&mut n.f, SLOTS.slots[usize::from(slot)].0) != Some(BROKEN) {
+                if minor_of(&mut n.f, SLOTS.slots[usize::from(slot)].header) != Some(BROKEN) {
                     Running::App { slot }
                 } else {
                     Running::Silent
@@ -574,7 +579,7 @@ fn installed_node(cores: Cores) -> Node {
     let app = image(image_kind::APP, cores, 0, 0);
     let mut g = f.clone();
     dagon_port::Flash::write(&mut g, cores.0[0].0, &core).unwrap();
-    dagon_port::Flash::write(&mut g, SLOTS.slots[0].0, &app).unwrap();
+    dagon_port::Flash::write(&mut g, SLOTS.slots[0].header, &app).unwrap();
     dagon_port::Flash::write(
         &mut g,
         LOG.faces[0],

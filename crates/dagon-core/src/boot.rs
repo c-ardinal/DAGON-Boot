@@ -12,13 +12,72 @@ use dagon_format::statelog::{kind, reason, target};
 use dagon_format::{Sha256, SigVerifier};
 use dagon_port::Flash;
 
-/// Where the APP slots live: `(start, length)` of each slot the MCU
-/// definition gives the app, index = slot (A, then B when there is one);
-/// each slot has its own length. Each slot starts with its 512-byte header;
-/// the body (vector table first) follows at `+HEADER_SIZE`.
+/// Where one slot's image lies, as its MCU definition places the header:
+/// the 512-byte header at `header`, the body at `body` with room for
+/// `room` bytes. An inline header starts the slot and the body follows it;
+/// a detached header has a sector of its own (a partition the MCU
+/// definition names). The image's header names the same placement and links the
+/// body for `body`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Place {
+    pub header: u32,
+    pub body: u32,
+    pub room: u32,
+    /// `placement::INLINE` or `placement::DETACHED`.
+    pub placement: u8,
+}
+
+impl Place {
+    /// A slot of `size` bytes at `base` whose header is inline.
+    pub const fn inline(base: u32, size: u32) -> Self {
+        Place {
+            header: base,
+            body: base + HEADER_SIZE as u32,
+            room: size.saturating_sub(HEADER_SIZE as u32),
+            placement: placement::INLINE,
+        }
+    }
+
+    /// A body region of `size` bytes at `body` whose header is at `header`.
+    pub const fn detached(header: u32, body: u32, size: u32) -> Self {
+        Place {
+            header,
+            body,
+            room: size,
+            placement: placement::DETACHED,
+        }
+    }
+
+    /// Whether header `h` was made for this place: the same placement, the
+    /// body linked for `body` and fitting the room.
+    pub fn fits(&self, h: &dagon_format::header::ImageHeader) -> bool {
+        h.placement == self.placement && h.load_addr == self.body && h.payload_size <= self.room
+    }
+}
+
+/// The places of the generated MCU definition's slots (`slots::<KIND>_PLACES`:
+/// header, body, body room, placement byte).
+pub const fn places<const N: usize>(rows: [(u32, u32, u32, u8); N]) -> [Place; N] {
+    let mut out = [Place::inline(0, 0); N];
+    let mut i = 0;
+    while i < N {
+        let (header, body, room, placement) = rows[i];
+        out[i] = Place {
+            header,
+            body,
+            room,
+            placement,
+        };
+        i += 1;
+    }
+    out
+}
+
+/// Where the APP slots live, index = slot (A, then B when there is one);
+/// each slot has its own place.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SlotLayout<'a> {
-    pub slots: &'a [(u32, u32)],
+    pub slots: &'a [Place],
 }
 
 /// What this boot core accepts (the signature key lives in the verifier
@@ -113,26 +172,24 @@ fn check<F: Flash, V: SigVerifier + ?Sized>(
     verifier: &V,
     r: SlotRef,
 ) -> Result<u32, u8> {
-    let (base, len) = *slots
+    let at = *slots
         .slots
         .get(r.slot as usize)
         .ok_or(reason::NO_VALID_IMAGE)?;
     let mut raw = [0u8; HEADER_SIZE];
     flash
-        .read(base, &mut raw)
+        .read(at.header, &mut raw)
         .map_err(|_| reason::HASH_MISMATCH)?;
     if header_digest16(&raw) != r.digest16 {
         return Err(reason::HASH_MISMATCH);
     }
     let h = verify_header(&raw, verifier).map_err(|_| reason::SIG_INVALID)?;
-    let body = base + HEADER_SIZE as u32;
+    let body = at.body;
     let fits = h.image_kind == image_kind::APP
-        && h.load_addr == body
+        && at.fits(&h)
         && h.mcu_id == cfg.mcu_id
         && h.target_tag == cfg.target_tag
-        && h.slot_binding == r.slot
-        && h.placement == placement::INLINE
-        && h.payload_size <= len.saturating_sub(HEADER_SIZE as u32);
+        && h.slot_binding == r.slot;
     if !fits {
         return Err(reason::SIG_INVALID);
     }

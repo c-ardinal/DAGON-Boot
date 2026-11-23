@@ -15,7 +15,7 @@ use dagon_core::bootcore::{start, Apps, Boot, CoreFail, Diag, NoCore, Stage0, CL
 use dagon_ed25519::Ed25519Small;
 
 /// One boot core slot, below the APP slots.
-const CORE: [(u32, u32); 1] = [(0x0801_0000, 0x1_0000)];
+const CORE: [Place; 1] = [Place::inline(0x0801_0000, 0x1_0000)];
 const MAX: u8 = 3;
 
 /// The entry point of an image whose body starts with a Cortex-M vector
@@ -67,7 +67,7 @@ fn app_header(slot: u8, body: &[u8]) -> ImageHeader {
 
 /// The body address of APP slot `slot`.
 fn entry_of(slot: u8) -> u32 {
-    SLOTS.slots[usize::from(slot)].0 + HEADER_SIZE as u32
+    SLOTS.slots[usize::from(slot)].body
 }
 
 /// An app body for `slot` whose vector table's reset vector is `reset`
@@ -90,7 +90,7 @@ fn signed(mut h: ImageHeader, seed: [u8; 32]) -> [u8; HEADER_SIZE] {
 
 /// Puts `hdr` and `body` into APP slot `slot`; the header as a record.
 fn put_app(m: &mut Mem, slot: u8, hdr: &[u8; HEADER_SIZE], body: &[u8]) -> SlotRef {
-    let base = SLOTS.slots[usize::from(slot)].0;
+    let base = SLOTS.slots[usize::from(slot)].header;
     m.put(base, hdr);
     m.put(base + HEADER_SIZE as u32, body);
     slot_ref(slot, hdr)
@@ -212,11 +212,11 @@ fn a_core_that_may_start_starts_and_the_app_does_not() {
     core.image_kind = image_kind::BOOTCORE;
     core.build_flags = build_flags::VERIFY_ENFORCED;
     core.capabilities = capabilities::SIG_VERIFIER;
-    core.load_addr = CORE[0].0 + HEADER_SIZE as u32;
+    core.load_addr = CORE[0].body;
     core.payload_sha256 = sha256(&[0x5A; 64]);
     let body_at = core.load_addr;
     let hdr = signed(core, SEED);
-    m.put(CORE[0].0, &hdr);
+    m.put(CORE[0].header, &hdr);
     m.put(body_at, &[0x5A; 64]);
     let c = slot_ref(A, &hdr);
     log(
@@ -309,7 +309,7 @@ fn an_app_failing_any_check_never_starts() {
             SEED
         }),
         ("larger than its slot", |h, _| {
-            h.payload_size = SLOTS.slots[0].1;
+            h.payload_size = SLOTS.slots[0].room + 1;
             SEED
         }),
         ("a body not the signed one", |_, b| {

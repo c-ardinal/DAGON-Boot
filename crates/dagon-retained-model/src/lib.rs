@@ -9,7 +9,7 @@
 //! plugs into the same harness and stays checked.
 //!
 //! Worlds ([`world_record`], [`world_fuse`], [`world_trial`]: the boot core
-//! trial cell) generate
+//! trial cell, [`world_hand_off`]: the app hand-off through that cell) generate
 //! seeded scenarios with faults after any byte, run them against an oracle
 //! and check their properties after every operation; a failure
 //! shrinks to a minimal case ([`harness`]). [`identity`] and [`boot`] hold
@@ -28,5 +28,6 @@ pub mod record;
 pub mod rng;
 pub mod skew;
 pub mod world_fuse;
+pub mod world_hand_off;
 pub mod world_record;
 pub mod world_trial;

@@ -309,7 +309,7 @@ fn newer_face_wins() {
 fn load_addr_must_be_slot_body() {
     let mut m = Mem::new();
     let a = install(&mut m, A, &image(A, 0));
-    let b = install(&mut m, B, &image_at(B, 1, SLOTS.slots[B as usize].0));
+    let b = install(&mut m, B, &image_at(B, 1, SLOTS.slots[B as usize].header));
     write_log(
         &mut m,
         0,
@@ -583,4 +583,59 @@ fn failed_compaction_write_keeps_the_active_face() {
             .unwrap();
         assert_eq!(Log::load(&mut f, &LOG).unwrap().generation, before.0 + 1);
     }
+}
+
+/// Slots whose MCU definition detaches the headers (each in a sector of
+/// its own, the body filling the slot): the decision reads each header
+/// where the definition puts it, starts the body it names, and refuses an
+/// image signed for inline placement.
+#[test]
+fn detached_headers_are_read_where_the_definition_puts_them() {
+    const DETACHED: SlotLayout = SlotLayout {
+        slots: &[
+            Place::detached(0x0807_0000, 0x0802_0000, 0x2_0000),
+            Place::detached(0x0807_1000, 0x0804_0000, 0x2_0000),
+        ],
+    };
+    let kp = KeyPair::from_seed(Seed::new(SEED));
+    let image = |slot: u8, minor: u8, placement: u8| {
+        let at = DETACHED.slots[usize::from(slot)];
+        let (raw, body) = image_at(slot, minor, at.body);
+        let mut h = ImageHeader::parse(&raw).unwrap();
+        h.placement = placement;
+        let msg = [SIGN_DOMAIN, &h.to_bytes()[..SIGNED_LEN]].concat();
+        h.signature = *kp.sk.sign(msg, None);
+        (h.to_bytes(), body)
+    };
+    let put = |m: &mut Mem, slot: u8, (hdr, body): &([u8; HEADER_SIZE], Vec<u8>)| {
+        let at = DETACHED.slots[usize::from(slot)];
+        m.put(at.header, hdr);
+        m.put(at.body, body);
+        slot_ref(slot, hdr)
+    };
+    let mut m = Mem::new();
+    let a = put(&mut m, A, &image(A, 0, placement::DETACHED));
+    let b = put(&mut m, B, &image(B, 1, placement::INLINE));
+    write_log(
+        &mut m,
+        0,
+        1,
+        &[
+            (kind::PROVISION, a),
+            (kind::CONFIRMED, a),
+            (kind::SLOT_PENDING, b),
+        ],
+    );
+    let mut log = Log::load(&mut m, &LOG).unwrap();
+    // B's header names inline placement: refused, and the boot goes back
+    // to A, read from its detached header.
+    assert_eq!(
+        decide(&mut m, &mut log, &DETACHED, &cfg(), &verifier()),
+        Decision::Boot {
+            slot: A,
+            entry: 0x0802_0000,
+            trial: false
+        }
+    );
+    assert_eq!(log.state.pending, None, "B rolled back");
 }

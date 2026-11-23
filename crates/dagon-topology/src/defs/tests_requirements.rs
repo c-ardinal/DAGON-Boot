@@ -279,3 +279,61 @@ fn coordinator_pins_are_usable() {
     let e = requirements::check_board(&board(lcd), f4).unwrap_err();
     assert!(e.contains("cannot be the coordinator"), "{e}");
 }
+
+#[test]
+fn link_rates_come_from_one_clock_within_the_definitions_bounds() {
+    let rp = include_str!("../../../../targets/mcu/rp2040/dagon-mcu.toml");
+    let ctl = "[link_i2c.controller]\nclock = \"app\"\nmin_period = 20\n";
+    assert!(
+        rp.contains(ctl),
+        "the rp2040 [link_i2c.controller] block moved"
+    );
+    for (to, says) in [
+        // Two clocks, or none.
+        (
+            "[link_i2c.controller]\nclock = \"app\"\nclock_hz = 125_000_000\nmin_period = 20\n",
+            "exactly one of clock_hz",
+        ),
+        (
+            "[link_i2c.controller]\nmin_period = 20\n",
+            "exactly one of clock_hz",
+        ),
+        (
+            "[link_i2c.controller]\nclock = \"app\"\nmin_period = 0\n",
+            "min_period must be at least 1",
+        ),
+        // A fixed 6 MHz clock cannot make 400 kHz in 20 cycles a period.
+        (
+            "[link_i2c.controller]\nclock_hz = 6_000_000\nmin_period = 20\n",
+            "cannot run SCL at 400000",
+        ),
+    ] {
+        let e = parse_mcu_text(&rp.replace(ctl, to), &[]).unwrap_err();
+        assert!(e.msg.contains("V-20") && e.msg.contains(says), "{to}: {e}");
+    }
+    // A fixed 125 MHz clock makes both speeds within the bounds.
+    let fixed = rp.replace(
+        ctl,
+        "[link_i2c.controller]\nclock_hz = 125_000_000\nmin_period = 20\n",
+    );
+    parse_mcu_text(&fixed, &[]).unwrap();
+    let e = parse_mcu_text(
+        &rp.replace("slow_ppm = 1_000_000", "slow_ppm = 1_000_001"),
+        &[],
+    )
+    .unwrap_err();
+    assert!(e.msg.contains("slow_ppm must be at most 1000000"), "{e}");
+    // The UART's bounds are the definition's: on a fixed 125 MHz clock
+    // the RP2040's UART runs 115200 at 115741 bit/s (+0.47 %), within 2 %
+    // but not within 0.1 %.
+    let uart = "[link_uart]\nclock = \"app\"\n";
+    assert!(rp.contains(uart), "the rp2040 [link_uart] block moved");
+    let fixed = rp.replace(uart, "[link_uart]\nclock_hz = 125_000_000\n");
+    parse_mcu_text(&fixed, &[]).unwrap();
+    let tight = fixed.replacen("fast_ppm = 20_000", "fast_ppm = 1_000", 1);
+    let e = parse_mcu_text(&tight, &[]).unwrap_err();
+    assert!(
+        e.msg.contains("V-26") && e.msg.contains("cannot run at 115200 from -2 % to +0.1 %"),
+        "{e}"
+    );
+}

@@ -150,7 +150,7 @@ pub struct ClockSetup {
     pub pll: BTreeMap<String, u32>,
     /// How far an internal oscillator may run from `out_hz`, in parts per
     /// million (an app's internal setup only; left out: unbounded, so no
-    /// UART link runs on it).
+    /// UART link runs on it and no I2C controller drives a bus on it).
     pub tolerance_ppm: Option<u32>,
 }
 

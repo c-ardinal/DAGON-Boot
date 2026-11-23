@@ -168,6 +168,12 @@ size = 16384
 [link_i2c]
 hzs = [100000, 400000]
 
+[link_i2c.controller]
+clock = "app"
+fast_ppm = 0
+min_period = 20
+slow_ppm = 1000000
+
 [[link_port]]
 index = 0
 kind = "usb-cdc"
@@ -202,7 +208,9 @@ name = "pio-uart"
 bauds = [115200, 230400]
 clock = "app"
 clocks_per_bit = 8
+fast_ppm = 20000
 frac_bits = 0
+slow_ppm = 20000
 
 [links]
 down = ["i2c", "uart"]

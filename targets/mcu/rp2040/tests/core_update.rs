@@ -443,7 +443,7 @@ fn stage0_starts_no_core_without_a_valid_signature() {
 
 /// A node whose definition gives the boot core one slot, built with the
 /// node's tag (the package's stage0 view otherwise).
-static ONE_CORE: [(u32, u32); 1] = [bl::STAGE0.slots[0]];
+static ONE_CORE: [dagon_core::boot::Place; 1] = [bl::STAGE0.slots[0]];
 const ONE: Stage0<'static> = Stage0 {
     slots: &ONE_CORE,
     ..bl::STAGE0
@@ -456,7 +456,7 @@ const APPS: Apps<'static> = Apps {
 /// An app for APP slot A whose body starts with a vector table.
 fn app_a() -> Vec<u8> {
     let kp = KeyPair::from_seed(Seed::new(SEED));
-    let at = APP_SLOTS.slots[0].0 + HEADER_LEN;
+    let at = APP_SLOTS.slots[0].body;
     let mut body: Vec<u8> = (0..2000u32).map(|i| i as u8).collect();
     body[..4].copy_from_slice(&RAM.to_le_bytes());
     body[4..8].copy_from_slice(&((at + 0x101) | 1).to_le_bytes());
@@ -487,10 +487,10 @@ fn app_a() -> Vec<u8> {
 /// The app log (its own faces on this MCU) confirms app A, then `more`.
 fn app_installed(f: &mut SimFlash, more: &[u8]) -> SlotRef {
     let app = app_a();
-    f.write(APP_SLOTS.slots[0].0, &app).unwrap();
+    f.write(APP_SLOTS.slots[0].header, &app).unwrap();
     f.write(APP_LOG[0], &FaceHeader { generation: 1 }.to_bytes())
         .unwrap();
-    let r = image::head_ref(f, APP_SLOTS.slots[0].0, 0).unwrap();
+    let r = image::head_ref(f, APP_SLOTS.slots[0].header, 0).unwrap();
     let mut log = Log::load(f, &APP_LOG_LAYOUT).unwrap();
     for &k in [kind::PROVISION, kind::CONFIRMED].iter().chain(more) {
         log.append(f, k, r, 0).unwrap();
@@ -518,7 +518,7 @@ fn with_one_core_slot_and_no_core_stage0_starts_the_confirmed_app() {
         decide(&mut f, &APPS),
         Ok(Boot::App {
             slot: 0,
-            body: APP_SLOTS.slots[0].0 + HEADER_LEN
+            body: APP_SLOTS.slots[0].body
         })
     );
 

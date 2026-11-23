@@ -112,7 +112,7 @@
     </div>
     {#if open}
       <!-- The height without dragging the edge (WCAG 2.5.7), on a full-size target (2.5.8): the tallest, or back to the lowest. -->
-      <button class="button-icon" title={tall ? DRAWER.lower : DRAWER.raise} aria-label={tall ? DRAWER.lower : DRAWER.raise} onclick={toggleHeight}
+      <button class="button-icon resize" title={tall ? DRAWER.lower : DRAWER.raise} aria-label={tall ? DRAWER.lower : DRAWER.raise} onclick={toggleHeight}
         ><span class="layer"><Icon name={tall ? 'chevrons-down' : 'chevrons-up'} /></span></button
       >
     {/if}
@@ -254,6 +254,11 @@
     .body {
       flex: none;
       min-height: var(--h-drawer-min);
+    }
+    /* So the edge and the raise/lower button have nothing to change here: gone, and the wide tier's kept height stays as it was. */
+    .handle,
+    .resize {
+      display: none;
     }
   }
 </style>

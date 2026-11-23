@@ -234,6 +234,8 @@ export async function reachFaults(page: Page): Promise<string[]> {
     // The open drawer shows its panel under its tabs.
     const body = document.querySelector('.drawer.open .body');
     if (body && body.getBoundingClientRect().height < 1) faults.push('the open drawer has no room for its panel');
+    // Its height follows its content there: no edge or raise/lower button that would change nothing on the page.
+    for (const e of document.querySelectorAll('.drawer .handle, .drawer .resize')) if (e.getBoundingClientRect().width > 0) faults.push(`${name(e)} resizes a drawer whose height is its content's`);
     // The bar's parts, and the windows the stage stacks, side by side or one under the other: never over each other.
     const groups = [
       [...document.querySelectorAll('.frame > header .left > *, .frame > header .modes, .frame > header .right > *')],

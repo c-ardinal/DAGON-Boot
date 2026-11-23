@@ -1006,7 +1006,8 @@
   // A stopped control is disabled for assistive technology too, not only dimmed, and gives its reason on hover (WCAG 4.1.2).
   let lockSync: (() => void) | undefined;
   $effect(() => {
-    const l = lockAria(document.body, (c) => lockedBy(c as Control));
+    // Made once: its first sync reads the locks, which must not tie this effect to them (the next one keeps it in step).
+    const l = untrack(() => lockAria(document.body, (c) => lockedBy(c as Control)));
     lockSync = l.sync;
     return l.stop;
   });

@@ -108,6 +108,14 @@ test('a control the state stops is disabled for assistive technology and says wh
   await expect(page.locator('.split .main')).toHaveAttribute('aria-disabled', 'false', { timeout: 240_000 });
   await expect(hub).toHaveAttribute('aria-disabled', 'false');
   expect((await hub.getAttribute('title')) ?? '').not.toContain('書込中');
+  // Nothing still stands as stopped whose control the page no longer stops.
+  const stale = await page.evaluate(() => {
+    const locks = (document.querySelector('.frame')?.getAttribute('data-locks') ?? '').split(' ');
+    return [...document.querySelectorAll<HTMLElement>('[data-lock-own-disabled]')]
+      .filter((e) => !locks.includes(e.closest<HTMLElement>('[data-control]')?.dataset.control ?? ''))
+      .map((e) => e.outerHTML.slice(0, 80));
+  });
+  expect(stale).toEqual([]);
 });
 
 test('F and / act only with the focus on the canvas (2.1.4)', async ({ page }) => {

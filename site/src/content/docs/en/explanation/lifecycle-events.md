@@ -150,7 +150,8 @@ SET_PENDING with target BOOTCORE into the idle boot loader slot, never the
 running or the confirmed core's; when the MCU definition gives one boot
 loader slot, into that one, and the agent refuses that transfer and its
 pending setting while an app is pending or on trial, and an app's pending
-setting while that core is pending, so the host asks to confirm or roll
+setting while that core is not confirmed (pending, or its slot left
+empty by a cut write), so the host asks to confirm or roll
 back the app first), `confirmed` and `demoted` by the new
 core's own CONFIRMED, `rolled_back` by the old core's ROLLBACK (replayed
 at the app's start). There is no `Trial` state the app can see: a core

@@ -670,7 +670,10 @@ impl<S: SlotStore, X: AppChain, V: SigVerifier, W: Writer, const L: usize> Agent
     /// With one boot core slot, a boot core trial and an app trial never
     /// overlap: the app's agent neither writes nor sets pending the only
     /// core while an app is pending or on trial, nor sets an app pending
-    /// while that core is pending. The core is written in place, so stage0
+    /// unless that core is confirmed: not while it is pending, nor while
+    /// a cut write left it empty, as no core would then start the app's
+    /// trial and the held-back core write could never repair it. The core
+    /// is written in place, so stage0
     /// has no other core to fall back to, and it starts the confirmed app
     /// only while no APP trial is open. Each start of a new core that
     /// fails would also start a pending app's trial (the core decides the
@@ -693,7 +696,7 @@ impl<S: SlotStore, X: AppChain, V: SigVerifier, W: Writer, const L: usize> Agent
             target::APP => self
                 .images
                 .target_status(target::BOOTCORE)
-                .is_some_and(|st| open(&st)),
+                .is_some_and(|st| !st.slots.iter().any(|s| s.state == SlotState::Confirmed)),
             _ => false,
         }
     }

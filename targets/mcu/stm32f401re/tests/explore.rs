@@ -750,7 +750,10 @@ fn every_state_of_a_node_with_one_boot_core_slot_boots_a_good_app() {
 
 /// Runs `path` from the installed node; every step happens.
 fn walk(cores: Cores, path: &[(Op, Option<Fault>)]) -> Node {
-    let mut n = installed_node(cores);
+    walk_from(cores, installed_node(cores), path)
+}
+
+fn walk_from(cores: Cores, mut n: Node, path: &[(Op, Option<Fault>)]) -> Node {
     for &(op, fault) in path {
         let (m, r) = run(cores, &n, op, fault).unwrap_or_else(|| panic!("{op:?} cannot happen"));
         r.unwrap_or_else(|e| panic!("{op:?}: {}", e.0));
@@ -780,6 +783,25 @@ fn one_boot_core_slot_takes_no_core_while_an_app_is_pending() {
         ],
     );
     assert!(log_state(&n).1.pending.is_none(), "the core is refused");
+    settles(cores, &n).unwrap_or_else(|e| panic!("{}", e.0));
+}
+
+/// The converse, found in review: with the only core slot left empty by
+/// a cut write, stage0 starts the confirmed app; an app set pending then
+/// would hold back every core write, and no core would start its trial.
+/// The agent sets no app pending until the core is confirmed again.
+#[test]
+fn one_boot_core_slot_takes_no_app_while_the_core_is_not_confirmed() {
+    let cores = Cores(&ONE_CORE);
+    let n = walk(
+        cores,
+        &[(Op::Core { good: true }, CUT_FIRST), (Op::Boot, None)],
+    );
+    assert_eq!(n.running, Running::App { slot: 0 });
+    let n = walk_from(cores, n, &[(Op::App { good: true }, None)]);
+    assert!(log_state(&n).0.pending.is_none(), "the app is refused");
+    let n = walk_from(cores, n, &[(Op::Core { good: true }, None)]);
+    assert!(log_state(&n).1.pending.is_some(), "the core is taken");
     settles(cores, &n).unwrap_or_else(|e| panic!("{}", e.0));
 }
 

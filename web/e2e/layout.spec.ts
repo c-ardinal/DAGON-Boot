@@ -111,6 +111,8 @@ const NARROW = [[640, 360], [320, 256], [640, 720], [1023, 700]] as const;
 test('narrow windows: every control is reached without a sideways scroll, nothing overlaps, in every state and both modes', async ({ page, context }) => {
   test.setTimeout(600_000);
   await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+  // The lowest drawer a wider window could have kept: the narrow tier's drawer still shows all its tabs and its panel.
+  await context.addInitScript(() => localStorage.setItem('dagon-drawer-height', '120'));
   const faults: string[] = [];
   for (const [w, h] of NARROW) {
     await page.setViewportSize({ width: w, height: h });

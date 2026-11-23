@@ -54,6 +54,8 @@
     edit,
     hub,
   }: Props = $props();
+  /** The bar's height as it is laid out: the narrow tier wraps it onto more rows, and the help opens under it. */
+  let barH = $state(0);
 
   /** 定義 → 運用: the order the user works in. */
   const MODES = [
@@ -70,7 +72,7 @@
 </script>
 
 <!-- TopBar: brand left, the mode toggle on the bar's centre line in every mode, then what every sequence needs: edit tools (準備, gone under 1100 px of bar), main actions, the connection, ☰. -->
-<header>
+<header bind:offsetHeight={barH}>
   <div class="left">
     <span class="brand" translate="no"><img class="mark" src="./icons/dagon-256.png" alt="" width="24" height="24" /><span class="name">{PRODUCT}</span></span>
     {#if title}<span class="project" translate="no">{title}</span>{/if}
@@ -120,7 +122,7 @@
 
 {#if helpOpen}
   <!-- トラブル対処 and キー操作: two popovers under ☰ with their own content, so each menu item opens what it names. -->
-  <section id="help" transition:rise={{ dur: '--dur-quick' }} class="help" aria-label={helpKeys ? HELP.keysHeading : HELP.heading} use:dismiss={() => (helpOpen = false)}>
+  <section id="help" transition:rise={{ dur: '--dur-quick' }} class="help" style:top={barH ? `${barH}px` : undefined} aria-label={helpKeys ? HELP.keysHeading : HELP.heading} use:dismiss={() => (helpOpen = false)}>
     <h2>{helpKeys ? HELP.keysHeading : HELP.heading}</h2>
     <button class="button-icon close" aria-label={helpKeys ? HELP.keysClose : HELP.close} title={helpKeys ? HELP.keysClose : HELP.close} onclick={() => (helpOpen = false)}><span class="layer"><Icon name="x" /></span></button>
     {#if helpKeys}
@@ -403,9 +405,6 @@
     }
     .modes {
       order: 3;
-    }
-    .help {
-      top: 100%;
     }
   }
 </style>

@@ -226,6 +226,14 @@ export async function reachFaults(page: Page): Promise<string[]> {
         }
       }
     }
+    // A popover opens where it is seen: some of it inside the window, not wholly down the page (the page may scroll on from there).
+    for (const e of document.querySelectorAll('#help, nav#menu .panel')) {
+      const r = e.getBoundingClientRect();
+      if (r.width && (r.bottom < 0.5 || r.top > innerHeight - 0.5)) faults.push(`${name(e)} opens out of view at ${Math.round(r.top)}`);
+    }
+    // The open drawer shows its panel under its tabs.
+    const body = document.querySelector('.drawer.open .body');
+    if (body && body.getBoundingClientRect().height < 1) faults.push('the open drawer has no room for its panel');
     // The bar's parts, and the windows the stage stacks, side by side or one under the other: never over each other.
     const groups = [
       [...document.querySelectorAll('.frame > header .left > *, .frame > header .modes, .frame > header .right > *')],

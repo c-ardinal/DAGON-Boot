@@ -246,8 +246,14 @@
     .drawer:not(.open) {
       height: auto;
     }
+    /* The open drawer grows with its tabs and its content, whatever height was dragged in a wider window (that height belongs to the wide tier); its body keeps the default height at least. */
     .drawer.open {
+      height: auto !important;
       max-height: none;
+    }
+    .body {
+      flex: none;
+      min-height: var(--h-drawer-min);
     }
   }
 </style>

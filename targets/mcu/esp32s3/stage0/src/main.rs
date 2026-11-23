@@ -169,7 +169,7 @@ pub extern "C" fn stage0_start() -> ! {
 /// as the confirmed boot core runs); returns only when it is no image
 /// stage0 may load, having changed nothing.
 fn run(f: &mut RomFlash, at: Place, period: Option<u32>) -> Refused {
-    let p = match load::plan_at(f, at) {
+    let p = match load::plan_at(f, at, (layout::CELL[0], layout::CELL[1] + 4)) {
         Ok(p) => p,
         Err(why) => return why,
     };

@@ -21,14 +21,24 @@ const PAGE_KIB: u32 = 64;
 
 /// The plan of the ESP image whose body is at `at`, every segment inside
 /// the body its header signs (`payload_size`, within the slot): bytes past
-/// it are covered by no signature or digest, so none is loaded.
-pub fn plan_at<F: Flash>(flash: &mut F, at: Place) -> Result<Plan, Refused> {
+/// it are covered by no signature or digest, so none is loaded. No RAM
+/// segment may write `keep` (start, end exclusive): the cell stage0 keeps
+/// across resets, whose trial count a copy would otherwise reset.
+pub fn plan_at<F: Flash>(flash: &mut F, at: Place, keep: (u32, u32)) -> Result<Plan, Refused> {
     let mut raw = [0u8; HEADER_SIZE];
     flash.read(at.header, &mut raw).map_err(|_| Refused::Read)?;
     let signed = ImageHeader::parse(&raw)
         .map_err(|_| Refused::Bounds)?
         .payload_size;
-    plan(flash, at.body, at.body.saturating_add(signed.min(at.room)))
+    let p = plan(flash, at.body, at.body.saturating_add(signed.min(at.room)))?;
+    match p
+        .copies()
+        .iter()
+        .find(|c| c.to < keep.1 && keep.0 < c.to + c.len)
+    {
+        Some(c) => Err(Refused::Range(c.to)),
+        None => Ok(p),
+    }
 }
 
 /// Copies and maps what `p` names, then runs its entry point.

@@ -191,3 +191,65 @@ export async function focusFaults(page: Page): Promise<string[]> {
     return [...new Set(faults)];
   });
 }
+
+/**
+ * The narrow tier (under 1024 px of window, WCAG 1.4.10 and 1.4.4): nothing goes off the window's side and the page
+ * never scrolls sideways; every control outside the two-dimensional parts (the graph's canvas, the data table) lies
+ * across the window's width and is not cut off by a box that hides its overflow; the bar's parts and the stacked
+ * windows do not overlap. The page itself may scroll down.
+ */
+export async function reachFaults(page: Page): Promise<string[]> {
+  return page.evaluate(() => {
+    const faults: string[] = [];
+    const name = (e: Element) => `${e.tagName.toLowerCase()}.${String(e.getAttribute('class') ?? '').split(' ')[0]}${e.getAttribute('aria-label') ? `[${e.getAttribute('aria-label')}]` : ''}`;
+    const w = innerWidth;
+    if (document.documentElement.scrollWidth > w) faults.push(`page scrolls sideways ${document.documentElement.scrollWidth} in ${w}`);
+    const hides = (c: CSSStyleDeclaration) => c.overflowX !== 'visible' || c.overflowY !== 'visible';
+    const controls = document.querySelectorAll<HTMLElement>('a[href], button, input, select, textarea, [role="tab"], [tabindex="0"]');
+    for (const el of controls) {
+      if (el.closest('.visually-hidden, [inert], [aria-hidden="true"], .box, .table-view') || !el.getClientRects().length) continue;
+      const r = el.getBoundingClientRect();
+      if (r.left < -0.5 || r.right > w + 0.5) faults.push(`${name(el)} off the window's side: ${Math.round(r.left)}..${Math.round(r.right)}`);
+      for (let a = el.parentElement; a && a !== document.body; a = a.parentElement) {
+        const c = getComputedStyle(a);
+        if (!hides(c)) continue;
+        // A box that scrolls the way it overflows still reaches what it holds.
+        // overflow: clip shows its clip margin too (the drawer keeps its handle's 4 px above its edge).
+        const m = c.overflowX === 'clip' || c.overflowY === 'clip' ? parseFloat(c.getPropertyValue('overflow-clip-margin')) || 0 : 0;
+        const b0 = a.getBoundingClientRect();
+        const b = { left: b0.left - m, top: b0.top - m, right: b0.right + m, bottom: b0.bottom + m };
+        const cutX = (r.left < b.left - 0.5 || r.right > b.right + 0.5) && !['auto', 'scroll'].includes(c.overflowX);
+        const cutY = (r.top < b.top - 0.5 || r.bottom > b.bottom + 0.5) && !['auto', 'scroll'].includes(c.overflowY);
+        if (cutX || cutY) {
+          faults.push(`${name(el)} cut off by ${name(a)}`);
+          break;
+        }
+      }
+    }
+    // A popover opens where it is seen: some of it inside the window, not wholly down the page (the page may scroll on from there).
+    for (const e of document.querySelectorAll('#help, nav#menu .panel')) {
+      const r = e.getBoundingClientRect();
+      if (r.width && (r.bottom < 0.5 || r.top > innerHeight - 0.5)) faults.push(`${name(e)} opens out of view at ${Math.round(r.top)}`);
+    }
+    // The open drawer shows its panel under its tabs.
+    const body = document.querySelector('.drawer.open .body');
+    if (body && body.getBoundingClientRect().height < 1) faults.push('the open drawer has no room for its panel');
+    // Its height follows its content there: no edge or raise/lower button that would change nothing on the page.
+    for (const e of document.querySelectorAll('.drawer .handle, .drawer .resize')) if (e.getBoundingClientRect().width > 0) faults.push(`${name(e)} resizes a drawer whose height is its content's`);
+    // The bar's parts, and the windows the stage stacks, side by side or one under the other: never over each other.
+    const groups = [
+      [...document.querySelectorAll('.frame > header .left > *, .frame > header .modes, .frame > header .right > *')],
+      [...document.querySelectorAll('.frame > header, main#canvas, .tools, .float, .focal, .pill, .toast, .notice, .edit-area.table, .drawer, #band, .dagon .mark, .bubble')],
+    ];
+    for (const peers of groups.map((g) => g.filter((e) => e.getBoundingClientRect().width > 0))) {
+      for (let i = 0; i < peers.length; i++) {
+        for (let j = i + 1; j < peers.length; j++) {
+          if (peers[i].contains(peers[j]) || peers[j].contains(peers[i])) continue;
+          const [a, b] = [peers[i].getBoundingClientRect(), peers[j].getBoundingClientRect()];
+          if (Math.min(a.right, b.right) - Math.max(a.left, b.left) > 0.5 && Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) > 0.5) faults.push(`${name(peers[i])} overlaps ${name(peers[j])}`);
+        }
+      }
+    }
+    return faults;
+  });
+}

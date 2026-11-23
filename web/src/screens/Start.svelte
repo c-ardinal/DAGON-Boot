@@ -350,4 +350,10 @@
   .band p {
     margin: 0;
   }
+  /* The narrow tier: the two choices stand one under the other rather than leaving the window. */
+  @media (max-width: 1023px) {
+    .choices {
+      flex-direction: column;
+    }
+  }
 </style>

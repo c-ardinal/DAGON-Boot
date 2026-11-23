@@ -31,7 +31,7 @@
 
 <style>
   dialog {
-    max-width: 32rem;
+    max-width: min(32rem, calc(100vw - 2 * var(--m-edge)));
     padding: var(--s-6);
     border: 1px solid var(--c-line);
     border-radius: var(--r-l);
@@ -52,6 +52,7 @@
   }
   .actions {
     display: flex;
+    flex-wrap: wrap;
     justify-content: flex-end;
     align-items: center;
     gap: var(--s-4);

@@ -1,7 +1,8 @@
 import { expect, test, type Page } from '@playwright/test';
-import { boxes, canvasState, focusFaults, layoutFaults, openSample, settled } from './console.ts';
+import { boxes, canvasState, focusFaults, layoutFaults, openSample, reachFaults, settled } from './console.ts';
 
 // The viewport matrix (ulthar config.json `viewport_matrix`) from 1024 wide up, the page's own 2560 theme edge (2559/2560) added.
+// Under 1024 is the narrow tier, which the narrow test below checks (web/README.md, "Window sizes").
 const WIDTHS = [1024, 1099, 1100, 1280, 1366, 1440, 1920, 2020, 2400, 2559, 2560];
 const HEIGHTS = [600, 700, 800, 1080, 1347, 1440];
 
@@ -103,6 +104,70 @@ test('sweep: no overflow, overlap, clipped text or clipped focus ring at any win
 });
 
 const box = async (p: Page, sel: string) => (await p.locator(sel).first().boundingBox())!;
+
+// The narrow tier: a 1280 x 720 window at 200 % (640 x 360) and at 400 % (320 x 256) zoom (WCAG 1.4.4, 1.4.10).
+const NARROW = [[640, 360], [320, 256], [640, 720], [1023, 700]] as const;
+
+test('narrow windows: every control is reached without a sideways scroll, nothing overlaps, in every state and both modes', async ({ page, context }) => {
+  test.setTimeout(600_000);
+  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+  // The lowest drawer a wider window could have kept: the narrow tier's drawer still shows all its tabs and its panel.
+  await context.addInitScript(() => localStorage.setItem('dagon-drawer-height', '120'));
+  const faults: string[] = [];
+  for (const [w, h] of NARROW) {
+    await page.setViewportSize({ width: w, height: h });
+    await page.goto('/?sim');
+    await page.waitForTimeout(700);
+    for (const f of await reachFaults(page)) faults.push(`${w}x${h} 開始: ${f}`);
+  }
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await openSample(page, 'sim&agent=linked');
+  for (const [w, h] of NARROW) {
+    await page.setViewportSize({ width: w, height: h });
+    await page.waitForTimeout(260);
+    // The fit puts the whole graph in the canvas, which the narrow tier does not float anything over.
+    await page.locator('#canvas').focus();
+    await page.keyboard.press('f');
+    await page.waitForTimeout(400);
+    const outside = await page.evaluate(() => {
+      const c = document.querySelector('main#canvas')!.getBoundingClientRect();
+      return [...document.querySelectorAll('.node')].filter((n) => { const r = n.getBoundingClientRect(); return r.left < c.left - 0.5 || r.right > c.right + 0.5 || r.top < c.top - 0.5 || r.bottom > c.bottom + 0.5; }).length;
+    });
+    if (outside) faults.push(`${w}x${h}: ${outside} cards outside the canvas after the fit`);
+    for (const mode of ['準備', '書込']) {
+      await page.getByRole('radio', { name: mode, exact: true }).click();
+      await page.waitForTimeout(300);
+      for (const [name, into, out] of mode === '準備' ? STATES : STATES.slice(0, 1)) {
+        await into(page);
+        await page.waitForTimeout(300);
+        for (const f of await reachFaults(page)) faults.push(`${w}x${h} ${mode} ${name}: ${f}`);
+        for (const f of await focusFaults(page)) faults.push(`${w}x${h} ${mode} ${name}: ${f}`);
+        await out(page);
+        await page.waitForTimeout(260);
+      }
+    }
+    await page.getByRole('radio', { name: '準備', exact: true }).click();
+    await page.keyboard.press('Escape');
+    // The stacked mark is not dragged: a drag keeps no place, so the wide tier's stays as it was.
+    await page.locator('.dagon .mark').scrollIntoViewIfNeeded();
+    const m = (await page.locator('.dagon .mark').boundingBox())!;
+    await page.mouse.move(m.x + m.width / 2, m.y + m.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(m.x - 40, m.y - 40, { steps: 4 });
+    await page.mouse.up();
+    const kept = await page.evaluate(() => Object.keys(localStorage).filter((k) => k.startsWith('dagon-pos:')));
+    if (kept.length) faults.push(`${w}x${h}: a drag of the stacked mark kept a place (${kept.join(', ')})`);
+    if (await page.locator('.bubble').count()) await page.keyboard.press('Escape');
+    // The pressed group's items stand under the whole list: the way down to them, over the other groups, keeps that group open.
+    await page.getByRole('button', { name: 'メニューの表示' }).click();
+    const list = page.locator('.panel').first();
+    await list.getByRole('button', { name: 'プロジェクト', exact: true }).click();
+    await list.getByRole('button', { name: 'トラブル対処', exact: true }).hover();
+    if ((await list.getByRole('button', { name: 'プロジェクト', exact: true }).getAttribute('aria-expanded')) !== 'true') faults.push(`${w}x${h}: passing over a menu group opened it in place of the pressed one`);
+    await page.keyboard.press('Escape');
+  }
+  expect([...new Set(faults)]).toEqual([]);
+});
 
 test('the mark: just left of the zoom in every view and mode, moved only by a drag, kept across reloads, and a click still opens the bubble', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });

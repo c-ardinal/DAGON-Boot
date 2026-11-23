@@ -88,6 +88,23 @@ A simulated node connected to the PC plugs in as one more `Transport` in `src/se
 `Transport` carries whole frames: the page owns choosing and opening the device, and the protocol
 steps belong to `dagon-host`, which will receive a `Transport` through `dagon-wasm`.
 
+## Window sizes
+
+The principle: at every window size the page supports, every piece of content and every control can be reached.
+Nothing is lost off the window's side, nothing covers another part, and text keeps its size. The graph's canvas and
+the data table are the only parts that may pan or scroll inside themselves, because their layout is two-dimensional
+by nature (WCAG 1.4.10). The page holds this at a 1280 × 720 window zoomed to 400 % (320 × 256).
+
+The page meets the principle in two tiers. The boundary between them is 1024 px of window width:
+
+- **1024 px and wider:** the canvas fills the window under the bar, the columns float over it, and the page never
+  scrolls. `e2e/layout.spec.ts` sweeps the viewport matrix from 1024 to 2560 px wide.
+- **Under 1024 px** (a 1280 window at 200 % zoom and more): the narrow tier. The bar wraps onto more rows, and the
+  brand keeps only its mark. The canvas keeps a height of its own (`--h-canvas-narrow`). The columns, the DAGON mark
+  and its bubble, and the drawer stack under the canvas, and the page scrolls down. Menus and dialogs fit the window's
+  width. The CSS media queries and `src/app/narrow.ts` use the same width. The narrow test in `e2e/layout.spec.ts`
+  checks 320 × 256, 640 × 360, 640 × 720 and 1023 × 700 in every state.
+
 ## Release key
 
 Keys never reach the browser; only the public release key does. At run time the page verifies

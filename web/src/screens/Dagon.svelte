@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { isNarrow } from '../app/narrow.ts';
   import { tick, untrack } from 'svelte';
   import type { Agent, AskKind } from '../app/agent.svelte.ts';
   import { AGENT } from '../app/copy.ts';
@@ -102,6 +103,8 @@
   /** Beside the mark where that is free; else the free spot nearest it, over the cards when the windows leave no other: nothing of the bubble lies over the sheet or a toast, wherever the mark is. */
   function placeBubble() {
     if (!open || !bubbleEl || !root) return;
+    // The narrow tier stacks the mark and its bubble in the page (CSS): nothing to place.
+    if (isNarrow()) return void ((bubbleAt = { x: 0, y: 0 }), (bubbleMax = 0));
     const [mx, my, s] = [root.offsetLeft, root.offsetTop, root.offsetWidth];
     // A low window: the bubble is no taller than the free area, its body scrolls.
     bubbleMax = Math.max(0, stage.h - 2 * MARGIN);
@@ -178,7 +181,8 @@
   /** The click that ends a drag opens nothing. */
   let dragged = false;
   function down(e: PointerEvent) {
-    if (!root || e.button !== 0) return;
+    // The narrow tier stacks the mark in the page: a drag there would only overwrite the wide tier's kept place.
+    if (!root || e.button !== 0 || isNarrow()) return;
     dragged = false;
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
     drag = { id: e.pointerId, dx: e.clientX - root.offsetLeft, dy: e.clientY - root.offsetTop, x0: e.clientX, y0: e.clientY, moved: false, from: { x: root.offsetLeft, y: root.offsetTop }, at: { x: root.offsetLeft, y: root.offsetTop } };
@@ -386,11 +390,14 @@
     overflow: auto;
     width: var(--w-bubble);
     display: grid;
+    /* One column no wider than the bubble: a long question or answer wraps instead of widening it past a narrow window. */
+    grid-template-columns: minmax(0, 1fr);
     gap: var(--s-2);
     padding: var(--s-3);
     border: 1px solid var(--c-line);
     border-radius: var(--r-m);
     background: var(--c-layer-1);
+    overflow-wrap: anywhere;
     box-shadow: 0 8px 24px rgb(0 0 0 / 0.45);
     transform-origin: right bottom;
   }
@@ -411,6 +418,7 @@
     gap: var(--s-2);
   }
   .q {
+    max-width: 100%;
     padding: var(--s-1) var(--s-2);
     border: 1px solid var(--c-line);
     border-radius: var(--r-full);
@@ -448,6 +456,27 @@
     .small,
     input {
       min-height: 2.75rem;
+    }
+  }
+  /* The narrow tier: the mark stands under the columns at the right and its bubble under it, both in the page, which scrolls down; no drag places them. */
+  @media (max-width: 1023px) {
+    .dagon {
+      position: static;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: var(--s-2);
+      width: auto;
+      height: auto;
+      translate: none;
+    }
+    .mark {
+      width: var(--w-mark);
+      height: var(--w-mark);
+    }
+    .bubble {
+      position: static;
+      width: 100%;
     }
   }
 </style>

@@ -22,6 +22,7 @@
 
 <script lang="ts">
   import { MENU } from '../app/copy.ts';
+  import { isNarrow } from '../app/narrow.ts';
   import { rise } from '../app/motion.ts';
   import Icon from './Icon.svelte';
 
@@ -56,7 +57,8 @@
   <ul class="panel">
     {#each groups as g (g.label)}
       <li>
-        <button class="row" aria-expanded={openGroup === g.label} onpointerenter={() => (openGroup = g.label)} onclick={() => (openGroup = g.label)}>
+        <!-- Hover opens a group beside the list; in the narrow tier its items stand under the whole list, so only a press opens it (the way down crosses the other groups). -->
+        <button class="row" aria-expanded={openGroup === g.label} onpointerenter={() => !isNarrow() && (openGroup = g.label)} onclick={() => (openGroup = g.label)}>
           <Icon name="chevron-left" size="var(--i-s)" />
           <span>{g.label}</span>
         </button>
@@ -153,5 +155,16 @@
     height: 1px;
     margin: var(--s-2) 0;
     background: var(--c-layer-2);
+  }
+  /* The narrow tier: a group's items open under the groups, both as wide as the window allows; the page scrolls down to the last of them. */
+  @media (max-width: 1023px) {
+    .menu {
+      flex-direction: column;
+      align-items: flex-end;
+    }
+    .panel {
+      width: min(var(--w-menu), calc(100vw - 2 * var(--m-edge)));
+      max-height: none;
+    }
   }
 </style>

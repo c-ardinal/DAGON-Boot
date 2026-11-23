@@ -110,8 +110,8 @@
   const NAME_MIN_PX = 13;
   /** A name's size on a card at 100 % (--t-small inside the canvas). */
   const NAME_PX = 14;
-  /** Card heights before they are measured (px). */
-  const EST_H = { normal: 140, compact: 56 };
+  /** Card heights before they are measured (px): what each class measures with the sample (a compact card keeps its header and its chip row). */
+  const EST_H = { normal: 140, compact: 78 };
   /** Room above a top coordinator for its uplink card (px). */
   const UPLINK_ROOM = 84;
   /** A press moves this far before it is a drag, not a click (px). */

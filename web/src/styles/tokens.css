@@ -121,6 +121,8 @@
   --t-mono: 13px; /* code, ids and logs */
   /* component sizes */
   --h-bar: 44px;
+  /* The narrow tier's canvas: a window's worth of graph, at least what a card and its links need. */
+  --h-canvas-narrow: max(240px, 60vh);
   --h-status: 32px;
   --h-control: 28px;
   --h-button: 44px;

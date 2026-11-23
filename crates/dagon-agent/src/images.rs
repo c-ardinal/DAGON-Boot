@@ -225,6 +225,7 @@ impl<S: SlotStore> ImageStore<S> {
                         from: s,
                         to: cs.active,
                         reason: cs.last_reason,
+                        version: cs.slots[usize::from(s)].version,
                     };
                     replay(chain, core_image::REPLAY, &p);
                 }
@@ -244,6 +245,7 @@ impl<S: SlotStore> ImageStore<S> {
                     from: s,
                     to: st.active,
                     reason: st.last_reason,
+                    version: info.version,
                 }),
                 _ => None,
             };
@@ -561,7 +563,7 @@ fn reach_core(m: &mut core_image::Machine, out: &mut impl Sink, slot: u8, st: &S
             C::Written => m.written(out, slot, v),
             C::Pending => m.pending_set(out, slot, v),
             C::Confirmed => m.confirmed(out, slot, v),
-            C::Reverted => m.rolled_back(out, slot, st.active, st.last_reason),
+            C::Reverted => m.rolled_back(out, slot, st.active, st.last_reason, v),
             C::Empty => Ok(()),
         };
         done(r);
@@ -592,7 +594,7 @@ fn reach(
             I::Pending => m.pending_set(out, slot, version),
             I::Trial => m.trial_started(out, slot, version, st.attempts, max),
             I::Confirmed => m.confirmed(out, slot, version),
-            I::Reverted => m.rolled_back(out, slot, st.active, st.last_reason),
+            I::Reverted => m.rolled_back(out, slot, st.active, st.last_reason, version),
             I::Empty => Ok(()),
         };
         done(r);

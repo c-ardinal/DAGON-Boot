@@ -98,8 +98,11 @@ dagon_events::state_machine! {
                 observe(live, host);
             /// The boot core rolled the slot back (attempts exhausted, or
             /// the pending image failed its check) and started `to`.
-            rolled_back(from: u8, to: u8, reason: u8): Pending | Trial => Reverted
-                emits RolledBack = 0x27 { from: u8, to: u8, reason: u8 }
+            /// `version` names the image rolled back: the marker is that
+            /// image's (a new image in the slot clears it), so a consumer
+            /// tells a new rollback from the one replayed at every start.
+            rolled_back(from: u8, to: u8, reason: u8, version: Version): Pending | Trial => Reverted
+                emits RolledBack = 0x27 { from: u8, to: u8, reason: u8, version: Version }
                 observe(replay, host);
             /// The confirmed slot had been set pending again; another slot
             /// was set pending, or the boot core ended its trial: it is the
@@ -147,8 +150,9 @@ dagon_events::state_machine! {
                 observe(host);
             /// Stage0 gave the pending core up (its starts ran out, or its
             /// image failed the check) and the core in `to` recorded it.
-            rolled_back(from: u8, to: u8, reason: u8): Pending => Reverted
-                emits CoreRolledBack = 0x45 { from: u8, to: u8, reason: u8 }
+            /// `version` names the core given up, as in `image`.
+            rolled_back(from: u8, to: u8, reason: u8, version: Version): Pending => Reverted
+                emits CoreRolledBack = 0x45 { from: u8, to: u8, reason: u8, version: Version }
                 observe(replay, host);
         }
     }

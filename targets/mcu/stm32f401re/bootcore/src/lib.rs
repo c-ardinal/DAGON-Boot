@@ -37,6 +37,12 @@
 //! pending, it records the rollback. Built for boot core slot A, or B with
 //! `slot-b`.
 #![no_std]
+// The build that measures the boot decision stops after it: the code that
+// starts the app is unused there.
+#![cfg_attr(
+    feature = "decide-time",
+    allow(unreachable_code, unused_variables, unused_mut)
+)]
 
 use core::panic::PanicInfo;
 
@@ -54,6 +60,8 @@ use dagon_events::{
 };
 use dagon_format::header::port_kind;
 use dagon_mcu_stm32f401re::boot_link::I2cPort;
+#[cfg(any(feature = "listen-time", feature = "decide-time"))]
+use dagon_mcu_stm32f401re::boot_time;
 use dagon_mcu_stm32f401re::clock::Setup;
 use dagon_mcu_stm32f401re::flash::F401Flash;
 use dagon_mcu_stm32f401re::layout as board;
@@ -201,9 +209,11 @@ pub fn run<E: Extension>(chain: E, limits: &'static [BootExtension], link_addr: 
             update_mode(port, flash, &mut clock, Some(stay))
         }
         #[cfg(feature = "listen-time")]
-        listen_time::hold(clock.now_us());
+        boot_time::hold(&boot_time::DAGON_LISTEN_US, clock.now_us(), iwdg::feed);
     }
     let mut chain = compose_boot(chain, clock, limits);
+    #[cfg(feature = "decide-time")]
+    let deciding = DWT::cycle_count();
     let mut boot = BootRun::start(
         &mut chain,
         &mut flash,
@@ -214,6 +224,13 @@ pub fn run<E: Extension>(chain: E, limits: &'static [BootExtension], link_addr: 
         board::TRIAL_WDT_MS,
     );
     let decision = boot.decision();
+    // At most 51 s at 84 MHz between the two reads (one 32-bit wrap).
+    #[cfg(feature = "decide-time")]
+    boot_time::hold(
+        &boot_time::DAGON_DECIDE_US,
+        u64::from(DWT::cycle_count().wrapping_sub(deciding) / CYCLES_PER_US),
+        iwdg::feed,
+    );
     // The decision verified the app it starts under this core's key.
     let healthy = !cfg!(feature = "no-confirm") && matches!(decision, Decision::Boot { .. });
     let settled = settle_log(
@@ -259,25 +276,6 @@ pub fn run<E: Extension>(chain: E, limits: &'static [BootExtension], link_addr: 
     }
     loop {
         cortex_m::asm::wfi();
-    }
-}
-
-/// The measuring build (`listen-time`): what the link and its listen
-/// window add to a boot that takes no STAY.
-#[cfg(feature = "listen-time")]
-mod listen_time {
-    use core::sync::atomic::{AtomicU32, Ordering};
-
-    /// Microseconds from the boot core's start (clock, watchdog and cycle
-    /// counter set up) to the end of the listen window; 0 until then.
-    #[no_mangle]
-    static DAGON_LISTEN_US: AtomicU32 = AtomicU32::new(0);
-
-    pub fn hold(us: u64) -> ! {
-        DAGON_LISTEN_US.store(u32::try_from(us).unwrap_or(u32::MAX), Ordering::Relaxed);
-        loop {
-            super::iwdg::feed();
-        }
     }
 }
 

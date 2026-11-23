@@ -14,7 +14,7 @@ publish = false
 # the lint uses a neutral tag and the boot folder in lint/.
 [package.metadata.dagon]
 bootcore = "rp2040"
-lint = { features = ["", "slot-b"], env = { DAGON_TARGET_TAG = "lint", DAGON_BOOT_CRATE = "./lint" } }
+lint = { features = ["", "slot-b", "listen-time", "decide-time"], env = { DAGON_TARGET_TAG = "lint", DAGON_BOOT_CRATE = "./lint" } }
 
 # Standalone: built for thumbv6m only, so it stays out of the host workspace.
 # Its memory.x and verifying key come from dagon-mcu-rp2040.
@@ -28,6 +28,13 @@ diag = ["dagon-mcu-rp2040/diag-panic"]
 no-confirm = []
 # Linked for boot core slot B (a release carries a core for each slot).
 slot-b = ["dagon-mcu-rp2040/slot-b"]
+# Measuring builds, for a probe to read (dagon-mcu-common's boot_time):
+# once the listen window has ended without a STAY, keeps the microseconds
+# since the boot core's start in DAGON_LISTEN_US; once the boot decision is
+# taken, the microseconds it took in DAGON_DECIDE_US. Either stays there
+# (watchdog fed) instead of booting.
+listen-time = ["dagon-mcu-common/boot-time"]
+decide-time = ["dagon-mcu-common/boot-time"]
 
 [dependencies]
 # `usb`: update and recovery mode serve the session on the app's USB device.

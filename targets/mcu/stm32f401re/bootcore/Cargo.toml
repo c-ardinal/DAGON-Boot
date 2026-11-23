@@ -14,7 +14,7 @@ publish = false
 # the lint uses a neutral tag and the boot folder in lint/.
 [package.metadata.dagon]
 bootcore = "stm32f401re"
-lint = { features = ["", "slot-b"], env = { DAGON_TARGET_TAG = "lint", DAGON_BOOT_CRATE = "./lint" } }
+lint = { features = ["", "slot-b", "listen-time", "decide-time"], env = { DAGON_TARGET_TAG = "lint", DAGON_BOOT_CRATE = "./lint" } }
 
 # Standalone: built for thumbv7em only, so it stays out of the host workspace.
 # Its memory.x and verifying key come from dagon-mcu-stm32f401re.
@@ -26,10 +26,13 @@ lint = { features = ["", "slot-b"], env = { DAGON_TARGET_TAG = "lint", DAGON_BOO
 no-confirm = []
 # Linked for boot core slot B (a release carries a core for each slot).
 slot-b = ["dagon-mcu-stm32f401re/slot-b"]
-# Measuring build: once the listen window has ended without a STAY, keeps
-# the microseconds since the boot core's start in DAGON_LISTEN_US and
-# stays there (watchdog fed) instead of booting, for a probe to read.
-listen-time = []
+# Measuring builds, for a probe to read (dagon-mcu-common's boot_time):
+# once the listen window has ended without a STAY, keeps the microseconds
+# since the boot core's start in DAGON_LISTEN_US; once the boot decision is
+# taken, the microseconds it took in DAGON_DECIDE_US. Either stays there
+# (watchdog fed) instead of booting.
+listen-time = ["dagon-mcu-stm32f401re/boot-time"]
+decide-time = ["dagon-mcu-stm32f401re/boot-time"]
 
 [dependencies]
 dagon-mcu-stm32f401re = { path = "..", default-features = false, features = ["hal", "image-bootcore"] }

@@ -8,7 +8,8 @@ normal build back. See README.md, "Measurements".
     python measure.py stage0-verify --project <project> --dagon <exe> --node <id> --key <file>
                                     [--probe <sel> | --drive <dir>] [--out <dir>]
     python measure.py listen-time   --project <project> --dagon <exe> --node <id> --key <file>
-                                    [--probe <sel>] [--out <dir>]
+                                    [--probe <sel>] [--chip <chip>] [--drive <dir>] [--out <dir>]
+    python measure.py decide-time   (the same arguments as listen-time)
     python measure.py restore       --project <project>
     python measure.py selftest
 
@@ -48,14 +49,21 @@ MEASUREMENTS = {
         # 1.8 MHz takes up to 28 s (lifecycle-events, "Stage0's clock").
         "wait_s": 35,
     },
+    # The boot core's measuring builds wait out stage0's check first.
     "listen-time": {
         "package": "boot",
         "feature": "{bootcore}/listen-time",
         "part": "bootcore",
         "symbols": ["DAGON_LISTEN_US"],
-        "wait_s": 3,
-        # Only this boot core has the measuring build.
-        "mcus": ["stm32f401re"],
+        "wait_s": 35,
+    },
+    "decide-time": {
+        "package": "boot",
+        "feature": "{bootcore}/decide-time",
+        "part": "bootcore",
+        "symbols": ["DAGON_DECIDE_US"],
+        # Stage0's check and the decision's check of the app.
+        "wait_s": 65,
     },
 }
 # The margin the listen window may add beyond itself.
@@ -281,6 +289,19 @@ def listen_verdict(us, window_ms):
     }
 
 
+def decide_verdict(us):
+    """The boot decision's time; it has no limit of its own (the boot
+    core feeds its watchdog through the check), so only a taken decision
+    (more than 0) passes."""
+    ok = us > 0
+    return {
+        "decide_us": us,
+        "decide_s": round(us / 1e6, 4),
+        "verdict": "PASS" if ok else "FAIL",
+        "why": None if ok else "the decision was never taken (0)",
+    }
+
+
 # ---- runs --------------------------------------------------------------
 
 
@@ -319,12 +340,10 @@ def measure(a, name, flash=run_flash, read=probe_read, wait=time.sleep, ask=inpu
     m = MEASUREMENTS[name]
     d = node_definition(a.project, a.node)
     mcu = d["id"]
-    if mcu not in m.get("mcus", [mcu]):
-        raise SystemExit(f"{name}: {mcu} has no measuring build (only {', '.join(m['mcus'])})")
     writer = d.get("writer", {})
     chip = read_chip(a, writer)
-    if name == "listen-time" and chip is None:
-        raise SystemExit("listen-time reads its value with a debug probe")
+    if name != "stage0-verify" and chip is None:
+        raise SystemExit(f"{name} reads its value with a debug probe (--probe, and --chip on a UF2 node)")
     out = Path(a.out or Path.home() / "dagon-measure") / dt.datetime.now().strftime("%Y%m%d-%H%M%S")
     out.mkdir(parents=True)
     steps = []
@@ -366,11 +385,15 @@ def measure(a, name, flash=run_flash, read=probe_read, wait=time.sleep, ask=inpu
                 print("Count the fast blinks between two dark pauses on the board's diagnostic output.")
                 blinks = int(ask("blinks: ").strip())
                 result.update(blink_verdict(blinks, hz))
-        else:
+        elif name == "listen-time":
             window = d.get("boot_receive", {}).get("listen_window_ms", 50)
             (us,), cmd = read(chip, a.probe, syms["DAGON_LISTEN_US"])
             log({"command": cmd, "listen_us": us})
             result.update(listen_verdict(us, window))
+        else:
+            (us,), cmd = read(chip, a.probe, syms["DAGON_DECIDE_US"])
+            log({"command": cmd, "decide_us": us})
+            result.update(decide_verdict(us))
     except (Exception, KeyboardInterrupt, SystemExit) as e:
         # Recorded, and the exit code waits for the write back below.
         result["verdict"] = "FAIL"
@@ -406,8 +429,7 @@ def main(argv=None):
         s.add_argument("--key", required=True, help="secret key file (path only, passed to dagon)")
         s.add_argument("--probe", help="probe-rs probe selector (reads the value; writes through it only on a probe-rs writer)")
         s.add_argument("--chip", help="probe-rs chip to read (default: the probe-rs writer's)")
-        if name == "stage0-verify":
-            s.add_argument("--drive", help="UF2 drive (a board without a probe)")
+        s.add_argument("--drive", help="UF2 drive the node is written through (a UF2 writer)")
         s.add_argument("--out", help="record folder (default ~/dagon-measure)")
     r = sub.add_parser("restore")
     r.add_argument("--project", required=True)

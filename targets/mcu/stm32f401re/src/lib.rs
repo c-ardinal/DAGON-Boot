@@ -52,6 +52,8 @@ pub mod watchdog;
 #[cfg(feature = "node")]
 pub use node::{BoardCore, BoardDef};
 
+#[cfg(feature = "boot-time")]
+pub use dagon_mcu_common::boot_time;
 pub use dagon_mcu_common::{liveness, tag};
 
 // The constants this package's MCU definition states (`dagon-mcu.toml`):

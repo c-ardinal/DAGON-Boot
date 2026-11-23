@@ -16,11 +16,15 @@
 //!   table;
 //! - [`verify_time`] (feature `verify-time`): a stage0 signature check
 //!   timed in core clock cycles, for a stage0 built to measure it.
+//! - [`boot_time`] (feature `boot-time`): the records of a boot core built
+//!   to measure its listen window or its boot decision.
 #![no_std]
 
 #[doc(hidden)]
 pub use dagon_format as __format;
 
+#[cfg(any(test, feature = "boot-time"))]
+pub mod boot_time;
 pub mod frames;
 pub mod guard;
 pub mod hooks;

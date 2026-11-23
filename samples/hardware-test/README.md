@@ -176,6 +176,7 @@ run `hwt.py` after measuring, not in between.
 # stage0's signature check of the boot core (each built-in MCU with a stage0)
 python samples/hardware-test/measure.py stage0-verify --project <project> --dagon <dagon.exe> --node seg --key <secret key file> [--probe <sel>]
 python samples/hardware-test/measure.py stage0-verify --project <project> --dagon <dagon.exe> --node hub --key <secret key file> --drive <UF2 drive>
+python samples/hardware-test/measure.py stage0-verify ... --node hub --drive <UF2 drive> --probe <sel> --chip RP2040
 
 # the STM32F401 boot core's listen window
 python samples/hardware-test/measure.py listen-time --project <project> --dagon <dagon.exe> --node seg --key <secret key file> [--probe <sel>]
@@ -189,7 +190,9 @@ python samples/hardware-test/measure.py selftest
 
 - `stage0-verify`: stage0 with `verify-time` times its check of the boot
   core and starts no core. Through a debug probe (the node's writer is
-  probe-rs, or `--probe` is given) it reads `DAGON_VERIFY_CYCLES` and
+  probe-rs, or `--probe` with `--chip`, e.g. `--chip RP2040`, on a UF2
+  node: the write still goes to `--drive`, the probe only reads) it reads
+  `DAGON_VERIFY_CYCLES` and
   `DAGON_VERIFY_COUNT` and gives the seconds at the clock the build chose
   (`clock.rs` of the build). Without one it asks for the blink code on the
   board's diagnostic output: the fast blinks between two dark pauses, in
@@ -204,6 +207,7 @@ python samples/hardware-test/measure.py selftest
 The feature is named in the package's `default` features for the one
 write; the file is put back byte for byte afterwards, also on a failure or
 Ctrl-C (`Cargo.toml.measure-backup` holds the original until then).
+A measurement that fails part way still writes the normal build back.
 Records go to `<out>/<yyyymmdd-hhmmss>/` (default `~/dagon-measure/`):
 `steps.json` (each command, the ELF and the symbol addresses, the words
 read) and `result.json` (the value, its limit, PASS / FAIL, whether the

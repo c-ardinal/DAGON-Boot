@@ -58,7 +58,7 @@ MEASUREMENTS = {
         "mcus": ["stm32f401re"],
     },
 }
-# The margin the listen window may add beyond itself (C-514 U4/U5).
+# The margin the listen window may add beyond itself.
 LISTEN_MARGIN_MS = 10
 
 
@@ -284,28 +284,46 @@ def listen_verdict(us, window_ms):
 # ---- runs --------------------------------------------------------------
 
 
-def flash(a, log):
-    """dagon flash of the node; its plan and question go to the terminal."""
+def flash_command(a, writer):
+    """dagon flash of the node through its own writer: `--probe` goes to a
+    probe-rs writer only (a UF2 writer takes `--drive`; the probe then only
+    reads)."""
     cmd = [a.dagon, "flash", a.node, "--key", a.key]
-    if getattr(a, "probe", None):
+    if writer.get("kind") == "probe-rs" and a.probe:
         cmd += ["--probe", a.probe]
-    if getattr(a, "drive", None):
+    if writer.get("kind") != "probe-rs" and getattr(a, "drive", None):
         cmd += ["--drive", a.drive]
-    log({"command": cmd})
-    rc = subprocess.run(cmd, cwd=a.project).returncode
+    return cmd
+
+
+def run_flash(cmd, project):
+    """Runs dagon flash; its plan and question go to the terminal."""
+    rc = subprocess.run(cmd, cwd=project).returncode
     if rc != 0:
         raise SystemExit(f"dagon flash exited {rc}")
 
 
-def measure(a, name):
+def read_chip(a, writer):
+    """The chip probe-rs reads: `--chip`, else the probe-rs writer's; None
+    when the value is read as a blink code."""
+    if getattr(a, "chip", None):
+        return a.chip
+    if writer.get("kind") == "probe-rs":
+        return writer["chip"]
+    if a.probe:
+        raise SystemExit("--probe on a node whose writer is not probe-rs needs --chip (probe-rs chip name, e.g. RP2040)")
+    return None
+
+
+def measure(a, name, flash=run_flash, read=probe_read, wait=time.sleep, ask=input):
     m = MEASUREMENTS[name]
     d = node_definition(a.project, a.node)
     mcu = d["id"]
     if mcu not in m.get("mcus", [mcu]):
         raise SystemExit(f"{name}: {mcu} has no measuring build (only {', '.join(m['mcus'])})")
     writer = d.get("writer", {})
-    use_probe = writer.get("kind") == "probe-rs" or a.probe
-    if name == "listen-time" and not use_probe:
+    chip = read_chip(a, writer)
+    if name == "listen-time" and chip is None:
         raise SystemExit("listen-time reads its value with a debug probe")
     out = Path(a.out or Path.home() / "dagon-measure") / dt.datetime.now().strftime("%Y%m%d-%H%M%S")
     out.mkdir(parents=True)
@@ -316,13 +334,18 @@ def measure(a, name):
         steps.append(rec)
         print(json.dumps(rec, ensure_ascii=False))
 
+    def write():
+        cmd = flash_command(a, writer)
+        log({"command": cmd})
+        flash(cmd, a.project)
+
     part = Path(a.project) / "out" / "flash" / "target" / m["part"]
     result = {"measurement": name, "node": a.node, "mcu": mcu}
     wrote = False
     try:
         with Switched(package_file(a.project, a.node, m, mcu), feature_of(m, mcu)):
             wrote = True
-            flash(a, log)
+            write()
         elf = newest_elf(part)
         syms = elf_symbols(elf.read_bytes(), m["symbols"])
         missing = [s for s in m["symbols"] if s not in syms]
@@ -330,25 +353,28 @@ def measure(a, name):
             raise SystemExit(f"{elf}: no symbol {', '.join(missing)}: not the measuring build")
         log({"elf": str(elf), "symbols": {k: hex(v) for k, v in syms.items()}})
         print(f"waiting {m['wait_s']} s for the node to finish ...")
-        time.sleep(m["wait_s"])
+        wait(m["wait_s"])
         if name == "stage0-verify":
             source, hz = stage0_clock(part)
             result["clock_source"] = source
-            if use_probe:
-                chip = writer.get("chip")
-                (cycles,), cmd = probe_read(chip, a.probe, syms["DAGON_VERIFY_CYCLES"])
-                (count,), _ = probe_read(chip, a.probe, syms["DAGON_VERIFY_COUNT"])
+            if chip:
+                (cycles,), cmd = read(chip, a.probe, syms["DAGON_VERIFY_CYCLES"])
+                (count,), _ = read(chip, a.probe, syms["DAGON_VERIFY_COUNT"])
                 log({"command": cmd, "cycles": cycles, "count": count})
                 result.update(stage0_verdict(cycles, count, hz))
             else:
                 print("Count the fast blinks between two dark pauses on the board's diagnostic output.")
-                blinks = int(input("blinks: ").strip())
+                blinks = int(ask("blinks: ").strip())
                 result.update(blink_verdict(blinks, hz))
         else:
             window = d.get("boot_receive", {}).get("listen_window_ms", 50)
-            (us,), cmd = probe_read(writer["chip"], a.probe, syms["DAGON_LISTEN_US"])
+            (us,), cmd = read(chip, a.probe, syms["DAGON_LISTEN_US"])
             log({"command": cmd, "listen_us": us})
             result.update(listen_verdict(us, window))
+    except (Exception, KeyboardInterrupt, SystemExit) as e:
+        # Recorded, and the exit code waits for the write back below.
+        result["verdict"] = "FAIL"
+        result["error"] = str(e) or type(e).__name__
     finally:
         # Only a node the measuring build was written to (or may have been,
         # when the write stopped) gets its normal build back.
@@ -356,10 +382,10 @@ def measure(a, name):
         if wrote:
             print("writing the node's normal build back ...")
             try:
-                flash(a, log)
+                write()
                 result["restored"] = True
-            except SystemExit as e:
-                result["restore_error"] = str(e)
+            except (Exception, SystemExit) as e:
+                result["restore_error"] = str(e) or type(e).__name__
         (out / "steps.json").write_text(json.dumps(steps, indent=2, ensure_ascii=False), encoding="utf-8")
         (out / "result.json").write_text(json.dumps(result, indent=2, ensure_ascii=False), encoding="utf-8")
         print(json.dumps(result, indent=2, ensure_ascii=False))
@@ -378,7 +404,8 @@ def main(argv=None):
         s.add_argument("--dagon", required=True)
         s.add_argument("--node", required=True)
         s.add_argument("--key", required=True, help="secret key file (path only, passed to dagon)")
-        s.add_argument("--probe", help="probe-rs probe selector")
+        s.add_argument("--probe", help="probe-rs probe selector (reads the value; writes through it only on a probe-rs writer)")
+        s.add_argument("--chip", help="probe-rs chip to read (default: the probe-rs writer's)")
         if name == "stage0-verify":
             s.add_argument("--drive", help="UF2 drive (a board without a probe)")
         s.add_argument("--out", help="record folder (default ~/dagon-measure)")

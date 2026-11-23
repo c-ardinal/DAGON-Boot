@@ -168,5 +168,95 @@ class StillTheFirmwares(unittest.TestCase):
             self.assertTrue(re.search(r"(?m)^\[features\]$", tpl))
 
 
+class Runs(unittest.TestCase):
+    """measure() with dagon flash, the probe, the wait and the question faked."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def project(self, writer, mcu="stm32f401re"):
+        src = self.root / "src"
+        (src / "targets/mcu" / mcu / "stage0").mkdir(parents=True)
+        self.cargo = src / "targets/mcu" / mcu / "stage0/Cargo.toml"
+        self.cargo.write_text('[package]\nname = "s"\n\n[features]\nverify-time = []\n')
+        proj = self.root / "proj"
+        (proj / "boot/n").mkdir(parents=True)
+        (proj / "dagon.toml").write_text('[dagon]\npath = "../src"\n')
+        w = ", ".join(f'{k} = "{v}"' for k, v in writer.items())
+        (proj / "boot/n/mcu.toml").write_text(f'id = "{mcu}"\nwriter = {{ {w} }}\n')
+        rel = proj / "out/flash/target/stage0/thumb/release"
+        (rel / "build/s-1/out").mkdir(parents=True)
+        (rel / "build/s-1/out/clock.rs").write_text('pub const SOURCE: &str = "crystal";\npub const OUT_HZ: u32 = 125000000;\n')
+        (rel / "stage0").write_bytes(elf32({"DAGON_VERIFY_CYCLES": 0x20000008, "DAGON_VERIFY_COUNT": 0x20000004}))
+        return proj
+
+    def args(self, proj, **kw):
+        base = dict(project=str(proj), dagon="dagon", node="n", key="k", probe=None, chip=None,
+                    drive=None, out=str(self.root / "rec"))
+        base.update(kw)
+        return measure.argparse.Namespace(**base)
+
+    def run_it(self, a, flash_fails=(), words=None):
+        self.flashes = []
+
+        def flash(cmd, project):
+            self.flashes.append((cmd, self.cargo.read_text()))
+            if len(self.flashes) in flash_fails:
+                raise SystemExit("dagon flash exited 1")
+
+        self.reads = []
+
+        def read(chip, probe, address, count=1):
+            self.reads.append((chip, probe, address))
+            return [(words or {}).get(address, 0)], ["probe-rs"]
+
+        return measure.measure(a, "stage0-verify", flash=flash, read=read, wait=lambda s: None,
+                               ask=lambda q: "4")
+
+    def test_probe_rs_node_measured_and_written_back(self):
+        proj = self.project({"kind": "probe-rs", "chip": "STM32F401RETx"})
+        original = self.cargo.read_text()
+        rc = self.run_it(self.args(proj, probe="0483:374b"), words={0x20000008: 48_750_000, 0x20000004: 1})
+        self.assertEqual(rc, 0)
+        (first, during), (second, after) = self.flashes
+        self.assertIn('default = ["verify-time"]', during)
+        self.assertEqual(after, original)
+        self.assertEqual(first[-2:], ["--probe", "0483:374b"])
+        self.assertEqual(self.reads[0][:2], ("STM32F401RETx", "0483:374b"))
+        self.assertEqual(self.cargo.read_text(), original)
+
+    def test_failed_measurement_and_failed_write_back_exit_2(self):
+        proj = self.project({"kind": "probe-rs", "chip": "STM32F401RETx"})
+        self.assertEqual(self.run_it(self.args(proj), flash_fails=(1, 2)), 2)
+
+    def test_failed_measurement_with_the_normal_build_back_exits_1(self):
+        proj = self.project({"kind": "probe-rs", "chip": "STM32F401RETx"})
+        self.assertEqual(self.run_it(self.args(proj), flash_fails=(1,)), 1)
+
+    def test_uf2_node_read_by_a_separate_probe(self):
+        proj = self.project({"kind": "uf2-drive"}, mcu="rp2040")
+        a = self.args(proj, probe="2e8a:000c", chip="RP2040", drive="E:")
+        self.assertEqual(self.run_it(a, words={0x20000008: 48_750_000, 0x20000004: 1}), 0)
+        for cmd, _ in self.flashes:
+            self.assertNotIn("--probe", cmd)
+            self.assertEqual(cmd[-2:], ["--drive", "E:"])
+        self.assertEqual(self.reads[0][:2], ("RP2040", "2e8a:000c"))
+
+    def test_uf2_node_without_a_probe_takes_the_blink_code(self):
+        proj = self.project({"kind": "uf2-drive"}, mcu="rp2040")
+        self.assertEqual(self.run_it(self.args(proj, drive="E:")), 0)
+        self.assertEqual(self.reads, [])
+
+    def test_a_probe_without_its_chip_is_refused_before_any_write(self):
+        proj = self.project({"kind": "uf2-drive"}, mcu="rp2040")
+        with self.assertRaises(SystemExit):
+            self.run_it(self.args(proj, probe="2e8a:000c"))
+        self.assertEqual(self.flashes, [])
+
+
 if __name__ == "__main__":
     unittest.main()

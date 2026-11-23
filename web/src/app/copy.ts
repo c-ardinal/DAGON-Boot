@@ -2,6 +2,7 @@
 // "label value" / "symbol + word" form and end in a noun; explanations end in
 // 〜します, requests to the user in 〜してください; sentences appear only where
 // the user acts, one sentence each.
+// One file on purpose: the wording rules above are checked across all of it at once, so it is not split by screen.
 import type { Action, HubState, Step } from './machine.ts';
 
 export const PRODUCT = 'DAGON Console';

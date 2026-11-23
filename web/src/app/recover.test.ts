@@ -8,7 +8,8 @@ import { PHASE, trialMs, versionText } from '../wasm/dagon.ts';
 import { bandOf } from './band.ts';
 import { ANNOUNCE, BAND, BAND_FOR, BUTTON_FOR, NODE, WRITE } from './copy.ts';
 import { SAMPLE_CONFIG } from './sample.ts';
-import { Operate, failureStage, hubBack, slotsSettled, writingTo } from './operate.svelte.ts';
+import { Operate } from './operate.svelte.ts';
+import { failureStage, hubBack, slotsSettled, writingTo } from './writeProgress.ts';
 
 const repo = (rel: string) => new Uint8Array(readFileSync(new URL(`../../../${rel}`, import.meta.url)));
 /** The project's files dagon serve hands out (release/latest, the boot core): the sample release 1.1.0 and the F401 boot core, both under the test key. */

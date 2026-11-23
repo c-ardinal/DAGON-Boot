@@ -3,7 +3,7 @@
 import { supportedBoards } from '../../wasm/dagon.ts';
 import { ANNOUNCE, LINK_WHY } from '../copy.ts';
 import { SAMPLE_CONFIG, SAMPLE_YAML, type Config } from '../sample.ts';
-import { connect, docWithDefaults, emptyDoc, fromYaml, linkIndexOf, linkKey, place, placeMcu, removeLink, sides, withDefaults, removeNode, toConfig, toYaml, type Doc, type Topo } from './model.ts';
+import { connect, docWithDefaults, emptyDoc, fromYaml, isCoordinator, linkIndexOf, linkKey, place, placeMcu, removeLink, sides, withDefaults, removeNode, toConfig, toYaml, type Doc, type Topo } from './model.ts';
 import type { SaveResult } from './cli.svelte.ts';
 import { keepComments } from './comments.ts';
 import { problems, type Problem } from './problems.ts';
@@ -151,7 +151,7 @@ export class Define {
     const r = place(this.doc, board);
     if (!r.id || !this.apply(r.doc)) return;
     this.selected = `node:${r.id}`;
-    this.status = ANNOUNCE.placed(product, r.doc.topo.nodes.find((n) => n.id === r.id)!.role === 'coordinator');
+    this.status = ANNOUNCE.placed(product, isCoordinator(r.doc.topo.nodes.find((n) => n.id === r.id)));
   }
 
   /**
@@ -164,7 +164,7 @@ export class Define {
     const next = parent ? connect(r.doc, r.id, parent) : r.doc;
     if (!this.apply(next)) return;
     this.selected = `node:${r.id}`;
-    this.status = ANNOUNCE.placed(name, next.topo.nodes.find((n) => n.id === r.id)!.role === 'coordinator');
+    this.status = ANNOUNCE.placed(name, isCoordinator(next.topo.nodes.find((n) => n.id === r.id)));
   }
 
   /** A port drag: node `id` under `parent`, with the link "PC側のノード" would make. */
@@ -184,7 +184,7 @@ export class Define {
     const up = above(id);
     if (up !== undefined) {
       const p = this.doc.topo.nodes.find((n) => n.id === up);
-      return p?.role === 'coordinator' ? LINK_WHY.taken : LINK_WHY.under(this.doc.names[up] ?? up);
+      return isCoordinator(p) ? LINK_WHY.taken : LINK_WHY.under(this.doc.names[up] ?? up);
     }
     // Under its own descendant: the link would close a loop.
     for (let at: string | undefined = parent, i = 0; at !== undefined && i < 64; at = above(at), i++) {
@@ -198,7 +198,7 @@ export class Define {
     const r = placeMcu(this.doc, mcu);
     if (!r.id || !this.apply(r.doc)) return;
     this.selected = `node:${r.id}`;
-    this.status = ANNOUNCE.placed(name, r.doc.topo.nodes.find((n) => n.id === r.id)!.role === 'coordinator');
+    this.status = ANNOUNCE.placed(name, isCoordinator(r.doc.topo.nodes.find((n) => n.id === r.id)));
   }
 
   /** What the user asked to delete (`node:id` / `link:to`): a modal confirms before anything goes. */

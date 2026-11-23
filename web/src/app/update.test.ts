@@ -8,7 +8,8 @@ import { ANNOUNCE, BAND, BAND_CHIP, BAND_FOR, BUTTON_FOR, NODE } from './copy.ts
 import { Define } from './define/define.svelte.ts';
 import { topoDiff } from './define/diff.ts';
 import { fromYaml, type Topo } from './define/model.ts';
-import { Operate, waterOf } from './operate.svelte.ts';
+import { Operate } from './operate.svelte.ts';
+import { waterOf } from './writeProgress.ts';
 import { SAMPLE_CONFIG, SAMPLE_YAML } from './sample.ts';
 
 const repo = (rel: string) => new URL(`../../../${rel}`, import.meta.url);

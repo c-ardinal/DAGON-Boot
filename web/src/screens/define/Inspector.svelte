@@ -3,6 +3,7 @@
   import { INSPECT } from '../../app/copy.ts';
   import type { Define } from '../../app/define/define.svelte.ts';
   import {
+    isCoordinator,
     connect,
     freeAddrs,
     definedPins,
@@ -47,7 +48,7 @@
   const link = $derived(linkIndex >= 0 ? linkView(t, (t.links ?? [])[linkIndex]) : undefined);
   const busIndex = $derived(d.selected?.startsWith('bus:') ? Number(d.selected.slice(4)) : -1);
   const bus = $derived(busIndex >= 0 ? t.buses?.[busIndex] : undefined);
-  const hub = $derived(t.nodes.find((n) => n.role === 'coordinator'));
+  const hub = $derived(t.nodes.find(isCoordinator));
   /** The bus speeds every node on the selected bus names in its MCU definition: the only ones it may be set to. */
   const hzs = $derived(bus ? i2cHzs(busNodes(t, bus.id)) : []);
   /** The coordinator's own pins: what a bus or a link from it may be set to (the check refuses any other). */
@@ -165,7 +166,7 @@
         </select></label
       >
       <!-- A coordinator linked from another node has that node above it (PC側のノード); one nobody links to has its own uplink. -->
-      {#if node.role === 'coordinator' && nodeLink < 0}
+      {#if isCoordinator(node) && nodeLink < 0}
         {@const up = node.uplink ?? { kind: LinkKind.UsbCdc, host: 'pc-cli' as UplinkHost }}
         <label
           >{INSPECT.uplink}<select data-field="uplink" value={up.kind} onchange={(e) => d.apply(setUplink(d.doc, node.id, { kind: Number(e.currentTarget.value), host: up.host ?? 'pc-cli' }))}>

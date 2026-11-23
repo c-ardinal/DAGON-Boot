@@ -1,5 +1,5 @@
 import { NODE, STATE, WRITE } from './copy.ts';
-import type { Progress } from './operate.svelte.ts';
+import type { Progress } from './writeProgress.ts';
 
 /** The six node states, each with its own mark (shape + colour) at the card's top-right. */
 export type NodeState = keyof typeof STATE;

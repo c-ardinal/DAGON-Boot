@@ -168,9 +168,9 @@ describe('the five places use the one system', () => {
     ['screens/Toast.svelte', 'transition:rise'],
     ['screens/Start.svelte', 'transition:fade'],
     ['App.svelte', 'transition:rise'],
-    ['graph/Graph.svelte', 'transition:rise'],
+    ['graph/NodeCard.svelte', 'transition:rise'],
     ['graph/Graph.svelte', 'transition:draw'],
-    ['graph/Graph.svelte', 'out:waterEnd'],
+    ['graph/NodeCard.svelte', 'out:waterEnd'],
   ])('%s has %s', (rel, directive) => {
     expect(read(rel)).toContain(directive);
   });

@@ -1,7 +1,7 @@
 import { render } from 'svelte/server';
 import { describe, expect, test } from 'vitest';
 import { DETAIL, SLOT, WRITE } from '../app/copy.ts';
-import type { Live } from '../app/operate.svelte.ts';
+import type { Live } from '../app/writeProgress.ts';
 import { SAMPLE_CONFIG } from '../app/sample.ts';
 import type { HelloResp } from '../serial/hello.ts';
 import type { VersionResp } from '../wasm/dagon.ts';

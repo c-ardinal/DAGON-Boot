@@ -3,12 +3,16 @@ import { describe, expect, test } from 'vitest';
 
 // Every place in the source that can open linking, talking, keys or the CLI sheet.
 // e2e/demo.spec.ts presses each of them in a demo; a new one fails here until it is closed there and listed.
-const SOURCES = import.meta.glob('./**/*.svelte', { query: '?raw', import: 'default', eager: true }) as Record<string, string>;
-const OPENER = /\bopenCli\b|\bopenLink\(|<LinkDialog|<CliPanel \{cli\} \{agent\}|cliPanel = '|dagonOpen\+\+|data-control="(?:ask|link|apply)"|control: '(?:ask|link|apply)'|\{ id: 'talk'|oncli=|AGENT\.menu\w+|<Dagon /;
+const SOURCES = import.meta.glob(['./**/*.svelte', './app/console/*.ts'], { query: '?raw', import: 'default', eager: true }) as Record<string, string>;
+const OPENER = /\bopenCli\b|\bopenLink\(|<LinkDialog|<CliPanel \{cli\} \{agent\}|cliPanel = '|openRequest\+\+|data-control="(?:ask|link|apply)"|control: '(?:ask|link|apply)'|\{ id: 'talk'|oncli=|AGENT\.menu\w+|<Dagon /;
 
 const LISTED: Record<string, number> = {
-  './App.svelte': 17,
+  './App.svelte': 11,
+  './app/console/agentLink.svelte.ts': 2,
+  './app/console/menu.ts': 4,
+  './screens/BuildFailureModal.svelte': 1,
   './screens/Dagon.svelte': 3,
+  './screens/DrawerBody.svelte': 1,
   './screens/StopNotice.svelte': 1,
 };
 
@@ -26,7 +30,7 @@ describe('the demo closes every opener', () => {
     const app = SOURCES['./App.svelte'];
     expect(app).toMatch(/const agentLinked = \$derived\(!simulated && agent\.linked\)/);
     expect(app.match(/\bagent\.linked\b/g)).toHaveLength(1);
-    expect(app).toMatch(/async function openLink[^\n]*\n\s*if \(simulated\) return;/);
+    expect(SOURCES['./app/console/agentLink.svelte.ts']).toMatch(/async openLink[^\n]*\n[^\n]*\n\s*if \(this\.deps\.simulated \|\|/);
     expect(app).toMatch(/function openCli\(\) \{\n\s*if \(simulated\) return;/);
     expect(app).toMatch(/oncli=\{simulated \? undefined : openCli\}/);
   });

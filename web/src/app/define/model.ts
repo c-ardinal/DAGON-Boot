@@ -33,6 +33,9 @@ export interface TNode {
   uplink?: { kind: Kind; host?: UplinkHost };
 }
 
+/** A coordinator in the 構成: the one place a 構成 node's role is told apart (the page's view of it: isHub, sample.ts). */
+export const isCoordinator = (n: Pick<TNode, 'role'> | undefined): boolean => n?.role === 'coordinator';
+
 export interface TBus {
   id: string;
   kind: typeof BUS_KIND;
@@ -72,7 +75,7 @@ export interface TLink {
 /** Links from a coordinator (0) outwards: how many links each node is from one. */
 function hops(t: Topo): Map<string, number> {
   const out = new Map<string, number>();
-  let at = t.nodes.filter((n) => n.role === 'coordinator').map((n) => n.id);
+  let at = t.nodes.filter(isCoordinator).map((n) => n.id);
   at.forEach((id) => out.set(id, 0));
   for (let d = 1; at.length; d++) {
     const next: string[] = [];
@@ -321,7 +324,7 @@ export function fromYaml(yaml: string, names: Record<string, string> = {}): Doc 
   return { topo: withDefaults(topoFromNames(t)), names };
 }
 
-const hub = (t: Topo) => t.nodes.find((n) => n.role === 'coordinator');
+const hub = (t: Topo) => t.nodes.find(isCoordinator);
 
 /** The other nodes by the current order, then the coordinator (V-14 wants the coordinator last). */
 function reorder(t: Topo): Topo {
@@ -417,14 +420,14 @@ export function connect(doc: Doc, id: string, parent?: string): Doc {
   const stand = n.board ?? defaultBoard(n.mcu);
   const tpl = stand ? template(stand) : null;
   const d = tpl?.link ?? { kind: LinkKind.Uart, iface: 'pio-uart', addr: null, baud: null, control: 'cooperative' as const, romEntry: null };
-  if (h.role !== 'coordinator' || n.role === 'coordinator') {
+  if (!isCoordinator(h) || isCoordinator(n)) {
     // Below a node the board's own way into its loader, as under the coordinator (V-11 asks for it on every UART link).
     const control: TControl = { kind: d.control, ...(d.romEntry ? { rom_entry: d.romEntry } : {}) };
     // Between coordinators: CAN where both MCUs define a port for it, else the first kind both define one for.
     const both = (k: LinkKind) => [h, n].every((x) => default_port(x.mcu, x.board, k, undefined) != null);
     const kind = [LinkKind.Can, ...linkKindCodes().filter((k) => k !== LinkKind.I2c && k !== LinkKind.Uart)].find(both) ?? LinkKind.Can;
     const link: TLink =
-      n.role === 'coordinator'
+      isCoordinator(n)
         ? { kind, ends: [endAt(h, kind), endAt(n, kind)] }
         : { kind: LinkKind.Uart, iface: 'hw-uart0', ends: [{ ...endAt(h, LinkKind.Uart, 'hw-uart0'), ...firstUart0(t, h) }, endAt(n, LinkKind.Uart, 'hw-uart0')], ...firstBaud(h, n), control };
     return { ...doc, topo: { ...t, links: [...(t.links ?? []), link] } };
@@ -534,7 +537,7 @@ export function setLinkKind(doc: Doc, index: number, kind: LinkKind): Doc {
   const tpl = saved ? template(saved) : null;
   const t = without.topo;
   const h = t.nodes.find((x) => x.id === up.node) ?? hub(t)!;
-  if (tpl?.link?.kind === kind && h.role === 'coordinator') return connect(without, down.node, h.id);
+  if (tpl?.link?.kind === kind && isCoordinator(h)) return connect(without, down.node, h.id);
   const lower = n ? endAt(n, kind, kind === LinkKind.Uart ? 'pio-uart' : undefined) : { node: down.node, port: '' };
   const link: TLink =
     kind === LinkKind.Uart
@@ -636,7 +639,7 @@ export function toConfig(doc: Doc, boards: Board[]): Config {
   const depth = (id: string, seen = new Set<string>()): number => {
     const n = t.nodes.find((x) => x.id === id);
     const p = parent(id);
-    if (!n || !p || seen.has(id)) return n?.role === 'coordinator' ? 0 : 1;
+    if (!n || !p || seen.has(id)) return isCoordinator(n) ? 0 : 1;
     seen.add(id);
     return depth(p, seen) + 1;
   };
@@ -657,7 +660,7 @@ export function toConfig(doc: Doc, boards: Board[]): Config {
       id: n.id,
       no: i + 1,
       name: doc.names[n.id] ?? n.id,
-      role: n.role === 'coordinator' ? 'hub' : 'node',
+      role: isCoordinator(n) ? 'hub' : 'node',
       product: b?.product ?? INSPECT.boardOwn,
       mcu: mcuName,
       mcuId: n.mcu,
@@ -665,7 +668,7 @@ export function toConfig(doc: Doc, boards: Board[]): Config {
       reset: gpio(s?.up.nrst),
       boot: gpio(s?.up.boot),
       depth: depth(n.id),
-      ...(n.role === 'coordinator' && n.uplink && !l ? { uplink: { kind: n.uplink.kind, host: n.uplink.host ?? 'pc-cli' } } : {}),
+      ...(isCoordinator(n) && n.uplink && !l ? { uplink: { kind: n.uplink.kind, host: n.uplink.host ?? 'pc-cli' } } : {}),
       ...(skipped[n.id] ? { skip: skipped[n.id] } : {}),
     };
   });

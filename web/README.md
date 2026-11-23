@@ -71,12 +71,15 @@ A simulated node connected to the PC plugs in as one more `Transport` in `src/se
 | `src/serial/hostLink.ts` | The byte link `dagon-host` runs on, over a `Transport`; the device under it can be replaced (the node connected to the PC chosen again after its reboot). |
 | `src/wasm/dagon.ts` | The only entry to `crates/dagon-wasm`: frame encoding and stream cutting, HELLO request / response, version text, board table, topology check and compile, release verification. `src/wasm/pkg/` is build output and not committed. |
 | `src/app/machine.ts` | Operating-mode state machine: states, main and side actions, transitions (`machine.test.ts` checks one main action at most and no dead ends). |
-| `src/app/operate.svelte.ts` | The operating-mode session: connect, find, send, monitoring every `watch_interval_ms()`, release check and update (`apply`, reconnecting the node connected to the PC, confirm rule), one node's write (`writeNode`: re-transfer, factory, ROM path after the question) and going back (`rollback`), all through `dagon-host` in `dagon-wasm`. |
+| `src/app/operateLink.svelte.ts` | The operating-mode session's link: connect, find, send, monitoring every `watch_interval_ms()` and the state machine's moves, all through `dagon-host` in `dagon-wasm`. |
+| `src/app/operate.svelte.ts` | `Operate`, built on that link: release check and update (`apply`, reconnecting the node connected to the PC, confirm rule), one node's write (`writeNode`: re-transfer, factory, ROM path after the question) and going back (`rollback`). |
+| `src/app/writeProgress.ts` | What the page knows about each node in an update: its answers, its write's stage and one %, the chosen release's verdict. |
+| `src/app/console/` | The page's own parts `App.svelte` wires: the open project (`workspace`), build, write, linking DAGON's agent, the lock table, notices, each mode's view, the menu and the keys. |
 | `src/app/band.ts` | Bottom band per state: cause chip, sentence, named buttons. |
 | `src/app/sample.ts` | The sample 構成 (`topology/sample.yaml` plus names and wiring). |
 | `src/app/connect.ts` | Device chooser and error mapping. |
 | `src/app/copy.ts` | All screen and announcement text. |
-| `src/graph/` | The graph: own SVG (wire bundles, ties) + HTML (nodes, chips, ports) under a view only pan, zoom and fit change; links are damped cables (`cable.ts`); roving focus with arrow keys. |
+| `src/graph/` | The graph: own SVG (wire bundles, ties: `bundles.ts`) + HTML (node cards: `NodeCard.svelte`, chips, ports) under a view only pan, zoom and fit (`fit.ts`) change; links are damped cables (`cable.ts`); roving focus with arrow keys. |
 | `src/app/start.svelte.ts` | The start screen: making and opening projects through serve (GET /v1/project, GET /v1/fs, POST /v1/project/open, /new). |
 | `src/app/define/` | 準備: the document and its history, the check's problems, the 構成 differences of a release (otherTopology), and the serve link (`cli.svelte.ts`: passphrase, API, events, saving the YAML). |
 | `src/screens/` | Header, menu popover and its restart dialog, start screen, bottom band, the columns over the canvas (focal number, parts, detail, zoom, notices), the reconnect dialog of the node connected to the PC; `define/` holds 準備's columns. |

@@ -98,7 +98,7 @@ fn boot(f: &mut Cut, cell: &mut [u32; 2]) -> u8 {
         }
         let at = bootcore::Stage0 {
             log: &LOG,
-            slots: &CORE_SLOTS,
+            slots: &CORE_PLACES,
             max: TRIAL_ATTEMPTS,
             mcu_id: MCU_ID,
         };
@@ -257,7 +257,7 @@ fn every_slot_the_store_takes_has_one_planner_layout() {
                 (cap, [l]) => {
                     assert_eq!(l.capacity, cap, "{t}/{slot}");
                     let start = match t {
-                        target::APP => SLOTS.slots[usize::from(slot)].0,
+                        target::APP => SLOTS.slots[usize::from(slot)].header,
                         _ => CORE_SLOTS[usize::from(slot)].0,
                     };
                     let inline = dagon_port::timeout::HeaderPlace::Inline;
@@ -306,12 +306,13 @@ fn the_store_plans_over_its_boards_regions() {
 // One boot core slot, written in place by the app.
 
 static ONE_CORE: [(u32, u32); 1] = [CORE_SLOTS[0]];
+static ONE_PLACE: [dagon_core::boot::Place; 1] = [CORE_PLACES[0]];
 const TAG: [u8; 16] = target_tag("seg-f401-7seg");
 
 /// What a stage0 built for a node with one boot core slot and this tag
 /// knows (the package's, with its slot list and tag).
 const ONE: bootcore::Stage0<'static> = bootcore::Stage0 {
-    slots: &ONE_CORE,
+    slots: &ONE_PLACE,
     ..STAGE0_AT
 };
 const APPS: bootcore::Apps<'static> = bootcore::Apps {
@@ -376,7 +377,7 @@ fn one_core_boot(f: &mut Cut, cell: &mut [u32; 2], lose: Option<usize>) -> Optio
             &mut bootcore::NoDiag,
         ) {
             Ok(Boot::App { slot, body }) => {
-                assert_eq!((slot, body), (0, SLOTS.slots[0].0 + HEADER_LEN));
+                assert_eq!((slot, body), (0, SLOTS.slots[0].body));
                 assert_eq!(*cell, before, "the trial cell is left as it is");
                 return Some(Ran::App);
             }
@@ -464,7 +465,7 @@ fn confirmed(f: &mut Cut) -> (Option<SlotRef>, Option<SlotRef>) {
 /// one confirmed through its trial, or stage0 started the confirmed app
 /// and that app writes a core that then runs; the app's record stays.
 fn ends_well(mut f: Cut, ran: Ran, minor: u8, what: &str) {
-    let app = signed(image_kind::APP, 0, SLOTS.slots[0].0, 0, 2000);
+    let app = signed(image_kind::APP, 0, SLOTS.slots[0].header, 0, 2000);
     assert_eq!(
         confirmed(&mut f).1,
         Some(head(&app, 0)),

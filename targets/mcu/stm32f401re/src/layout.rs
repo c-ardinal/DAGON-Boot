@@ -14,7 +14,7 @@
 //! | 5, 6 | 128 KiB each | APP slots A and B |
 //! | 7 | 128 KiB | boot core slot B |
 
-use dagon_core::boot::SlotLayout;
+use dagon_core::boot::{places, Place, SlotLayout};
 use dagon_core::bootcore::{Apps, Stage0};
 use dagon_core::log::LogLayout;
 use dagon_format::header::HEADER_SIZE;
@@ -42,11 +42,14 @@ pub const LOG: LogLayout = {
 /// start, body (vector table) at +512.
 pub const CORE_SLOTS: [(u32, u32); crate::slots::BOOTCORE.len()] = crate::slots::BOOTCORE;
 
-/// The APP slots `(start, length)`, A first, each with its own length,
-/// header inline at the slot start.
-pub const SLOTS: SlotLayout = SlotLayout {
-    slots: &crate::slots::APP,
-};
+/// The boot core slots' places, A first.
+pub const CORE_PLACES: [Place; crate::slots::BOOTCORE.len()] =
+    places(crate::slots::BOOTCORE_PLACES);
+
+/// The APP slots' places, A first, each with its own length, header
+/// inline at the slot start.
+pub const APP_PLACES: [Place; crate::slots::APP.len()] = places(crate::slots::APP_PLACES);
+pub const SLOTS: SlotLayout = SlotLayout { slots: &APP_PLACES };
 
 /// The MCU id in image headers (`wire_id`).
 pub const MCU_ID: u16 = crate::MCU_WIRE_ID;
@@ -55,7 +58,7 @@ pub const MCU_ID: u16 = crate::MCU_WIRE_ID;
 /// log, the boot core slots and the trial's starts.
 pub const STAGE0_AT: Stage0<'static> = Stage0 {
     log: &LOG,
-    slots: &CORE_SLOTS,
+    slots: &CORE_PLACES,
     max: crate::TRIAL_ATTEMPTS,
     mcu_id: MCU_ID,
 };

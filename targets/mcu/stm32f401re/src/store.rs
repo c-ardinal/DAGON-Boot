@@ -95,7 +95,13 @@ impl<F: Flash> KindSStore<F> {
     fn slot(&self, t: u8, s: u8) -> Result<(u32, u32), StoreError> {
         let i = usize::from(s);
         match t {
-            target::APP => self.slots.slots.get(i).copied().ok_or(StoreError::Range),
+            // Inline headers: the slot is the header and its body.
+            target::APP => self
+                .slots
+                .slots
+                .get(i)
+                .map(|p| (p.header, p.room + HEADER_SIZE as u32))
+                .ok_or(StoreError::Range),
             target::BOOTCORE => self
                 .cores
                 .ok_or(StoreError::Unsupported)?

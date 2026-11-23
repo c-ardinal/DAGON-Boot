@@ -208,7 +208,7 @@ fn app(slot: u8) -> Vec<u8> {
     signed(
         image_kind::APP,
         slot,
-        SLOTS.slots[usize::from(slot)].0,
+        SLOTS.slots[usize::from(slot)].header,
         4,
         2000,
     )
@@ -452,7 +452,7 @@ fn a_write_through_update_mode_is_tried_at_the_next_start() {
             decide(&mut f, &mut log, &SLOTS, &cfg, &verifier()),
             Decision::Boot {
                 slot,
-                entry: SLOTS.slots[usize::from(slot)].0 + HEADER_LEN,
+                entry: SLOTS.slots[usize::from(slot)].body,
                 trial: true
             },
             "slot {slot}"

@@ -11,7 +11,7 @@ description: "利用者のファームウェアにDAGONのエージェントと�
    - 対応済のマイコン: マイコンの定義（`targets/mcu/<mcu>`。フラッシュの配置、リンカの配置指定、ブート用のイメージ、ウォッチドッグ、リンク）を使用します。ボードはボードの定義（`targets/boards/<board id>`）を使用します。または独自のボード用に`BoardCore`（`targets/mcu/common`。ボードID、フラッシュ容量、起動処理、拡張）とマイコンの定義の`BoardDef`（周辺機能の分担）を実装します。マイコンの定義のREADMEに、約20行の完全なアプリがあります。
    - 他のマイコン: 同一の形式でフラッシュを配置します。配置対象はブートローダ、状態ログ2面、イメージの種類ごとのスロット（AとB、または別の種類のイメージが書込する種類ではAだけ。[マイコンとボードの定義](/reference/definitions/)の`[[slot]]`と`[writers]`）です。各スロットの先頭に512バイトの署名付きイメージヘッダを配置し、本体はスロット先頭 + 0x200に配置します。
 
-3. ボード用に`dagon-port`のtrait（`Flash`、`Link`、`Reset`、`Watchdog`、`BootSelectS`か`BootSelectV`）と`dagon_agent::SlotStore`を実装します。
+3. ボード用に`dagon-port`のtrait（`Flash`、`Link`、`Reset`、`Watchdog`、`BootSelectS`か`BootSelectV`、`SlotStore`）を実装します。`SlotStore`の`Transition`には`dagon_agent::Transition`を指定します。
 4. アプリ層のチェーンを`dagon_events::compose`で構築します。`dagon_agent::Config`、署名の検証器（`dagon_format::SigVerifier`の実装。例: `dagon_ed25519::Ed25519Compact::new(PUBKEY)`）、`SlotStore`の実装を`dagon_agent::Agent::new`に指定して、エージェントを作成します。拡張が判断点に応答し、イベントを受信します（[イベント](/reference/events/)）。
 5. ループを記述します。ループはリンク（`dagon_port::Link`）から要求のフレームを受信し、`Agent::handle`の応答を送信し、要求されたリセットを実行します。以下はマイコンの定義が使用するループ（`targets/mcu/node/src/serve.rs`）と同一です。`host`はマイコンごとに異なる部分（クロック、ウォッチドッグへの報告、記録、待機）です。応答の送信に失敗した場合（`wrote`が`Err`）は、リセットせずに後続の要求を待機します。リセットの条件はリブートへの応答の送信と送信完了（`flush`）の両方の成功だけです。`Exit::Reboot`で復帰した場合は、呼出元がリセットします。
 

@@ -6,8 +6,9 @@
 //! layouts the erase plan covers, stage0's region) comes from [`LogMcu`].
 
 use core::marker::PhantomData;
+use dagon_port::{SlotStore, StoreError};
 
-use dagon_agent::{erase_plan, SlotStore, StoreError, Transition};
+use dagon_agent::{erase_plan, Transition};
 use dagon_core::boot::{Place, SlotLayout};
 use dagon_core::log::{trial_room, Log, LogError, LogLayout, LogState, SlotRef};
 use dagon_format::header::{header_digest16, ImageHeader, HEADER_SIZE};
@@ -211,6 +212,8 @@ fn flash_err(_: FlashError) -> StoreError {
 }
 
 impl<F: Flash, M: LogMcu> SlotStore for LogStore<F, M> {
+    type Transition = Transition;
+
     /// Slots with a parsing header are Written; the log upgrades the slot
     /// whose header it names (`LogState::status`), the running slot the
     /// active one.

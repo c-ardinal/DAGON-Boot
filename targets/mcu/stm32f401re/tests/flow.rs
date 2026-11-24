@@ -4,10 +4,11 @@
 //! confirmed slot.
 
 use dagon_core::boot::Place;
+use dagon_port::SlotStore;
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use dagon_agent::{Agent, Config, SlotStore, Transition};
+use dagon_agent::{Agent, Config, Transition};
 use dagon_core::boot::{decide, BootConfig, Decision, SlotLayout};
 use dagon_core::log::{Log, LogLayout, SlotRef};
 use dagon_ed25519::Ed25519Compact;

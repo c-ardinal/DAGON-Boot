@@ -16,8 +16,9 @@
 mod cut;
 
 use cut::*;
+use dagon_port::SlotStore;
 
-use dagon_agent::{SlotStore, Transition};
+use dagon_agent::Transition;
 use dagon_core::bootcore::{self, Boot, MustReset, Settled, CLEARED};
 use dagon_core::log::{Log, SlotRef};
 use dagon_ed25519::Ed25519Small;

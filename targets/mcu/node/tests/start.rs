@@ -5,10 +5,11 @@
 //! trial with `Confirm::Own`; the board package's extension sits between
 //! the publisher and the app's; the published snapshot follows an update.
 
+use dagon_port::SlotStore;
 use std::sync::{Arc, Mutex};
 
 use dagon_agent::snapshot::{AppSnapshot, Phase};
-use dagon_agent::{Agent, SlotStore};
+use dagon_agent::Agent;
 use dagon_ed25519::Ed25519Compact;
 use dagon_events::{BoardBringUp, Ctx, Event, Extension, Health, Published, TrialInfo, Watchdog};
 use dagon_format::header::*;

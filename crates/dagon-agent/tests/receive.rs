@@ -1,11 +1,12 @@
 //! The agent over the DAGON wire against an in-memory slot store: what it
 //! answers, what it writes, and the events and decisions on the way.
 
+use dagon_port::{SlotStore, StoreError};
 use std::cell::RefCell;
 use std::rc::Rc;
 
 use dagon_agent::snapshot::{AppSnapshot, Phase};
-use dagon_agent::{image, requests, session, Agent, Config, SlotStore, StoreError, Transition};
+use dagon_agent::{image, requests, session, Agent, Config, Transition};
 use dagon_ed25519::Ed25519Compact;
 use dagon_events::{
     compose, Accept, Bounds, Composed, Ctx, Delay, Event, Extension, Health, Layer, Nop, Published,
@@ -100,6 +101,8 @@ impl Mem {
 }
 
 impl SlotStore for Mem {
+    type Transition = Transition;
+
     fn status(&mut self) -> StatusResp {
         self.status
     }

@@ -223,7 +223,7 @@ pub const PORTS: &[Port] = &[
         TrustedOnly,
         "",
         &[],
-        Has(&["dagon_agent::SlotStore"]),
+        Has(&["dagon_port::SlotStore"]),
     ),
     port(
         "LogStorage",

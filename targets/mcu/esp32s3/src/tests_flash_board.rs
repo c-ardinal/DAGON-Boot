@@ -6,8 +6,9 @@
 use crate::board::BoardDef;
 use crate::store::EspStore;
 use crate::tests::{FakeOta, Feeds, Store};
-use dagon_agent::{erase_plan, SlotStore};
+use dagon_agent::erase_plan;
 use dagon_port::timeout::{EraseOp, EraseRegion};
+use dagon_port::SlotStore;
 use dagon_proto::payload::target::APP;
 
 /// What the board package's build writes from its `[flash]`.

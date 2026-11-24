@@ -17,10 +17,11 @@
 
 use crate::layout::{SLOT_FACTORY, WRITE_UNIT};
 use crate::otadata::{selected_view, Counted, ENTRY_LEN};
-use dagon_agent::{erase_plan, SlotStore, StoreError, Transition};
+use dagon_agent::{erase_plan, Transition};
 use dagon_format::header::{self, ImageHeader, HEADER_SIZE};
 use dagon_port::timeout::{EraseLayout, EraseRegion, HeaderPlace, Plan, SlotLayout};
 use dagon_port::{Flash, Watchdog};
+use dagon_port::{SlotStore, StoreError};
 use dagon_proto::payload::{target, SlotState, StatusResp};
 
 /// One detached header sector (an erase unit) per slot in the dagon
@@ -146,6 +147,8 @@ impl<F: Flash, O: Otadata, W: Watchdog> EspStore<F, O, W> {
 }
 
 impl<F: Flash, O: Otadata, W: Watchdog> SlotStore for EspStore<F, O, W> {
+    type Transition = Transition;
+
     /// Slots with a header are Written; otadata then sets the selected
     /// slot (Pending, Trying, Reverted) and the running one (Trying or
     /// Confirmed). While on trial, `confirmed` is the slot the 2nd stage

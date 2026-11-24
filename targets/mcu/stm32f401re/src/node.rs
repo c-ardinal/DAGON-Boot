@@ -19,7 +19,7 @@
 //! Flash size is check-only: the layout is fixed (`layout`, the topology's
 //! `f401-default` flash map) and needs [`MIN_FLASH_SIZE`] bytes.
 
-use dagon_agent::{Agent, Config, SlotStore};
+use dagon_agent::{Agent, Config};
 pub use dagon_core::log::LogError;
 use dagon_ed25519::Ed25519Compact;
 use dagon_events::{Published, Watchdog as Periods};
@@ -29,6 +29,7 @@ use dagon_mcu_common::link::LinkError;
 pub use dagon_node::hooks::{always, App, AppEvents, BoardCore, Confirm, NodeChain, SelfCheck};
 use dagon_node::hooks::{finish_start, node_chain, BoardExtension, Events, UserExtensions};
 use dagon_node::serve::{serve as dagon_serve, Exit, ServeHost};
+use dagon_port::SlotStore;
 use dagon_proto::max_payload;
 use dagon_proto::payload::{mode, role};
 use defmt::{info, warn};

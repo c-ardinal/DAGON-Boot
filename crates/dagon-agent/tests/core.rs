@@ -4,10 +4,11 @@
 //! confirmed core slot, a board without boot core slots, an image that is
 //! not a verifying boot core, a board that keeps no boot core slots).
 
+use dagon_port::{SlotStore, StoreError};
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use dagon_agent::{core_image, Agent, Config, SlotStore, StoreError, Transition};
+use dagon_agent::{core_image, Agent, Config, Transition};
 use dagon_core::log::{Log, LogLayout, SlotRef};
 use dagon_ed25519::Ed25519Compact;
 use dagon_events::{
@@ -142,6 +143,8 @@ fn app_status(trial: bool) -> StatusResp {
 }
 
 impl SlotStore for Store {
+    type Transition = Transition;
+
     fn status(&mut self) -> StatusResp {
         app_status(self.app_trial)
     }

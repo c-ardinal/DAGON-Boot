@@ -8,12 +8,14 @@
 //! feed interval, and feed the watchdog at every wake; the MCU package
 //! gives the port, the clock and the feed.
 
+use crate::Transition;
 use dagon_events::Clock;
 use dagon_format::SigVerifier;
+use dagon_port::SlotStore;
 use dagon_proto::payload::{self, mode};
 use dagon_proto::{flags, frame_len, Cmd, Frame};
 
-use crate::{Agent, AppChain, SlotStore, Writer, IDLE_TIMEOUT_MS};
+use crate::{Agent, AppChain, Writer, IDLE_TIMEOUT_MS};
 
 /// Update mode ends after this long without a request (a normal restart).
 pub const EXIT_IDLE_MS: u32 = 60_000;
@@ -165,7 +167,7 @@ pub fn serve<P, S, X, V, W, C, const L: usize>(
 ) -> Exit
 where
     P: Port,
-    S: SlotStore,
+    S: SlotStore<Transition = Transition>,
     X: AppChain,
     V: SigVerifier,
     W: Writer,
@@ -187,7 +189,7 @@ pub fn serve_in<P, S, X, V, W, C, const L: usize>(
 ) -> Exit
 where
     P: Port,
-    S: SlotStore,
+    S: SlotStore<Transition = Transition>,
     X: AppChain,
     V: SigVerifier,
     W: Writer,

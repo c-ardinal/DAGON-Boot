@@ -179,7 +179,7 @@ fn what_the_catalog_says_the_tree_has_is_checked_by_the_build() {
             dagon_host::BuildRunner,
             dagon_host::Agent,
             dagon_port::Watchdog,
-            dagon_agent::SlotStore,
+            dagon_port::SlotStore,
             dagon_events::Extension,
             dagon_events::BoardBringUp,
             dagon_port::NodeLink;

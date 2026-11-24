@@ -7,12 +7,14 @@
 //! the start's and its serving task's.
 
 use dagon_agent::snapshot::AppSnapshot;
-use dagon_agent::{Agent, AppChain, SlotStore};
+use dagon_agent::Transition;
+use dagon_agent::{Agent, AppChain};
 use dagon_events::{
     compose, BoardBringUp, Bounds, Chain, Composed, Ctx, Extension, Health, Layer, Published,
     Reader, TrialInfo, Watchdog,
 };
 use dagon_format::SigVerifier;
+use dagon_port::SlotStore;
 
 /// Recent events a node keeps for its display and log tasks.
 pub const RECENT: usize = 8;
@@ -159,7 +161,12 @@ pub fn node_chain(
 /// one runs nothing and emits nothing. Then, with [`Confirm::Own`] and the
 /// image on trial, the trial is confirmed. Returns whether the image is
 /// still on trial (for the watchdog guard).
-pub fn finish_start<S: SlotStore, X: AppChain, V: SigVerifier, const L: usize>(
+pub fn finish_start<
+    S: SlotStore<Transition = Transition>,
+    X: AppChain,
+    V: SigVerifier,
+    const L: usize,
+>(
     agent: &mut Agent<S, X, V, dagon_agent::writer::App, L>,
     board: Option<(&str, &mut dyn BoardBringUp)>,
     confirm: Confirm,

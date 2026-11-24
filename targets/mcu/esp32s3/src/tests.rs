@@ -6,12 +6,13 @@ use crate::layout::{
 };
 use crate::otadata::{raw, seq_crc, trial_entry, Counted, ENTRY_LEN};
 use crate::store::{header_addr, EspStore, Otadata, HEADER_SECTOR};
-use dagon_agent::{SlotStore, StoreError, Transition};
+use dagon_agent::Transition;
 use dagon_format::header::{self, image_kind, placement, port_kind, slot_binding, McuId};
 use dagon_format::header::{ImageHeader, HEADER_SIZE};
 use dagon_format::statelog::reason;
 use dagon_format::Version;
 use dagon_port::{Flash, FlashError, FlashRegion, Watchdog};
+use dagon_port::{SlotStore, StoreError};
 use dagon_proto::payload::{target::APP, SlotState};
 
 /// What the agent's image machine hands the store's mutators.

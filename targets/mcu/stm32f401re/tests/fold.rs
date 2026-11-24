@@ -16,7 +16,7 @@ mod cut;
 
 use cut::*;
 use dagon_agent::image::State as Image;
-use dagon_agent::{Agent, Config, SlotStore};
+use dagon_agent::{Agent, Config};
 use dagon_core::boot::{decide, BootConfig, Decision};
 use dagon_core::log::Log;
 use dagon_ed25519::Ed25519Compact;
@@ -25,6 +25,7 @@ use dagon_format::header::*;
 use dagon_format::statelog::slot;
 use dagon_mcu_stm32f401re::layout::*;
 use dagon_mcu_stm32f401re::{KindSStore, ERASE_REGIONS, TRIAL_ATTEMPTS};
+use dagon_port::SlotStore;
 use dagon_proto::payload::*;
 use dagon_proto::{max_payload, split_status, Cmd, Frame, Status};
 use ed25519_compact::{KeyPair, Seed};

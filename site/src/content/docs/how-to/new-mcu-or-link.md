@@ -12,7 +12,7 @@ description: "DAGONに新規のマイコンやリンクを追加する場合の�
 1. `targets/mcu/<id>/`にcrate `dagon-mcu-<id>`を作成します。このcrateには独自の`[workspace]`があります。ルートの`Cargo.toml`は変更しません。
 2. `dagon-mcu.toml`を記述します。キーは[マイコンとボードの定義](/reference/definitions/)にあります。フォルダの追加で定義が増加します。
 3. `crates/dagon-port/src/lib.rs`のトレイトを実装します: `Flash`、`Link`、`Reset`、`Watchdog`、ブートの種類に応じて`BootSelectS`か`BootSelectV`。コーディネータにするマイコンは`StreamPort`、`I2cBus`、`SubControl`も実装します。マイクロ秒単位のクロックはポートではなくDAGON自身の機能です。`crates/dagon-events/src/compose.rs`の`Clock`をマイコンのcrateが実装します。
-4. `crates/dagon-agent/src/lib.rs`の`SlotStore`を実装します（例: `targets/mcu/stm32f401re/src/store.rs`）。
+4. `crates/dagon-port/src/slot_store.rs`の`SlotStore`を実装します（例: `targets/mcu/stm32f401re/src/store.rs`）。
 5. DAGONのブートを使用するマイコンは`stage0/`と`bootcore/`を用意します（例: `targets/mcu/stm32f401re/`）。
 6. 全マイコンで`template/`を用意します。`dagon gen`はこのフォルダからノードのcrateを作成します。
 7. `compat.toml`に部品を追加します（[バージョンとリリース](/explanation/versioning/)）。

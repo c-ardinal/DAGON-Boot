@@ -5,13 +5,14 @@
 use crate::flash::SimFlash;
 use crate::rom::SimRom;
 use crate::store::{Boot, Layout, SimStore};
+use dagon_port::{SlotStore, StoreError};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, MutexGuard};
 
 use dagon_agent::snapshot::AppSnapshot;
 use dagon_agent::update_mode::EXIT_IDLE_MS;
 use dagon_agent::writer::BootCore;
-use dagon_agent::{Agent, Config, SlotStore, StoreError};
+use dagon_agent::{Agent, Config};
 use dagon_ed25519::Ed25519Compact;
 use dagon_events::{
     compose, Bounds, Composed, Ctx, Extension, Health, Layer, Nop, Published, Reader, TrialInfo,

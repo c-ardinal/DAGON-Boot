@@ -2,11 +2,12 @@
 //! run the same engine with their drivers injected, give the same verdict
 //! on every image, and differ only in the slot each one runs from.
 
+use dagon_port::{SlotStore, StoreError};
 use std::cell::{Cell, RefCell};
 use std::collections::BTreeMap;
 
 use dagon_agent::writer::{self, Writer};
-use dagon_agent::{Agent, Config, SlotStore, StoreError, Transition};
+use dagon_agent::{Agent, Config, Transition};
 use dagon_ed25519::Ed25519Compact;
 use dagon_events::{compose, Bounds, Composed, Layer, Nop, Published, Watchdog};
 use dagon_format::header::*;
@@ -112,6 +113,8 @@ impl Mem {
 }
 
 impl SlotStore for Mem {
+    type Transition = Transition;
+
     fn status(&mut self) -> StatusResp {
         self.calls.set(self.calls.get() + 1);
         self.status[0]

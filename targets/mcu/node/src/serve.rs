@@ -8,14 +8,22 @@
 //! (`app.link_up`, `app.link_down`, `app.request`, `app.replied`).
 
 use dagon_agent::writer::App;
-use dagon_agent::{reply_status, Agent, AppChain, SlotStore, Writer, IDLE_TIMEOUT_MS};
+use dagon_agent::Transition;
+use dagon_agent::{reply_status, Agent, AppChain, Writer, IDLE_TIMEOUT_MS};
 use dagon_format::SigVerifier;
+use dagon_port::SlotStore;
 
 use dagon_mcu_common::link::{Link, LinkError};
 
 /// What the serving loop asks of its MCU.
 #[allow(async_fn_in_trait)]
-pub trait ServeHost<S: SlotStore, X: AppChain, V: SigVerifier, W: Writer = App> {
+pub trait ServeHost<
+    S: SlotStore<Transition = Transition>,
+    X: AppChain,
+    V: SigVerifier,
+    W: Writer = App,
+>
+{
     /// Milliseconds on a monotonic clock.
     fn now_ms(&self) -> u64;
     /// Waiting for a request (no deadline of its own).
@@ -69,7 +77,7 @@ pub async fn serve<L, S, X, V, W, H>(
 ) -> Exit
 where
     L: Link,
-    S: SlotStore,
+    S: SlotStore<Transition = Transition>,
     X: AppChain,
     V: SigVerifier,
     W: Writer,
@@ -261,7 +269,9 @@ mod tests {
         calls: Vec<std::string::String>,
     }
 
-    impl<S: SlotStore, X: AppChain, V: SigVerifier> ServeHost<S, X, V> for Host {
+    impl<S: SlotStore<Transition = Transition>, X: AppChain, V: SigVerifier> ServeHost<S, X, V>
+        for Host
+    {
         fn now_ms(&self) -> u64 {
             0
         }

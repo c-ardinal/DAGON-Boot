@@ -9,12 +9,13 @@
 //! `rp2040-4m` flash map) and needs [`MIN_FLASH_SIZE`] bytes; a board with
 //! less fails to build, a larger one keeps the rest for the app.
 
-use dagon_agent::{Agent, Config, SlotStore};
+use dagon_agent::{Agent, Config};
 use dagon_ed25519::Ed25519Compact;
 use dagon_events::{Published, Watchdog as Periods};
 use dagon_format::header::{port_kind, target_tag};
 pub use dagon_node::hooks::{always, App, AppEvents, BoardCore, Confirm, NodeChain, SelfCheck};
 use dagon_node::hooks::{finish_start, node_chain, Events};
+use dagon_port::SlotStore;
 use dagon_proto::max_payload;
 use dagon_proto::payload::{mode, SlotState, StatusResp};
 use embassy_rp::peripherals::{FLASH, USB, WATCHDOG};

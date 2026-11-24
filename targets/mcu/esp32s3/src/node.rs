@@ -34,6 +34,7 @@
 
 use core::cell::RefCell;
 use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use dagon_port::{SlotStore, StoreError};
 
 use crate::{
     board::{BoardDef, PlainBoard},
@@ -45,7 +46,7 @@ use crate::{
     sys::{EspClock, EspReset, RtcWatchdog},
     CONFIRMED_WDT_MS, TRIAL_WDT_MS,
 };
-use dagon_agent::{reply_status, Agent, SlotStore, StoreError, TrialPolicy, NO_ADDR};
+use dagon_agent::{reply_status, Agent, TrialPolicy, NO_ADDR};
 use dagon_ed25519::Ed25519Compact;
 use dagon_events::{Published, Watchdog as Periods};
 use dagon_mcu_common::link::Link as DagonLink;

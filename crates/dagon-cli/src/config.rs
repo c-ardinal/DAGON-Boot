@@ -414,12 +414,26 @@ pub fn check_pubkey_bytes(cfg: &Config, k: [u8; 32]) -> Result<[u8; 32], String>
         .map_err(|_| "the pubkey is not a valid public key")?;
     if let Some(s) = signing_key_path(cfg) {
         let kp = dagon_sign::load_key_pair(&s).map_err(|_| "the signing key cannot be read")?;
-        if *kp.pk != k {
-            return Err("pubkey is not the public half of the project's signing key".into());
-        }
+        public_half_of(&kp, k)?;
+    } else if key_outside_a_file() {
+        // The key from DAGON_SIGNING_KEY_COMMAND or _SEED: the same checks
+        // as for a file, the secret-copy one included.
+        let kp = load_key(None).map_err(|_| "the signing key cannot be had")?;
+        public_half_of(&kp, k)?;
     }
     allow_key(&k, test_key_allowed())?;
     Ok(k)
+}
+
+/// `k` is `kp`'s public half, and not its secret seed.
+fn public_half_of(kp: &KeyPair, k: [u8; 32]) -> Result<(), String> {
+    if kp.sk.seed().as_ref() == k.as_slice() {
+        return Err("the pubkey file holds a secret key".into());
+    }
+    if *kp.pk != k {
+        return Err("pubkey is not the public half of the project's signing key".into());
+    }
+    Ok(())
 }
 
 /// The key a firmware build embeds, checked: pubkey in dagon.toml, else
@@ -501,6 +515,18 @@ pub fn read_file(path: &Path) -> Result<Vec<u8>, String> {
 #[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
+
+    /// A pubkey that is the signing key's seed, or another key's half, is
+    /// refused, whatever store the signing key came from.
+    #[test]
+    fn a_pubkey_is_the_signing_keys_public_half_only() {
+        let kp = KeyPair::from_seed([0x6e; 32].into());
+        assert!(public_half_of(&kp, *kp.pk).is_ok());
+        let e = public_half_of(&kp, [0x6e; 32]).unwrap_err();
+        assert!(e.contains("secret"), "{e}");
+        let other = KeyPair::from_seed([0x6f; 32].into());
+        assert!(public_half_of(&kp, *other.pk).is_err());
+    }
 
     /// `--key` wins; else exactly one of the three variables; the key
     /// itself never in an error.

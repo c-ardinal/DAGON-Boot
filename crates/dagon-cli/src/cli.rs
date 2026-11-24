@@ -170,7 +170,7 @@ pub enum Command {
     /// the public key given here (--pubkey, pubkey in dagon.toml, or the
     /// signing key's public half).
     Serve(ServeArgs),
-    /// Run the simulator scenarios (no hardware)
+    /// Simulate an update: the built-in scenarios, or a topology of your own (no hardware)
     Sim(SimArgs),
     /// Work with an AI agent
     #[command(subcommand)]
@@ -564,9 +564,22 @@ pub struct SimArgs {
     #[arg(
         value_name = "SCENARIO",
         value_parser = scenario_ids(),
-        help = "Scenario to run [default: every scenario]"
+        conflicts_with_all = ["topology", "fault", "config"],
+        help = "Scenario of the built-in pair to run [default: every scenario]"
     )]
     pub scenario: Option<String>,
+    /// Topology YAML to simulate an update of, with the project's definitions [default with --fault or --config: topology in dagon.toml]
+    #[arg(long, value_name = "YAML")]
+    pub topology: Option<String>,
+    #[arg(
+        long,
+        value_name = "NODE=KIND",
+        value_parser = crate::simfault::Injection::parse,
+        help = crate::simfault::FAULT_HELP
+    )]
+    pub fault: Vec<crate::simfault::Injection>,
+    #[arg(long, value_name = "FILE", help = CONFIG)]
+    pub config: Option<String>,
 }
 
 /// The scenario IDs `dagon sim` takes: the simulator's own list.

@@ -72,6 +72,10 @@ ALLOWED = {
         3,
         "the simulator's fixed sample layouts",
     ),
+    "crates/dagon-sim/src/world.rs": (
+        2,
+        "the one vendor-stage2 layout and flash the simulator models, picked by the id its fixed layout carries",
+    ),
     "web/src/app/sample.ts": (
         8,
         "the Console demo's fixed sample nodes (the demo has no project and no definitions of its own)",

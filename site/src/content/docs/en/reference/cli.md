@@ -45,7 +45,7 @@ Check a node:
 
 Tools:
   serve      Start DAGON Console, the browser tool, and its API on 127.0.0.1
-  sim        Run the simulator scenarios (no hardware)
+  sim        Simulate an update: the built-in scenarios, or a topology of your own (no hardware)
   ai         Work with an AI agent
 
 Help:
@@ -658,13 +658,13 @@ Options:
 ## dagon sim
 
 ```text
-Run the simulator scenarios (no hardware)
+Simulate an update: the built-in scenarios, or a topology of your own (no hardware)
 
-Usage: dagon sim [SCENARIO]
+Usage: dagon sim [OPTIONS] [SCENARIO]
 
 Arguments:
   [SCENARIO]
-          Scenario to run [default: every scenario]
+          Scenario of the built-in pair to run [default: every scenario]
 
           Possible values:
           - S1: update with a power cut
@@ -673,6 +673,15 @@ Arguments:
           - S4: erased F401 via ROM loader
 
 Options:
+      --topology <YAML>
+          Topology YAML to simulate an update of, with the project's definitions [default with --fault or --config: topology in dagon.toml]
+
+      --fault <NODE=KIND>
+          Fault to inject into a node, by its id; each runs on a fresh simulation (repeatable). KIND: power-cut (power lost during the write), no-confirm (the new app never confirms), tamper (one bit of its image flipped), erased (flash erased; rewritten through its ROM loader)
+
+      --config <FILE>
+          Project file the defaults come from [default: ./dagon.toml]
+
   -h, --help
           Print help (see a summary with '-h')
 ```

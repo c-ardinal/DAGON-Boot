@@ -13,6 +13,7 @@
 //!   transactions.
 //! - [`TimedRelay`]: a [`SimRelay`] whose answers take the links' and
 //!   flash's real time (one model for `dagon demo` and the browser demo).
+//! - [`world`]: the wiring of any topology, from the definitions given.
 //! - [`listen`]: when the hub's STAY reaches a node's boot core on each
 //!   link kind, against the listen window its MCU definition opens.
 //!
@@ -30,6 +31,7 @@ pub mod rng;
 pub mod rom;
 pub mod store;
 pub mod timing;
+pub mod world;
 
 pub use flash::{CutPoint, FlashOp, OpKind, SimFlash};
 pub use link::SimLink;

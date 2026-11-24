@@ -58,10 +58,18 @@ impl SimFlash {
     /// at a time. That is the chip's own unit, which a ROM loader writes
     /// in, finer than the definition's `write_unit` (DAGON's firmware's).
     pub fn of(mcu: &str, write_size: u32, seed: u64) -> Self {
-        let e = crate::mcu::simulated_mcu(mcu)
-            .execution
-            .as_ref()
-            .unwrap_or_else(|| panic!("MCU definition {mcu} has no [execution]"));
+        SimFlash::of_definition(crate::mcu::simulated_mcu(mcu), write_size, seed)
+            .unwrap_or_else(|| panic!("MCU definition {mcu} has no [execution]"))
+    }
+
+    /// [`SimFlash::of`] for the given definition `def` (a project's own,
+    /// its overrides included); `None` when it has no `[execution]`.
+    pub fn of_definition(
+        def: &dagon_topology::defs::McuDef,
+        write_size: u32,
+        seed: u64,
+    ) -> Option<Self> {
+        let e = def.execution.as_ref()?;
         let regions: Vec<_> = e
             .erase_regions
             .iter()
@@ -73,7 +81,7 @@ impl SimFlash {
                 erased_value: e.erased_value,
             })
             .collect();
-        SimFlash::new(&regions, seed)
+        Some(SimFlash::new(&regions, seed))
     }
 
     /// STM32F401xE as its definition gives it, byte programming.

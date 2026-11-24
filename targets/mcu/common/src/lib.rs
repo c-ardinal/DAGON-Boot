@@ -1,5 +1,7 @@
 //! MCU-independent building blocks of the DAGON MCU packages:
 //! - [`guard`]: the liveness-gated watchdog guard apps declare;
+//! - [`handed`]: the start of a boot core whose stage0 starts the app on
+//!   its request (listen window, hand-over, recovery, then the request);
 //! - [`hooks`]: the app layer's chain, with the app's CONFIRM self-check;
 //! - [`tag`]: the node's image target tag, checked;
 //! - [`link`]: the one frame-link interface of every hop, link kinds;
@@ -10,6 +12,8 @@
 //! - [`serve`]: the agent's serving loop over any link;
 //! - [`reattach`]: when a USB device drops off the bus and attaches again
 //!   because the host never reset it;
+//! - [`log_store`]: the slot store of an MCU whose boot stage keeps a
+//!   DAGON state log, inline or detached headers;
 //! - [`mapped`]: read-only `Flash` over memory-mapped flash;
 //! - [`shared`]: several handles on one flash driver, no interrupt masking;
 //! - [`vector`]: the entry point of an image that starts with its vector
@@ -29,9 +33,11 @@ pub use dagon_format as __format;
 pub mod boot_time;
 pub mod frames;
 pub mod guard;
+pub mod handed;
 pub mod hooks;
 pub mod link;
 pub mod liveness;
+pub mod log_store;
 pub mod mapped;
 #[cfg(any(test, feature = "masked-time"))]
 pub mod masked_time;

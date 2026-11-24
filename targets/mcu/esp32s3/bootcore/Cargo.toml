@@ -1,0 +1,52 @@
+[package]
+name = "dagon-esp32s3-bootcore"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+version = "0.0.0"
+publish = false
+
+# The ESP32-S3 boot core under DAGON's stage0: the image in the factory
+# partition that stage0 checks and starts at every reset. It settles its
+# trial, serves update mode (a STAY in its listen window on UART0, or the
+# app's hand-over) or recovery mode (stage0's decision started no app),
+# and otherwise asks stage0 for the app by reset
+# (dagon_mcu_common::handed). It is not written to nodes yet: like stage0
+# it takes the emulator's provisional layout (`qemu-layout`) until the
+# definition gives stage0's after the hardware measurement.
+# Firmware clippy runs in CI (scripts/ci_crates.py --firmware-lint).
+[package.metadata.dagon]
+lint = { features = ["qemu-layout"], env = { DAGON_ALLOW_TEST_KEY = "1", DAGON_TARGET_TAG = "lint" } }
+
+# Standalone: built for the ESP32-S3 only (the esp toolchain).
+[workspace]
+
+[dependencies]
+# The pure modules only (frame cutter, definition constants, key): no esp-hal.
+dagon-mcu-esp32s3 = { path = "..", default-features = false }
+dagon-mcu-common = { path = "../../common" }
+dagon-agent = { path = "../../../../crates/dagon-agent" }
+dagon-core = { path = "../../../../crates/dagon-core" }
+dagon-ed25519 = { path = "../../../../crates/dagon-ed25519" }
+dagon-events = { path = "../../../../crates/dagon-events" }
+dagon-format = { path = "../../../../crates/dagon-format" }
+dagon-port = { path = "../../../../crates/dagon-port" }
+dagon-proto = { path = "../../../../crates/dagon-proto" }
+# One core and no interrupt handlers: the published events' lock is a no-op.
+critical-section = { version = "1.1", features = ["restore-state-none"] }
+
+[features]
+# stage0's provisional layout (../stage0/src/qemu_layout.rs): without it
+# the boot core does not build, so no image with these values reaches a
+# node.
+qemu-layout = []
+
+[profile.release]
+opt-level = "z"
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+debug = true
+
+[build-dependencies]
+# build.rs: the listen window from ../dagon-mcu.toml.
+toml = { version = "0.8", default-features = false, features = ["parse"] }

@@ -200,6 +200,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "dagon-core"
+version = "0.1.0"
+dependencies = [
+ "dagon-format",
+ "dagon-port",
+ "dagon-proto",
+]
+
+[[package]]
 name = "dagon-ed25519"
 version = "0.1.0"
 dependencies = [
@@ -238,6 +247,7 @@ version = "0.1.0"
 dependencies = [
  "critical-section",
  "dagon-agent",
+ "dagon-core",
  "dagon-events",
  "dagon-format",
  "dagon-port",

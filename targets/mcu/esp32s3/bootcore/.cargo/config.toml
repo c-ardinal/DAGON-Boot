@@ -1,0 +1,14 @@
+[build]
+target = "xtensa-esp32s3-none-elf"
+
+[target.xtensa-esp32s3-none-elf]
+# Joined to ../.cargo/config.toml's flags: the boot core's own linker
+# script (bootcore.x, found through build.rs's search path), no C runtime,
+# and the compact SHA-2 rounds as in stage0.
+rustflags = [
+    "-C", "link-arg=-nostartfiles", "-C", "link-arg=-Tbootcore.x",
+    "--cfg", 'sha2_backend_soft="compact"',
+]
+
+[unstable]
+build-std = ["core"]

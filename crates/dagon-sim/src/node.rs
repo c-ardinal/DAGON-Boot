@@ -208,6 +208,16 @@ impl SimNode {
         &self.cfg
     }
 
+    /// The reply to the last request left at `now_ms` (after the node's own
+    /// work on it): its boot core keeps the transfer, and update mode its
+    /// stay, from then ([`Agent::reply_left`]).
+    pub fn reply_left(&mut self, now_ms: u64) {
+        if let Some(core) = self.core.as_mut() {
+            core.reply_left(now_ms * 1_000);
+            self.core_served_ms = self.core_served_ms.max(now_ms);
+        }
+    }
+
     /// Worst-case ms the erase for transfer `begin` takes on this node: the
     /// erase its MCU definition plans for it, each unit at its
     /// `unit_max_ms` (the wait a host allows, less its margin); 0 for a

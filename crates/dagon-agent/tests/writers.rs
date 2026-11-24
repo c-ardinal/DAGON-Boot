@@ -959,6 +959,25 @@ fn a_transfer_times_out_on_its_own_link_only() {
     n.agent.tick((3 * t + 1) * 1_000);
     assert_eq!(n.ask(UART, 4, Cmd::XferHdr, &chunk(200)).0, Status::State);
 
+    // A request's own work is not silence: the deadline runs from when its
+    // reply left (an erase longer than the deadline keeps the transfer).
+    let mut n = TwoLinks::new();
+    assert_eq!(at(&mut n, 0, UART, 1, Cmd::XferBegin, &begin), Status::Ok);
+    n.agent.reply_left((idle + 5_000) * 1_000);
+    let next = 2 * idle + 4_999;
+    assert_eq!(
+        at(&mut n, next, UART, 2, Cmd::XferHdr, &chunk(0)),
+        Status::Ok
+    );
+    // A refused request's reply leaving keeps nothing.
+    assert_eq!(
+        at(&mut n, next, USB, 1, Cmd::XferHdr, &chunk(100)),
+        Status::State
+    );
+    n.agent.reply_left((3 * idle) * 1_000);
+    n.agent.tick((next + idle) * 1_000);
+    assert_eq!(n.ask(UART, 3, Cmd::XferHdr, &chunk(100)).0, Status::State);
+
     // The other link going down leaves it; its own link going down ends it.
     let mut n = TwoLinks::new();
     assert_eq!(at(&mut n, 0, UART, 1, Cmd::XferBegin, &begin), Status::Ok);

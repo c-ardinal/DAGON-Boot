@@ -463,8 +463,13 @@ impl Link {
             if !sent {
                 self.up[via as usize] = false;
                 self.agent.link_down_on(via as usize, via.code(), NO_ADDR);
-            } else if let Some(status) = reply_status(&out[..n]) {
-                self.agent.replied(status, now_ms().wrapping_sub(start));
+            } else {
+                // The idle deadline runs from the reply: the request's own
+                // work (an erase) is not silence.
+                self.agent.reply_left(Instant::now().as_micros());
+                if let Some(status) = reply_status(&out[..n]) {
+                    self.agent.replied(status, now_ms().wrapping_sub(start));
+                }
             }
             held = held.max(self.after_reply(serve::next(then, sent)).await);
         }

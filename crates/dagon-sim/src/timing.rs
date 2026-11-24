@@ -248,10 +248,25 @@ impl TimedRelay {
         // The node's own work may move its clock; the links' time comes on top.
         let links = self.relay.links();
         let (relay, heading) = (&self.relay, &mut self.heading);
+        let mut eraser = None;
         let erase = |via: Option<&Relay<'_>>, cmd, payload: &[u8]| {
-            erase_on(relay, heading, via, cmd, payload)
+            let ms = erase_on(relay, heading, via, cmd, payload);
+            if ms > 0 {
+                eraser = Some(via.map(|r| (r.link, r.addr)));
+            }
+            ms
         };
         let due = self.relay.now_ms() + exchange_ms(bytes, self.medium, links, erase) as u64;
+        // The node answers once its erase is done: its transfer is kept
+        // from then, as a node's reply leaving keeps it.
+        let node = match eraser {
+            Some(None) => Some(&mut self.relay.node),
+            Some(Some((link, addr))) => self.relay.node_behind_mut(link, addr),
+            None => None,
+        };
+        if let Some(n) = node {
+            n.reply_left(due);
+        }
         let answer = self.relay.usb_read();
         if !answer.is_empty() {
             self.out.push_back((due, answer));

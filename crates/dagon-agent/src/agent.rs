@@ -100,6 +100,9 @@ pub struct Agent<S, X, V, W = writer::App, const L: usize = 1, C = Software> {
     /// the transfer last brought a request ([`IDLE_TIMEOUT_MS`] runs from it).
     now_us: u64,
     xfer_heard_us: u64,
+    /// The last request handled kept the transfer: [`Agent::reply_left`]
+    /// moves its time to when the reply left.
+    xfer_kept: bool,
     /// Kept apart from a link's reply, which a repeated request is
     /// answered from.
     refusal: [u8; REFUSAL_BUF],
@@ -174,6 +177,7 @@ impl<S: SlotStore, X: AppChain, V: SigVerifier, W: Writer, const L: usize, C: Cr
             xfer_link: 0,
             now_us: 0,
             xfer_heard_us: 0,
+            xfer_kept: false,
             refusal: [0; REFUSAL_BUF],
             front: CmdSet::EMPTY,
             reset_cause: payload::reset_cause::NONE,
@@ -365,6 +369,18 @@ impl<S: SlotStore, X: AppChain, V: SigVerifier, W: Writer, const L: usize, C: Cr
         noted(self.requests.before_reboot(&mut self.chain));
     }
 
+    /// The reply to the request last handled left at `now_us` (the node's
+    /// clock, as [`Agent::tick`] takes it). A request that kept the
+    /// transfer keeps it from then: its own work (an erase can take longer
+    /// than [`IDLE_TIMEOUT_MS`]) is not silence. A node that calls
+    /// [`Agent::tick`] calls this after every reply.
+    pub fn reply_left(&mut self, now_us: u64) {
+        if core::mem::take(&mut self.xfer_kept) {
+            self.now_us = self.now_us.max(now_us);
+            self.xfer_heard_us = self.now_us;
+        }
+    }
+
     /// Handles one request frame that came over the node's link 0
     /// ([`Agent::handle_on`]).
     pub fn handle(&mut self, request: &[u8]) -> Option<Reply<'_>> {
@@ -420,7 +436,8 @@ impl<S: SlotStore, X: AppChain, V: SigVerifier, W: Writer, const L: usize, C: Cr
         }
         let link = &self.links[on];
         // Only a request served (or its repeat) keeps the transfer going.
-        if on == self.xfer_link && link.resp[HEADER_LEN] == Status::Ok as u8 {
+        self.xfer_kept = on == self.xfer_link && link.resp[HEADER_LEN] == Status::Ok as u8;
+        if self.xfer_kept {
             self.xfer_heard_us = self.now_us;
         }
         Some(Reply {

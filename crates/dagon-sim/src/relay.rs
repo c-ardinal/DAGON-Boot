@@ -404,6 +404,21 @@ impl SimRelay {
         }
     }
 
+    /// [`SimRelay::node_behind`], to change.
+    pub fn node_behind_mut(&mut self, link: u8, addr: u8) -> Option<&mut SimNode> {
+        let l = self.links.iter().find(|l| l.id == link)?;
+        match l.kind {
+            dagon_port::LinkKind::I2c => self
+                .bus
+                .i2c
+                .get_mut(&l.port)?
+                .iter_mut()
+                .find(|n| n.i2c_addr == Some(addr)),
+            dagon_port::LinkKind::Uart => self.bus.uart.get_mut(&l.port).map(|s| &mut s.node),
+            _ => None,
+        }
+    }
+
     pub fn now_ms(&self) -> u64 {
         self.bus.now_ms
     }

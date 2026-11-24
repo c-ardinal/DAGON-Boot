@@ -323,13 +323,20 @@ fn the_display_name_of_every_kind_is_its_catalog_name() {
     );
 }
 
-/// Workspace packages whose resolved normal dependencies reach
-/// `dagon-events` other than through this registry: each declares
-/// machines and must be in REGISTRY, once, by its own `MACHINES`.
+/// Workspace packages whose sources invoke `state_machine!`: each
+/// declares machines and must be in REGISTRY, once, by its own `MACHINES`.
+/// A crate without the macro has no machine (the macro is the only way to
+/// declare one) and is not listed, whatever it depends on.
 #[test]
 fn every_machine_crate_is_registered_once() {
     let out = std::process::Command::new(env!("CARGO"))
-        .args(["metadata", "--format-version", "1", "--offline"])
+        .args([
+            "metadata",
+            "--format-version",
+            "1",
+            "--offline",
+            "--no-deps",
+        ])
         .current_dir(root())
         .output()
         .expect("cargo metadata");
@@ -339,73 +346,40 @@ fn every_machine_crate_is_registered_once() {
         String::from_utf8_lossy(&out.stderr)
     );
     let meta: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
-    let name_of: BTreeMap<&str, &str> = meta["packages"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|p| (p["id"].as_str().unwrap(), p["name"].as_str().unwrap()))
-        .collect();
-    // Normal (shipped) dependency edges, by package name.
-    let mut deps: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
-    for node in meta["resolve"]["nodes"].as_array().unwrap() {
-        let from = name_of[node["id"].as_str().unwrap()];
-        for d in node["deps"].as_array().unwrap() {
-            let normal = d["dep_kinds"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .any(|k| k["kind"].is_null() || k["kind"] == "build");
-            if normal {
-                deps.entry(from)
-                    .or_default()
-                    .push(name_of[d["pkg"].as_str().unwrap()]);
-            }
-        }
-    }
-    let reaches_events = |start: &str| {
-        let mut todo = vec![start];
-        let mut seen = BTreeSet::new();
-        while let Some(n) = todo.pop() {
-            if n == "dagon-events" {
-                return true;
-            }
-            if n == "dagon-catalog" || !seen.insert(n) {
-                continue;
-            }
-            todo.extend(deps.get(n).into_iter().flatten().copied());
-        }
-        false
-    };
-    // A crate that depends on this registry reads the catalogs; it cannot
-    // be listed here (that would be a dependency cycle), so it declares no
-    // machine: its sources never invoke `state_machine!`.
-    let reads_registry = |name: &str| deps.get(name).is_some_and(|d| d.contains(&"dagon-catalog"));
     let mut machine_crates = BTreeSet::new();
-    for id in meta["workspace_members"].as_array().unwrap() {
-        let name = name_of[id.as_str().unwrap()];
-        if reads_registry(name) {
-            let manifest = meta["packages"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .find(|p| p["id"] == *id)
-                .and_then(|p| p["manifest_path"].as_str())
-                .unwrap();
-            let src = PathBuf::from(manifest).with_file_name("src");
-            let declares = rust_files(&src).into_iter().find(|f| {
-                std::fs::read_to_string(f)
-                    .unwrap_or_default()
-                    .contains(concat!("state_machine", "!"))
-            });
-            assert_eq!(
-                declares, None,
-                "{name} reads the registry and cannot declare machines"
-            );
+    for p in meta["packages"].as_array().unwrap() {
+        let name = p["name"].as_str().unwrap();
+        // The macro's own crate declares the layers' shared machines; this
+        // crate's tests declare one to check the macro.
+        if name == "dagon-events" {
+            machine_crates.insert(name.to_string());
             continue;
         }
-        if name == "dagon-events" || (name != "dagon-catalog" && reaches_events(name)) {
-            machine_crates.insert(name.to_string());
+        if name == "dagon-catalog" {
+            continue;
         }
+        let src = PathBuf::from(p["manifest_path"].as_str().unwrap()).with_file_name("src");
+        let declares = rust_files(&src).into_iter().find(|f| {
+            std::fs::read_to_string(f)
+                .unwrap_or_default()
+                .contains(concat!("state_machine", "!"))
+        });
+        if declares.is_none() {
+            continue;
+        }
+        // A crate that depends on this registry reads the catalogs; it
+        // cannot be listed here (that would be a dependency cycle), so it
+        // declares no machine.
+        let reads_registry = p["dependencies"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|d| d["name"] == "dagon-catalog" && d["kind"].is_null());
+        assert!(
+            !reads_registry,
+            "{name} reads the registry and cannot declare machines: {declares:?}"
+        );
+        machine_crates.insert(name.to_string());
     }
     let listed: Vec<_> = REGISTRY.iter().map(|m| m.krate().to_string()).collect();
     let unique: BTreeSet<_> = listed.iter().cloned().collect();
@@ -416,7 +390,7 @@ fn every_machine_crate_is_registered_once() {
     );
     assert_eq!(
         unique, machine_crates,
-        "dagon_catalog::REGISTRY must list the MACHINES of every crate that reaches dagon-events"
+        "dagon_catalog::REGISTRY must list the MACHINES of every crate that invokes state_machine!"
     );
     // Each entry is that crate's own static, not a copy.
     assert!(std::ptr::eq(REGISTRY[0], &dagon_events::MACHINES));

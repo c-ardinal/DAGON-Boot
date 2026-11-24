@@ -523,7 +523,6 @@ dependencies = [
  "dagon-host",
  "dagon-port",
  "dagon-sign",
- "dagon-sim",
  "serde_json",
  "toml",
 ]

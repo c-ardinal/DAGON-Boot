@@ -455,21 +455,27 @@ pub fn ports_md(ports: &[Port], lang: Lang<'_>) -> String {
 }
 
 /// The limitations page's list of what this tree lacks of the catalog:
-/// the ports with no trait in the code, then each record's own words.
+/// the ports with no trait in the code and where each is to go, then each
+/// part's own words.
 pub fn gaps_md(ports: &[Port], lang: Lang<'_>) -> String {
-    let lacking: Vec<_> = ports
-        .iter()
-        .filter(|p| p.trust.is_port() && matches!(p.in_tree, InTree::Lacks(_)))
-        .map(|p| format!("`{}`", p.id))
-        .collect();
+    let lacking = ports.iter().filter_map(|p| match p.in_tree {
+        InTree::Planned(at) => Some((p.id, at)),
+        _ => None,
+    });
     let mut s = match lang {
         Lang::Ja(_) => format!(
-            "- 置換用のトレイトがコードに存在しないポート: {}\n",
-            lacking.join("、")
+            "- 置換用のトレイトがコードに存在しないポート（括弧内は予定の配置）: {}\n",
+            lacking
+                .map(|(id, at)| format!("`{id}`（`{at}`）"))
+                .collect::<Vec<_>>()
+                .join("、")
         ),
         Lang::En => format!(
-            "- Ports with no trait in the code: {}\n",
-            lacking.join(", ")
+            "- Ports with no trait in the code (where it is to go): {}\n",
+            lacking
+                .map(|(id, at)| format!("`{id}` (`{at}`)"))
+                .collect::<Vec<_>>()
+                .join(", ")
         ),
     };
     for p in ports {

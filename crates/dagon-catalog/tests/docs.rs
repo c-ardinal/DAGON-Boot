@@ -201,6 +201,51 @@ fn what_the_catalog_says_the_tree_has_is_checked_by_the_build() {
     assert_eq!(catalog, checked);
 }
 
+/// A port the catalog says has no trait yet has none anywhere in the tree:
+/// a trait of its name, added without moving the record to `Has`, fails.
+#[test]
+fn a_planned_port_has_no_trait_in_the_tree() {
+    let planned: Vec<(&str, &str)> = PORTS
+        .iter()
+        .filter_map(|p| match p.in_tree {
+            InTree::Planned(at) => Some((p.id, at)),
+            _ => None,
+        })
+        .collect();
+    assert!(!planned.is_empty());
+    let mut found = Vec::new();
+    for dir in ["crates", "targets"] {
+        for f in rust_files(&root().join(dir)) {
+            let text = std::fs::read_to_string(&f).unwrap_or_default();
+            for line in text.lines() {
+                let mut words = line
+                    .split(|c: char| !(c.is_alphanumeric() || c == '_'))
+                    .filter(|w| !w.is_empty());
+                while let Some(w) = words.next() {
+                    if w != "trait" {
+                        continue;
+                    }
+                    if let Some(&(id, at)) = words
+                        .next()
+                        .and_then(|n| planned.iter().find(|(id, _)| *id == n))
+                    {
+                        found.push(format!(
+                            "{} declares `{id}` (planned at `{at}`)",
+                            f.display()
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    assert!(
+        found.is_empty(),
+        "move these ports to `Has` in dagon_events::PORTS and name the trait in \
+         what_the_catalog_says_the_tree_has_is_checked_by_the_build:\n{}",
+        found.join("\n")
+    );
+}
+
 /// A new or changed description fails until it is translated, and the
 /// table holds nothing the catalogs no longer say.
 #[test]

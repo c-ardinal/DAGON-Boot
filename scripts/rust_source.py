@@ -63,3 +63,57 @@ def code_only(text):
             continue
         out.append(" ")
     return "".join(out)
+
+
+def blanked(text):
+    """(`text` with each comment blanked, `text` with each comment and literal
+    blanked): spaces in their place (line breaks kept), so an offset in
+    either is the same offset in `text`. The literals are the ones
+    `code_only` drops."""
+    keep, code, i, n = list(text), list(text), 0, len(text)
+
+    def blank(chars, start, end):
+        for k in range(start, end):
+            if chars[k] != "\n":
+                chars[k] = " "
+
+    while i < n:
+        c = text[i]
+        if text.startswith("//", i):
+            j = text.find("\n", i)
+            j = n if j < 0 else j
+            blank(keep, i, j)
+            blank(code, i, j)
+        elif text.startswith("/*", i):
+            depth, j = 1, i + 2
+            while j < n and depth:
+                if text.startswith("/*", j):
+                    depth, j = depth + 1, j + 2
+                elif text.startswith("*/", j):
+                    depth, j = depth - 1, j + 2
+                else:
+                    j += 1
+            blank(keep, i, j)
+            blank(code, i, j)
+        elif (m := RAW_STRING.match(text, i)) and (i == 0 or not (text[i - 1].isalnum() or text[i - 1] == "_")):
+            close = '"' + m.group(1)
+            j = text.find(close, m.end())
+            j = n if j < 0 else j + len(close)
+            blank(code, i, j)
+        elif c == '"':
+            j = i + 1
+            while j < n and text[j] != '"':
+                j += 2 if text[j] == "\\" else 1
+            j += 1
+            blank(code, i, j)
+        elif c == "'" and i + 1 < n and text[i + 1] == "\\":
+            j = text.find("'", i + 3)
+            j = n if j < 0 else j + 1
+            blank(code, i, j)
+        elif c == "'" and i + 2 < n and text[i + 2] == "'":
+            j = i + 3
+            blank(code, i, j)
+        else:
+            j = i + 1
+        i = j
+    return "".join(keep), "".join(code)

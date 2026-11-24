@@ -7,8 +7,8 @@
 // Unsafe only in `mem`, the C memory routines of a boot core image.
 #![deny(unsafe_code)]
 
-use dagon_core::boot::{decide, BootConfig, Decision, SlotLayout};
-use dagon_core::log::{Log, LogLayout};
+use dagon_core::boot::{decide, rebuild, BootConfig, Decision, SlotLayout};
+use dagon_core::log::{Log, LogError, LogLayout};
 use dagon_events::{Refused, Sink};
 use dagon_format::SigVerifier;
 use dagon_port::Flash;
@@ -78,7 +78,8 @@ impl BootRun {
     /// Runs the boot up to the decision. Call it right after the watchdog
     /// was armed with `watchdog_ms` (the trial period), before anything
     /// else reads flash. `verifier` checks the signature of the image the
-    /// decision starts, pending or confirmed.
+    /// decision starts, pending or confirmed. A log with no valid face is
+    /// rebuilt from the slots before the decision ([`rebuild`]).
     pub fn start<F: Flash, S: Sink, V: SigVerifier + ?Sized>(
         chain: &mut S,
         flash: &mut F,
@@ -90,10 +91,17 @@ impl BootRun {
     ) -> BootRun {
         let mut m = sequence::Machine::new();
         taken(m.watchdog_armed(chain, watchdog_ms));
-        let loaded = Log::load(flash, log);
+        let read = Log::load(flash, log);
+        let ok = read.is_ok();
+        // Both faces lost: the log is rebuilt from the slots' images
+        // (`ok` still reports the log as it was read).
+        let loaded = match read {
+            Err(LogError::NoValidFace) => rebuild(flash, log, slots, cfg, verifier),
+            other => other,
+        };
         let state = loaded.as_ref().map(|l| l.state).unwrap_or_default();
         let (pending, confirmed) = (state.pending.is_some(), state.confirmed.is_some());
-        taken(m.log_read(chain, loaded.is_ok(), pending, confirmed, state.attempts));
+        taken(m.log_read(chain, ok, pending, confirmed, state.attempts));
         taken(m.before_decision(chain, pending, confirmed, state.attempts));
         let decision = match loaded {
             Ok(mut l) => decide(flash, &mut l, slots, cfg, verifier),

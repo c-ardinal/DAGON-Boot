@@ -333,6 +333,40 @@ impl Log {
         }
     }
 
+    /// A new log in face 0 holding the APP `records`, made only when
+    /// neither face has a valid header (otherwise the log [`Log::load`]
+    /// reads, with nothing erased or written): face 0 is erased,
+    /// the records go in, and the face header (generation 1) is written
+    /// last, so a cut creation leaves no valid face and is simply redone.
+    /// The boot core rebuilds a lost log this way ([`crate::boot::rebuild`]).
+    pub fn create<F: Flash>(
+        flash: &mut F,
+        layout: &LogLayout,
+        records: &[(u8, SlotRef)],
+    ) -> Result<Log, LogError> {
+        match Log::load(flash, layout) {
+            Err(LogError::NoValidFace) => {}
+            other => return other,
+        }
+        let face = layout.faces[0];
+        flash.erase(face, layout.face_len)?;
+        let mut log = Log {
+            state: LogState::default(),
+            core: LogState::default(),
+            update_stay: false,
+            generation: 1,
+            layout: *layout,
+            face: 0,
+            next: Some(face + FACE_HEADER_SIZE as u32),
+            next_seq: 1,
+        };
+        for &(kind, at) in records {
+            log.append_in_place(flash, target::APP, kind, at, reason::NONE)?;
+        }
+        flash.write(face, &FaceHeader { generation: 1 }.to_bytes())?;
+        Log::load(flash, layout)
+    }
+
     /// Appends one APP record and folds it into `state`, compacting into the
     /// other face first when this one cannot take it.
     pub fn append<F: Flash>(

@@ -14,7 +14,10 @@
 //! 4. a STAY within the listen window: update mode, the STAY answered
 //!    first;
 //! 5. otherwise [`START_APP`] (word 0, then word 1): the core resets and
-//!    stage0 runs the app decision once.
+//!    stage0 runs the app decision once. An app log with no valid face is
+//!    rebuilt from the app slots first (`rebuild`, which the caller makes
+//!    over `dagon_core::boot::rebuild`): stage0 never writes, so the core
+//!    is the one that rebuilds it.
 //!
 //! After serving (REBOOT, or update mode's idle exit) the core resets
 //! without a request, so the next start comes back here: the listen window
@@ -24,7 +27,7 @@ use dagon_agent::update_mode::{self, Entry, Port, Stay};
 use dagon_core::bootcore::{
     cell_holds, hand_off, settle_log, Cell, HandOff, Settled, CLEARED, START_APP,
 };
-use dagon_core::log::{Log, LogLayout};
+use dagon_core::log::{Log, LogError, LogLayout};
 use dagon_events::Clock;
 use dagon_port::Flash;
 
@@ -73,14 +76,18 @@ pub struct Window<'a, P, C, D> {
     pub feed: &'a mut D,
 }
 
-/// The boot core's start, steps 1 to 5 of this module.
-pub fn begin<F, R, W, P, C, D>(
+/// The boot core's start, steps 1 to 5 of this module. `rebuild` runs
+/// only before the request for the app, and only when the app log has no
+/// valid face.
+pub fn begin<F, R, W, P, C, D, B>(
     flash: &mut F,
     logs: Logs<'_>,
     mut cell: CellIo<R, W>,
     w: Window<'_, P, C, D>,
+    rebuild: B,
 ) -> Next
 where
+    B: FnOnce(&mut F),
     F: Flash,
     R: Fn() -> [u32; 2],
     W: FnMut(usize, u32),
@@ -115,6 +122,9 @@ where
     }
     if let Some(s) = update_mode::listen(w.port, w.clock, w.window_ms, w.feed_every_ms, w.feed) {
         return Next::Serve(Entry::Stay, Some(s));
+    }
+    if matches!(Log::load(flash, logs.app), Err(LogError::NoValidFace)) {
+        rebuild(flash);
     }
     put(START_APP);
     Next::AskForApp

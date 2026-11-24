@@ -195,6 +195,7 @@ fn i2c_raw_reaches_the_wired_node_on_its_own_port() {
                 dagon_proto::payload::SubCtl {
                     nrst: nrst::PULSE,
                     boot0: boot0::HIGH,
+                    target: None,
                 }
                 .encode(b)
             }),
@@ -203,6 +204,7 @@ fn i2c_raw_reaches_the_wired_node_on_its_own_port() {
     assert_eq!(s, Status::Ok);
     let mut p = [0u8; 32];
     let n = I2cRaw {
+        target: None,
         read_len: 1,
         data: &[cmd::GET, 0xFF],
     }
@@ -239,6 +241,7 @@ fn i2c_raw_reaches_the_rom_loader_at_its_definitions_address() {
                 dagon_proto::payload::SubCtl {
                     nrst: nrst::PULSE,
                     boot0: boot0::HIGH,
+                    target: None,
                 }
                 .encode(b)
             }),
@@ -253,6 +256,7 @@ fn i2c_raw_reaches_the_rom_loader_at_its_definitions_address() {
     );
     let mut p = [0u8; 32];
     let n = I2cRaw {
+        target: None,
         read_len: 1,
         data: &[cmd::GET, 0xFF],
     }
@@ -278,6 +282,7 @@ fn i2c_raw_without_a_recovery_link_is_unsupported() {
                 dagon_proto::payload::SubCtl {
                     nrst: nrst::PULSE,
                     boot0: boot0::HIGH,
+                    target: None,
                 }
                 .encode(b)
             }),
@@ -286,6 +291,7 @@ fn i2c_raw_without_a_recovery_link_is_unsupported() {
     assert_eq!(s, Status::Ok);
     let mut p = [0u8; 32];
     let n = I2cRaw {
+        target: None,
         read_len: 1,
         data: &[cmd::GET, 0xFF],
     }

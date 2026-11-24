@@ -2,7 +2,9 @@
 //! the worker of the link they name, SUBCTL to the recovery lines (owned
 //! here); everything else, SHOW included, is this node's own agent (owned
 //! here). A link the board does not wire answers E_UNSUPPORTED; a node
-//! without recovery lines does not serve SUBCTL and I2C_RAW at all. CAPS
+//! without recovery targets does not serve SUBCTL and I2C_RAW at all. SUBCTL
+//! and I2C_RAW name their target by link and ROM loader address
+//! ([`cmd::recovery_target`]). CAPS
 //! about RELAY is answered here too, with the tunnel of the link asked
 //! about; CAPS about any other command is the agent's.
 //!
@@ -14,15 +16,17 @@
 use dagon_port::{Link, Nrst, SubControl};
 use dagon_proto::handler::{self, Handler};
 use dagon_proto::payload::{
-    self, boot0, nrst, CapsReq, CapsResp, CmdSet, I2cRaw, Relay as RelayReq, Req as Asked, SubCtl,
+    self, boot0, nrst, CapsReq, CapsResp, CmdSet, I2cRaw, Relay as RelayReq, Req as Asked,
+    RomTarget, SubCtl,
 };
 use dagon_proto::{flags, Cmd, Frame, FrameError, Status, HEADER_LEN, MAX_FRAME};
 
 use crate::port::{Op, Port, Req};
 use crate::{cmd, task, Config, LinkRoute, Liveness, OwnAgent, RelayClock};
 
-/// The reset and boot-mode lines of a node, and the link and address its
-/// ROM boot loader answers I2C_RAW on.
+/// A node the relay recovers through its ROM boot loader: its reset and
+/// boot-mode lines, and the link and address the loader answers I2C_RAW
+/// on. A relay has one per such node, on any of its I2C links.
 pub struct Recovery<C> {
     pub lines: C,
     /// Id of that link (one of the node's [`RelayLinkDef`](dagon_port::RelayLinkDef)s).
@@ -39,7 +43,11 @@ pub struct Relay<'a, A, C, W, T> {
     /// Every link the node relays over, one entry each (the MCU package's
     /// list), with the port of the link's worker where the board wires it.
     pub links: &'a [LinkRoute<'a>],
-    pub recovery: Option<Recovery<C>>,
+    /// The nodes it recovers, told apart by link and loader address
+    /// ([`cmd::recovery_target`]; the first answers SUBCTL and I2C_RAW
+    /// that name none). Empty: SUBCTL and I2C_RAW are not served. At most
+    /// [`MAX_RECOVERY`] are used.
+    pub recovery: &'a mut [Recovery<C>],
     pub watch: W,
     pub clock: T,
     pub config: Config,
@@ -58,7 +66,10 @@ const TABLE: [Handler<(), ()>; 3] = [
 /// about anything else (the agent's HELLO names it).
 const CAPS: Handler<(), ()> = Handler::deferred(Cmd::Caps);
 
-/// The commands of its own a relay serves: RELAY, and with recovery lines
+/// The most recovery targets a relay tells apart (one bit each of BOOT0).
+pub const MAX_RECOVERY: usize = 32;
+
+/// The commands of its own a relay serves: RELAY, and with recovery targets
 /// SUBCTL and I2C_RAW. The node's HELLO names them with its agent's.
 pub const fn cmds(recovery: bool) -> CmdSet {
     if recovery {
@@ -72,8 +83,9 @@ struct Pc<'a, A, C, W, T> {
     r: Relay<'a, A, C, W, T>,
     resp: [u8; MAX_FRAME],
     next_id: u32,
-    /// BOOT0 as last set successfully (I2C_RAW only while it is high).
-    boot0_high: bool,
+    /// BOOT0 of each recovery target (bit i: `recovery[i]`) as last set
+    /// successfully (I2C_RAW only while it is high).
+    boot0_high: u32,
 }
 
 /// Serves the PC over the uplink `up`, whatever its kind, for good. A
@@ -91,9 +103,9 @@ where
         r: relay,
         resp: [0; MAX_FRAME],
         next_id: 1,
-        boot0_high: false,
+        boot0_high: 0,
     };
-    pc.r.agent.also_serves(cmds(pc.r.recovery.is_some()));
+    pc.r.agent.also_serves(cmds(!pc.r.recovery.is_empty()));
     let max = up.max_payload();
     let (via, addr) = (up.kind().code(), up.addr());
     let mut link_up = false;
@@ -158,7 +170,7 @@ where
             Err(_) => return (0, None),
         };
         let is_request = f.flags & (flags::RESP | flags::EVENT) == 0;
-        let served = cmds(self.r.recovery.is_some());
+        let served = cmds(!self.r.recovery.is_empty());
         let row = handler::find(&TABLE, f.cmd)
             .filter(|h| served.has(h.cmd as u8))
             .or((f.cmd == Cmd::Caps as u8).then_some(&CAPS));
@@ -285,38 +297,55 @@ where
         self.via(port, req, r.inner, max).await
     }
 
-    /// SUBCTL: BOOT0 first, then NRST (a pulse samples the new BOOT0).
+    /// The recovery target a SUBCTL or I2C_RAW names, by index.
+    fn target(&self, asked: Option<RomTarget>) -> Result<usize, Status> {
+        let known = self.r.recovery.iter().take(MAX_RECOVERY);
+        cmd::recovery_target(known.map(|r| (r.link, r.rom_addr)), asked)
+    }
+
+    /// SUBCTL: BOOT0 first, then NRST (a pulse samples the new BOOT0), of
+    /// the target it names.
     async fn lines(&mut self, s: SubCtl) -> Status {
         let line = match s.nrst {
             nrst::RELEASE => Nrst::Release,
             nrst::LOW => Nrst::Low,
             _ => Nrst::Pulse,
         };
-        let Some(rec) = self.r.recovery.as_mut() else {
-            return Status::Unsupported;
+        let i = match self.target(s.target) {
+            Ok(i) => i,
+            Err(e) => return e,
         };
         let high = s.boot0 == boot0::HIGH;
-        match rec.lines.set_lines(line, high).await {
+        match self.r.recovery[i].lines.set_lines(line, high).await {
             Ok(()) => {
-                self.boot0_high = high;
+                let bit = 1 << i;
+                self.boot0_high = if high {
+                    self.boot0_high | bit
+                } else {
+                    self.boot0_high & !bit
+                };
                 Status::Ok
             }
             Err(_) => Status::Timeout,
         }
     }
 
-    /// Raw transactions to the ROM loader, only while BOOT0 is high, each
-    /// within the recovery link's buffer.
+    /// Raw transactions to the ROM loader of the target it names, only
+    /// while that target's BOOT0 is high, each within the buffer of the
+    /// target's link.
     async fn i2c_raw(&mut self, raw: I2cRaw<'_>, max: usize) -> (Status, usize) {
-        let Some(rec) = self.r.recovery.as_ref() else {
-            return (Status::Unsupported, 0);
+        let i = match self.target(raw.target) {
+            Ok(i) => i,
+            Err(e) => return (e, 0),
         };
+        let rec = &self.r.recovery[i];
         let addr = rec.rom_addr;
         let route = self.route(rec.link);
         let Some((link, port)) = route.and_then(|k| Some((k.link, k.port?))) else {
             return (Status::Unsupported, 0);
         };
-        if let Err(e) = cmd::i2c_raw(&raw, self.boot0_high, &link) {
+        let high = self.boot0_high & (1 << i) != 0;
+        if let Err(e) = cmd::i2c_raw(&raw, high, &link) {
             return (e, 0);
         }
         let timeout = self.r.config.raw_timeout_ms;

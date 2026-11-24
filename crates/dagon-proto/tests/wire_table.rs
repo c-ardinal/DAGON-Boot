@@ -495,6 +495,7 @@ fn typed(cmd: Cmd, resp: bool) -> Typed {
             let m = SubCtl {
                 nrst: nrst::PULSE,
                 boot0: boot0::HIGH,
+                target: None,
             };
             (
                 enc(|b| m.encode(b).unwrap()),
@@ -504,6 +505,7 @@ fn typed(cmd: Cmd, resp: bool) -> Typed {
         (Cmd::I2cRaw, false) => {
             let m = I2cRaw {
                 read_len: 3,
+                target: None,
                 data: &[0, 0xFF],
             };
             (

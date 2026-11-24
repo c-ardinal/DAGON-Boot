@@ -28,7 +28,7 @@ mod port;
 
 use dagon_port::RelayLinkDef;
 
-pub use pc::{cmds, serve, Recovery, Relay};
+pub use pc::{cmds, serve, Recovery, Relay, MAX_RECOVERY};
 pub use port::{fits_link, run_link, LinkRoute, Port};
 
 /// The relay's settings. The defaults are the relay's own values; an MCU

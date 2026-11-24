@@ -797,7 +797,13 @@ impl<T: Transport, C: HostClock> Host<T, C> {
         };
         self.report(on_event, node, phase::ROM, 0, v);
         let stats = {
-            let mut link = crate::rom::HubRom::new(self, on_event, node, map.addr, v);
+            // The relay tells its recovery targets apart by the link the
+            // node is on: the one RELAY reaches it over.
+            let via = match to {
+                Target::Linked { link, .. } => Some(link),
+                _ => None,
+            };
+            let mut link = crate::rom::HubRom::new(self, on_event, node, map.addr, via, v);
             dagon_romlink::flash(&mut link, &plan).await
         };
         let stats = match stats {

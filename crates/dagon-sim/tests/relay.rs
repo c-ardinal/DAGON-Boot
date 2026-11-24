@@ -146,6 +146,7 @@ impl Pc {
     fn rom(&mut self, relay: &mut SimRelay, write: &[u8], read_len: u16) -> Vec<u8> {
         let mut p = vec![0u8; 16 + write.len()];
         let n = I2cRaw {
+            target: None,
             read_len,
             data: write,
         }
@@ -160,7 +161,14 @@ impl Pc {
         let (s, _) = self.ask(
             relay,
             Cmd::SubCtl,
-            &wire(|b| dagon_proto::payload::SubCtl { nrst, boot0 }.encode(b)),
+            &wire(|b| {
+                dagon_proto::payload::SubCtl {
+                    nrst,
+                    boot0,
+                    target: None,
+                }
+                .encode(b)
+            }),
         );
         assert_eq!(s, Status::Ok);
     }
@@ -310,6 +318,7 @@ fn the_relaying_node_says_what_it_serves_and_reads_before_it_acts() {
     let raw = |read_len: u16| {
         wire(|b| {
             I2cRaw {
+                target: None,
                 read_len,
                 data: &[],
             }
@@ -455,6 +464,7 @@ fn rom_get_and_get_id() {
     let mut pc = Pc { seq: 0 };
     let mut p = [0u8; 32];
     let n = I2cRaw {
+        target: None,
         read_len: 1,
         data: &[cmd::GET, 0xFF],
     }
@@ -497,7 +507,13 @@ fn i2c_raw_above_the_recovery_links_buffer_is_refused() {
     let limit = dagon_proto::frame_len(max_payload::I2C);
     let raw = |read_len: u16, data: &[u8]| {
         let mut p = vec![0u8; 16 + data.len()];
-        let n = I2cRaw { read_len, data }.encode(&mut p).unwrap();
+        let n = I2cRaw {
+            read_len,
+            target: None,
+            data,
+        }
+        .encode(&mut p)
+        .unwrap();
         p.truncate(n);
         p
     };

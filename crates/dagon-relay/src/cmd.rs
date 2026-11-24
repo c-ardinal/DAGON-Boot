@@ -2,7 +2,7 @@
 //! relay (`dagon-sim`) so tools tested against it behave the same on a
 //! node.
 
-use dagon_proto::payload::{I2cRaw, Relay};
+use dagon_proto::payload::{I2cRaw, Relay, RomTarget};
 use dagon_proto::Status;
 
 use crate::RelayLinkDef;
@@ -36,4 +36,25 @@ pub fn i2c_raw(raw: &I2cRaw<'_>, boot0_high: bool, link: &RelayLinkDef) -> Resul
         return Err(Status::Arg);
     }
     Ok(())
+}
+
+/// The recovery target a SUBCTL or I2C_RAW names among a relay's
+/// `targets` (link id, ROM loader address), by index: the first one with
+/// that link and address, or the first of all when it names none.
+/// E_UNSUPPORTED without targets, E_ARG for a link and address no target
+/// has.
+pub fn recovery_target(
+    mut targets: impl Iterator<Item = (u8, u8)>,
+    asked: Option<RomTarget>,
+) -> Result<usize, Status> {
+    let Some(first) = targets.next() else {
+        return Err(Status::Unsupported);
+    };
+    let Some(t) = asked else {
+        return Ok(0);
+    };
+    core::iter::once(first)
+        .chain(targets)
+        .position(|(link, rom)| (link, rom) == (t.link, t.rom_addr))
+        .ok_or(Status::Arg)
 }

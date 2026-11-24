@@ -17,7 +17,7 @@ use dagon_port::{BusError, LinkKind, Nrst, RelayLinkDef};
 use dagon_proto::handler::{self, Handler};
 use dagon_proto::mailbox::{State, STATE_LEN};
 use dagon_proto::payload::{
-    self, boot0, nrst, CapsReq, CapsResp, CmdSet, I2cRaw, Relay, Req, SubCtl,
+    self, boot0, nrst, CapsReq, CapsResp, CmdSet, I2cRaw, Relay, Req, RomTarget, SubCtl,
 };
 use dagon_proto::{find_sof, flags, frame_len, max_payload, Cmd, Frame, FrameError, Status};
 use dagon_topology::defs::{McuDef, PortDef};
@@ -577,7 +577,28 @@ impl SimRelay {
         }
     }
 
+    /// Whether a SUBCTL or I2C_RAW names the one recovery target here, the
+    /// wired node (`dagon_relay::cmd::recovery_target` over one target):
+    /// naming none is naming it; another link or loader address is E_ARG.
+    fn names_the_wired(&self, asked: Option<RomTarget>) -> Result<(), Status> {
+        let Some(t) = asked else {
+            return Ok(());
+        };
+        let link = self.bus.sub.and_then(|(port, _)| {
+            self.links
+                .iter()
+                .find(|l| l.port == port && l.kind == LinkKind::I2c)
+        });
+        match (link, self.rom_addr) {
+            (Some(l), Some(rom)) if (l.id, rom) == (t.link, t.rom_addr) => Ok(()),
+            _ => Err(Status::Arg),
+        }
+    }
+
     fn subctl(&mut self, s: SubCtl) -> Answer {
+        if let Err(e) = self.names_the_wired(s.target) {
+            return (e, Vec::new());
+        }
         let line = match s.nrst {
             nrst::LOW => Nrst::Low,
             nrst::RELEASE => Nrst::Release,
@@ -594,6 +615,9 @@ impl SimRelay {
     /// port's relay link (`RelayLinkDef::buffer_len`, the relay's limit
     /// too): E_ARG for longer data or reads.
     fn i2c_raw(&mut self, raw: &I2cRaw<'_>) -> Answer {
+        if let Err(e) = self.names_the_wired(raw.target) {
+            return (e, Vec::new());
+        }
         if !self.bus.sub_mut().is_some_and(|n| n.boot0()) {
             return (Status::State, Vec::new());
         }

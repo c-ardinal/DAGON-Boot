@@ -387,6 +387,7 @@ fn hub_command_vectors() {
     let sub = SubCtl {
         nrst: nrst::PULSE,
         boot0: boot0::HIGH,
+        target: None,
     };
     let file = golden(
         "frame_subctl.bin",
@@ -398,6 +399,7 @@ fn hub_command_vectors() {
 
     let raw = I2cRaw {
         read_len: 1,
+        target: None,
         data: &[0x00, 0xFF],
     };
     let file = golden(
@@ -407,6 +409,40 @@ fn hub_command_vectors() {
     assert_eq!(I2cRaw::parse(decode(&file).payload).unwrap(), raw);
     // must field 1 read_len 1, the delimiter, then the bytes to write
     expect_at(&file, &[(5, &[0x61, 7, 0, 0x03, 2, 1, 0, 0, 0x00, 0xFF])]);
+
+    // Naming the recovery target: the link (I2C0, id 1) and the loader's
+    // address. Additive: the two files above, which name none, are unchanged.
+    let seg = Some(RomTarget {
+        link: 1,
+        rom_addr: 0x39,
+    });
+    let sub = SubCtl { target: seg, ..sub };
+    let file = golden(
+        "frame_subctl_target.bin",
+        &frame(0, 0x17, Cmd::SubCtl, |b| sub.encode(b).unwrap()),
+    );
+    assert_eq!(SubCtl::parse(decode(&file).payload).unwrap(), sub);
+    // must fields 3 link 1, 4 rom_addr 0x39 after nrst and boot0
+    expect_at(
+        &file,
+        &[(5, &[0x60, 12, 0]), (14, &[0x07, 1, 1, 0x09, 1, 0x39])],
+    );
+    let raw = I2cRaw { target: seg, ..raw };
+    let file = golden(
+        "frame_i2c_raw_target.bin",
+        &frame(0, 0x18, Cmd::I2cRaw, |b| raw.encode(b).unwrap()),
+    );
+    assert_eq!(I2cRaw::parse(decode(&file).payload).unwrap(), raw);
+    // read_len, must fields 2 link and 3 rom_addr, the delimiter, the bytes
+    expect_at(
+        &file,
+        &[(
+            5,
+            &[
+                0x61, 13, 0, 0x03, 2, 1, 0, 0x05, 1, 1, 0x07, 1, 0x39, 0, 0x00, 0xFF,
+            ],
+        )],
+    );
 }
 
 #[test]

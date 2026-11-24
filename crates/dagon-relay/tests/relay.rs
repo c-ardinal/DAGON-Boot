@@ -22,7 +22,8 @@ use dagon_port::{
 };
 use dagon_port::{Addressing, RelayLinkDef};
 use dagon_proto::payload::{
-    boot0, nrst, CapsReq, CapsResp, CmdSet, HelloResp, I2cRaw, Relay as RelayReq, Show, SubCtl,
+    boot0, nrst, CapsReq, CapsResp, CmdSet, HelloResp, I2cRaw, Relay as RelayReq, RomTarget, Show,
+    SubCtl,
 };
 use dagon_proto::{finish, frame_len, max_payload, plant, split_status, Cmd, Frame, Status};
 use dagon_relay::{
@@ -427,11 +428,16 @@ impl Pc<'_> {
     }
 
     async fn lines(&self, boot0_high: bool, line: u8) -> Status {
+        self.lines_of(None, boot0_high, line).await
+    }
+
+    async fn lines_of(&self, target: Option<RomTarget>, boot0_high: bool, line: u8) -> Status {
         let s = SubCtl {
             nrst: line,
             boot0: if boot0_high { boot0::HIGH } else { boot0::LOW },
+            target,
         };
-        let mut p = [0u8; 8];
+        let mut p = [0u8; 16];
         let n = s.encode(&mut p).unwrap();
         self.ask(Cmd::SubCtl, &p[..n]).await.0
     }
@@ -442,7 +448,20 @@ impl Pc<'_> {
     }
 
     async fn raw(&self, read_len: u16, data: &[u8]) -> (Status, Vec<u8>) {
-        let raw = I2cRaw { read_len, data };
+        self.raw_of(None, read_len, data).await
+    }
+
+    async fn raw_of(
+        &self,
+        target: Option<RomTarget>,
+        read_len: u16,
+        data: &[u8],
+    ) -> (Status, Vec<u8>) {
+        let raw = I2cRaw {
+            read_len,
+            target,
+            data,
+        };
         let mut p = vec![0u8; I2cRaw::OVERHEAD_MAX + data.len()];
         let n = raw.encode(&mut p).unwrap();
         self.ask(Cmd::I2cRaw, &p[..n]).await
@@ -520,12 +539,12 @@ fn the_relay_serves_the_pc_over_its_links() {
     let relay = Relay {
         agent: own,
         links: &links,
-        recovery: Some(Recovery {
+        recovery: &mut [Recovery {
             lines: SimLines(&bus),
             link: BUS,
             // The wired node's MCU definition gives its loader's address.
             rom_addr: bus.borrow_mut().sub_mut().and_then(|n| n.rom_addr).unwrap(),
-        }),
+        }],
         watch: NoWatchdog,
         clock: clock.clone(),
         config: Config::default(),
@@ -662,7 +681,7 @@ fn a_relay_without_a_recovery_answers_i2c_raw_unsupported() {
     let relay: Relay<'_, _, SimLines<'_>, _, _> = Relay {
         agent: own,
         links: &links,
-        recovery: None,
+        recovery: &mut [],
         watch: NoWatchdog,
         clock: clock.clone(),
         config: Config::default(),
@@ -749,11 +768,11 @@ fn the_relay_says_what_it_serves_and_reads_before_it_acts() {
     let relay = Relay {
         agent: own,
         links: &links,
-        recovery: Some(Recovery {
+        recovery: &mut [Recovery {
             lines: Counted(&reached),
             link: BUS,
             rom_addr: 0x38,
-        }),
+        }],
         watch: NoWatchdog,
         clock: clock.clone(),
         config: Config::default(),
@@ -898,6 +917,196 @@ fn the_relay_says_what_it_serves_and_reads_before_it_acts() {
     run(&clock, &bus, workers, scenario.as_mut());
 }
 
+/// One of two I2C buses as its link worker sees it: every raw
+/// transaction is noted with the bus and address, and a read answers the
+/// bus's link id.
+struct RomBus<'a> {
+    id: u8,
+    seen: &'a RefCell<Vec<(u8, u8, Vec<u8>)>>,
+}
+
+impl NodeLink for RomBus<'_> {
+    fn link_id(&self) -> u8 {
+        self.id
+    }
+    fn max_payload(&self) -> usize {
+        max_payload::I2C
+    }
+    fn hello_timeout_ms(&self) -> u16 {
+        50
+    }
+    async fn exchange(&mut self, _: u8, _: &[u8], _: u16, _: &mut [u8]) -> Result<usize, Status> {
+        Err(Status::Timeout)
+    }
+    async fn raw(&mut self, addr: u8, write: &[u8], read: &mut [u8]) -> Result<(), Status> {
+        self.seen.borrow_mut().push((self.id, addr, write.to_vec()));
+        read.fill(self.id);
+        Ok(())
+    }
+}
+
+/// The reset and boot-mode lines of one recovery target, noting each
+/// setting with the target's name.
+struct NamedLines<'a> {
+    name: u8,
+    set: &'a RefCell<Vec<(u8, bool)>>,
+}
+
+impl SubControl for NamedLines<'_> {
+    async fn set_lines(&mut self, _: Nrst, boot0_high: bool) -> Result<(), BusError> {
+        self.set.borrow_mut().push((self.name, boot0_high));
+        Ok(())
+    }
+}
+
+/// A relay with a recovery target on each of two I2C buses: SUBCTL and
+/// I2C_RAW name a target by its link and ROM loader address, each target
+/// keeps its own BOOT0, a transaction goes out on its target's bus at its
+/// loader's address, and a request naming none goes to the first target.
+#[test]
+fn a_relay_recovers_a_node_on_each_of_two_buses() {
+    const BUS2: u8 = 0x14;
+    let two: [RelayLinkDef; 2] = [
+        LINKS[0],
+        RelayLinkDef {
+            id: BUS2,
+            port: 3,
+            ..LINKS[0]
+        },
+    ];
+    let (bus, _) = sample_bus();
+    let clock = VirtualClock::default();
+    let first: Port<[u8; frame_len(max_payload::I2C)]> = Port::new(&two[0]);
+    let second: Port<[u8; frame_len(max_payload::I2C)]> = Port::new(&two[1]);
+    let links = [
+        LinkRoute {
+            link: two[0],
+            port: Some(&first),
+        },
+        LinkRoute {
+            link: two[1],
+            port: Some(&second),
+        },
+    ];
+    // Two MCUs whose loaders answer at different addresses, and one more
+    // node of the first MCU on the second bus.
+    let a = RomTarget {
+        link: BUS,
+        rom_addr: 0x39,
+    };
+    let b = RomTarget {
+        link: BUS2,
+        rom_addr: 0x56,
+    };
+    let c = RomTarget {
+        link: BUS2,
+        rom_addr: 0x39,
+    };
+    let set = RefCell::new(Vec::new());
+    let seen = RefCell::new(Vec::new());
+    let target = |name: u8, t: RomTarget| Recovery {
+        lines: NamedLines { name, set: &set },
+        link: t.link,
+        rom_addr: t.rom_addr,
+    };
+    let (requests, replies) = (Frames::new(), Frames::new());
+    let (own, _app) = agent();
+    let relay = Relay {
+        agent: own,
+        links: &links,
+        recovery: &mut [target(0, a), target(1, b), target(2, c)],
+        watch: NoWatchdog,
+        clock: clock.clone(),
+        config: Config::default(),
+    };
+    let up = ScriptedPc {
+        requests: &requests,
+        replies: &replies,
+        frame: Vec::new(),
+        max: max_payload::USB,
+    };
+    let pc = Pc {
+        requests: &requests,
+        replies: &replies,
+        seq: Cell::new(0),
+    };
+    let scenario = async {
+        // BOOT0 of the second target alone goes high.
+        assert_eq!(pc.lines_of(Some(b), true, nrst::PULSE).await, Status::Ok);
+        assert_eq!(*set.borrow(), [(1, true)]);
+        assert_eq!(pc.raw_of(Some(a), 1, &[0x00]).await.0, Status::State);
+        assert_eq!(pc.raw_of(Some(c), 1, &[0x00]).await.0, Status::State);
+        assert_eq!(pc.raw(1, &[0x00]).await.0, Status::State, "the first is a");
+        assert!(seen.borrow().is_empty());
+
+        // Its loader answers on the second bus at its own address.
+        let (s, read) = pc.raw_of(Some(b), 2, &[0x00, 0xFF]).await;
+        assert_eq!((s, read), (Status::Ok, vec![BUS2, BUS2]));
+        assert_eq!(*seen.borrow(), [(BUS2, 0x56, vec![0x00, 0xFF])]);
+
+        // The first target on the first bus, asked by name and by default.
+        assert_eq!(pc.lines_of(Some(a), true, nrst::PULSE).await, Status::Ok);
+        assert_eq!(
+            pc.raw_of(Some(a), 1, &[0x11]).await,
+            (Status::Ok, vec![BUS])
+        );
+        assert_eq!(pc.raw(1, &[0x22]).await, (Status::Ok, vec![BUS]));
+        // The same loader address on the other bus is the third target,
+        // whose BOOT0 is still low.
+        assert_eq!(pc.raw_of(Some(c), 1, &[0x33]).await.0, Status::State);
+        assert_eq!(seen.borrow().len(), 3);
+        assert_eq!(
+            seen.borrow()[1..],
+            [(BUS, 0x39, vec![0x11]), (BUS, 0x39, vec![0x22])]
+        );
+
+        // A link and address no target has: E_ARG, lines and buses untouched.
+        let none = RomTarget {
+            link: BUS,
+            rom_addr: 0x56,
+        };
+        assert_eq!(
+            pc.lines_of(Some(none), true, nrst::PULSE).await,
+            Status::Arg
+        );
+        assert_eq!(pc.raw_of(Some(none), 1, &[0x00]).await.0, Status::Arg);
+        assert_eq!(set.borrow().len(), 2);
+        assert_eq!(seen.borrow().len(), 3);
+
+        // BOOT0 of the second target low again: only its I2C_RAW stops.
+        assert_eq!(pc.lines_of(Some(b), false, nrst::PULSE).await, Status::Ok);
+        assert_eq!(pc.raw_of(Some(b), 1, &[0x00]).await.0, Status::State);
+        assert_eq!(pc.raw_of(Some(a), 1, &[0x00]).await.0, Status::Ok);
+        assert_eq!(*set.borrow(), [(1, true), (0, true), (1, false)]);
+    };
+    let serving = async move {
+        serve(relay, up).await;
+    };
+    let on_first = async {
+        let mut l = RomBus {
+            id: BUS,
+            seen: &seen,
+        };
+        run_link(&mut l, &first, NoWatchdog, task::link(0)).await;
+    };
+    let on_second = async {
+        let mut l = RomBus {
+            id: BUS2,
+            seen: &seen,
+        };
+        run_link(&mut l, &second, NoWatchdog, task::link(1)).await;
+    };
+    let (mut serving, mut on_first, mut on_second, mut scenario) = (
+        std::pin::pin!(serving),
+        std::pin::pin!(on_first),
+        std::pin::pin!(on_second),
+        std::pin::pin!(scenario),
+    );
+    let workers: Vec<Pin<&mut dyn Future<Output = ()>>> =
+        vec![serving.as_mut(), on_first.as_mut(), on_second.as_mut()];
+    run(&clock, &bus, workers, scenario.as_mut());
+}
+
 /// A relay without recovery lines does not say it serves SUBCTL and
 /// I2C_RAW.
 #[test]
@@ -932,7 +1141,7 @@ fn the_relay_refuses_what_it_cannot_carry_before_forwarding() {
     let relay: Relay<'_, _, SimLines<'_>, _, _> = Relay {
         agent: own,
         links: &links,
-        recovery: None,
+        recovery: &mut [],
         watch: NoWatchdog,
         clock: clock.clone(),
         config: Config::default(),

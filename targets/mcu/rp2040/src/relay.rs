@@ -202,20 +202,25 @@ pub fn start<B: BoardDef, const N: usize>(
         link: RELAY_LINKS[i],
         port: ports[i],
     }));
+    // The ROM loader of the node on the recovery lines answers on the I2C
+    // link, at the address its MCU definition gives (generated); without
+    // one there is no recovery target.
+    static RECOVERY: StaticCell<Option<Recovery<SubLines<'static>>>> = StaticCell::new();
+    let recovery =
+        RECOVERY.init(
+            links
+                .lines
+                .zip(RECOVERY_ROM_ADDR)
+                .map(|(lines, rom_addr)| Recovery {
+                    lines,
+                    link: RELAY_LINK_I2C0,
+                    rom_addr,
+                }),
+        );
     let relay = RpRelay {
         agent: RpAgent(agent),
         links: routes,
-        // The ROM loader of the node on the recovery lines answers on the
-        // I2C link, at the address its MCU definition gives (generated);
-        // without one there is no recovery.
-        recovery: links
-            .lines
-            .zip(RECOVERY_ROM_ADDR)
-            .map(|(lines, rom_addr)| Recovery {
-                lines,
-                link: RELAY_LINK_I2C0,
-                rom_addr,
-            }),
+        recovery: recovery.as_mut_slice(),
         watch,
         clock: RpClock,
         config: setup.relay,

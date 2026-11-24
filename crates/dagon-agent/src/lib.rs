@@ -262,6 +262,8 @@ dagon_events::state_machine! {
             hello(): Ready => Ready emits Hello = 0x31 {} observe(live, host);
             /// Status answered.
             status_asked(): Ready => Ready emits StatusAsked = 0x32 {} observe(live, host);
+            /// VERSION answered.
+            version_asked(): Ready => Ready emits VersionAsked = 0x3E {} observe(live, host);
             /// A write was refused, by a DAGON guard or by an extension's
             /// `accept_update`.
             update_refused(status: u8, by_extension: bool): Ready => Ready

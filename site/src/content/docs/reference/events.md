@@ -156,6 +156,7 @@ stage0のあるself-bootのマイコンの、ブートローダのスロット1�
 | `app.store_opened` | 0x30 | `store_opened`: Ready → Ready | `active: u8` (1 B), `trial: bool` (1 B), `version: Version` (4 B), `attempts: u8` (1 B), `last_reason: u8` (1 B) | live |  | 起動時にスロットのストアを読込しました。 |
 | `app.hello` | 0x31 | `hello`: Ready → Ready | – | live, host |  | 識別情報に応答しました。 |
 | `app.status_asked` | 0x32 | `status_asked`: Ready → Ready | – | live, host |  | ステータスに応答しました。 |
+| `app.version_asked` | 0x3e | `version_asked`: Ready → Ready | – | live, host |  | VERSIONに応答しました。 |
 | `app.update_refused` | 0x33 | `update_refused`: Ready → Ready | `status: u8` (1 B), `by_extension: bool` (1 B) | live, host |  | 書込の申し出を、DAGONのガードか拡張の`accept_update`が拒否しました。 |
 | `app.header_verified` | 0x34 | `header_verified`: Ready → Ready | `slot: u8` (1 B), `version: Version` (4 B) | live, host |  | ヘッダの署名、キー、互換性を検証しました。 |
 | `app.header_rejected` | 0x35 | `header_rejected`: Ready → Ready | `status: u8` (1 B) | live, host |  | ヘッダを拒否しました（署名、キー、互換性、サイズ）。 |

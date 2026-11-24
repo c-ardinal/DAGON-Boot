@@ -27,6 +27,7 @@
 "SHA-256" = "SHA-256"
 "Stage0 gave the pending core up (its starts ran out, or its image failed the check) and the core in `to` recorded it. `version` names the core given up, as in `image`." = "stage0が待機中のコアを断念し（起動回数の上限に到達したか、イメージが検査に失敗しました）、`to`のコアがその結果を記録しました。`version`は`image`と同様、断念したコアの版です。"
 "Status answered." = "ステータスに応答しました。"
+"VERSION answered." = "VERSIONに応答しました。"
 "The board's bring-up ran. `board`: the board definition's id as a name digest (`NameDigest`); a host resolves it from the board definitions it knows." = "ボードの起動処理を実行しました。`board`: ボード定義のidの名称ダイジェスト（`NameDigest`）。ホストは既知のボード定義から解決します。"
 "The body or its header did not verify, or could not be stored." = "本体かそのヘッダの検証に失敗したか、保存に失敗しました。"
 "The body read back matches its digest." = "再読込した本体がダイジェストと一致しました。"

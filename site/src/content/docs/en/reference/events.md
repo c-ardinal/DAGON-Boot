@@ -160,6 +160,7 @@ States: `Ready` (initial).
 | `app.store_opened` | 0x30 | `store_opened`: Ready → Ready | `active: u8` (1 B), `trial: bool` (1 B), `version: Version` (4 B), `attempts: u8` (1 B), `last_reason: u8` (1 B) | live |  | The slot store was read at start. |
 | `app.hello` | 0x31 | `hello`: Ready → Ready | – | live, host |  | Identity answered. |
 | `app.status_asked` | 0x32 | `status_asked`: Ready → Ready | – | live, host |  | Status answered. |
+| `app.version_asked` | 0x3e | `version_asked`: Ready → Ready | – | live, host |  | VERSION answered. |
 | `app.update_refused` | 0x33 | `update_refused`: Ready → Ready | `status: u8` (1 B), `by_extension: bool` (1 B) | live, host |  | A write was refused, by a DAGON guard or by an extension's `accept_update`. |
 | `app.header_verified` | 0x34 | `header_verified`: Ready → Ready | `slot: u8` (1 B), `version: Version` (4 B) | live, host |  | The header's signature, key and compatibility checked out. |
 | `app.header_rejected` | 0x35 | `header_rejected`: Ready → Ready | `status: u8` (1 B) | live, host |  | The header was refused (signature, key, compatibility, size). |

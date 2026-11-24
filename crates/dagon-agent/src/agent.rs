@@ -571,6 +571,7 @@ impl<S: SlotStore, X: AppChain, V: SigVerifier, W: Writer, const L: usize> Agent
             core_slots: core,
             app_slots: Some(VersionSlots::of(&self.images.status())),
         };
+        noted(self.requests.version_asked(&mut self.chain));
         Ok((resp.encode(self.body()).expect("fits"), None))
     }
 

@@ -233,7 +233,9 @@ trial_attempts = 3
 # The lockup fuse's watchdog-reset flag: RCC_CSR IWDGRSTF/WWDGRSTF (RM0368,
 # RCC clock control & status register), set by a watchdog reset, kept over
 # every reset but a power reset, cleared by writing RMVF. Unverified
-# against RM0368 itself.
+# against RM0368 itself. The app clears them at its start, after reading
+# the reset cause STATUS reports (src/reset.rs); the boot stages run
+# before it and see them as the reset left them.
 flag = { unverified = "register" }
 
 # Single-bank flash: an erase or program stalls instruction fetch (nothing

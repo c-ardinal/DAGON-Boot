@@ -166,13 +166,17 @@ pub mod status {
     pub const ATTEMPTS: FieldSpec = FieldSpec::opt(4, 1, 1);
     pub const LAST_REASON: FieldSpec = FieldSpec::opt(5, 1, 1);
     pub const LOG_GENERATION: FieldSpec = FieldSpec::opt(6, 4, 4);
-    pub const RESP: [FieldSpec; 6] = [
+    /// The cause of the node's last reset (`payload::reset_cause`). Left
+    /// out: not reported.
+    pub const RESET_CAUSE: FieldSpec = FieldSpec::opt(7, 1, 1);
+    pub const RESP: [FieldSpec; 7] = [
         SLOTS,
         ACTIVE,
         CONFIRMED,
         ATTEMPTS,
         LAST_REASON,
         LOG_GENERATION,
+        RESET_CAUSE,
     ];
 }
 

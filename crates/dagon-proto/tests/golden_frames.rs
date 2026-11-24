@@ -225,6 +225,7 @@ fn status_vector() {
         attempts: 1,
         last_reason: 0,
         log_generation: 1,
+        reset_cause: reset_cause::NONE,
     };
     let file = golden(
         "frame_status_resp.bin",
@@ -232,7 +233,9 @@ fn status_vector() {
     );
     let (_, body) = split_status(decode(&file).payload).unwrap();
     assert_eq!(StatusResp::parse(body).unwrap(), s);
-    assert_eq!(body.len(), StatusResp::MAX_LEN);
+    // A reset cause not reported is left out: the frame of a node that
+    // reports none is the one before the field.
+    assert_eq!(body.len() + 3, StatusResp::MAX_LEN);
     let mut a = vec![1, 0x00, 0x00, 0x00, 0x01]; // A: written, 1.0.0
     a.extend([0xA0; 16]);
     let mut b = vec![3, 0x00, 0x00, 0x01, 0x01]; // B: trying, 1.1.0
@@ -255,6 +258,21 @@ fn status_vector() {
     );
     assert_eq!(file.len(), 96);
     assert_crc(&file);
+}
+
+/// A reported reset cause is field 7, after the others, and the longest
+/// body.
+#[test]
+fn status_resp_reports_the_reset_cause_last() {
+    let s = StatusResp {
+        reset_cause: reset_cause::WATCHDOG,
+        ..Default::default()
+    };
+    let mut b = [0u8; StatusResp::MAX_LEN];
+    let n = s.encode(&mut b).unwrap();
+    assert_eq!(n, StatusResp::MAX_LEN);
+    assert_eq!(&b[n - 3..n], &[0x0E, 1, reset_cause::WATCHDOG]);
+    assert_eq!(StatusResp::parse(&b[..n]).unwrap(), s);
 }
 
 #[test]

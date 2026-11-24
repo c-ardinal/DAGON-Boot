@@ -164,6 +164,7 @@ pub(crate) fn open<B: BoardDef, const N: usize>(
     );
     let verifier = Ed25519Compact::new(crate::PUBKEY);
     let mut agent = Agent::new(config(tag, role), verifier, store, chain);
+    agent.note_reset(crate::reset::read());
     agent.watchdog_taken(crate::layout::watchdog_ms(trial), guard.trial_policy());
     let board = B::bring_up_port().map(|p| (B::BOARD_ID, p));
     guard.set_trial(finish_start(&mut agent, board, app.confirm));

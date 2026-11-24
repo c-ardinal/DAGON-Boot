@@ -369,6 +369,8 @@ impl Link {
             start.chain,
         );
         agent.also_serves(rom::CMDS);
+        // The SoC logs the cause of each reset itself: nothing to clear.
+        agent.note_reset(EspReset.reset_cause());
         #[cfg(feature = "conform")]
         if crate::CONFORM_SCRATCH.is_some() {
             agent.also_serves(dagon_conform::node::CMDS);

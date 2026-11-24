@@ -138,52 +138,38 @@ impl BoardDef for Board {
                 nrst: take!(p.child_nrst),
                 boot0: take!(p.child_boot0),
             },
-            spare: Spare {
-                pin_0: p.PIN_0,
-                pin_1: p.PIN_1,
-                pin_2: p.PIN_2,
-                pin_3: p.PIN_3,
-                pin_4: p.PIN_4,
-                pin_5: p.PIN_5,
-                pin_6: p.PIN_6,
-                pin_7: p.PIN_7,
-                pin_12: p.PIN_12,
-                pin_14: p.PIN_14,
-                pin_15: p.PIN_15,
-                pin_19: p.PIN_19,
-                pin_20: p.PIN_20,
-                pin_21: p.PIN_21,
-                pin_23: p.PIN_23,
-                pin_24: p.PIN_24,
-                pin_29: p.PIN_29,
-                i2c1: p.I2C1,
-                spi0: p.SPI0,
-                uart0: p.UART0,
-                uart1: p.UART1,
-                pio1: p.PIO1,
-                adc: p.ADC,
-                dma_ch1: p.DMA_CH1,
-                dma_ch2: p.DMA_CH2,
-                dma_ch3: p.DMA_CH3,
-                dma_ch4: p.DMA_CH4,
-                dma_ch5: p.DMA_CH5,
-                dma_ch6: p.DMA_CH6,
-                dma_ch7: p.DMA_CH7,
-                dma_ch8: p.DMA_CH8,
-                dma_ch9: p.DMA_CH9,
-                dma_ch10: p.DMA_CH10,
-                dma_ch11: p.DMA_CH11,
-                pwm_slice0: p.PWM_SLICE0,
-                pwm_slice1: p.PWM_SLICE1,
-                pwm_slice2: p.PWM_SLICE2,
-                pwm_slice3: p.PWM_SLICE3,
-                pwm_slice4: p.PWM_SLICE4,
-                pwm_slice5: p.PWM_SLICE5,
-                pwm_slice6: p.PWM_SLICE6,
-                pwm_slice7: p.PWM_SLICE7,
-                core1: p.CORE1,
-                display,
-            },
+            spare: take_spare_gpios!(
+                p,
+                Spare {
+                    i2c1: p.I2C1,
+                    spi0: p.SPI0,
+                    uart0: p.UART0,
+                    uart1: p.UART1,
+                    pio1: p.PIO1,
+                    adc: p.ADC,
+                    dma_ch1: p.DMA_CH1,
+                    dma_ch2: p.DMA_CH2,
+                    dma_ch3: p.DMA_CH3,
+                    dma_ch4: p.DMA_CH4,
+                    dma_ch5: p.DMA_CH5,
+                    dma_ch6: p.DMA_CH6,
+                    dma_ch7: p.DMA_CH7,
+                    dma_ch8: p.DMA_CH8,
+                    dma_ch9: p.DMA_CH9,
+                    dma_ch10: p.DMA_CH10,
+                    dma_ch11: p.DMA_CH11,
+                    pwm_slice0: p.PWM_SLICE0,
+                    pwm_slice1: p.PWM_SLICE1,
+                    pwm_slice2: p.PWM_SLICE2,
+                    pwm_slice3: p.PWM_SLICE3,
+                    pwm_slice4: p.PWM_SLICE4,
+                    pwm_slice5: p.PWM_SLICE5,
+                    pwm_slice6: p.PWM_SLICE6,
+                    pwm_slice7: p.PWM_SLICE7,
+                    core1: p.CORE1,
+                    display,
+                }
+            ),
         };
         (dagon, io)
     }
@@ -200,70 +186,62 @@ pub struct Io {
     pub spare: Spare,
 }
 
-/// The pins and peripherals DAGON's relay does not use, the display's
-/// among them; [`start`] returns them for the app. Some of these pins are wired on the
-/// board itself:
-///
-/// | Pin | On the board |
-/// |---|---|
-/// | `pin_6`, `pin_7` | I2C1 SDA, SCL of the touch controller (CST816S) and the IMU (QMI8658) |
-/// | `pin_21` | touch controller interrupt |
-/// | `pin_23`, `pin_24` | IMU interrupts INT1, INT2 |
-/// | `pin_12` | LCD MISO (SPI1 RX; [`Display::pins`] sets the bus up to write only) |
-/// | `pin_29` | battery voltage (ADC3, through a divider) |
-///
-/// The others (`pin_0`..`pin_5`, `pin_14`, `pin_15`, `pin_19`, `pin_20`)
-/// are free for the app; check the board's pinout for which reach a
-/// header.
-pub struct Spare {
-    pub pin_0: Peri<'static, PIN_0>,
-    pub pin_1: Peri<'static, PIN_1>,
-    pub pin_2: Peri<'static, PIN_2>,
-    pub pin_3: Peri<'static, PIN_3>,
-    pub pin_4: Peri<'static, PIN_4>,
-    pub pin_5: Peri<'static, PIN_5>,
-    pub pin_6: Peri<'static, PIN_6>,
-    pub pin_7: Peri<'static, PIN_7>,
-    pub pin_12: Peri<'static, PIN_12>,
-    pub pin_14: Peri<'static, PIN_14>,
-    pub pin_15: Peri<'static, PIN_15>,
-    pub pin_19: Peri<'static, PIN_19>,
-    pub pin_20: Peri<'static, PIN_20>,
-    pub pin_21: Peri<'static, PIN_21>,
-    pub pin_23: Peri<'static, PIN_23>,
-    pub pin_24: Peri<'static, PIN_24>,
-    pub pin_29: Peri<'static, PIN_29>,
-    pub i2c1: Peri<'static, I2C1>,
-    pub spi0: Peri<'static, SPI0>,
-    pub uart0: Peri<'static, UART0>,
-    pub uart1: Peri<'static, UART1>,
-    pub pio1: Peri<'static, PIO1>,
-    pub adc: Peri<'static, ADC>,
-    pub dma_ch1: Peri<'static, DMA_CH1>,
-    pub dma_ch2: Peri<'static, DMA_CH2>,
-    pub dma_ch3: Peri<'static, DMA_CH3>,
-    pub dma_ch4: Peri<'static, DMA_CH4>,
-    pub dma_ch5: Peri<'static, DMA_CH5>,
-    pub dma_ch6: Peri<'static, DMA_CH6>,
-    pub dma_ch7: Peri<'static, DMA_CH7>,
-    pub dma_ch8: Peri<'static, DMA_CH8>,
-    pub dma_ch9: Peri<'static, DMA_CH9>,
-    pub dma_ch10: Peri<'static, DMA_CH10>,
-    pub dma_ch11: Peri<'static, DMA_CH11>,
-    pub pwm_slice0: Peri<'static, PWM_SLICE0>,
-    pub pwm_slice1: Peri<'static, PWM_SLICE1>,
-    pub pwm_slice2: Peri<'static, PWM_SLICE2>,
-    pub pwm_slice3: Peri<'static, PWM_SLICE3>,
-    pub pwm_slice4: Peri<'static, PWM_SLICE4>,
-    pub pwm_slice5: Peri<'static, PWM_SLICE5>,
-    pub pwm_slice6: Peri<'static, PWM_SLICE6>,
-    pub pwm_slice7: Peri<'static, PWM_SLICE7>,
-    /// The second core (DAGON runs on core 0 only).
-    pub core1: Peri<'static, CORE1>,
-    /// The round display's bus and pins; [`Display::pins`] sets them up.
-    pub display: Display,
+/// Declares [`Spare`] with a field for each GPIO the board's definition
+/// names for nothing (`spare_gpios!`), then the blocks below.
+macro_rules! spare {
+    ($($pin:ident $ty:ident,)*) => {
+        #[doc = "The pins and peripherals DAGON's relay does not use, the display's"]
+        #[doc = "among them; [`start`] returns them for the app. The pins are each"]
+        #[doc = "GPIO the board's definition (with a project's overrides) names for"]
+        #[doc = "nothing, so a pin moved to a free one leaves this list and the pin it"]
+        #[doc = "left joins it. Some of them are wired on the board itself:"]
+        #[doc = ""]
+        #[doc = "| Pin | On the board |"]
+        #[doc = "|---|---|"]
+        #[doc = "| `pin_6`, `pin_7` | I2C1 SDA, SCL of the touch controller (CST816S) and the IMU (QMI8658) |"]
+        #[doc = "| `pin_21` | touch controller interrupt |"]
+        #[doc = "| `pin_23`, `pin_24` | IMU interrupts INT1, INT2 |"]
+        #[doc = "| `pin_12` | LCD MISO (SPI1 RX; [`Display::pins`] sets the bus up to write only) |"]
+        #[doc = "| `pin_29` | battery voltage (ADC3, through a divider) |"]
+        #[doc = ""]
+        #[doc = "The others (`pin_0`..`pin_5`, `pin_14`, `pin_15`, `pin_19`, `pin_20`"]
+        #[doc = "on the built-in definition) are free for the app; check the board's"]
+        #[doc = "pinout for which reach a header."]
+        pub struct Spare {
+            $(pub $pin: Peri<'static, $ty>,)*
+            pub i2c1: Peri<'static, I2C1>,
+            pub spi0: Peri<'static, SPI0>,
+            pub uart0: Peri<'static, UART0>,
+            pub uart1: Peri<'static, UART1>,
+            pub pio1: Peri<'static, PIO1>,
+            pub adc: Peri<'static, ADC>,
+            pub dma_ch1: Peri<'static, DMA_CH1>,
+            pub dma_ch2: Peri<'static, DMA_CH2>,
+            pub dma_ch3: Peri<'static, DMA_CH3>,
+            pub dma_ch4: Peri<'static, DMA_CH4>,
+            pub dma_ch5: Peri<'static, DMA_CH5>,
+            pub dma_ch6: Peri<'static, DMA_CH6>,
+            pub dma_ch7: Peri<'static, DMA_CH7>,
+            pub dma_ch8: Peri<'static, DMA_CH8>,
+            pub dma_ch9: Peri<'static, DMA_CH9>,
+            pub dma_ch10: Peri<'static, DMA_CH10>,
+            pub dma_ch11: Peri<'static, DMA_CH11>,
+            pub pwm_slice0: Peri<'static, PWM_SLICE0>,
+            pub pwm_slice1: Peri<'static, PWM_SLICE1>,
+            pub pwm_slice2: Peri<'static, PWM_SLICE2>,
+            pub pwm_slice3: Peri<'static, PWM_SLICE3>,
+            pub pwm_slice4: Peri<'static, PWM_SLICE4>,
+            pub pwm_slice5: Peri<'static, PWM_SLICE5>,
+            pub pwm_slice6: Peri<'static, PWM_SLICE6>,
+            pub pwm_slice7: Peri<'static, PWM_SLICE7>,
+            /// The second core (DAGON runs on core 0 only).
+            pub core1: Peri<'static, CORE1>,
+            /// The round display's bus and pins; [`Display::pins`] sets them up.
+            pub display: Display,
+        }
+    };
 }
-
+spare_gpios!(spare);
 /// Holds the touch controller out of reset and otherwise leaves it alone.
 pub fn hold_touch(pin: Peri<'static, TouchRst>) -> Output<'static> {
     Output::new(pin, Level::High)

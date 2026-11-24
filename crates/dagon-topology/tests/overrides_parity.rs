@@ -202,7 +202,7 @@ fn the_firmware_constants_come_from_the_overridden_definitions() {
             name: &name,
             lifetime: false,
         };
-        let pins = codegen::pins_rs(&b, &hal);
+        let pins = codegen::pins_rs(&b, reg.mcu(mcu).unwrap(), &hal);
         assert!(pins.contains(&format!("$p.{}", PIN.0)), "{board}\n{pins}");
     }
 }

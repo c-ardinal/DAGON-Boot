@@ -1460,9 +1460,10 @@ fn a_project_override_of_unequal_f401_slots_reaches_the_firmware() {
     let _ = std::fs::remove_dir_all(&d);
 }
 
-/// The hub's app slot B, shorter, and the resets of its touch controller
-/// and its display swapped (touch on GPIO13, display on GPIO22), by a
-/// project's overrides of the RP2040 and of the hub's board.
+/// The hub's app slot B, shorter, the display's reset moved to the touch
+/// controller's GPIO22 and the touch controller's to GPIO21, a pin the
+/// board's definition leaves free (GPIO13 is then free), by a project's
+/// overrides of the RP2040 and of the hub's board.
 const HUB_SLOT_AND_PIN: &str = "
 [[mcu_override.rp2040.slot]]
 image = \"app\"
@@ -1480,6 +1481,10 @@ name = \"lcd_rst\"
 
 [[board_override.\"waveshare-rp2040-touch-lcd-1.28\".pin]]
 pin = \"GPIO13\"
+dagon-remove = true
+
+[[board_override.\"waveshare-rp2040-touch-lcd-1.28\".pin]]
+pin = \"GPIO21\"
 name = \"touch_rst\"
 ";
 
@@ -1507,7 +1512,8 @@ fn generated_by(target: &Path, package: &str, name: &str) -> Vec<String> {
 /// for both: `dagon gen` writes the merged MCU and board definitions and
 /// their hashes into the node's folder; the MCU package builds the
 /// shorter slot B and the board package takes the two resets at their
-/// swapped pins, which the board's code takes by name. A `board.toml` or `mcu.toml`
+/// new pins, which the board's code takes by name, and hands the app the
+/// pin they left instead of the free one they took. A `board.toml` or `mcu.toml`
 /// edited by hand after gen is refused, by `dagon build` before cargo
 /// runs and by the packages' builds themselves (real firmware builds: run
 /// with --ignored).
@@ -1550,11 +1556,13 @@ fn a_project_slot_and_board_pin_override_reaches_the_firmware() {
     assert!(!pins.is_empty(), "no pins.rs of {board_pkg}");
     for p in &pins {
         for want in [
-            "pub type TouchRst = embassy_rp::peripherals::PIN_13;",
+            "pub type TouchRst = embassy_rp::peripherals::PIN_21;",
             "pub type LcdRst = embassy_rp::peripherals::PIN_22;",
+            "pin_12 PIN_12, pin_13 PIN_13, pin_14 PIN_14,",
         ] {
             assert!(p.contains(want), "{want} in\n{p}");
         }
+        assert!(!p.contains("pin_21 PIN_21"), "{p}");
     }
 
     // Edited by hand after gen: refused by the build command, and by the
@@ -1564,7 +1572,7 @@ fn a_project_slot_and_board_pin_override_reaches_the_firmware() {
     let key = ed25519_compact::KeyPair::from_seed(ed25519_compact::Seed::new([9; 32]));
     let hex = dagon_sign::to_hex(&key.pk[..]);
     for (file, from, to) in [
-        (BOARD_FILE, "\"GPIO13\"", "\"GPIO12\""),
+        (BOARD_FILE, "\"GPIO21\"", "\"GPIO20\""),
         (MCU_FILE, "size = 524288", "size = 589824"),
     ] {
         let path = boot.join(file);

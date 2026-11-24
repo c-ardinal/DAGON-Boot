@@ -338,25 +338,23 @@ pub struct Coordinator {
 }
 
 /// The pins a board wires new links to when it is the coordinator (numbered
-/// GPIOs, as the topology's `buses[]` and `links[].pins` take them).
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(deny_unknown_fields)]
+/// GPIOs, as the topology's `buses[]` and `links[].pins` take them), from its
+/// `dagon = true` buses ([`BoardDef::coordinator_pins`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HubPins {
     pub i2c: HubI2c,
     pub pio_uart: HubUart,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HubI2c {
-    /// One of the board's `i2c` controllers.
+    /// The controller of the board's `dagon = true` I2C bus.
     pub controller: String,
     pub sda: u8,
     pub scl: u8,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct HubUart {
     pub tx: u8,
     pub rx: u8,
@@ -903,11 +901,6 @@ pub struct BoardDef {
     /// `cooperative`), `rom_entry` (`force-download-boot`, `m5pm1`, `stm32-i2c-rom`). Left out for
     /// the coordinator.
     pub default_link: Option<DefaultLink>,
-    /// Pins the page wires new links to when this board is the coordinator: `i2c = { controller, sda, scl }`
-    /// (a new I2C bus; `controller` is one of the board's `i2c`) and `pio_uart = { tx, rx }` (a new
-    /// PIO UART link), numbered GPIOs below the MCU's `gpio_count`. Only on boards whose MCU has
-    /// `[coordinator]`.
-    pub coordinator: Option<HubPins>,
     /// Parts built from the board package itself (`name`, `sub`, `bin`).
     #[serde(default, rename = "part")]
     pub parts: Vec<Part>,

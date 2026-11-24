@@ -840,14 +840,12 @@ fn coordinator_pins_are_dagons_link_buses() {
             b.sda = Some("GPIO20".into());
         }
     });
-    let e = requirements::check_board(&moved, m).unwrap_err();
-    assert!(e.contains("coordinator.i2c is no dagon = true"), "{e}");
+    assert_eq!(moved.coordinator_pins(m).unwrap().i2c.sda, 20);
     let mut uart = hub.clone();
     uart.buses
         .iter_mut()
         .for_each(|b| b.dagon &= b.kind != super::board_boot::BusKind::Uart);
-    let e = requirements::check_board(&uart, m).unwrap_err();
-    assert!(e.contains("coordinator.pio_uart"), "{e}");
+    assert_eq!(uart.coordinator_pins(m), None);
 }
 
 #[test]

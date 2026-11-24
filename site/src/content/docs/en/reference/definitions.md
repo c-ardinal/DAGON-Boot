@@ -177,7 +177,6 @@ definition that leaves a class out is refused with the class named.
 | `[[header]]` | tables | no | `[{ pin, label }]`; `label` left out when not confirmed on the board. Every pin a topology may name on this board, as a link end on it (a hub's `pins`, `control`, bus `sda`/`scl`; a node's `node_pins` come from `i2c`): the check (V-07) refuses any other, and DAGON Console offers only these. |
 | `[[i2c]]` | tables | no | `[{ controller, sda, scl }]` pairs usable from the header. |
 | `[default_link]` | table | no | How a node board is wired unless the topology says otherwise: `kind` (`i2c`, `uart`, `can`, `ethernet`), `iface` (`hw-uart0`, `pio-uart`), `addr`, `baud`, `control` (`full`, `cooperative`), `rom_entry` (`force-download-boot`, `m5pm1`, `stm32-i2c-rom`). Left out for the coordinator. |
-| `[coordinator]` | table | no | Pins the page wires new links to when this board is the coordinator: `i2c = { controller, sda, scl }` (a new I2C bus; `controller` is one of the board's `i2c`) and `pio_uart = { tx, rx }` (a new PIO UART link), numbered GPIOs below the MCU's `gpio_count`. Only on boards whose MCU has `[coordinator]`. |
 | `[[part]]` | tables | no | Parts built from the board package itself (`name`, `sub`, `bin`). |
 | `[boot]` | table | no | The boot stage's board values: `led` (a `[[pin]]`), `led_active` (`high`, `low`), `halt = { pattern, period_ms }` (`blink`, `code`, `off`; with `led` on an MCU with a DAGON stage0, a `blink` period is at least 10 ms, since stage0 blinks its code in tenths of it), `power_hold = { pin, level }`. Its boot action programs, `[[boot.action]]`: A boot action program (`boot-program` format 1): `on` (a boot event the event catalog marks action-capable) and `ops`: `{ op = "led", state }` (`on`, `off`, `toggle`), `{ op = "gpio", pin, level }` (a `[[pin]]` with `boot = true`; the power hold pin takes only its hold level), `{ op = "delay", ms }` (1 to 20), `{ op = "bus_write", device, reg, bytes }` (a `[[device]]` register in its `writable` list, 1 to 8 bytes, only on an MCU with `boot_capabilities = ["i2c"]`). At most 32 ops and 50 ms per event, a bus write counting 5 ms. |
 | `[[pin]]` | tables | no | The board's pins: `pin`, `name` (what the board package's code takes it by, `a-z 0-9 _`), `boot` (a boot program may drive it), `levels` (allowed levels; all when left out). |
@@ -202,8 +201,11 @@ reaches. Where the topology gives none, both take `[default_link] addr`.
 
 No pin appears twice across `[[pin]]` and the buses, and every name code is
 generated from (pin names, bus ids and their signals, device ids, with `-`
-read as `_`) appears once. On a board that declares buses, the
-`[coordinator]` pins are those of its `dagon = true` I2C and UART buses.
+read as `_`) appears once. When the board is the coordinator, the page wires
+a new I2C bus to its `dagon = true` I2C bus and a new PIO UART link to its
+`dagon = true` UART bus on a `pio` controller (numbered `GPIO<n>` pins, on
+an MCU with `[coordinator]`). The board states those pins only once, in
+the buses.
 
 A board package's build script reads the board's definition
 (`dagon_topology::defs::codegen::package_build`) and includes the result.

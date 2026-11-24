@@ -87,9 +87,6 @@ pub(super) fn board(b: &mut BoardDef) -> Result<(), String> {
     plain("id", &b.id)?;
     plain("mcu", &b.mcu)?;
     plain_pairs("i2c", &b.i2c_pairs)?;
-    if let Some(c) = &b.coordinator {
-        plain("coordinator.i2c.controller", &c.i2c.controller)?;
-    }
     for h in &mut b.header {
         plain("header.pin", &h.pin)?;
         if let Some(l) = &mut h.label {

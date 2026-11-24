@@ -106,7 +106,6 @@ description: "dagon-mcu.tomlとdagon-board.toml: DAGONが把握するマイコ�
 | `[[header]]` | テーブルの配列 | 任意 | `[{ pin, label }]`。ボード上で確認実績のない`label`は省略します。構成がこのボードで指定可能なピンの全部です（コーディネータ側の`pins`・`control`・バスの`sda`/`scl`。ノード側の`node_pins`は`i2c`から選択します）。構成の確認（V-07）はそれ以外を拒否し、DAGON Consoleはこれらのピンだけを選択肢に表示します。 |
 | `[[i2c]]` | テーブルの配列 | 任意 | ヘッダから使用可能な`[{ controller, sda, scl }]`の組。 |
 | `[default_link]` | テーブル | 任意 | 構成で別途指定しない場合の、ノードのボードの配線: `kind`（`i2c`、`uart`、`can`、`ethernet`）、`iface`（`hw-uart0`、`pio-uart`）、`addr`、`baud`、`control`（`full`、`cooperative`）、`rom_entry`（`force-download-boot`、`m5pm1`、`stm32-i2c-rom`）。コーディネータでは省略します。 |
-| `[coordinator]` | テーブル | 任意 | このボードがコーディネータの場合に、ページが新規リンクを配線するピン: `i2c = { controller, sda, scl }`（新規I2Cバス。`controller`はボードの`i2c`のいずれか）と`pio_uart = { tx, rx }`（新規PIO UARTリンク）。番号がマイコンの`gpio_count`未満のGPIOです。マイコンに`[coordinator]`があるボード専用です。 |
 | `[[part]]` | テーブルの配列 | 任意 | ボードの定義自体からビルドする部品（`name`、`sub`、`bin`）。 |
 | `[boot]` | テーブル | 任意 | ブート段階のボードの値: `led`（`[[pin]]`）、`led_active`（`high`、`low`）、`halt = { pattern, period_ms }`（`blink`、`code`、`off`。DAGONのstage0があるマイコンで`led`がある場合は、stage0が周期の10分の1単位でコードを点滅させるため、`blink`の周期は10 ms以上です）、`power_hold = { pin, level }`。ブートのアクションプログラムは`[[boot.action]]`です。ブートのアクションプログラム（`boot-program`形式1）: `on`（イベントのカタログがアクション対応と明示するブートイベント）と`ops`: `{ op = "led", state }`（`on`、`off`、`toggle`）、`{ op = "gpio", pin, level }`（`boot = true`の`[[pin]]`。電源保持のピンは保持のレベルのみ）、`{ op = "delay", ms }`（1から20）、`{ op = "bus_write", device, reg, bytes }`（`writable`の一覧にある`[[device]]`のレジスタ、1から8バイト。`boot_capabilities = ["i2c"]`のマイコンのみ）。イベントごとに最大32の操作と50 msで、バスの書込は5 msとして計算します。 |
 | `[[pin]]` | テーブルの配列 | 任意 | ボードのピン: `pin`、`name`（ボードの定義のコードが参照する名称、`a-z 0-9 _`）、`boot`（ブートプログラムが駆動可能）、`levels`（許可するレベル。省略時は全部）。 |
@@ -121,7 +120,7 @@ description: "dagon-mcu.tomlとdagon-board.toml: DAGONが把握するマイコ�
 
 ノードのI2Cターゲットのアドレスは、構成にあるそのノードの端の`addr`です。`dagon gen`はその値を`LINK_ADDR`として、アプリの`wiring.rs`とブートローダの`boot_wiring.rs`に出力します。そのため両方ともコーディネータが指定するアドレスで応答します。構成にアドレスの指定がない場合は、両方とも`[default_link] addr`を使用します。
 
-`[[pin]]`とバス全体で、同一のピンの重複はありません。コードの生成元の名称（ピンの名称、バスのidとその信号、デバイスのid。`-`は`_`として解釈します）も、それぞれ重複しません。バスを宣言するボードでは、`[coordinator]`のピンは、`dagon = true`のI2CとUARTのバスのピンです。
+`[[pin]]`とバス全体で、同一のピンの重複はありません。コードの生成元の名称（ピンの名称、バスのidとその信号、デバイスのid。`-`は`_`として解釈します）も、それぞれ重複しません。ボードがコーディネータの場合、ページは新規I2Cバスを`dagon = true`のI2Cバスに、新規PIO UARTリンクを`pio`のコントローラにある`dagon = true`のUARTバスに配線します（番号付きの`GPIO<n>`のピンで、マイコンに`[coordinator]`がある場合）。ボードはそのピンをバスにだけ記述します。
 
 ボードの定義のビルドスクリプトは、ボードの定義を読込し（`dagon_topology::defs::codegen::package_build`）、結果を取込します。`DAGON_BOOT_CRATE`がある場合の読込対象はそのフォルダの`board.toml`（`dagon gen`が出力する、プロジェクトの上書きを適用したボードの定義。後述）で、ない場合はソースツリーのボードの定義です。出力は以下のとおりです。ボードのid、フラッシュのサイズ、既定のリンク、ブートのLEDと停止のパターン、バスの速度とデバイスは定数として出力します（`def.rs`）。名称付きのピン、バス、バスのピンは、`take!(p.<name>)`マクロを付与したHALの型として出力します（`pins.rs`）。各デバイスはバスのポートの能力を表す`dagon_events::Device`として出力します（`devices.rs`。作成方法はこれだけです）。検証で読込した定義のいずれかが変化すると、ビルドを再度実行します。マイコンの定義のブートイメージは、ボードの`[boot]`を同様に読込します（`boot_build`）。読込対象はビルド対象のノードのボードです。`DAGON_BOOT_CRATE`がノードのブート用crate（プロジェクトの`boot/<id>/`。`dagon gen`が出力します）を指し、その`Cargo.toml`がノード、マイコン、ボード（このツリーのボードか、プロジェクトの`[board.<id>]`）、信頼されたブート拡張を指定します。この指定がないビルドは失敗します。ボードがないノードには、ブートのLEDも停止のパターンもありません。コード自体にはピンもアドレスもパターンもありません。
 

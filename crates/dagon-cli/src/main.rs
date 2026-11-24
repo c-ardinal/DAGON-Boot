@@ -32,7 +32,9 @@ mod paths;
 mod scaffold;
 mod serial;
 mod serve;
+mod simfault;
 mod simrun;
+mod simworld;
 mod srcver;
 mod versions;
 
@@ -95,7 +97,7 @@ fn main() -> ExitCode {
         Command::Flash(a) => run(flash::command(&a)),
         Command::Doctor(a) => run(doctor::command(&a)),
         Command::Serve(a) => run(serve::command(&a)),
-        Command::Sim(a) => run(simrun::run(a.scenario.as_deref())),
+        Command::Sim(a) => run(simworld::command(&a)),
         Command::Ai(AiCmd::Link(a)) => run(consent::link_command(&a)),
         Command::Ai(AiCmd::Unlink) => run(consent::unlink_command()),
         Command::Ai(AiCmd::Key(k)) => run(keystore::command(&k)),

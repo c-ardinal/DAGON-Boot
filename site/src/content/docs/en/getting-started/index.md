@@ -31,3 +31,18 @@ It runs end-to-end scenarios in the simulator:
 - An image that never confirms
 - Tampered packages
 - An erased F401 brought back through its ROM boot loader
+
+With `--topology`, it simulates the update of a 構成 of your own, each node modelled on your project's MCU definitions, and `--fault <node id>=<kind>` injects a fault into the node you name:
+
+```sh
+dagon sim --topology topology.yaml --fault seg=power-cut --fault hub=tamper
+```
+
+| Kind | What happens to the node |
+|---|---|
+| `power-cut` | It loses power during the write |
+| `no-confirm` | Its new version never confirms |
+| `tamper` | One bit of its image is flipped |
+| `erased` | Its flash is erased, and it is rewritten through its ROM boot loader |
+
+Every node starts on 1.0.0 and the simulated release is 1.1.0. Each fault runs on a fresh simulation, and a line says whether DAGON kept the node safe. The simulator models the node the PC is connected to and the nodes one I2C or UART link away from it.

@@ -104,6 +104,7 @@ The environment variable `DAGON_UNINSTALL=1` works too. The PowerShell script cl
 
 ```sh
 dagon sim # runs end-to-end scenarios in the simulator
+dagon sim --topology topology.yaml --fault seg=power-cut # your own 構成, with a fault injected into the node you name
 ```
 
 ## Start your own project

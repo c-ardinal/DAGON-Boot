@@ -1,6 +1,7 @@
 //! `sim`: the four simulator scenarios, end to end through dagon-host
 //! against the simulated hub (RP2040) and F401, with the public RFC 8032
-//! test key. Needs no hardware.
+//! test key. Needs no hardware. A topology of one's own runs in
+//! [`crate::simworld`].
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -24,7 +25,7 @@ fn topology_tag(id: &str) -> String {
     t.node(id).expect("node in the sim topology").tag.clone()
 }
 /// RFC 8032 section 7.1 TEST 1 key (public test data).
-const SEED: [u8; 32] = [
+pub(crate) const SEED: [u8; 32] = [
     0x9d, 0x61, 0xb1, 0x9d, 0xef, 0xfd, 0x5a, 0x60, 0xba, 0x84, 0x4a, 0xf4, 0x92, 0xec, 0x2c, 0xc4,
     0x44, 0x49, 0xc5, 0x69, 0x7b, 0x32, 0x69, 0x19, 0x70, 0x3b, 0xac, 0x03, 0x1c, 0xae, 0x7f, 0x60,
 ];
@@ -55,12 +56,16 @@ pub(crate) struct Sim {
 }
 
 impl Sim {
-    #[cfg(test)]
     pub(crate) fn new(relay: SimRelay) -> Sim {
         Sim {
             relay: Rc::new(RefCell::new(relay)),
             pending: Vec::new(),
         }
+    }
+
+    /// The simulated wiring, to inject a fault into or to look at.
+    pub(crate) fn relay(&self) -> std::cell::RefMut<'_, SimRelay> {
+        self.relay.borrow_mut()
     }
 }
 

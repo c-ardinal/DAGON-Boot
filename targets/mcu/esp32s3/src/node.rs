@@ -52,7 +52,7 @@ use dagon_events::{Published, Watchdog as Periods};
 use dagon_mcu_common::link::Link as DagonLink;
 pub use dagon_node::hooks::BoardExtension;
 pub use dagon_node::hooks::{always, App, AppEvents, Confirm, NodeChain, SelfCheck};
-use dagon_node::hooks::{finish_start, node_chain, Events};
+use dagon_node::hooks::{node_chain, run_start, Events, Taken};
 use dagon_port::{BootSelectV, Reset, Watchdog};
 use dagon_proto::payload::SlotState;
 use embassy_executor::{SendSpawner, Spawner};
@@ -370,24 +370,27 @@ impl Link {
             start.chain,
         );
         agent.also_serves(rom::CMDS);
-        // The SoC logs the cause of each reset itself: nothing to clear.
-        agent.note_reset(EspReset.reset_cause());
         #[cfg(feature = "conform")]
         if crate::CONFORM_SCRATCH.is_some() {
             agent.also_serves(dagon_conform::node::CMDS);
         }
-        // The trial watchdog never feeds while on trial; a confirmed image
-        // runs the confirmed period.
-        let period = if trial {
-            TRIAL_WDT_MS
-        } else {
-            CONFIRMED_WDT_MS
+        let taken = Taken {
+            // The SoC logs the cause of each reset itself: nothing to clear.
+            reset: EspReset.reset_cause(),
+            // The trial watchdog never feeds while on trial; a confirmed
+            // image runs the confirmed period.
+            watchdog_ms: if trial {
+                TRIAL_WDT_MS
+            } else {
+                CONFIRMED_WDT_MS
+            },
+            trial: TrialPolicy::NeverFeed,
         };
-        agent.watchdog_taken(period, TrialPolicy::NeverFeed);
         // Board bring-up, once, before the links open and anything is
         // served; then the app's own confirm, if it asked.
         let id = p.board.id();
-        if !finish_start(&mut agent, id.zip(p.board.bring_up_port()), start.confirm) {
+        let board = id.zip(p.board.bring_up_port());
+        if !run_start(&mut agent, taken, board, start.confirm) {
             wdt.borrow_mut().end_trial();
         }
         let board = RomBoard {

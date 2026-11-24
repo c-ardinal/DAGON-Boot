@@ -27,7 +27,7 @@ use dagon_format::header::{port_kind, target_tag, ImageHeader, HEADER_SIZE};
 use dagon_format::Version;
 use dagon_mcu_common::link::LinkError;
 pub use dagon_node::hooks::{always, App, AppEvents, BoardCore, Confirm, NodeChain, SelfCheck};
-use dagon_node::hooks::{finish_start, node_chain, BoardExtension, Events, UserExtensions};
+use dagon_node::hooks::{node_chain, run_start, BoardExtension, Events, Taken, UserExtensions};
 use dagon_node::serve::{serve as dagon_serve, Exit, ServeHost};
 use dagon_port::{SlotStore, Watchdog};
 use dagon_proto::max_payload;
@@ -187,28 +187,24 @@ pub fn config(tag: &str) -> Config {
 /// events, the board's extension `board`, the app's extensions `exts` and
 /// `self_check` as the CONFIRM decision; returns it with the app's read
 /// access to the events. Only [`start`] holds the agent. Call
-/// once, after [`install_watchdog`] gave `guard` the watchdog
-/// (`app.watchdog_taken` names its period and the guard's trial policy).
-fn agent<const N: usize>(
+/// once.
+fn agent(
     tag: &str,
     store: Store,
     board: Option<BoardExtension>,
     exts: Option<UserExtensions>,
     self_check: fn() -> bool,
-    guard: &Guard<N>,
 ) -> (AppAgent, AppEvents) {
     static EVENTS: StaticCell<Events> = StaticCell::new();
     let periods = Periods::new(layout::TRIAL_WDT_MS, layout::CONFIRMED_WDT_MS);
     let now_us: fn() -> u64 = || Instant::now().as_micros();
     let events = EVENTS.init(Published::new());
     let (chain, reader) = node_chain(events, board, exts, self_check, now_us, periods);
-    let on_trial = on_trial(&store);
     let verifier = Ed25519Compact::new(crate::PUBKEY);
+    #[allow(unused_mut)]
     let mut agent = Agent::new(config(tag), verifier, store, chain);
-    agent.note_reset(crate::reset::take());
     #[cfg(feature = "conform")]
     agent.also_serves(dagon_conform::node::CMDS);
-    agent.watchdog_taken(watchdog_period_ms(on_trial), guard.trial_policy());
     (agent, reader)
 }
 
@@ -217,7 +213,7 @@ fn agent<const N: usize>(
 /// `Preempting`) on DAGON's high-priority executor (`crate::exec`) and the
 /// feeder on `spawner` (the app's executor). Before the link serves, the
 /// board's bring-up runs and, with [`Confirm::Own`], the app's trial is
-/// confirmed ([`finish_start`]). `tag` is the node's image target tag;
+/// confirmed ([`run_start`]). `tag` is the node's image target tag;
 /// `app` holds the self-check, the app's extensions and who confirms;
 /// `addr` is the node's I2C target address (its end in the topology,
 /// `LINK_ADDR` of the generated wiring, else its board's default).
@@ -248,9 +244,14 @@ pub fn start<B: BoardDef, const N: usize>(
     let (store, flash) = open_store(parts.flash, B::ERASE_REGIONS)?;
     let period = watchdog_period_ms(on_trial(&store));
     install_watchdog(parts.iwdg, guard, period, &store);
-    let (mut agent, events) = agent(tag, store, B::extension(), app.exts, app.self_check, guard);
+    let taken = Taken {
+        reset: crate::reset::take(),
+        watchdog_ms: period,
+        trial: guard.trial_policy(),
+    };
+    let (mut agent, events) = agent(tag, store, B::extension(), app.exts, app.self_check);
     let board = B::bring_up_port().map(|p| (B::BOARD_ID, p));
-    guard.set_trial(finish_start(&mut agent, board, app.confirm));
+    guard.set_trial(run_start(&mut agent, taken, board, app.confirm));
     let (target, regs) = B::open_link(parts.link, addr);
     let link = links::I2c::new(target, regs);
     let high = crate::exec::start();

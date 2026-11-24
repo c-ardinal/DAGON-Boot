@@ -16,6 +16,7 @@ use core::cell::RefCell;
 use critical_section::Mutex;
 
 use dagon_mcu_common::liveness::{Level, Liveness};
+use dagon_port::{Reset, Watchdog};
 
 /// Longest a task may stay inside one piece of work it did not bound.
 pub const BUSY_LIMIT_MS: u64 = 5_000;
@@ -46,20 +47,12 @@ pub trait Dog {
     fn trial(&mut self, _on_trial: bool) {}
 }
 
-/// A running watchdog whose period can be changed.
-pub trait Rearm {
-    /// Run `period_ms` from now on (the countdown restarts with it).
-    fn set_period(&mut self, period_ms: u32);
-    /// Restart the countdown with the period it runs.
-    fn feed(&mut self);
-    /// Reset the chip now.
-    fn reset(&mut self);
-}
-
-/// A [`Dog`] over a [`Rearm`] watchdog: it runs the trial period while
-/// the image is on trial and the confirmed period once it is confirmed
-/// (the MCU definition's `[watchdog] trial_ms` and `confirmed_ms`). The
-/// period is set at the first feed and when it changes.
+/// A [`Dog`] over the MCU's [`Watchdog`] and [`Reset`] ports: it runs the
+/// trial period while the image is on trial and the confirmed period once
+/// it is confirmed (the MCU definition's `[watchdog] trial_ms` and
+/// `confirmed_ms`). The watchdog is started with the period at the first
+/// feed and when the period changes (a start on a running watchdog
+/// restarts the countdown with the new period).
 pub struct PeriodDog<H> {
     pub hw: H,
     trial_ms: u32,
@@ -80,7 +73,7 @@ impl<H> PeriodDog<H> {
     }
 }
 
-impl<H: Rearm> Dog for PeriodDog<H> {
+impl<H: Watchdog + Reset> Dog for PeriodDog<H> {
     fn feed(&mut self) {
         let ms = if self.on_trial {
             self.trial_ms
@@ -88,7 +81,7 @@ impl<H: Rearm> Dog for PeriodDog<H> {
             self.confirmed_ms
         };
         if self.running_ms != Some(ms) {
-            self.hw.set_period(ms);
+            self.hw.start(ms);
             self.running_ms = Some(ms);
         }
         self.hw.feed();
@@ -422,14 +415,18 @@ mod tests {
         }
         #[derive(Default)]
         struct Log(Vec<Hw>);
-        impl Rearm for Log {
-            fn set_period(&mut self, period_ms: u32) {
-                self.0.push(Hw::Set(period_ms));
+        impl Watchdog for Log {
+            fn start(&mut self, timeout_ms: u32) {
+                self.0.push(Hw::Set(timeout_ms));
             }
             fn feed(&mut self) {
                 self.0.push(Hw::Feed);
             }
-            fn reset(&mut self) {}
+        }
+        impl Reset for Log {
+            fn reset(&mut self) -> ! {
+                unreachable!("the test never resets")
+            }
         }
         // Its own clock: the shared one is moved by other tests.
         let g = Guard::new([Level::Preempting], Trial::FeedUntilMs(60_000), || 0);

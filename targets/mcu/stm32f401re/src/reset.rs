@@ -53,6 +53,13 @@ pub fn take() -> ResetCause {
     cause(csr)
 }
 
+/// The cause the reset flags name now; the flags stay set.
+#[cfg(target_os = "none")]
+pub fn peek() -> ResetCause {
+    // SAFETY: a read of the fixed RCC_CSR register.
+    cause(unsafe { CSR.read_volatile() })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -21,8 +21,6 @@ dagon-port = { path = "../dagon-port" }
 critical-section = { version = "1.1", features = ["std"] }
 
 [dev-dependencies]
-# Its own tests share their slot store with the bench (`store-tests`).
-dagon-agent = { path = ".", features = ["store-tests"] }
 dagon-core = { path = "../dagon-core" }
 dagon-ed25519 = { path = "../dagon-ed25519", features = ["compact"] }
 # tests/writers.rs: each writer's targets against the MCU definitions' [writers].

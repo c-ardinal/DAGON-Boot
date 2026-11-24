@@ -885,7 +885,7 @@ pub struct BoardDef {
     /// `true`: the board a node naming only its MCU is checked against (a project cannot replace
     /// the default of a builtin MCU that already has one: two marked boards do not load). At most
     /// one board of an MCU says so; an MCU's only board is its default without it; an MCU with
-    /// several boards and none marked has no default (its nodes are checked without board facts).
+    /// several boards and none marked has no default (V-06 rejects a node naming only that MCU).
     /// Definition order never decides it.
     #[serde(default)]
     pub default: bool,

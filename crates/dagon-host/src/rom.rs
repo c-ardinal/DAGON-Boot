@@ -12,7 +12,7 @@ use dagon_port::timeout::REQUEST_MS;
 use dagon_port::{BusError, I2cBus, Nrst, SubControl};
 use dagon_proto::payload::{self, phase, I2cRaw, RomTarget, SubCtl};
 use dagon_proto::{Cmd, Status};
-use dagon_romlink::{Region, RomLink, FRAME_TIMEOUT_MS};
+use dagon_romlink::{Loader, Region, RomLink, FRAME_TIMEOUT_MS};
 
 use crate::ops::Event;
 use crate::{Error, Host, HostClock, Target, Transport};
@@ -32,6 +32,9 @@ pub struct RomSlot {
 pub struct RomMap {
     /// Image header `mcu_id` of the MCU this map is for.
     pub wire_id: u16,
+    /// The ROM loader's client, as the MCU definition names it
+    /// ([`Loader::of`]).
+    pub loader: Loader,
     /// The loader's I2C address (never probed with DAGON frames).
     pub addr: u8,
     pub bootcore: RomSlot,
@@ -64,9 +67,11 @@ pub fn rom_maps(reg: &dagon_topology::defs::Registry) -> Vec<RomMap> {
         .iter()
         .filter(|m| m.has_rom_loader())
         .filter_map(|m| {
+            let loader = Loader::of(m.rom_i2c.is_some())?;
             let rom = m.rom_i2c.as_ref()?;
             Some(RomMap {
                 wire_id: m.wire_id,
+                loader,
                 addr: rom.addr,
                 bootcore: slot(m, ImageKind::Bootcore)?,
                 app_a: slot(m, ImageKind::App)?,
@@ -330,6 +335,31 @@ impl<'h, T: Transport, C: HostClock> HubRom<'h, T, C> {
 mod tests {
     use super::{RomMap, RomSlot};
 
+    /// The loader's client is the one the MCU definition names: the F401's
+    /// `[rom_i2c]` is the STM32 I2C loader; an MCU without such a table has
+    /// no ROM path.
+    #[cfg(feature = "defs")]
+    #[test]
+    fn the_definition_chooses_the_loader() {
+        let reg = dagon_topology::defs::Registry::builtin();
+        let maps = super::rom_maps(reg);
+        for m in reg.mcus() {
+            let map = maps.iter().find(|r| r.wire_id == m.wire_id);
+            match &m.rom_i2c {
+                Some(_) if m.has_rom_loader() => {
+                    assert_eq!(
+                        map.map(|r| r.loader),
+                        Some(dagon_romlink::Loader::Stm32I2c),
+                        "{}",
+                        m.id
+                    )
+                }
+                _ => assert!(map.is_none(), "{}", m.id),
+            }
+        }
+        assert!(!maps.is_empty(), "the F401 has a ROM path");
+    }
+
     #[test]
     fn app_a_larger_than_its_slot_is_refused() {
         let slot = RomSlot {
@@ -339,6 +369,7 @@ mod tests {
         };
         let map = RomMap {
             wire_id: 2,
+            loader: dagon_romlink::Loader::Stm32I2c,
             addr: 0x39,
             bootcore: slot,
             app_a: slot,

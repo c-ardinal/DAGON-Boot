@@ -13,7 +13,7 @@ description: "利用者のファームウェアにDAGONのエージェントと�
 
 3. ボード用に`dagon-port`のtrait（`Flash`、`Link`、`Reset`、`Watchdog`、`BootSelectS`か`BootSelectV`）と`dagon_agent::SlotStore`を実装します。
 4. アプリ層のチェーンを`dagon_events::compose`で構築します。`dagon_agent::Config`、署名の検証器（`dagon_format::SigVerifier`の実装。例: `dagon_ed25519::Ed25519Compact::new(PUBKEY)`）、`SlotStore`の実装を`dagon_agent::Agent::new`に指定して、エージェントを作成します。拡張が判断点に応答し、イベントを受信します（[イベント](/reference/events/)）。
-5. ループを記述します。ループはリンク（`dagon_port::Link`）から要求のフレームを受信し、`Agent::handle`の応答を送信し、要求されたリセットを実行します。以下はマイコンの定義が使用するループ（`targets/mcu/common/src/serve.rs`）と同一です。`host`はマイコンごとに異なる部分（クロック、ウォッチドッグへの報告、記録、待機）です。応答の送信に失敗した場合（`wrote`が`Err`）は、リセットせずに後続の要求を待機します。リセットの条件はリブートへの応答の送信と送信完了（`flush`）の両方の成功だけです。`Exit::Reboot`で復帰した場合は、呼出元がリセットします。
+5. ループを記述します。ループはリンク（`dagon_port::Link`）から要求のフレームを受信し、`Agent::handle`の応答を送信し、要求されたリセットを実行します。以下はマイコンの定義が使用するループ（`targets/mcu/node/src/serve.rs`）と同一です。`host`はマイコンごとに異なる部分（クロック、ウォッチドッグへの報告、記録、待機）です。応答の送信に失敗した場合（`wrote`が`Err`）は、リセットせずに後続の要求を待機します。リセットの条件はリブートへの応答の送信と送信完了（`flush`）の両方の成功だけです。`Exit::Reboot`で復帰した場合は、呼出元がリセットします。
 
    ```rust
    let (via, addr) = (link.kind().code(), link.addr());

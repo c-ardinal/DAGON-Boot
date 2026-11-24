@@ -3,7 +3,7 @@
 //! [`Guard::busy`] when it starts a piece of work and [`Guard::idle`] when
 //! it waits for the next one. The watchdog is fed only through
 //! [`Guard::feed`], which feeds only while every task is within the
-//! deadline of its current work (see [`crate::liveness`]: background
+//! deadline of its current work (see [`dagon_mcu_common::liveness`]: background
 //! deadlines are frozen while a preempting task works). A stuck task
 //! therefore ends in a reset instead of a silent hang.
 //!
@@ -15,7 +15,7 @@ use core::cell::RefCell;
 
 use critical_section::Mutex;
 
-use crate::liveness::{Level, Liveness};
+use dagon_mcu_common::liveness::{Level, Liveness};
 
 /// Longest a task may stay inside one piece of work it did not bound.
 pub const BUSY_LIMIT_MS: u64 = 5_000;

@@ -337,7 +337,7 @@ class Runs(unittest.TestCase):
         self.assertIn('"masked_max_us = 76"', next((self.root / "rec").glob("*/result.json")).read_text())
 
     def test_the_readout_delay_is_the_firmware_s(self):
-        src = (REPO / "targets/mcu/common/src/masked_time.rs").read_text(encoding="utf-8")
+        src = (REPO / "targets/mcu/node/src/masked_time.rs").read_text(encoding="utf-8")
         self.assertIn(f"pub const READOUT_AFTER_S: u64 = {measure.MASKED_READOUT_AFTER_S};", src)
 
     def test_a_probe_without_its_chip_is_refused_before_any_write(self):

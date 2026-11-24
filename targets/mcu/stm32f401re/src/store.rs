@@ -2,9 +2,9 @@
 //! the slot start, boot target switches and confirms appended to the state
 //! log (one log holds the APP and the boot core records). The store is
 //! the shared one of the MCUs with a state log
-//! (`dagon_mcu_common::log_store`), under this MCU's definition.
+//! (`dagon_node::log_store`), under this MCU's definition.
 
-use dagon_mcu_common::log_store::{LogMcu, LogStore};
+use dagon_node::log_store::{LogMcu, LogStore};
 
 /// The STM32F401RE as the log store takes it.
 pub enum F401 {}

@@ -38,13 +38,13 @@ in Espressif's QEMU with the test images of `stage0-qemu/`
 `bootcore/` is the boot core behind that stage0: the image in the factory
 partition that stage0 checks and starts at every reset, with the same
 provisional layout (`qemu-layout`). It runs from RAM on the ROM's flash
-driver and UART0. At its start (`dagon_mcu_common::handed::begin`) it
+driver and UART0. At its start (`dagon_node::handed::begin`) it
 settles its own trial, then serves recovery mode when stage0's decision
 started no app, update mode when the app handed over (an UPDATE_STAY in
 the app log) or a STAY arrives within the definition's listen window, and
 otherwise asks stage0 for the app (START_APP in the retained cell) and
 resets. Its session is dagon-agent's with the boot core writer over the
-shared state-log store (`dagon_mcu_common::log_store`). CI boots it behind
+shared state-log store (`dagon_node::log_store`). CI boots it behind
 stage0 in QEMU and talks to it over UART0
 (`crates/dagon-cli/src/esp_image_qemu_bootcore.rs`). The app's side of
 the hand-over (REBOOT mode 1 writing UPDATE_STAY) comes with the app's

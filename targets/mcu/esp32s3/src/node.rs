@@ -48,9 +48,9 @@ use crate::{
 use dagon_agent::{reply_status, Agent, SlotStore, StoreError, TrialPolicy, NO_ADDR};
 use dagon_ed25519::Ed25519Compact;
 use dagon_events::{Published, Watchdog as Periods};
-pub use dagon_mcu_common::hooks::BoardExtension;
-pub use dagon_mcu_common::hooks::{always, App, AppEvents, Confirm, NodeChain, SelfCheck};
-use dagon_mcu_common::hooks::{finish_start, node_chain, Events};
+pub use dagon_node::hooks::BoardExtension;
+pub use dagon_node::hooks::{always, App, AppEvents, Confirm, NodeChain, SelfCheck};
+use dagon_node::hooks::{finish_start, node_chain, Events};
 use dagon_mcu_common::link::Link as DagonLink;
 use dagon_port::{BootSelectV, Reset, Watchdog};
 use dagon_proto::payload::SlotState;

@@ -1,0 +1,36 @@
+[package]
+name = "dagon-node"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+version = "0.1.0"
+publish = false
+
+# The node's services the DAGON MCU packages run (the agent's serving loop,
+# its slot store, the watchdog guard, the boot core's start), host-testable:
+#   cargo test --target <host triple>
+# The driver helpers they build on are dagon-mcu-common's.
+[workspace]
+
+[dependencies]
+dagon-agent = { path = "../../../crates/dagon-agent" }
+# log_store: the state log the store appends to.
+dagon-core = { path = "../../../crates/dagon-core" }
+dagon-events = { path = "../../../crates/dagon-events" }
+dagon-format = { path = "../../../crates/dagon-format" }
+dagon-mcu-common = { path = "../common" }
+dagon-port = { path = "../../../crates/dagon-port" }
+dagon-proto = { path = "../../../crates/dagon-proto" }
+critical-section = "1"
+
+[features]
+# masked_time: an app built to measure how long DAGON's own code masks
+# interrupts.
+masked-time = []
+
+[dev-dependencies]
+critical-section = { version = "1", features = ["std"] }
+dagon-sim = { path = "../../../crates/dagon-sim" }
+# The agents of the tests verify with the key the simulator's images are signed under.
+dagon-ed25519 = { path = "../../../crates/dagon-ed25519", features = ["compact"] }
+# tests/start.rs signs the update it sends.
+ed25519-compact = { version = "2.6", default-features = false }

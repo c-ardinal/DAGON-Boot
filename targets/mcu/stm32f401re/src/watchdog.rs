@@ -1,5 +1,5 @@
 //! The independent watchdog (IWDG) behind the liveness-gated [`Guard`]
-//! (see `dagon_mcu_common::guard`). It runs from start-up on: the boot
+//! (see `dagon_node::guard`). It runs from start-up on: the boot
 //! core starts it ([`TRIAL_WDT_MS`](crate::layout::TRIAL_WDT_MS) on
 //! trial, else [`CONFIRMED_WDT_MS`](crate::layout::CONFIRMED_WDT_MS)) and
 //! the app takes it over and sets the confirmed period once the image is
@@ -11,10 +11,10 @@ use embassy_stm32::peripherals::IWDG;
 use embassy_stm32::Peri;
 use embassy_time::Instant;
 
-pub use dagon_mcu_common::guard::{
+pub use dagon_mcu_common::liveness::Level;
+pub use dagon_node::guard::{
     levels, Dog, Lease, PeriodDog, Rearm, Trial, Watch, BUSY_LIMIT_MS, BUSY_MARGIN_MS,
 };
-pub use dagon_mcu_common::liveness::Level;
 
 /// The running IWDG (owning its peripheral), programmed by [`crate::iwdg`].
 pub struct Iwdg(Peri<'static, IWDG>);
@@ -46,7 +46,7 @@ pub fn start(_p: &mut Peri<'static, IWDG>, period_ms: u32) {
 }
 
 /// The app's guard over `N` tasks.
-pub type Guard<const N: usize> = dagon_mcu_common::guard::Guard<PeriodDog<Iwdg>, N>;
+pub type Guard<const N: usize> = dagon_node::guard::Guard<PeriodDog<Iwdg>, N>;
 
 /// Milliseconds since boot (the guard's clock).
 pub fn now_ms() -> u64 {

@@ -372,8 +372,9 @@ const NEVER_PASSED: [&str; 1] = ["ANTHROPIC_API_KEY"];
 /// Environment variables a child process of dagon never sees: the signing
 /// key's and [`NEVER_PASSED`].
 pub fn secret_env(_home: Option<&Path>) -> Vec<String> {
-    std::iter::once(crate::config::KEY_ENV)
-        .chain(NEVER_PASSED)
+    [crate::config::KEY_ENV, crate::config::KEY_COMMAND_ENV]
+        .into_iter()
+        .chain(NEVER_PASSED.iter().copied())
         .map(str::to_string)
         .collect()
 }

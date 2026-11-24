@@ -9,6 +9,9 @@ use serde::{Deserialize, Serialize};
 pub const CONFIG_FILE: &str = "dagon.toml";
 /// Environment variable holding the secret key file path.
 pub const KEY_ENV: &str = "DAGON_SIGNING_KEY";
+/// A command that prints the signing key (`dagon_sign::KeyCommand`): the
+/// KeyStore port for a key kept outside a file.
+pub const KEY_COMMAND_ENV: &str = "DAGON_SIGNING_KEY_COMMAND";
 const DEFAULT_PROVISION_DIR: &str = "out/provision";
 
 /// Inputs for `provision <node>`: ELF/raw binaries (signed here) or signed
@@ -284,16 +287,45 @@ pub fn skipped_lines(cut: &dagon_topology::Cut) -> Vec<String> {
         .collect()
 }
 
-/// Loads the signing key from `--key` or `DAGON_SIGNING_KEY`. Refuses key
-/// files inside a git work tree. Error messages carry the path only.
+/// Loads the signing key from `--key`, else `DAGON_SIGNING_KEY_COMMAND`
+/// (a command that prints it), else `DAGON_SIGNING_KEY`; both variables
+/// set is refused as ambiguous. Refuses key files inside a git work tree.
+/// Error messages carry the path only, never the key.
 pub fn load_key(arg: Option<&str>) -> Result<KeyPair, String> {
-    let path = arg
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os(KEY_ENV).map(PathBuf::from))
-        .ok_or_else(|| format!("no signing key: pass --key <file> or set {KEY_ENV}"))?;
-    let key = dagon_sign::KeyStore::key(&dagon_sign::KeyFile(path))?;
+    let key = dagon_sign::KeyStore::key(key_store(arg)?.as_ref())?;
     allow_key(&key.pk, test_key_allowed())?;
     Ok(key)
+}
+
+/// Where [`load_key`] takes the key from.
+fn key_store(arg: Option<&str>) -> Result<Box<dyn dagon_sign::KeyStore>, String> {
+    pick_key_store(arg, key_command(), std::env::var_os(KEY_ENV))
+}
+
+/// [`key_store`] for the option and the two variables' values.
+fn pick_key_store(
+    arg: Option<&str>,
+    command: Option<String>,
+    file: Option<std::ffi::OsString>,
+) -> Result<Box<dyn dagon_sign::KeyStore>, String> {
+    if let Some(p) = arg {
+        return Ok(Box::new(dagon_sign::KeyFile(PathBuf::from(p))));
+    }
+    match (command, file) {
+        (Some(_), Some(_)) => Err(format!("set {KEY_COMMAND_ENV} or {KEY_ENV}, not both")),
+        (Some(c), None) => Ok(Box::new(dagon_sign::KeyCommand(c))),
+        (None, Some(p)) => Ok(Box::new(dagon_sign::KeyFile(PathBuf::from(p)))),
+        (None, None) => Err(format!(
+            "no signing key: pass --key <file>, or set {KEY_COMMAND_ENV} or {KEY_ENV}"
+        )),
+    }
+}
+
+/// The command `DAGON_SIGNING_KEY_COMMAND` names, if set and not blank.
+pub fn key_command() -> Option<String> {
+    std::env::var(KEY_COMMAND_ENV)
+        .ok()
+        .filter(|c| !c.trim().is_empty())
 }
 
 /// The project's signing key file: `signing_key` in dagon.toml, else the
@@ -440,6 +472,33 @@ pub fn read_file(path: &Path) -> Result<Vec<u8>, String> {
 #[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
+
+    /// `--key` wins; else exactly one of the key command and the key file
+    /// variable; the key itself never in an error.
+    #[test]
+    fn the_key_comes_from_the_option_or_one_variable() {
+        let seed = "5d".repeat(32);
+        let cmd = Some(format!("echo {seed}"));
+        let missing = std::env::temp_dir().join("dagon-no-such-key-file");
+        let file = Some(missing.clone().into_os_string());
+        let key = |r: Result<Box<dyn dagon_sign::KeyStore>, String>| r.and_then(|s| s.key());
+
+        let by_cmd = key(pick_key_store(None, cmd.clone(), None)).unwrap();
+        assert_eq!(*by_cmd.pk, *KeyPair::from_seed([0x5d; 32].into()).pk);
+        let missing_s = missing.to_string_lossy();
+        assert!(key(pick_key_store(Some(&missing_s), cmd.clone(), None)).is_err());
+        assert!(key(pick_key_store(None, None, file.clone())).is_err());
+        let both = key(pick_key_store(None, cmd, file)).unwrap_err();
+        assert!(
+            both.contains("not both") && !both.contains(&seed[..8]),
+            "{both}"
+        );
+        let none = key(pick_key_store(None, None, None)).unwrap_err();
+        assert!(
+            none.contains(KEY_COMMAND_ENV) && none.contains(KEY_ENV),
+            "{none}"
+        );
+    }
 
     #[test]
     fn output_folders_outside_the_work_area_read_as_outside() {

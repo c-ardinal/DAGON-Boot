@@ -195,7 +195,8 @@ impl Signer for KeyPair {
 }
 
 /// The KeyStore port: hands over the signing key from where the user
-/// keeps it. DAGON's default is a key file ([`KeyFile`]).
+/// keeps it. DAGON's default is a key file ([`KeyFile`]); a command that
+/// prints the key ([`KeyCommand`]) reaches any other store.
 pub trait KeyStore {
     /// The key, or why it cannot be had (with no secret in the text).
     fn key(&self) -> Result<KeyPair, String>;
@@ -218,6 +219,47 @@ impl KeyStore for KeyFile {
             ));
         }
         load_key_pair(path).map_err(|e| e.to_string())
+    }
+}
+
+/// A command that prints the secret seed on its standard output, as a key
+/// file holds it (64 hex digits): how a key kept in the OS key store, a
+/// password manager or an environment variable is handed over without a
+/// change to DAGON (`security find-generic-password -w ...`,
+/// `op read op://...`, `printenv MY_KEY`). It runs through the platform
+/// shell (`sh -c`, `cmd /C`) with the caller's terminal for its prompts;
+/// what it prints never appears in an error.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct KeyCommand(pub String);
+
+impl KeyStore for KeyCommand {
+    fn key(&self) -> Result<KeyPair, String> {
+        use std::process::{Command, Stdio};
+        let (shell, flag) = if cfg!(windows) {
+            ("cmd", "/C")
+        } else {
+            ("sh", "-c")
+        };
+        let child = Command::new(shell)
+            .arg(flag)
+            .arg(&self.0)
+            .stdin(Stdio::inherit())
+            .stderr(Stdio::inherit())
+            .stdout(Stdio::piped())
+            .spawn()
+            .map_err(|e| format!("the key command cannot start: {}", e.kind()))?;
+        let mut out = child
+            .wait_with_output()
+            .map_err(|e| format!("the key command cannot be read: {}", e.kind()))?;
+        let seed = std::str::from_utf8(&out.stdout)
+            .ok()
+            .and_then(from_hex::<32>);
+        out.stdout.fill(0);
+        if !out.status.success() {
+            return Err(format!("the key command failed ({})", out.status));
+        }
+        let seed = seed.ok_or("the key command printed no key (64 hex digits expected)")?;
+        Ok(KeyPair::from_seed(Seed::new(seed)))
     }
 }
 
@@ -272,6 +314,32 @@ mod tests {
 
         assert!(matches!(generate_to_dir(&dir), Err(KeyError::Exists(_))));
         fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// A command printing a seed gives that key; one that fails or prints
+    /// something else is refused, and no error carries what it printed.
+    #[test]
+    fn a_key_command_hands_over_the_key_and_never_shows_it() {
+        let seed = "4c".repeat(32);
+        let want = KeyPair::from_seed(Seed::new([0x4c; 32]));
+        let got = KeyCommand(format!("echo {seed}")).key().unwrap();
+        assert_eq!(*got.pk, *want.pk);
+
+        let then_fail = if cfg!(windows) {
+            format!("echo {seed} & exit 3")
+        } else {
+            format!("echo {seed}; exit 3")
+        };
+        let not_a_key = format!("echo {}", "secret-words ".repeat(3));
+        for (cmd, says) in [
+            (then_fail, "failed"),
+            (not_a_key, "no key"),
+            (format!("echo {}", &seed[2..]), "no key"),
+        ] {
+            let e = KeyCommand(cmd.clone()).key().unwrap_err();
+            assert!(e.contains(says), "{cmd}: {e}");
+            assert!(!e.contains(&seed[..16]) && !e.contains("secret"), "{e}");
+        }
     }
 
     #[test]

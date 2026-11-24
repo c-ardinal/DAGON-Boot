@@ -34,6 +34,15 @@ Tell `dagon` where the secret key file is when you sign:
 export DAGON_SIGNING_KEY=~/.dagon/keys/my-fleet/dagon-signing.key
 ```
 
+To keep the key somewhere other than a file, set `DAGON_SIGNING_KEY_COMMAND` instead, to a command that prints the key's 64 hex digits (the contents of the key file). For example, the macOS keychain or 1Password:
+
+```sh
+export DAGON_SIGNING_KEY_COMMAND='security find-generic-password -s dagon-signing -w'
+export DAGON_SIGNING_KEY_COMMAND='op read op://Private/dagon-signing/seed'
+```
+
+`dagon` runs it through the shell each time it signs. Its output never appears in messages. Set only one of the two variables.
+
 ## 2. Make the topology
 
 ### In DAGON Console

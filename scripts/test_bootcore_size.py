@@ -116,6 +116,51 @@ class BootcoreSize(unittest.TestCase):
             self.assertEqual(bootcore_size.package_check(pkg, pkg / "e", pkg, "x"), [])
 
 
+class BootcoreBudget(unittest.TestCase):
+    """CT-16 for the boot cores: every boot core package has a parts and
+    RAM budget, the parts come from the linker map over the image's span,
+    and a part over its max fails the image."""
+
+    def test_every_boot_core_package_has_a_budget_with_ram(self):
+        for mcu in bootcore_size.bootcore_mcus() + bootcore_size.ram_loaded():
+            path = bootcore_size.budget_file(mcu)
+            parts = stage0_size.read_budget(path)
+            self.assertEqual(parts[-1]["name"], stage0_size.OTHER, mcu)
+            self.assertIn("max_bytes", tomllib.loads(path.read_text(encoding="utf-8"))["ram"], mcu)
+
+    def test_the_esp32s3_boot_core_is_ram_loaded_within_its_regions(self):
+        # Stage0 copies it into RAM: no boot core slot, an [image] budget.
+        self.assertEqual(bootcore_size.ram_loaded(), ["esp32s3"])
+        path = bootcore_size.budget_file("esp32s3")
+        image = tomllib.loads(path.read_text(encoding="utf-8"))["image"]
+        self.assertEqual(image["max_bytes"], 0x2_0000 + 0x1_0000)
+        parts = stage0_size.read_budget(path)
+        self.assertLessEqual(sum(p["max_bytes"] for p in parts), image["max_bytes"])
+
+    def test_a_part_over_its_max_fails_the_image(self):
+        from test_stage0_size import MAP, BUDGET
+        mcu = bootcore_size.bootcore_mcus()[0]
+        with tempfile.TemporaryDirectory() as d:
+            d = pathlib.Path(d)
+            img = d / "boot"
+            img.write_bytes(elf([(1, 0x1000_0000, 0x150)]))
+            (d / "boot.map").write_text(MAP, encoding="utf-8")
+            budget = d / "budget.toml"
+            real = bootcore_size.budget_file
+            try:
+                bootcore_size.budget_file = lambda _: budget
+                budget.write_text("[ram]\nmax_bytes = 0\n" + BUDGET, encoding="utf-8")
+                self.assertEqual(bootcore_size.check(img, mcu, map_path=d / "boot.map"), [])
+                self.assertTrue((d / "boot.parts.txt").is_file())
+                budget.write_text("[ram]\nmax_bytes = 0\n"
+                                  + BUDGET.replace("max_bytes = 32", "max_bytes = 19"),
+                                  encoding="utf-8")
+                self.assertEqual(bootcore_size.check(img, mcu, map_path=d / "boot.map"),
+                                 [f"{mcu} boot core: part verifier: 20 bytes, over its 19"])
+            finally:
+                bootcore_size.budget_file = real
+
+
 def symtab_elf(syms):
     """An ELF32 image holding only a symbol table of `syms` (name, value)."""
     strtab = b"\0" + b"".join(n.encode() + b"\0" for n, _ in syms)

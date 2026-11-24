@@ -1,0 +1,63 @@
+# The parts of this boot core's image and the most bytes each may take
+# (scripts/bootcore_size.py, CT-16). A section of the linker map belongs to
+# the first part one of whose `match` prefixes starts its symbol's
+# demangled path, its section name or its output section's name; the rest
+# (anonymous constants, padding) are `other`. The slot of the MCU
+# definition is the hard limit; these catch the part that grew. Each is
+# the largest of the builds (no board and every board of the MCU) plus a
+# quarter, in 256-byte steps; measured 13,576 (no board) and
+# 37,176 bytes (nucleo-f401re) when set.
+
+[ram]
+# Static RAM (allocated, writable sections: .data, .bss, .uninit); the
+# stack is not counted. Measured 256 bytes.
+max_bytes = 512
+
+[[part]]
+name = "verifier"
+match = ["dagon_ed25519"]
+max_bytes = 1792
+
+[[part]]
+name = "sha2"
+match = ["sha2", "digest", "hybrid_array", "block_buffer"]
+max_bytes = 2560
+
+[[part]]
+name = "agent"
+match = ["dagon_agent"]
+max_bytes = 2816
+
+[[part]]
+name = "proto"
+match = ["dagon_proto"]
+max_bytes = 3328
+
+[[part]]
+name = "dagon-core"
+match = ["dagon_core"]
+max_bytes = 5376
+
+[[part]]
+name = "dagon-format"
+match = ["dagon_format"]
+max_bytes = 3328
+
+[[part]]
+name = "mcu-package"
+match = ["dagon_mcu_stm32f401re", "dagon_stm32f401re_bootcore", "dagon_mcu_common", "dagon_port", "dagon_events"]
+max_bytes = 11776
+
+[[part]]
+name = "hal"
+match = ["embassy_", "stm32_metapac", "cortex_m"]
+max_bytes = 2048
+
+[[part]]
+name = "rust-core"
+match = ["core::", "compiler_builtins", "memcpy", "memset", "memcmp", "__aeabi"]
+max_bytes = 8960
+
+[[part]]
+name = "other"
+max_bytes = 7168

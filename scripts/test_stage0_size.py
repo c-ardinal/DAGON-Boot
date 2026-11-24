@@ -212,5 +212,52 @@ class RomLoaded(unittest.TestCase):
         self.assertEqual(sum(used.values()), 0x200)
 
 
+def sections_elf(sections):
+    """An ELF32 image of section headers `sections` as (flags, size)."""
+    head = bytearray(52)
+    head[:6] = b"\x7fELF\x01\x01"
+    struct.pack_into("<I", head, 0x20, 52)
+    struct.pack_into("<HH", head, 0x2E, 40, len(sections))
+    for flags, size in sections:
+        head += struct.pack("<10I", 0, 1, flags, 0, 0, size, 0, 0, 4, 0)
+    return bytes(head)
+
+
+class StaticRam(unittest.TestCase):
+    """CT-16, static RAM: the allocated, writable sections of every boot
+    image against its budget's [ram]."""
+
+    def test_only_allocated_writable_sections_count(self):
+        w, a, x = stage0_size.SHF_WRITE, stage0_size.SHF_ALLOC, 0x4
+        img = sections_elf([
+            (a | x, 0x4000),   # .text
+            (a, 0x200),        # .rodata
+            (w | a, 0x10),     # .data
+            (w | a, 0x300),    # .bss
+            (w, 0x50),         # writable but not in memory
+            (0, 0x999),        # debug information
+        ])
+        self.assertEqual(stage0_size.ram_bytes(img), 0x310)
+
+    def test_a_budget_without_ram_or_an_image_over_it_fails(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = pathlib.Path(d) / "budget.toml"
+            path.write_text(BUDGET, encoding="utf-8")
+            img = sections_elf([(stage0_size.SHF_WRITE | stage0_size.SHF_ALLOC, 0x101)])
+            self.assertEqual(stage0_size.check_ram(img, path, "x"),
+                             [f"x: {path} has no [ram] max_bytes"])
+            path.write_text("[ram]\nmax_bytes = 256\n" + BUDGET, encoding="utf-8")
+            self.assertEqual(stage0_size.check_ram(img, path, "x"),
+                             ["x: 257 bytes of static RAM, over its 256"])
+            path.write_text("[ram]\nmax_bytes = 257\n" + BUDGET, encoding="utf-8")
+            self.assertEqual(stage0_size.check_ram(img, path, "x"), [])
+
+    def test_every_stage0_budget_bounds_its_static_ram(self):
+        import tomllib
+        for mcu in stage0_size.stage0_mcus() + stage0_size.rom_loaded():
+            path = stage0_size.MCU / mcu / "stage0" / "budget.toml"
+            self.assertIn("max_bytes", tomllib.loads(path.read_text(encoding="utf-8"))["ram"], mcu)
+
+
 if __name__ == "__main__":
     unittest.main()

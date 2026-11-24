@@ -47,12 +47,7 @@ fn tier_name(t: u8) -> Option<&'static str> {
 }
 
 fn rom_entry_name(r: u8) -> Option<&'static str> {
-    match r {
-        tp::rom_entry::FORCE_DOWNLOAD_BOOT => Some("force-download-boot"),
-        tp::rom_entry::M5PM1 => Some("m5pm1"),
-        tp::rom_entry::STM32_I2C_ROM => Some("stm32-i2c-rom"),
-        _ => None,
-    }
+    dagon_topology::schema::RomEntry::from_wire(r).map(|e| e.name())
 }
 
 fn tag_text(t: &[u8; 16]) -> String {

@@ -157,11 +157,7 @@ fn control_kind(k: ControlKind) -> &'static str {
 }
 
 fn rom_entry(r: RomEntry) -> &'static str {
-    match r {
-        RomEntry::ForceDownloadBoot => "force-download-boot",
-        RomEntry::M5pm1 => "m5pm1",
-        RomEntry::Stm32I2cRom => "stm32-i2c-rom",
-    }
+    r.name()
 }
 
 fn iface(i: UartIface) -> &'static str {

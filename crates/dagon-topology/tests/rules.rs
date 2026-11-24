@@ -46,6 +46,67 @@ fn unparseable_document_is_v01() {
     assert_fires("not: [valid", "V-01");
 }
 
+/// A name the 構成 writes as a string and this DAGON does not have is said
+/// by name, with the names it has, apart from a malformed document.
+#[test]
+fn a_kind_this_dagon_does_not_know_is_named() {
+    use dagon_topology::schema::{LinkKind, RomEntry, UplinkHost};
+    let said = |yaml: String| {
+        let report = check_str(&yaml);
+        let issues: Vec<_> = report.errors().collect();
+        assert_eq!(issues.len(), 1, "{issues:?}");
+        assert_eq!(issues[0].rule, "V-01");
+        issues[0].message.clone()
+    };
+    let m = said(mutate("  - kind: i2c", "  - kind: lora"));
+    assert!(
+        m.contains("this DAGON does not know the link kind `lora`"),
+        "{m}"
+    );
+    for name in LinkKind::NAMES {
+        assert!(m.contains(&format!("`{name}`")), "{name}: {m}");
+    }
+    let m = said(mutate("rom_entry: stm32-i2c-rom", "rom_entry: swd-probe"));
+    assert!(
+        m.contains("this DAGON does not know the ROM entry `swd-probe`"),
+        "{m}"
+    );
+    for name in RomEntry::NAMES {
+        assert!(m.contains(&format!("`{name}`")), "{name}: {m}");
+    }
+    let m = said(mutate(
+        "role: coordinator",
+        "role: coordinator\n    uplink: { kind: usb-cdc, host: satellite }",
+    ));
+    assert!(
+        m.contains("this DAGON does not know the uplink host `satellite`"),
+        "{m}"
+    );
+    for name in UplinkHost::NAMES {
+        assert!(m.contains(&format!("`{name}`")), "{name}: {m}");
+    }
+}
+
+/// Every name reads back to the value that writes it, so a kind added to a
+/// list is read with no other change (and no format number moves).
+#[test]
+fn every_name_reads_as_its_own_value() {
+    use dagon_topology::schema::{LinkKind, RomEntry, UplinkHost};
+    for k in LinkKind::ALL {
+        assert_eq!(LinkKind::from_name(k.name()), Some(*k));
+        assert_eq!(yaml_serde::from_str::<LinkKind>(k.name()).unwrap(), *k);
+    }
+    assert_eq!(LinkKind::NAMES.len(), LinkKind::ALL.len());
+    for r in RomEntry::ALL {
+        assert_eq!(RomEntry::from_name(r.name()), Some(*r));
+        assert_eq!(yaml_serde::from_str::<RomEntry>(r.name()).unwrap(), *r);
+    }
+    for h in UplinkHost::ALL {
+        assert_eq!(UplinkHost::from_name(h.name()), Some(*h));
+        assert_eq!(yaml_serde::from_str::<UplinkHost>(h.name()).unwrap(), *h);
+    }
+}
+
 #[test]
 fn v01_schema_version() {
     assert_fires(&mutate("dagon: 2", "dagon: 1"), "V-01");

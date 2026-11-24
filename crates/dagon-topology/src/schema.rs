@@ -59,17 +59,86 @@ impl Default for Uplink {
     }
 }
 
-/// What drives a coordinator through its uplink.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum UplinkHost {
-    /// dagon on a PC.
-    #[default]
-    PcCli,
-    /// DAGON Console in a browser (a PC or a phone).
-    Browser,
-    /// A custom device of the developer's own.
-    Embedded,
+/// A name a 構成 or a definition writes as a string that this DAGON does not
+/// have: said by name, with the names it has, so a file written for a DAGON
+/// with more kinds is told apart from a malformed one. Adding a name changes
+/// no format number.
+pub(crate) fn unknown_name(what: &str, name: &str, known: &[&str]) -> String {
+    format!(
+        "this DAGON does not know the {what} `{name}` (it knows {})",
+        known
+            .iter()
+            .map(|k| format!("`{k}`"))
+            .collect::<Vec<_>>()
+            .join(", ")
+    )
+}
+
+/// Reads `$t` from the string a file writes: one of `$t::NAMES`, else
+/// [`unknown_name`].
+macro_rules! read_by_name {
+    ($t:ident, $what:literal) => {
+        impl<'de> Deserialize<'de> for $t {
+            fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+                let name = String::deserialize(d)?;
+                $t::from_name(&name)
+                    .ok_or_else(|| serde::de::Error::custom(unknown_name($what, &name, $t::NAMES)))
+            }
+        }
+    };
+}
+
+/// An enum a file names by string: its variants with their names, `ALL`,
+/// `NAMES`, `name`, `from_name` and the reading of [`read_by_name!`].
+macro_rules! named {
+    (
+        $(#[$meta:meta])* $what:literal
+        pub enum $t:ident { $( $(#[$vmeta:meta])* $v:ident = $n:literal, )* }
+    ) => {
+        $(#[$meta])*
+        pub enum $t {
+            $( $(#[$vmeta])* $v, )*
+        }
+
+        impl $t {
+            /// Every value, in the order declared.
+            pub const ALL: &'static [$t] = &[$($t::$v),*];
+            /// Every name a file may write.
+            pub const NAMES: &'static [&'static str] = &[$($n),*];
+
+            /// The name a file writes.
+            pub fn name(self) -> &'static str {
+                match self {
+                    $( $t::$v => $n, )*
+                }
+            }
+
+            /// The value a file writes as `name`.
+            pub fn from_name(name: &str) -> Option<Self> {
+                match name {
+                    $( $n => Some($t::$v), )*
+                    _ => None,
+                }
+            }
+        }
+
+        read_by_name!($t, $what);
+    };
+}
+
+named! {
+    /// What drives a coordinator through its uplink.
+    #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+    "uplink host"
+    pub enum UplinkHost {
+        /// dagon on a PC.
+        #[default]
+        PcCli = "pc-cli",
+        /// DAGON Console in a browser (a PC or a phone).
+        Browser = "browser",
+        /// A custom device of the developer's own.
+        Embedded = "embedded",
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -168,14 +237,24 @@ impl End {
 macro_rules! link_kind_enum {
     (() $( $v:ident = $c:literal, $n:literal; )*) => {
         /// A hop's medium, by the name a 構成 uses.
-        #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Deserialize)]
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
         pub enum LinkKind {
-            $( #[serde(rename = $n)] $v, )*
+            $( $v, )*
         }
 
         impl LinkKind {
             /// Every kind, in the list's order.
             pub const ALL: &'static [LinkKind] = &[$(LinkKind::$v),*];
+            /// Every name a 構成 or a definition may write.
+            pub const NAMES: &'static [&'static str] = &[$($n),*];
+
+            /// The kind a 構成 writes as `name`.
+            pub fn from_name(name: &str) -> Option<Self> {
+                match name {
+                    $( $n => Some(LinkKind::$v), )*
+                    _ => None,
+                }
+            }
 
             /// The name a 構成 uses.
             pub fn name(self) -> &'static str {
@@ -195,6 +274,7 @@ macro_rules! link_kind_enum {
 }
 
 dagon_format::with_link_kinds!([link_kind_enum]());
+read_by_name!(LinkKind, "link kind");
 
 impl LinkKind {
     /// Kinds the compiled topology can carry between a coordinator and a node linked to it.
@@ -258,12 +338,33 @@ fn cooperative() -> ControlKind {
     ControlKind::Cooperative
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum RomEntry {
-    ForceDownloadBoot,
-    M5pm1,
-    Stm32I2cRom,
+named! {
+    /// How a node is put into its ROM loader over a link.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    "ROM entry"
+    pub enum RomEntry {
+        ForceDownloadBoot = "force-download-boot",
+        M5pm1 = "m5pm1",
+        Stm32I2cRom = "stm32-i2c-rom",
+    }
+}
+
+impl RomEntry {
+    /// The code a compiled topology carries (`dagon_format::topology::rom_entry`).
+    pub fn wire(self) -> u8 {
+        use dagon_format::topology::rom_entry as code;
+        match self {
+            RomEntry::ForceDownloadBoot => code::FORCE_DOWNLOAD_BOOT,
+            RomEntry::M5pm1 => code::M5PM1,
+            RomEntry::Stm32I2cRom => code::STM32_I2C_ROM,
+        }
+    }
+
+    /// The entry a compiled topology carries as `code`; `NONE` and a code
+    /// this DAGON does not know: none.
+    pub fn from_wire(code: u8) -> Option<Self> {
+        Self::ALL.iter().copied().find(|r| r.wire() == code)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]

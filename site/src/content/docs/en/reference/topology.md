@@ -18,6 +18,12 @@ compiled topology holds, per link, both ends' node, port index and address.
 `buses` stays for the wiring checks and does not name a link to firmware or
 host.
 
+A link's `kind`, its `control.rom_entry` and a coordinator's `uplink.host` are
+strings. A name this DAGON does not have is refused by name with the names it
+has (V-01: ``this DAGON does not know the link kind `lora` ``), so a 構成
+written for a DAGON with more kinds is told apart from a malformed one. A new
+name changes no format number: `dagon: 2` stays.
+
 ```yaml
 links:
   - kind: i2c

@@ -282,12 +282,10 @@ fn link(reg: &Registry, t: &Topology, l: &Link) -> Result<TopoLink, CompileError
         nrst_pin: pin(gpios.and_then(|e| e.nrst)),
         boot_pin: pin(gpios.and_then(|e| e.boot)),
         baud,
-        rom_entry: match l.control.rom_entry {
-            None => tp::rom_entry::NONE,
-            Some(RomEntry::ForceDownloadBoot) => tp::rom_entry::FORCE_DOWNLOAD_BOOT,
-            Some(RomEntry::M5pm1) => tp::rom_entry::M5PM1,
-            Some(RomEntry::Stm32I2cRom) => tp::rom_entry::STM32_I2C_ROM,
-        },
+        rom_entry: l
+            .control
+            .rom_entry
+            .map_or(tp::rom_entry::NONE, RomEntry::wire),
         bus_id,
         gpio_end,
     })

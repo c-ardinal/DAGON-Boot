@@ -42,7 +42,7 @@ pub(super) fn tree_ids(dir: &str, file: &str) -> Vec<String> {
 }
 
 /// Folders under the builtin roots that are not definition packages.
-const NOT_PACKAGES: &[(&str, &str)] = &[("mcu", "build"), ("mcu", "common")];
+const NOT_PACKAGES: &[(&str, &str)] = &[("mcu", "build"), ("mcu", "common"), ("mcu", "node")];
 
 #[test]
 fn every_folder_under_the_builtin_roots_is_a_package_or_listed_as_not_one() {

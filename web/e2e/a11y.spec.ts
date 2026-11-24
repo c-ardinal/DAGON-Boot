@@ -7,7 +7,9 @@ import { openSample, settled } from './console.ts';
 const WCAG = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22a', 'wcag22aa'];
 
 async function violations(page: Page, where: string, into: string[]): Promise<void> {
-  await page.waitForTimeout(400);
+  // Longer than the slowest leave (a chip fades out over --dur-settle, 480 ms): while one is leaving,
+  // the card still shows words its name no longer says.
+  await settled(page);
   const r = await new AxeBuilder({ page }).withTags(WCAG).analyze();
   for (const v of r.violations) for (const n of v.nodes) into.push(`${where}: ${v.id} ${n.target.join(' ')}`);
 }

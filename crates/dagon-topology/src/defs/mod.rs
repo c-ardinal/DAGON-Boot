@@ -630,7 +630,8 @@ pub struct McuDef {
     /// the host waits each one's `unit_max_ms` and a margin), `pairs = [{ controller, sda, scl }]`
     /// it listens on.
     pub rom_i2c: Option<RomI2c>,
-    /// Link kinds the MCU package's firmware implements (its `LINK_KINDS`).
+    /// Link kinds the MCU package's firmware implements, `up` and `down`: the one source of its
+    /// `LINK_KINDS`, which the package builds from them.
     #[serde(default)]
     pub links: Links,
     /// How the boot stage that writes the app (`[writers] app` names a kind other than `app`)

@@ -53,7 +53,7 @@ fn put_app(m: &mut Mem, kp: &KeyPair, slot: u8, minor: u8) -> SlotRef {
     let mut h = ImageHeader {
         image_kind: image_kind::APP,
         port_kind: port_kind::SELF_BOOT,
-        mcu_id: mcu_id::RP2040,
+        mcu_id: McuId::of_name("rp2040"),
         slot_binding: slot,
         placement: placement::INLINE,
         load_addr: base + HEADER_LEN,
@@ -116,7 +116,7 @@ fn verifier(kp: &KeyPair) -> Ed25519Compact {
 
 fn config() -> BootConfig {
     BootConfig {
-        mcu_id: mcu_id::RP2040,
+        mcu_id: McuId::of_name("rp2040"),
         target_tag: target_tag(HUB_TAG),
         max_attempts: dagon_mcu_rp2040::TRIAL_ATTEMPTS,
     }

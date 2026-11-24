@@ -19,7 +19,7 @@ pub const STAGE0: Stage0<'static> = Stage0 {
     log: &BL_LOG_LAYOUT,
     slots: &crate::layout::BOOTCORE_PLACES,
     max: TRIAL_ATTEMPTS,
-    mcu_id: crate::MCU_WIRE_ID,
+    mcu_id: crate::MCU_ID,
 };
 
 /// The apps stage0 starts the confirmed one of when no boot core may

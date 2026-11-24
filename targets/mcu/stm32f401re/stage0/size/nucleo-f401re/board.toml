@@ -2,7 +2,7 @@
 default = true
 drawing = "nucleo-64"
 flash_bytes = 524288
-format = 3
+format = 4
 i2c_target = true
 id = "nucleo-f401re"
 mcu = "stm32f401re"

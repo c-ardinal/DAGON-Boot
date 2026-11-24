@@ -843,12 +843,15 @@ mod tests {
             lines[0].starts_with(&format!("hub: versions: stage0 {s0}; boot core A:")),
             "{lines:?}"
         );
-        assert!(lines[0].ends_with("; wire 2; mcu 0x0001"), "{lines:?}");
+        assert!(
+            lines[0].ends_with("; wire 2; mcu 644720c5da08d019"),
+            "{lines:?}"
+        );
         assert!(
             lines[1].contains(&format!("app A:Confirmed {OLD} (running)")),
             "{lines:?}"
         );
-        assert!(lines[1].ends_with("mcu 0x0002"), "{lines:?}");
+        assert!(lines[1].ends_with("mcu 5d5cf11b0a9a0c54"), "{lines:?}");
         assert_eq!(lines[2], "far: not reachable (updating does not reach it)");
 
         seg(&mut w.sim.relay.borrow_mut()).predates = vec![dagon_proto::Cmd::Version as u8];

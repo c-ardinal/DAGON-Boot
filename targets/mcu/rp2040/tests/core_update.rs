@@ -48,7 +48,7 @@ fn bootcore(slot: u8, minor: u8) -> Vec<u8> {
     let mut h = ImageHeader {
         image_kind: image_kind::BOOTCORE,
         port_kind: port_kind::SELF_BOOT,
-        mcu_id: mcu_id::RP2040,
+        mcu_id: McuId::of_name("rp2040"),
         slot_binding: slot,
         placement: placement::INLINE,
         load_addr: BL_SLOT[slot as usize] + HEADER_LEN,
@@ -463,7 +463,7 @@ fn app_a() -> Vec<u8> {
     let mut h = ImageHeader {
         image_kind: image_kind::APP,
         port_kind: port_kind::SELF_BOOT,
-        mcu_id: mcu_id::RP2040,
+        mcu_id: McuId::of_name("rp2040"),
         slot_binding: 0,
         placement: placement::INLINE,
         load_addr: at,

@@ -586,7 +586,8 @@ fn other_fuse_layout_is_ignored() {
 /// never matched, round trip through the topology node.
 #[test]
 fn identity_load_and_match() {
-    let ids: Vec<String> = (0..500).map(|i| format!("mcu-{i}")).collect();
+    // Few enough that no two meet in the identity reply's 16 bits.
+    let ids: Vec<String> = (0..40).map(|i| format!("mcu-{i}")).collect();
     let refs: Vec<&str> = ids.iter().map(String::as_str).collect();
     let t = identity::load(&refs, identity).unwrap();
     for id in &refs {
@@ -605,6 +606,14 @@ fn identity_load_and_match() {
     }
     match identity::load(&refs, low_byte) {
         Err(LoadError::Collision { a, b, .. }) => assert_ne!(a, b),
+        other => panic!("{other:?}"),
+    }
+    // The identity reply carries 16 bits: two ids that meet there are
+    // refused though their full identities differ.
+    let twin = ["rp2040", "fake-m51917"];
+    assert_ne!(identity(twin[0]), identity(twin[1]));
+    match identity::load(&twin, identity) {
+        Err(LoadError::Collision { bits: 16, .. }) => {}
         other => panic!("{other:?}"),
     }
 }

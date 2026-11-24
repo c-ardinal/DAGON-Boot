@@ -45,7 +45,7 @@ pub use chain::AppChain;
 pub use images::{ImageView, Transition};
 
 use dagon_events::Compact;
-use dagon_format::header::HEADER_SIZE;
+use dagon_format::header::{McuId, HEADER_SIZE};
 use dagon_format::Version;
 use dagon_port::timeout::{EraseLayout, Plan, PlanError};
 use dagon_proto::payload::{self, StatusResp};
@@ -610,7 +610,7 @@ pub trait SlotStore {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Config {
     /// Image header `mcu_id` this node accepts.
-    pub mcu_id: u16,
+    pub mcu_id: McuId,
     /// Image header `port_kind` this node accepts.
     pub port_kind: u8,
     /// Image header `target_tag` this node accepts.

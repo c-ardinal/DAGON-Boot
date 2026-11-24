@@ -59,8 +59,9 @@ probability.
 ## 2. MCU identity
 
 `identity(id)` = the first 8 bytes of `SHA-256("dagon-mcu/" ‖ id)` as a
-little-endian u64, where `id` is the MCU definition's `id`. Every carrier
-holds all 64 bits. Carriers: `image-header`, `identity-reply`,
+little-endian u64, where `id` is the MCU definition's `id`. The identity
+reply (HELLO) holds the low 16 bits; every other carrier holds all 64.
+Carriers: `image-header`, `identity-reply`,
 `version-0x06`, `topology-node` (the model's `identity::CARRIERS`; a test
 checks this line against it). The definition loader refuses two
 definitions whose identities agree in the width of any carrier, naming
@@ -70,21 +71,23 @@ exactly is shown as unknown. No numeric MCU table exists.
 
 ## 3. Compiled topology
 
-### 3.1 Body (`topology-bin` 2)
+### 3.1 Body (`topology-bin` 3)
 
-Head, 16 bytes: magic `DGTP`, layout u16 LE (2), node count (1 to `MAX_NODES`), link
-count (≤ `MAX_LINKS`), constraint count (≤ `MAX_CONSTRAINTS`), 7 zero bytes. Then:
+Head, 32 bytes: magic `DGTP`, layout u16 LE (3), node count (1 to `MAX_NODES`), link
+count (≤ `MAX_LINKS`), total length u32 LE at offset 8, constraint count
+(≤ `MAX_CONSTRAINTS`) at offset 20, every other byte zero. Then:
 
-- nodes, 40 bytes each: index, role, port kind, max attempts, listen
-  window ms u16 LE, map id, order rank, recovery tiers [3], 5 zero bytes,
-  MCU identity u64 LE at offset 16, target tag [16] at offset 24;
+- nodes, 40 bytes each: index, role, 2 zero bytes, port kind, max attempts, listen
+  window ms u16 LE, map id, recovery tiers [3], order rank, 3 zero bytes,
+  target tag [16] at offset 16, MCU identity u64 LE at offset 32;
 - links, 20 bytes each, in the image tools' link layout: no direction, two
   ends, each with its node, port index and address;
 - constraints, 16 bytes each, in the manifest's constraint layout.
 
 Canonical: node `index` equals its position, a link's ends in node order,
-links sorted by their ends' nodes, reserved bytes zero; layout 1 (16-byte
-links) is not read; a decoder re-encodes and compares.
+links sorted by their ends' nodes, reserved bytes zero; an older layout
+(2 and its 32-byte nodes with a 16-bit MCU number) is not read; a decoder
+re-encodes and compares.
 
 ## 4. Properties
 

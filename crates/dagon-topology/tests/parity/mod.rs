@@ -20,8 +20,10 @@ pub const OVERRIDDEN: [(&str, &str, &str); 2] = [
     (BUILTIN.0, BUILTIN.1, "seg"),
     (SYNTHETIC.0, SYNTHETIC.1, "seg2"),
 ];
-/// The synthetic MCU's image header id.
-pub const SYNTHETIC_WIRE_ID: u16 = 0x7E01;
+/// The synthetic MCU's identity in image headers.
+pub fn synthetic_mcu_id() -> dagon_format::header::McuId {
+    dagon_format::header::McuId::of_name(SYNTHETIC.0)
+}
 
 /// App slot B: start (unchanged), bytes; and what a node receives into it.
 pub const APP_B: (u32, u32) = (0x0804_0000, 0x1_C000);
@@ -159,7 +161,6 @@ pub fn project(name: &str) -> Project {
         &[
             ("id = \"stm32f401re\"", "id = \"parity-m4\""),
             ("name = \"STM32F401RE\"", "name = \"PARITY-M4\""),
-            ("wire_id = 0x0002", "wire_id = 0x7E01"),
             ("name = \"f401-default\"", "name = \"parity-default\""),
         ],
     );

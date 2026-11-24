@@ -54,8 +54,8 @@ use dagon_agent::{Agent, Config};
 use dagon_core::boot::{rebuild, BootConfig, SlotLayout};
 use dagon_ed25519::Ed25519Small;
 use dagon_events::{compose, Bounds, Composed, Layer, Nop, Published, Watchdog};
-use dagon_format::header::{mcu_id, port_kind};
-use dagon_mcu_esp32s3::{PUBKEY, TRIAL_ATTEMPTS, TRIAL_WDT_MS};
+use dagon_format::header::port_kind;
+use dagon_mcu_esp32s3::{MCU_ID, PUBKEY, TRIAL_ATTEMPTS, TRIAL_WDT_MS};
 use dagon_node::handed::{begin, CellIo, Logs, Next, Window};
 use dagon_node::log_store::{LogMcu, LogStore};
 use dagon_port::{Flash, FlashError, FlashRegion};
@@ -205,7 +205,7 @@ pub extern "C" fn core_start() -> ! {
         },
         |f: &mut RomFlash| {
             let cfg = BootConfig {
-                mcu_id: mcu_id::ESP32S3,
+                mcu_id: MCU_ID,
                 target_tag: TAG,
                 max_attempts: TRIAL_ATTEMPTS,
             };
@@ -260,7 +260,7 @@ fn session(flash: Fed, entry: Entry) -> Option<&'static mut Session> {
     let periods = Watchdog::new(TRIAL_WDT_MS, dagon_mcu_esp32s3::CONFIRMED_WDT_MS);
     let chain = compose(Layer::App, events, Nop, Nop, Bounds::new(now, periods));
     let cfg = Config {
-        mcu_id: mcu_id::ESP32S3,
+        mcu_id: MCU_ID,
         port_kind: port_kind::SELF_BOOT,
         target_tag: TAG,
         role: role::NODE,

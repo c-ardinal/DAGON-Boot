@@ -106,6 +106,7 @@ pub mod hello {
     pub const ROLE: FieldSpec = FieldSpec::opt(1, 1, 1);
     /// Image header `port_kind`.
     pub const PORT_KIND: FieldSpec = FieldSpec::opt(2, 1, 1);
+    /// The low 16 bits of the MCU identity.
     pub const MCU_ID: FieldSpec = FieldSpec::opt(3, 2, 2);
     pub const MODE: FieldSpec = FieldSpec::opt(4, 1, 1);
     pub const ACTIVE_VERSION: FieldSpec = FieldSpec::opt(5, 4, 4);
@@ -185,7 +186,7 @@ pub mod status {
 pub mod version {
     use super::FieldSpec;
     pub const BOOTCORE: FieldSpec = FieldSpec::opt(1, 4, 4);
-    pub const MCU: FieldSpec = FieldSpec::opt(6, 2, 2);
+    pub const MCU: FieldSpec = FieldSpec::opt(6, 8, 8);
     pub const STAGE0: FieldSpec = FieldSpec::opt(10, 4, 4);
     /// `active u8`, then per slot A, B `state u8`, `version u32`.
     pub const BOOTCORE_SLOTS: FieldSpec = FieldSpec::opt(11, 11, 11);

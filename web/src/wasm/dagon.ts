@@ -75,7 +75,8 @@ export interface VersionSlots {
 /** VERSION of a node (dagon_proto::payload::VersionResp); null where the node left a value out. */
 export interface VersionResp {
   wire: number | null;
-  mcuId: number | null;
+  /** The MCU identity: 16 hex digits (dagon_format::header::McuId). */
+  mcuId: string | null;
   stage0: number | null;
   bootCore: number | null;
   coreSlots: VersionSlots | null;

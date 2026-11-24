@@ -12,7 +12,7 @@
 use dagon_agent::{Agent, Config, SlotStore};
 use dagon_ed25519::Ed25519Compact;
 use dagon_events::{Published, Watchdog as Periods};
-use dagon_format::header::{mcu_id, port_kind, target_tag};
+use dagon_format::header::{port_kind, target_tag};
 pub use dagon_node::hooks::{always, App, AppEvents, BoardCore, Confirm, NodeChain, SelfCheck};
 use dagon_node::hooks::{finish_start, node_chain, Events};
 use dagon_proto::max_payload;
@@ -89,7 +89,7 @@ pub const fn levels<const N: usize>() -> [crate::watchdog::Level; N] {
 /// its topology role (`dagon_proto::payload::role`).
 pub fn config(tag: &str, role: u8) -> Config {
     Config {
-        mcu_id: mcu_id::RP2040,
+        mcu_id: crate::MCU_ID,
         port_kind: port_kind::SELF_BOOT,
         target_tag: target_tag(tag),
         role,

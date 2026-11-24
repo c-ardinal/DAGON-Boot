@@ -124,7 +124,6 @@ pub const ROWS: &[Row] = &[
     row(Mcu, "bootcore.clock", Whole),
     row(Mcu, "app.clock", Whole),
     row(Mcu, "id", Same),
-    row(Mcu, "wire_id", Same),
     row(Mcu, "format", Same),
     row(Mcu, "port", Same),
     row(Mcu, "partitions", Same),

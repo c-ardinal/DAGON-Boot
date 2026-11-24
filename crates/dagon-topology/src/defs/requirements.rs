@@ -69,12 +69,6 @@ pub const MCU: &[Requirement<McuCheck>] = &[
         check: any,
     },
     Requirement {
-        engine: "image header",
-        fields: &["wire_id"],
-        rule: "not 0 (unique across MCUs: registry)",
-        check: |m| fail(m.wire_id == 0, || "wire_id 0 is not an MCU id".into()),
-    },
-    Requirement {
         engine: "topology check V-07",
         fields: &["gpio_count"],
         rule: "any; 0 = pins named by port",

@@ -30,7 +30,7 @@ fn topology() -> dagon_topology::Topology {
 fn the_definitions_alone_differ_from_every_overridden_value() {
     let p = project("tree");
     let reg = tree_only(&p);
-    assert_eq!(reg.mcu(SYNTHETIC.0).unwrap().wire_id, SYNTHETIC_WIRE_ID);
+    assert_eq!(reg.mcu(SYNTHETIC.0).unwrap().mcu_id(), synthetic_mcu_id());
     for (mcu, board, _) in OVERRIDDEN {
         let m = reg.mcu(mcu).unwrap();
         let b = reg.slot(mcu, image_kind::APP, slot_binding::B).unwrap();
@@ -80,8 +80,8 @@ fn the_host_times_and_maps_each_node_by_its_overridden_definition() {
     let t = topology();
     let timings = dagon_host::node_timings(&reg, &t).unwrap();
     let wires = [
-        reg.mcu(BUILTIN.0).unwrap().wire_id,
-        reg.mcu(SYNTHETIC.0).unwrap().wire_id,
+        reg.mcu(BUILTIN.0).unwrap().mcu_id(),
+        reg.mcu(SYNTHETIC.0).unwrap().mcu_id(),
     ];
     let roms = dagon_host::rom::rom_maps(&reg);
     for ((_, _, node), wire) in OVERRIDDEN.into_iter().zip(wires) {
@@ -100,7 +100,7 @@ fn the_host_times_and_maps_each_node_by_its_overridden_definition() {
         assert_eq!(r.unit_max_ms, ERASE_MAX_MS, "{node}");
         let b = erase.slots.iter().find(|s| s.start == APP_B.0).unwrap();
         assert_eq!(b.capacity, APP_B_CAPACITY, "{node}");
-        let map = roms.iter().find(|m| m.wire_id == wire).unwrap();
+        let map = roms.iter().find(|m| m.mcu_id == wire).unwrap();
         assert_eq!(
             (
                 map.addr,
@@ -132,12 +132,12 @@ fn gen_and_the_host_skip_a_rom_peer_without_a_full_map() {
     let bin = dagon_topology::compile_with(&reg, &t).unwrap();
     let view = dagon_format::topology::TopologyView::parse(&bin).unwrap();
     let hub = (0..view.node_count())
-        .find(|&i| view.node(i).mcu_id == reg.mcu("rp2040").unwrap().wire_id)
+        .find(|&i| view.node(i).mcu_id == reg.mcu("rp2040").unwrap().mcu_id())
         .unwrap();
     let peer = view
-        .rom_peer(hub as u8, |w| roms.iter().any(|m| m.wire_id == w))
+        .rom_peer(hub as u8, |w| roms.iter().any(|m| m.mcu_id == w))
         .unwrap();
-    assert_eq!(view.node(usize::from(peer)).mcu_id, SYNTHETIC_WIRE_ID);
+    assert_eq!(view.node(usize::from(peer)).mcu_id, synthetic_mcu_id());
 }
 
 #[test]
@@ -155,7 +155,7 @@ fn signing_takes_the_overridden_slot() {
         let spec = ImageSpec {
             image_kind: image_kind::APP,
             port_kind: image::port_kind_of("self-boot").unwrap(),
-            mcu_id: reg.mcu(mcu).unwrap().wire_id,
+            mcu_id: reg.mcu(mcu).unwrap().mcu_id(),
             slot,
             version: Version::new(1, 0, 0),
             build_flags: flags,

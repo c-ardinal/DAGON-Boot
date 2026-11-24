@@ -101,7 +101,7 @@ pub(crate) fn image_for_node(
     let spec = ImageSpec {
         image_kind: kind,
         port_kind: image::port_kind_of(&n.port).ok_or("unknown port kind")?,
-        mcu_id: reg.mcu(&n.mcu).ok_or("unknown MCU")?.wire_id,
+        mcu_id: reg.mcu(&n.mcu).ok_or("unknown MCU")?.mcu_id(),
         slot: geometry,
         version: o.version,
         build_flags: flags,

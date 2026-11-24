@@ -6,7 +6,8 @@ use std::fmt;
 use crate::Signer;
 use dagon_ed25519::Ed25519Compact;
 use dagon_format::header::{
-    self, build_flags, capabilities, image_kind, slot_binding, ImageHeader, HEADER_SIZE, SIGNED_LEN,
+    self, build_flags, capabilities, image_kind, slot_binding, ImageHeader, McuId, HEADER_SIZE,
+    SIGNED_LEN,
 };
 use dagon_format::{sha256, Version};
 use dagon_topology::defs::Registry;
@@ -124,7 +125,7 @@ pub use dagon_format::header::capabilities_ok;
 pub struct ImageSpec {
     pub image_kind: u8,
     pub port_kind: u8,
-    pub mcu_id: u16,
+    pub mcu_id: McuId,
     pub slot: Slot,
     pub version: Version,
     /// TEST_KEY is managed by `sign_image` and ignored here.

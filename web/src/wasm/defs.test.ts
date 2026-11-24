@@ -27,7 +27,7 @@ const served = JSON.stringify({
     board('waveshare-rp2040-touch-lcd-1.28'),
     board('nucleo-f401re'),
     board('m5stopwatch'),
-    { label: 'dagon.toml [board.my-pico]', toml: 'id = "my-pico"\nformat = 3\nproduct = "My Pico"\nmcu = "rp2040"\nflash_bytes = 0x400000\ndrawing = "pico"\ndefault_link = { kind = "i2c", addr = 0x44, control = "full" }\n' },
+    { label: 'dagon.toml [board.my-pico]', toml: 'id = "my-pico"\nformat = 4\nproduct = "My Pico"\nmcu = "rp2040"\nflash_bytes = 0x400000\ndrawing = "pico"\ndefault_link = { kind = "i2c", addr = 0x44, control = "full" }\n' },
   ],
 });
 

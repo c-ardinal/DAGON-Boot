@@ -5,7 +5,7 @@
 use alloc::vec;
 use alloc::vec::Vec;
 use dagon_ed25519::Ed25519Compact;
-use dagon_format::header::{self, image_kind, HEADER_SIZE};
+use dagon_format::header::{self, image_kind, McuId, HEADER_SIZE};
 use dagon_format::statelog::{self, kind, reason, slot, FaceHeader, Record};
 use dagon_format::{sha256, FormatError, ImageHeader};
 use dagon_port::timeout::REQUEST_MS;
@@ -31,7 +31,7 @@ pub struct RomSlot {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RomMap {
     /// Image header `mcu_id` of the MCU this map is for.
-    pub wire_id: u16,
+    pub mcu_id: McuId,
     /// The ROM loader's client, as the MCU definition names it
     /// ([`Loader::of`]).
     pub loader: Loader,
@@ -72,7 +72,7 @@ pub fn rom_maps(reg: &dagon_topology::defs::Registry) -> Vec<RomMap> {
             let loader = Loader::of(m.rom_i2c.is_some())?;
             let rom = m.rom_i2c.as_ref()?;
             Some(RomMap {
-                wire_id: m.wire_id,
+                mcu_id: m.mcu_id(),
                 loader,
                 addr: rom.addr,
                 bootcore: slot(m, ImageKind::Bootcore)?,
@@ -163,7 +163,7 @@ pub fn check_bootcore(
     let h = header::verify_header(raw, &Ed25519Compact::new(*pubkey))?;
     let body = &img[HEADER_SIZE..];
     let fits = body.len() as u64 <= u64::from(map.bootcore.max_payload);
-    if h.image_kind != image_kind::BOOTCORE || h.mcu_id != map.wire_id || !fits {
+    if h.image_kind != image_kind::BOOTCORE || h.mcu_id != map.mcu_id || !fits {
         return Err(FormatError::BadField);
     }
     if h.payload_size as usize != body.len() || sha256(body) != h.payload_sha256 {
@@ -356,7 +356,7 @@ mod tests {
         let reg = dagon_topology::defs::Registry::builtin();
         let maps = super::rom_maps(reg);
         for m in reg.mcus() {
-            let map = maps.iter().find(|r| r.wire_id == m.wire_id);
+            let map = maps.iter().find(|r| r.mcu_id == m.mcu_id());
             match &m.rom_i2c {
                 Some(_) if m.has_rom_loader() => {
                     assert_eq!(
@@ -380,7 +380,7 @@ mod tests {
             max_payload: 0x1_FE00,
         };
         let map = RomMap {
-            wire_id: 2,
+            mcu_id: dagon_format::header::McuId([2; 8]),
             loader: dagon_romlink::Loader::Stm32I2c,
             addr: 0x39,
             bootcore: slot,

@@ -17,7 +17,7 @@
 
 use crate::report::{CtResult, Report, Verdict};
 use crate::{ct_info, detail, CtInfo, Detail, CTS};
-use dagon_format::header::{self, ImageHeader, HEADER_SIZE, SIGNED_LEN};
+use dagon_format::header::{self, ImageHeader, McuId, HEADER_SIZE, SIGNED_LEN};
 use dagon_format::statelog::reason;
 use dagon_format::{sha256, Version};
 use dagon_port::timeout::{self, EraseLayout, EraseRegion, NodeTimings, SlotLayout};
@@ -149,7 +149,7 @@ struct Img<'a> {
 #[derive(Clone, Copy, Debug)]
 struct Ident {
     version: Version,
-    mcu_id: u16,
+    mcu_id: McuId,
     port_kind: u8,
     key_id: [u8; 8],
 }
@@ -560,7 +560,7 @@ impl<'a, 's, C: Channel> Runner<'a, 's, C> {
         for field in ["mcu_id", "target_tag"] {
             let mut h = img.hdr;
             match field {
-                "mcu_id" => h[0x00A] ^= 0x80,
+                "mcu_id" => h[0x068] ^= 0x80,
                 _ => h[0x050] ^= 0x01,
             }
             let sig = (self.sign)(&h[..SIGNED_LEN]);
@@ -722,7 +722,7 @@ impl<'a, 's, C: Channel> Runner<'a, 's, C> {
             ),
             ("role", h.role == role::NODE),
             ("port_kind", h.port_kind == id.port_kind),
-            ("mcu_id", h.mcu_id == id.mcu_id),
+            ("mcu_id", h.mcu_id == id.mcu_id.low16()),
             ("mode", h.mode == payload::mode::APP),
             ("active_version", h.active_version == exp.active_version),
             ("trial", !h.trial),

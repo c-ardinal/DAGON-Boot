@@ -373,7 +373,7 @@ fn typed(cmd: Cmd, resp: bool) -> Typed {
         (Cmd::Version, true) => {
             let m = VersionResp {
                 wire: Some(2),
-                mcu_id: Some(3),
+                mcu_id: Some(dagon_format::header::McuId([3; 8])),
                 stage0: Some(v),
                 boot_core: Some(v),
                 core_slots: Some(VersionSlots::default()),
@@ -612,7 +612,7 @@ fn golden_cores_and_samples() {
             "000000000000000000000000000000000000000000",
             " 040101 060100 080102 0A0103 0C0409000000")),
         (Cmd::Version, false, 0, ""),
-        (Cmd::Version, true, 0, "020403000201 0C020300 140403000201 160B0000000000000000000000 181000000000000000000000000000000000 1A0102"),
+        (Cmd::Version, true, 0, "020403000201 0C080303030303030303 140403000201 160B0000000000000000000000 181000000000000000000000000000000000 1A0102"),
         (Cmd::Caps, false, 1, "50 030101"),
         (Cmd::Caps, true, 0, "020106 040102 06020C01"),
         (Cmd::Stay, false, 0, ""),

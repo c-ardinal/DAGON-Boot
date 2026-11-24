@@ -44,12 +44,12 @@ fn rust(what: &str) -> Check {
 }
 
 /// Rust, then each MCU's `[[doctor]]` entries; an entry several MCUs define
-/// alike is one check naming them all. MCUs go by image header id, so the
+/// alike is one check naming them all. MCUs go by their id, so the
 /// order is the same whether the definitions are builtin or a source tree's.
 fn checks(reg: &Registry, mcus: &[String]) -> Vec<Check> {
     let mut out = vec![rust("rustup"), rust("cargo")];
     let mut wanted: Vec<_> = reg.mcus().iter().filter(|m| mcus.contains(&m.id)).collect();
-    wanted.sort_by_key(|m| m.wire_id);
+    wanted.sort_by(|a, b| a.id.cmp(&b.id));
     for m in wanted {
         let ask = reg.mcu_origin(&m.id).is_some_and(Origin::is_project_text);
         for (i, d) in m.doctor.iter().enumerate() {
@@ -373,7 +373,6 @@ mod tests {
         }
         let toml = include_str!("../../../targets/mcu/rp2040/dagon-mcu.toml")
             .replace("id = \"rp2040\"", "id = \"rp2040b\"")
-            .replace("wire_id = 0x0001", "wire_id = 0x00F1")
             .replace("name = \"rp2040-4m\"", "name = \"rp2040b-4m\"");
         std::fs::write(dir.join("m/dagon-mcu.toml"), format!("{toml}{extra}")).unwrap();
         std::fs::write(

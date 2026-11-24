@@ -2,15 +2,17 @@
 //! `DAGON/IMG/1`. The payload is bound by `payload_sha256`.
 
 use crate::le::{arr, put_u16, put_u32, u16_at, u32_at};
-use crate::{sha256, verify_signed, FormatError, SigVerifier, Version};
+use crate::{
+    sha256, verify_signed, CryptoProvider, Digest, FormatError, SigVerifier, Software, Version,
+};
 
 pub const HEADER_SIZE: usize = 512;
 pub const MAGIC: [u8; 4] = *b"DGIM";
-pub const HDR_VERSION: u16 = 1;
+pub const HDR_VERSION: u16 = 2;
 /// Bytes covered by the signature.
 pub const SIGNED_LEN: usize = 0x1C0;
 pub const SIGN_DOMAIN: &[u8] = b"DAGON/IMG/1";
-const RESERVED_TAIL: core::ops::Range<usize> = 0x068..0x1C0;
+const RESERVED_TAIL: core::ops::Range<usize> = 0x070..0x1C0;
 
 pub mod image_kind {
     pub const APP: u8 = 0x01;
@@ -24,10 +26,33 @@ pub mod port_kind {
     pub const VENDOR_STAGE2: u8 = 0x02;
 }
 
-pub mod mcu_id {
-    pub const RP2040: u16 = 0x0001;
-    pub const STM32F401XE: u16 = 0x0002;
-    pub const ESP32S3: u16 = 0x0003;
+/// What an MCU is named by in images and on the wire: the first 8 bytes of
+/// SHA-256 over `dagon-mcu/` and the id of its definition (`rp2040`). No
+/// table of numbers stands behind it: a new MCU definition has its identity
+/// by having an id.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct McuId(pub [u8; 8]);
+
+impl McuId {
+    /// The identity of the MCU whose definition has this `id`.
+    pub fn of_name(id: &str) -> Self {
+        let mut h = Software.sha256();
+        h.update(b"dagon-mcu/");
+        h.update(id.as_bytes());
+        McuId(arr(&h.finalize(), 0))
+    }
+
+    /// The 16 bits a HELLO answer carries: bytes 0 and 1, little-endian.
+    pub const fn low16(self) -> u16 {
+        u16::from_le_bytes([self.0[0], self.0[1]])
+    }
+}
+
+impl core::fmt::Display for McuId {
+    /// 16 hex digits, byte 0 first.
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        self.0.iter().try_for_each(|b| write!(f, "{b:02x}"))
+    }
 }
 
 pub mod slot_binding {
@@ -79,7 +104,7 @@ pub fn capabilities_ok(kind: u8, flags: u32, caps: u32) -> bool {
 pub struct ImageHeader {
     pub image_kind: u8,
     pub port_kind: u8,
-    pub mcu_id: u16,
+    pub mcu_id: McuId,
     pub slot_binding: u8,
     pub placement: u8,
     pub load_addr: u32,
@@ -107,6 +132,7 @@ impl ImageHeader {
             return Err(FormatError::UnsupportedVersion);
         }
         if u16_at(raw, 0x006) as usize != HEADER_SIZE
+            || u16_at(raw, 0x00A) != 0
             || u16_at(raw, 0x00E) != 0
             || raw[RESERVED_TAIL].iter().any(|&b| b != 0)
         {
@@ -115,7 +141,7 @@ impl ImageHeader {
         Ok(ImageHeader {
             image_kind: raw[0x008],
             port_kind: raw[0x009],
-            mcu_id: u16_at(raw, 0x00A),
+            mcu_id: McuId(arr(raw, 0x068)),
             slot_binding: raw[0x00C],
             placement: raw[0x00D],
             load_addr: u32_at(raw, 0x010),
@@ -140,7 +166,6 @@ impl ImageHeader {
         put_u16(&mut b, 0x006, HEADER_SIZE as u16);
         b[0x008] = self.image_kind;
         b[0x009] = self.port_kind;
-        put_u16(&mut b, 0x00A, self.mcu_id);
         b[0x00C] = self.slot_binding;
         b[0x00D] = self.placement;
         put_u32(&mut b, 0x010, self.load_addr);
@@ -154,6 +179,7 @@ impl ImageHeader {
         b[0x050..0x060].copy_from_slice(&self.target_tag);
         put_u32(&mut b, 0x060, self.proto_version);
         put_u32(&mut b, 0x064, self.capabilities);
+        b[0x068..0x070].copy_from_slice(&self.mcu_id.0);
         b[0x1C0..0x200].copy_from_slice(&self.signature);
         b
     }

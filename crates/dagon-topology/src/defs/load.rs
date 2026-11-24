@@ -836,7 +836,7 @@ fn resolve(table: &[Partition], s: &super::SlotDef) -> Result<Slot, String> {
     }
 }
 
-/// Registry-wide rules: unique ids, wire ids and flash map names; every
+/// Registry-wide rules: unique ids, identities and flash map names; every
 /// board's MCU exists and its flash holds one of the MCU's flash maps.
 fn validate(reg: &Registry) -> Result<(), DefError> {
     for (i, m) in reg.mcus.iter().enumerate() {
@@ -847,10 +847,31 @@ fn validate(reg: &Registry) -> Result<(), DefError> {
         if let Some(o) = reg.mcus[..i].iter().find(|o| o.id == m.id) {
             return err(at, format!("defined twice ({})", o.name));
         }
-        if let Some(o) = reg.mcus[..i].iter().find(|o| o.wire_id == m.wire_id) {
+        // The identity is taken from the id, so two ids can meet: in all
+        // 8 bytes (images of one would be taken for the other's) or in the
+        // 16 bits a HELLO answer carries.
+        // All zeros reads as "none" and all ones as erased flash.
+        let reserved = |b: &[u8]| b.iter().all(|&x| x == 0) || b.iter().all(|&x| x == 0xFF);
+        if reserved(&m.mcu_id().0) || reserved(&m.mcu_id().0[..2]) {
             return err(
                 at,
-                format!("wire_id {:#06x} is MCU '{}''s too", m.wire_id, o.id),
+                format!(
+                    "identity {} reads as none or as erased flash: give the MCU another id",
+                    m.mcu_id()
+                ),
+            );
+        }
+        let same_low = |o: &&McuDef| o.mcu_id().low16() == m.mcu_id().low16();
+        if let Some(o) = reg.mcus[..i].iter().find(same_low) {
+            let (mine, theirs) = (m.mcu_id(), o.mcu_id());
+            let what = if mine == theirs {
+                format!("identity {mine}")
+            } else {
+                format!("identity {mine} begins like {theirs}")
+            };
+            return err(
+                at,
+                format!("{what}, MCU '{}''s: give one of the two another id", o.id),
             );
         }
         for f in &m.flash_maps {

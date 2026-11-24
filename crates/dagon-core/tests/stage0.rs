@@ -24,7 +24,7 @@ const AT: Stage0<'static> = Stage0 {
     log: &LOG,
     slots: &CORE_SLOTS,
     max: MAX,
-    mcu_id: mcu_id::STM32F401XE,
+    mcu_id: McuId([0x02; 8]),
 };
 
 /// How the core in a slot is signed.
@@ -53,7 +53,7 @@ fn core(slot: u8, minor: u8, sig: Sig) -> ([u8; HEADER_SIZE], Vec<u8>) {
     let mut h = ImageHeader {
         image_kind: image_kind::BOOTCORE,
         port_kind: port_kind::SELF_BOOT,
-        mcu_id: mcu_id::STM32F401XE,
+        mcu_id: McuId([0x02; 8]),
         slot_binding: slot,
         placement: placement::INLINE,
         load_addr: CORE_SLOTS[usize::from(slot)].body,

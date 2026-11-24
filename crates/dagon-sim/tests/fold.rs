@@ -46,7 +46,7 @@ fn image(slot: u8, minor: u16) -> Vec<u8> {
     let mut h = ImageHeader {
         image_kind: image_kind::APP,
         port_kind: port_kind::SELF_BOOT,
-        mcu_id: mcu_id::STM32F401XE,
+        mcu_id: McuId::of_name("stm32f401re"),
         slot_binding: slot,
         placement: placement::INLINE,
         load_addr: Layout::of("stm32f401re").slots[slot as usize].0 + 0x200,

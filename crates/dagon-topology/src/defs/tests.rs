@@ -83,9 +83,11 @@ fn mcus_match_the_port_registry() {
         let m = reg().mcu(id).unwrap();
         assert_eq!(m.port.as_str(), port, "{id}");
         assert_eq!(m.gpio_count, gpio_count, "{id}");
-        assert_eq!(Some(m.wire_id), mcu_id_of(id), "{id}");
+        assert_eq!(Some(m.mcu_id()), mcu_id_of(id), "{id}");
+        assert_eq!(m.mcu_id(), McuId::of_name(id), "{id}");
         assert!(port_kind_of(m.port.as_str()).is_some());
-        assert_eq!(reg().mcu_by_wire(m.wire_id).unwrap().id, id);
+        assert_eq!(reg().mcu_by_id(m.mcu_id()).unwrap().id, id);
+        assert_eq!(reg().mcu_by_low16(m.mcu_id().low16()).unwrap().id, id);
     }
 }
 
@@ -291,10 +293,9 @@ fn source_tree_loads_and_equals_builtin() {
 }
 
 pub(super) const FAKE_MCU: &str = r#"
-format = 3
+format = 4
 id = "fake-m0"
 name = "FAKE-M0"
-wire_id = 0x7F01
 port = "self-boot"
 gpio_count = 16
 
@@ -355,7 +356,7 @@ out_hz = 1_000_000
 
 pub(super) const FAKE_BOARD: &str = r#"
 product = "Fake Board"
-format = 3
+format = 4
 mcu = "fake-m0"
 flash_bytes = 0x20_0000
 i2c_target = true
@@ -646,19 +647,34 @@ fn project_may_not_redefine_an_id() {
     let e = Registry::load(&[Source::Project(&dir.join("dagon.toml"))]).unwrap_err();
     assert!(e.msg.contains("already defined"), "{e}");
 
+    // An MCU's identity is taken from its id, so two ids can meet. This
+    // one's identity begins with the 16 bits rp2040's begins with (what a
+    // HELLO answer carries): refused, naming both.
+    let twin = "fake-m51917";
+    assert_ne!(McuId::of_name(twin), McuId::of_name("rp2040"));
+    assert_eq!(
+        McuId::of_name(twin).low16(),
+        McuId::of_name("rp2040").low16()
+    );
     write(
         &dir.join("m/dagon-mcu.toml"),
-        &FAKE_MCU.replace("0x7F01", "0x0001"),
+        &FAKE_MCU.replace("fake-m0", twin),
     );
     let e = Registry::load(&[Source::Project(&dir.join("dagon.toml"))]).unwrap_err();
-    assert!(e.msg.contains("wire_id"), "{e}");
+    assert!(
+        e.msg.contains("begins like") && e.msg.contains("MCU 'rp2040'"),
+        "{e}"
+    );
 
+    // An identity whose HELLO bits are all zeros reads as none: refused.
+    let none = "fake-m10515";
+    assert_eq!(McuId::of_name(none).low16(), 0);
     write(
         &dir.join("m/dagon-mcu.toml"),
-        &FAKE_MCU.replace("0x7F01", "0"),
+        &FAKE_MCU.replace("fake-m0", none),
     );
     let e = Registry::load(&[Source::Project(&dir.join("dagon.toml"))]).unwrap_err();
-    assert!(e.msg.contains("wire_id 0"), "{e}");
+    assert!(e.msg.contains("reads as none"), "{e}");
 
     write(&dir.join("dagon.toml"), "[board.x]\nid = \"x\"\n");
     let e = Registry::load(&[Source::Project(&dir.join("dagon.toml"))]).unwrap_err();
@@ -676,35 +692,35 @@ fn definitions_state_their_format_and_unknown_formats_are_refused() {
     }
     // Absent means format 1, which this reader refuses by number, as it
     // refuses a newer one even when it carries fields it does not know.
-    let want = "definition format 1; this dagon reads definition format 3 ";
-    let mcu = FAKE_MCU.replace("format = 3\n", "");
+    let want = "definition format 1; this dagon reads definition format 4 ";
+    let mcu = FAKE_MCU.replace("format = 4\n", "");
     let e = project_registry("format-absent", &mcu, FAKE_BOARD).unwrap_err();
     assert!(e.msg.contains(want), "{e}");
-    let board = FAKE_BOARD.replace("format = 3\n", "");
+    let board = FAKE_BOARD.replace("format = 4\n", "");
     let e = project_registry("format-absent-board", FAKE_MCU, &board).unwrap_err();
     assert!(e.msg.contains(want), "{e}");
-    let mcu = FAKE_MCU.replace("format = 3", "format = 4\nnew_key = 1");
+    let mcu = FAKE_MCU.replace("format = 4", "format = 5\nnew_key = 1");
     let e = project_registry("format-mcu", &mcu, FAKE_BOARD).unwrap_err();
-    let want = "definition format 4; this dagon reads definition format 3 ";
+    let want = "definition format 5; this dagon reads definition format 4 ";
     assert!(e.msg.contains(want), "{e}");
-    let board = FAKE_BOARD.replace("format = 3", "format = 9");
+    let board = FAKE_BOARD.replace("format = 4", "format = 9");
     let e = project_registry("format-board", FAKE_MCU, &board).unwrap_err();
-    let want = "definition format 9; this dagon reads definition format 3 ";
+    let want = "definition format 9; this dagon reads definition format 4 ";
     assert!(e.msg.contains(want), "{e}");
     // Format 2 (without the flash write facts) is refused by number.
-    let want = "definition format 2; this dagon reads definition format 3 ";
-    let mcu = FAKE_MCU.replace("format = 3", "format = 2");
+    let want = "definition format 2; this dagon reads definition format 4 ";
+    let mcu = FAKE_MCU.replace("format = 4", "format = 2");
     let e = project_registry("format-mcu-2", &mcu, FAKE_BOARD).unwrap_err();
     assert!(e.msg.contains(want), "{e}");
-    let board = FAKE_BOARD.replace("format = 3", "format = 2");
+    let board = FAKE_BOARD.replace("format = 4", "format = 2");
     let e = project_registry("format-board-2", FAKE_MCU, &board).unwrap_err();
     assert!(e.msg.contains(want), "{e}");
     // Format 1 (an MCU's `erase_unit`) is refused by number.
-    let mcu = FAKE_MCU.replace("format = 3", "format = 1");
+    let mcu = FAKE_MCU.replace("format = 4", "format = 1");
     let e = project_registry("format-mcu-1", &mcu, FAKE_BOARD).unwrap_err();
-    let want = "definition format 1; this dagon reads definition format 3 ";
+    let want = "definition format 1; this dagon reads definition format 4 ";
     assert!(e.msg.contains(want), "{e}");
-    let board = FAKE_BOARD.replace("format = 3", "format = 1");
+    let board = FAKE_BOARD.replace("format = 4", "format = 1");
     let e = project_registry("format-board-1", FAKE_MCU, &board).unwrap_err();
     assert!(e.msg.contains(want), "{e}");
 }
@@ -715,7 +731,7 @@ fn a_board_table_is_a_whole_board_definition() {
     // A node's values alone are no board: refused, naming what is missing.
     write(
         &dir.join("dagon.toml"),
-        "[board.seg]\nformat = 3\nflash_bytes = 524288\n",
+        "[board.seg]\nformat = 4\nflash_bytes = 524288\n",
     );
     let e = Registry::load(&[Source::Project(&dir.join("dagon.toml"))]).unwrap_err();
     assert!(e.msg.contains("missing field `product`"), "{e}");
@@ -723,7 +739,7 @@ fn a_board_table_is_a_whole_board_definition() {
 
     write(
         &dir.join("dagon.toml"),
-        "[board.my-f401]\nformat = 3\nproduct = \"My F401\"\nmcu = \"stm32f401re\"\n\
+        "[board.my-f401]\nformat = 4\nproduct = \"My F401\"\nmcu = \"stm32f401re\"\n\
          flash_bytes = 524288\ndrawing = \"nucleo-64\"\n",
     );
     let r = Registry::load(&[Source::Project(&dir.join("dagon.toml"))]).unwrap();
@@ -1118,7 +1134,7 @@ fn the_json_form_round_trips_and_is_validated_again() {
     assert_eq!(back.mcus(), without_doctor(&project));
     assert_eq!(back.boards(), project.boards());
     // A project's entry is made safe again on receipt, whatever was sent.
-    let board = "format = 3\nid = 'x'\nproduct = '<b>C:/Users/me</b>'\nmcu = 'rp2040'\n\
+    let board = "format = 4\nid = 'x'\nproduct = '<b>C:/Users/me</b>'\nmcu = 'rp2040'\n\
                  flash_bytes = 0x400000\ndrawing = 'pico'\n";
     let sent = serde_json::json!({
         "mcus": [{
@@ -1180,11 +1196,11 @@ fn project_text_that_is_not_a_plain_name_leaves_as_a_generic_label() {
     write(
         &dir.join("dagon.toml"),
         &format!(
-            "[board.my-pico]\nformat = 3\nproduct = \"C:/Users/me/{secret}\"\nmcu = \"rp2040\"\n\
+            "[board.my-pico]\nformat = 4\nproduct = \"C:/Users/me/{secret}\"\nmcu = \"rp2040\"\n\
              flash_bytes = 0x40_0000\ndrawing = \"pico\"\n\
              header = [{{ pin = \"GPIO4\", label = \"{secret}\" }}, {{ pin = \"GPIO5\", label = \"D5\" }}]\n\
              default_link = {{ kind = \"i2c\", addr = 0x44, control = \"full\" }}\n\
-             [board.my-two]\nformat = 3\nproduct = \"My Two\"\nmcu = \"rp2040\"\n\
+             [board.my-two]\nformat = 4\nproduct = \"My Two\"\nmcu = \"rp2040\"\n\
              flash_bytes = 0x40_0000\ndrawing = \"pico\"\n\
              default_link = {{ kind = \"i2c\", addr = 0x45, control = \"full\" }}\n"
         ),
@@ -1228,7 +1244,6 @@ fn a_projects_file_names_and_csv_fields_are_scrubbed_and_still_load() {
     write(&pkg.join("private-token/partitions.csv"), &csv);
     let mcu = include_str!("../../../../targets/mcu/esp32s3/dagon-mcu.toml")
         .replace("id = \"esp32s3\"", "id = \"my-s3\"")
-        .replace("wire_id = 0x0003", "wire_id = 0x00F3")
         .replace("name = \"esp32s3-16m\"", "name = \"my-s3-16m\"")
         .replace(
             "partitions = \"partitions.csv\"",

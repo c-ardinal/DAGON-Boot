@@ -5,6 +5,7 @@
 //! the binary's, each link end's port named from its MCU definition. Compiling
 //! the result gives the release's topology bytes again.
 
+use dagon_format::header::McuId;
 use dagon_format::topology::{self as tp, TopologyView};
 use dagon_format::BundleView;
 use dagon_topology::defs::PortKind;
@@ -28,8 +29,8 @@ fn map(entries: impl IntoIterator<Item = (&'static str, Value)>) -> Value {
     Value::Mapping(m)
 }
 
-fn mcu_name(id: u16) -> Option<String> {
-    crate::defs::with_registry(|reg| reg.mcu_by_wire(id).map(|m| m.id.clone()))
+fn mcu_name(id: McuId) -> Option<String> {
+    crate::defs::with_registry(|reg| reg.mcu_by_id(id).map(|m| m.id.clone()))
 }
 
 fn port_name(k: u8) -> Option<&'static str> {

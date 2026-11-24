@@ -7,7 +7,7 @@ use crate::layout::{
 use crate::otadata::{raw, seq_crc, trial_entry, Counted, ENTRY_LEN};
 use crate::store::{header_addr, EspStore, Otadata, HEADER_SECTOR};
 use dagon_agent::{SlotStore, StoreError, Transition};
-use dagon_format::header::{self, image_kind, mcu_id, placement, port_kind, slot_binding};
+use dagon_format::header::{self, image_kind, placement, port_kind, slot_binding, McuId};
 use dagon_format::header::{ImageHeader, HEADER_SIZE};
 use dagon_format::statelog::reason;
 use dagon_format::Version;
@@ -157,7 +157,7 @@ fn header(minor: u8, len: u32) -> [u8; HEADER_SIZE] {
     ImageHeader {
         image_kind: image_kind::APP,
         port_kind: port_kind::VENDOR_STAGE2,
-        mcu_id: mcu_id::ESP32S3,
+        mcu_id: McuId::of_name("esp32s3"),
         slot_binding: slot_binding::ANY,
         placement: placement::DETACHED,
         load_addr: OTA_0.offset,

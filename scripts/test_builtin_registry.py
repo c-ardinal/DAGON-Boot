@@ -22,7 +22,7 @@ ALLOWED = {
     ("crates/dagon-topology/src/compile.rs", "compile"):
         "the built-in sample topologies of `dagon demo` and `dagon sim` (compile_str goes through it); a project compiles with compile_with",
     ("crates/dagon-topology/src/compile.rs", "mcu_id_of"):
-        "wire ids of the built-in sample images of `dagon demo` and `dagon sim`; a project reads its registry's MCU",
+        "identities of the built-in sample images of `dagon demo` and `dagon sim`; a project reads its registry's MCU",
     ("crates/dagon-sign/src/image.rs", "slot"):
         "slots of the built-in sample images of `dagon demo` and `dagon sim`; a project signs with slot_with",
     ("crates/dagon-sim/src/store.rs", "trial_attempts"):

@@ -14,6 +14,7 @@ use crate::table::{
     subctl, version, xfer_begin, xfer_end, ERROR,
 };
 use crate::{Cmd, FrameError, Status};
+use dagon_format::header::McuId;
 use dagon_format::Version;
 
 /// The typed request of a message the reader accepted.
@@ -340,6 +341,8 @@ pub struct HelloResp {
     pub role: u8,
     /// Image header `port_kind` values.
     pub port_kind: u8,
+    /// The low 16 bits of the node's MCU identity (`McuId::low16`); the
+    /// whole identity is in VERSION.
     pub mcu_id: u16,
     pub mode: u8,
     pub active_version: Version,
@@ -551,7 +554,7 @@ pub mod version_id {
 
     /// The running boot loader's version (`Version`, u32 LE).
     pub const BOOTCORE: u8 = version::BOOTCORE.num as u8;
-    /// The image header `mcu_id` (u16 LE).
+    /// The image header `mcu_id` (8 bytes).
     pub const MCU: u8 = version::MCU.num as u8;
     /// The stage0 version mark (`dagon_format::stage0`; `Version`, u32 LE).
     pub const STAGE0: u8 = version::STAGE0.num as u8;
@@ -571,7 +574,7 @@ pub mod version_id {
         (0x03, "agent (`dagon-agent`) version"),
         (0x04, "MCU definition version"),
         (0x05, "board definition version"),
-        (0x06, "MCU identity (5.5): the image header's `mcu_id`, u16 LE"),
+        (0x06, "MCU identity (5.5): the image header's `mcu_id`, 8 bytes"),
         (0x07, "isolation (4.5): `level u8`, `kind u8`, `boot_extensions u8`, `root_protection` (kind and exact level as the definition enumerates them, e.g. `rdp1`/`rdp2`, the write-protected sectors, and whether the level is reversible), `fuse` (Clear, or Tripped with the disabled extension's identity as the model encodes it, 5.5)"),
         (0x08, "extensions, for display: a packed array, per linked extension `id` (32 bytes, zero padded), `trusted u8`, first 8 bytes of its source hash (4.7)"),
         (0x09, "extensions, for identity: a packed array, per trusted extension its full 32-byte source hash (4.7)"),
@@ -665,7 +668,7 @@ impl<const N: usize> VersionSlots<N> {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub struct VersionResp {
     pub wire: Option<u8>,
-    pub mcu_id: Option<u16>,
+    pub mcu_id: Option<McuId>,
     pub stage0: Option<Version>,
     /// The running boot loader ([`version_id::BOOTCORE`]).
     pub boot_core: Option<Version>,
@@ -679,7 +682,7 @@ const _: () = assert!(VersionResp::MAX_LEN < crate::max_payload::I2C);
 impl VersionResp {
     /// The longest body (every value present).
     pub const MAX_LEN: usize =
-        6 * 2 + 1 + 2 + 4 + 4 + VersionSlots::<2>::LEN + VersionSlots::<3>::LEN;
+        6 * 2 + 1 + 8 + 4 + 4 + VersionSlots::<2>::LEN + VersionSlots::<3>::LEN;
 
     pub fn parse(b: &[u8]) -> Result<Self, Status> {
         let p = rd(b, &Cmd::Version.spec().resp)?;
@@ -687,7 +690,7 @@ impl VersionResp {
         let slots3 = p.field(&version::APP_SLOTS);
         Ok(VersionResp {
             wire: val::<1>(&p, &version::WIRE)?.map(|[v]| v),
-            mcu_id: val(&p, &version::MCU)?.map(u16::from_le_bytes),
+            mcu_id: val(&p, &version::MCU)?.map(McuId),
             stage0: val(&p, &version::STAGE0)?.map(Version::from_le_bytes),
             boot_core: val(&p, &version::BOOTCORE)?.map(Version::from_le_bytes),
             core_slots: slots2.map(VersionSlots::parse).transpose()?,
@@ -701,7 +704,7 @@ impl VersionResp {
             w.field(&version::BOOTCORE, &v.to_le_bytes())?;
         }
         if let Some(v) = self.mcu_id {
-            w.field(&version::MCU, &v.to_le_bytes())?;
+            w.field(&version::MCU, &v.0)?;
         }
         if let Some(v) = self.stage0 {
             w.field(&version::STAGE0, &v.to_le_bytes())?;

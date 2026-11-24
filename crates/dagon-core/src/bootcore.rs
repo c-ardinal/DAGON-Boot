@@ -26,7 +26,9 @@
 
 use crate::boot::Place;
 use crate::log::{Log, LogError, LogLayout, LogState, SlotRef};
-use dagon_format::header::{header_digest16, image_kind, verify_header, ImageHeader, HEADER_SIZE};
+use dagon_format::header::{
+    header_digest16, image_kind, verify_header, ImageHeader, McuId, HEADER_SIZE,
+};
 use dagon_format::statelog::{
     kind, reason, target, FaceHeader, Record, FACE_HEADER_SIZE, RECORD_SIZE,
 };
@@ -335,7 +337,7 @@ pub fn check_inline<F: Flash, V: SigVerifier + ?Sized>(
     at: Place,
     slot: u8,
     (expect, verifier): (Option<&SlotRef>, &V),
-    mcu_id: u16,
+    mcu_id: McuId,
 ) -> Result<u32, CoreFail> {
     let kind = (image_kind::BOOTCORE, mcu_id);
     check_signed(flash, at, slot, (expect, verifier), kind).map(|(body, _)| body)
@@ -348,7 +350,7 @@ fn check_signed<F: Flash, V: SigVerifier + ?Sized>(
     at: Place,
     slot: u8,
     (expect, verifier): (Option<&SlotRef>, &V),
-    (kind, mcu_id): (u8, u16),
+    (kind, mcu_id): (u8, McuId),
 ) -> Result<(u32, ImageHeader), CoreFail> {
     let mut raw = [0u8; HEADER_SIZE];
     flash
@@ -517,7 +519,7 @@ pub struct Stage0<'a> {
     pub log: &'a LogLayout,
     pub slots: &'a [Place],
     pub max: u8,
-    pub mcu_id: u16,
+    pub mcu_id: McuId,
 }
 
 /// The apps stage0 may start when no boot core may ([`start`]): the log
@@ -627,7 +629,7 @@ fn core_choice<F: Flash, V: SigVerifier + ?Sized>(
 pub fn confirmed_app<F: Flash, V: SigVerifier + ?Sized>(
     flash: &mut F,
     apps: &Apps<'_>,
-    mcu_id: u16,
+    mcu_id: McuId,
     verifier: &V,
 ) -> Option<(u8, u32)> {
     let st = read_fold(flash, apps.log, LogState::apply)?;

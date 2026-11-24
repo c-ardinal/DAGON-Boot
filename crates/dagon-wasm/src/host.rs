@@ -469,7 +469,7 @@ pub fn check_bootcore_for(img: &[u8]) -> Result<(), JsError> {
     let roms = crate::defs::with_registry(dagon_host::rom::rom_maps);
     let map = roms
         .iter()
-        .find(|m| m.wire_id == mcu)
+        .find(|m| m.mcu_id == mcu)
         .ok_or_else(|| JsError::new("BadField"))?;
     dagon_host::rom::check_bootcore(img, &key, map)
         .map(|_| ())
@@ -755,7 +755,11 @@ fn version_js(v: &VersionResp) -> JsValue {
     }
     let o = Object::new();
     set(&o, "wire", or_null(v.wire));
-    set(&o, "mcuId", or_null(v.mcu_id));
+    set(
+        &o,
+        "mcuId",
+        or_null(v.mcu_id.map(|m| alloc::format!("{m}"))),
+    );
     set(&o, "stage0", or_null(v.stage0.map(|x| x.raw())));
     set(&o, "bootCore", or_null(v.boot_core.map(|x| x.raw())));
     set(&o, "coreSlots", slots_js(v.core_slots));

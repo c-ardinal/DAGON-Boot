@@ -7,11 +7,12 @@ use dagon_core::bootcore::{
     Plan, Settle, CLEARED,
 };
 use dagon_core::log::{Log, LogLayout, LogState, SlotRef};
-use dagon_format::header::{header_digest16, HEADER_SIZE};
+use dagon_format::header::{header_digest16, McuId, HEADER_SIZE};
 use dagon_format::statelog::{kind, reason, target, FaceHeader, Record};
 use dagon_format::Version;
 use dagon_port::{Flash, FlashError, FlashRegion};
 
+const MCU: McuId = McuId([2; 8]);
 const MAX: u8 = 3;
 
 fn r(slot: u8, minor: u8) -> SlotRef {
@@ -146,7 +147,7 @@ fn check_inline_verifies_the_signature() {
     let mut h = ImageHeader {
         image_kind: image_kind::BOOTCORE,
         port_kind: port_kind::SELF_BOOT,
-        mcu_id: 2,
+        mcu_id: MCU,
         slot_binding: 0,
         placement: placement::INLINE,
         load_addr: 0x200,
@@ -172,9 +173,9 @@ fn check_inline_verifies_the_signature() {
     m.write(0x200, &body).unwrap();
     let slot = dagon_core::boot::Place::inline(0, 0x1000);
     let (mine, theirs) = (Ed25519Small::new(*signer.pk), Ed25519Small::new(*other.pk));
-    assert_eq!(check_inline(&mut m, slot, 0, (None, &mine), 2), Ok(0x200));
+    assert_eq!(check_inline(&mut m, slot, 0, (None, &mine), MCU), Ok(0x200));
     assert!(matches!(
-        check_inline(&mut m, slot, 0, (None, &theirs), 2),
+        check_inline(&mut m, slot, 0, (None, &theirs), MCU),
         Err(CoreFail::Signature)
     ));
 }
@@ -539,7 +540,7 @@ fn check_inline_takes_a_detached_header_where_the_definition_puts_it() {
         let mut h = ImageHeader {
             image_kind: image_kind::BOOTCORE,
             port_kind: port_kind::SELF_BOOT,
-            mcu_id: 2,
+            mcu_id: MCU,
             slot_binding: 0,
             placement: placement::DETACHED,
             load_addr: 0x1000,
@@ -564,12 +565,12 @@ fn check_inline_takes_a_detached_header_where_the_definition_puts_it() {
         m
     };
     let v = Ed25519Small::new(*kp.pk);
-    let check = |mut m: Mem| check_inline(&mut m, place, 0, (None, &v), 2);
+    let check = |mut m: Mem| check_inline(&mut m, place, 0, (None, &v), MCU);
     assert_eq!(check(signed(&|_| {})), Ok(0x1000));
     // The same image read as if its header were inline: no header there.
     let mut m = signed(&|_| {});
     assert_eq!(
-        check_inline(&mut m, Place::inline(0x1000, 0x3000), 0, (None, &v), 2),
+        check_inline(&mut m, Place::inline(0x1000, 0x3000), 0, (None, &v), MCU),
         Err(CoreFail::Header)
     );
     for (what, f) in [
@@ -586,7 +587,7 @@ fn check_inline_takes_a_detached_header_where_the_definition_puts_it() {
     // The body fills the region (no header room taken from it).
     let mut big = signed(&|h| h.payload_size = 0x2000);
     assert_eq!(
-        check_inline(&mut big, place, 0, (None, &v), 2),
+        check_inline(&mut big, place, 0, (None, &v), MCU),
         Err(CoreFail::Body)
     );
     assert_eq!(
@@ -639,7 +640,7 @@ fn the_body_digest_comes_from_the_ports_hash() {
     let mut h = ImageHeader {
         image_kind: image_kind::BOOTCORE,
         port_kind: port_kind::SELF_BOOT,
-        mcu_id: 2,
+        mcu_id: MCU,
         slot_binding: 0,
         placement: placement::DETACHED,
         load_addr: 0x1000,
@@ -662,10 +663,10 @@ fn the_body_digest_comes_from_the_ports_hash() {
     let place = Place::detached(0x3000, 0x1000, 0x2000);
     let v = Ed25519Small::new(*kp.pk);
     let mut hw = Peripheral(mem, [0x5A; 32]);
-    assert_eq!(check_inline(&mut hw, place, 0, (None, &v), 2), Ok(0x1000));
+    assert_eq!(check_inline(&mut hw, place, 0, (None, &v), MCU), Ok(0x1000));
     hw.1[31] ^= 1;
     assert_eq!(
-        check_inline(&mut hw, place, 0, (None, &v), 2),
+        check_inline(&mut hw, place, 0, (None, &v), MCU),
         Err(CoreFail::Body)
     );
 }

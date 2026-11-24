@@ -8,7 +8,7 @@ use dagon_topology::defs::codegen::erase_regions_rs;
 use dagon_topology::defs::{Registry, Source};
 
 /// A synthetic ESP32-S3 board carrying a slower 4 KiB-sector part.
-const BOARD: &str = "format = 1\n[board.slow-s3]\nformat = 3\nproduct = \"Slow S3\"\nmcu = \"esp32s3\"\n\
+const BOARD: &str = "format = 1\n[board.slow-s3]\nformat = 4\nproduct = \"Slow S3\"\nmcu = \"esp32s3\"\n\
                      flash_bytes = 0x100_0000\ndrawing = \"pico\"\n[board.slow-s3.flash]\npart = \"X\"\n\
                      erase_regions = [{ start = 0x0, len = 0x100_0000, unit = 0x1000, unit_max_ms = 900 }]\n";
 

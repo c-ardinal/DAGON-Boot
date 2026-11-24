@@ -2,7 +2,7 @@
 default = true
 drawing = "round-lcd"
 flash_bytes = 4194304
-format = 3
+format = 4
 i2c_target = true
 id = "waveshare-rp2040-touch-lcd-1.28"
 mcu = "rp2040"

@@ -77,24 +77,24 @@ const SLOTS: [SlotRow; 10] = [
 
 /// SHA-256 of each signed image, in `SLOTS` order.
 const IMAGE_SHA256: [&str; 10] = [
-    "9bc167e2b4ce2d8748ab5176dbd593e49660177cb10d19c7face2d31141e98cd",
-    "45efbf2ff884dcfcc800d77969e6474d704321597e45426ea77e4883b2798ecc",
-    "0fbf0acc6a4842b8fb658a6a901d6bd6606f6ef46edc70e9ca0ab21635017c0e",
-    "455bcaa34d1174314cdd6794bbfd96bcb9d021615bd3b612a64859ddd2bb7396",
-    "d0c3aa83143fb19f5a229cd5c7a7bab907e50ea016f1ef7dec242ede8929a499",
-    "533b305e7d843bf92b3781b197eac5cab6ac0eeafefa8f1dc94b4e2bc97c4a9b",
-    "c2a364d9ead164338b1a31f0eb77f48dff34a76d38bdd9f56b88e95d1c0fb622",
-    "bcb4e5d10aa41e62c3cba546d965eaaa3a59e50e9c94fcf59ba2b73c1ea7e4cf",
-    "b8a7614b2de0d1393189121b272ad9147c068e192d03fcdaf57995a9522d6af0",
-    "d35b69b885455d466565b721d49e60d00c468fbd23255db87bc766e766a126a8",
+    "a8b386c1c73c9ba707887f58b362f6b817956d03ed5ccd5f8afd72e1a56cad64",
+    "67c2440db1b05f70c15d92f5d09631eae0d497a4229ebebfabbe88588e29b569",
+    "ef74e3ebec6db1b411471092654e6570a65cc99f61e025c010b563ec933de7f1",
+    "0398d1141383d13130aa4c5455b8890e3b564bae042639c19a2bf58a5ff2baff",
+    "03aab2f1534d3b7ec198f08ac5c5982670da41086acc88322a46e3e35292cba0",
+    "a378c5031c4cd1b58bf6acfc12f8148ab84f9a0759c203fa1a66f92d05119b06",
+    "4d396faa0dbd5068055a5954c6b88747e8ce71561cfec8271639cc5da2052ac5",
+    "096981f741ef77cac2ab40fd45c5385f5ce95f573035d6aca19920fbe78d8add",
+    "a1829d2921be1cb3e7c8968e6aff357f598129b40a6fa94aadb64a3fc197a2ff",
+    "f37c0cf5615aa6349193aa61e9c3ffaf3104b0147e3b2467a571122909e88f00",
 ];
 /// F401 flash.bin (stage0, one state log for both targets, boot core A in
 /// sector 4, APP-A): 133120 bytes.
-const F401_BIN_SHA256: &str = "562cc3be57928bbaaa4cb071b5e57128d6e943ab4d9d630a8580bbba2b00a3cf";
+const F401_BIN_SHA256: &str = "3fea1467341eeb816d19af5bb2ffa6fc73eaaede153680b946e5e439f455a1c9";
 
 const F401_BIN_LEN: usize = 133_120;
 /// RP2040 rescue.uf2: 81920 bytes (160 blocks).
-const RP2040_UF2_SHA256: &str = "1236d745960c7709c20185f7d269ad5d5eb5599beed5bfd03ec75ade75e4b113";
+const RP2040_UF2_SHA256: &str = "bf03c27fdc615d227b696d25c9ac3dd30af295497f111e96e09dc95a1e5a89b8";
 const RP2040_UF2_LEN: usize = 81_920;
 
 fn key() -> KeyPair {

@@ -2,6 +2,7 @@
 //! rebuilt from fixed inputs, compared with the file, then decoded again.
 //! Set `DAGON_REGEN_GOLDEN=1` to rewrite the files.
 
+use dagon_format::header::McuId;
 use dagon_format::Version;
 use dagon_proto::payload::*;
 use dagon_proto::{finish, flags, max_payload, split_status, Cmd, Frame, Status, HEADER_LEN};
@@ -56,7 +57,8 @@ fn hello_resp() -> HelloResp {
         proto_ver: 2,
         role: role::NODE,
         port_kind: 1,
-        mcu_id: 2,
+        // The low 16 bits of the F401's identity (`McuId::low16`).
+        mcu_id: 0x5C5D,
         mode: mode::APP,
         active_version: Version::new(1, 1, 0),
         trial: true,
@@ -108,7 +110,7 @@ fn hello_vectors() {
             (9, &[2, 0, 0, 0, 0x00, 0x01]),           // core: proto_ver, max_payload 256
             (15, &[0x02, 1, 1]),                      // field 1: role node
             (18, &[0x04, 1, 1]),                      // field 2: port_kind S
-            (21, &[0x06, 2, 0x02, 0x00]),             // field 3: mcu_id F401
+            (21, &[0x06, 2, 0x5D, 0x5C]),             // field 3: mcu_id F401, low 16 bits
             (25, &[0x08, 1, 0]),                      // field 4: mode app
             (28, &[0x0A, 4, 0x00, 0x00, 0x01, 0x01]), // field 5: active_version 1.1.0
             (34, &[0x0C, 1, 1]),                      // field 6: trial
@@ -479,11 +481,14 @@ fn enter_rom_vector() {
     assert_crc(&file);
 }
 
+/// The F401's identity: SHA-256("dagon-mcu/stm32f401re")[0..8].
+const F401: McuId = McuId([0x5D, 0x5C, 0xF1, 0x1B, 0x0A, 0x9A, 0x0C, 0x54]);
+
 fn version_resp() -> VersionResp {
     let sv = |state, version| SlotVersion { state, version };
     VersionResp {
         wire: Some(2),
-        mcu_id: Some(2),
+        mcu_id: Some(F401),
         stage0: Some(Version::new(0, 1, 0)),
         boot_core: Some(Version::new(1, 0, 0)),
         core_slots: Some(VersionSlots {
@@ -530,20 +535,21 @@ fn version_vectors() {
     expect_at(
         &file,
         &[
-            (6, &[51, 0]),                            // len = status + 50
-            (9, &[0x02, 4, 0x00, 0x00, 0x00, 0x01]),  // 1: running boot core 1.0.0
-            (15, &[0x0C, 2, 0x02, 0x00]),             // 6: mcu_id F401
-            (19, &[0x14, 4, 0x00, 0x00, 0x01, 0x00]), // 10: stage0 0.1.0
-            (25, &[0x16, 11, 0]),                     // 11: boot core slots, A running
-            (28, &[4, 0x00, 0x00, 0x00, 0x01]),       // core A confirmed 1.0.0
-            (33, &[0; 5]),                            // core B empty
-            (38, &[0x18, 16, 1]),                     // 12: app slots, B running
-            (41, &[1, 0x00, 0x00, 0x00, 0x01]),       // A written 1.0.0
-            (46, &[3, 0x00, 0x00, 0x01, 0x01]),       // B trying 1.1.0
-            (51, &[0; 5]),                            // factory empty
-            (56, &[0x1A, 1, 2]),                      // 13: wire 2
+            (6, &[57, 0]),                           // len = status + 56
+            (9, &[0x02, 4, 0x00, 0x00, 0x00, 0x01]), // 1: running boot core 1.0.0
+            (15, &[0x0C, 8]),                        // 6: mcu_id F401, all 8 bytes
+            (17, &F401.0),
+            (25, &[0x14, 4, 0x00, 0x00, 0x01, 0x00]), // 10: stage0 0.1.0
+            (31, &[0x16, 11, 0]),                     // 11: boot core slots, A running
+            (34, &[4, 0x00, 0x00, 0x00, 0x01]),       // core A confirmed 1.0.0
+            (39, &[0; 5]),                            // core B empty
+            (44, &[0x18, 16, 1]),                     // 12: app slots, B running
+            (47, &[1, 0x00, 0x00, 0x00, 0x01]),       // A written 1.0.0
+            (52, &[3, 0x00, 0x00, 0x01, 0x01]),       // B trying 1.1.0
+            (57, &[0; 5]),                            // factory empty
+            (62, &[0x1A, 1, 2]),                      // 13: wire 2
         ],
     );
-    assert_eq!(file.len(), 63);
+    assert_eq!(file.len(), 69);
     assert_crc(&file);
 }

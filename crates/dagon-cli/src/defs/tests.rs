@@ -5,17 +5,16 @@
 use std::path::{Path, PathBuf};
 
 use dagon_format::header::HEADER_SIZE;
-use dagon_format::header::{image_kind, slot_binding};
+use dagon_format::header::{image_kind, slot_binding, McuId};
 use dagon_format::{BundleView, ImageHeader};
 
 use crate::config::{read_topology, Config};
 
 /// An MCU no DAGON source knows: probe-rs writer, A/B app slots.
 const FAKE_MCU: &str = r#"
-format = 3
+format = 4
 id = "fake-m0"
 name = "FAKE-M0"
-wire_id = 0x7F01
 port = "self-boot"
 gpio_count = 16
 
@@ -93,7 +92,7 @@ hint = "SWD probe"
 
 const FAKE_BOARD: &str = r#"
 [board.fake-board]
-format = 3
+format = 4
 product = "Fake Board"
 mcu = "fake-m0"
 flash_bytes = 0x20_0000
@@ -214,7 +213,11 @@ fn a_project_defined_mcu_and_board_go_through_every_command() {
         .unwrap();
         let img = std::fs::read(&out).unwrap();
         let h = ImageHeader::parse(&img[..HEADER_SIZE].try_into().unwrap()).unwrap();
-        assert_eq!((h.mcu_id, h.load_addr), (0x7F01, want_at), "slot {slot}");
+        assert_eq!(
+            (h.mcu_id, h.load_addr),
+            (McuId::of_name("fake-m0"), want_at),
+            "slot {slot}"
+        );
     }
 
     // release (build)
@@ -422,8 +425,8 @@ fn a_projects_overrides_reach_every_command() {
             .find(|r| r.start == ERASE_START)
             .unwrap();
         assert_eq!(r.unit_max_ms, ERASE_MAX_MS, "{node}");
-        let wire = reg.mcu(mcu).unwrap().wire_id;
-        let map = roms.iter().find(|m| m.wire_id == wire).unwrap();
+        let wire = reg.mcu(mcu).unwrap().mcu_id();
+        let map = roms.iter().find(|m| m.mcu_id == wire).unwrap();
         let sectors: Vec<_> = map.erase.iter().map(|e| e.sector).collect();
         assert_eq!(
             (map.addr, &sectors[..]),

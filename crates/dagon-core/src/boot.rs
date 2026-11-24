@@ -10,7 +10,7 @@
 
 use crate::log::{Log, LogError, LogLayout, SlotRef};
 use dagon_format::header::{
-    header_digest16, image_kind, placement, verify_header, ImageHeader, HEADER_SIZE,
+    header_digest16, image_kind, placement, verify_header, ImageHeader, McuId, HEADER_SIZE,
 };
 use dagon_format::statelog::{kind, reason, target};
 use dagon_format::SigVerifier;
@@ -88,7 +88,7 @@ pub struct SlotLayout<'a> {
 /// [`decide`] is given).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct BootConfig {
-    pub mcu_id: u16,
+    pub mcu_id: McuId,
     pub target_tag: [u8; 16],
     pub max_attempts: u8,
 }

@@ -204,6 +204,14 @@ pub const NODE_BOARD: &str = "board.toml";
 /// helpers and DAGON's board and boot stage builds alike.
 pub const DEFS_FILE: &str = "defs.sha256";
 
+/// The identity of the MCU whose definition has this `id`
+/// (`dagon_format::header::McuId::of_name`).
+fn mcu_id(id: &str) -> [u8; 8] {
+    let name = format!("dagon-mcu/{id}");
+    let hash = sha2::Digest::finalize(<sha2::Sha256 as sha2::Digest>::new_with_prefix(name));
+    hash[..8].try_into().expect("8 of 32 bytes")
+}
+
 fn sha256_hex(bytes: &[u8]) -> String {
     sha2::Digest::finalize(<sha2::Sha256 as sha2::Digest>::new_with_prefix(bytes))
         .iter()
@@ -519,10 +527,10 @@ impl Definition {
     fn layout_rs(&self) -> String {
         let pair = |(a, b): (u32, u32)| format!("({a:#x}, {b:#x})");
         let mut out = String::new();
-        if let Some(id) = self.t.get("wire_id") {
-            let id = u16::try_from(int(id, "wire_id")).expect("wire_id fits a u16");
-            out += "/// The MCU's id in image headers (`wire_id`).\n";
-            out += &format!("pub const MCU_WIRE_ID: u16 = {id:#x};\n");
+        if let Some(id) = self.t.get("id").and_then(|v| v.as_str()) {
+            out += "/// The MCU's identity in image headers and on the wire: the first 8\n";
+            out += "/// bytes of SHA-256 over `dagon-mcu/` and the definition's id.\n";
+            out += &format!("pub const MCU_ID_BYTES: [u8; 8] = {:?};\n", mcu_id(id));
         }
         let first_map = self
             .t
@@ -1606,7 +1614,7 @@ mod tests {
 
     /// A definition with every layout fact the generated module carries:
     /// boot core slot B written before A, one app slot.
-    const LAYOUT: &str = "format = 3\nid = \"m\"\nwire_id = 0x0042\n\
+    const LAYOUT: &str = "format = 4\nid = \"m\"\n\
                           ram = { at = 0x2000_0000, size = 0x1_0000 }\n\
                           [[flash_map]]\nname = \"m-1m\"\nxip = true\nbase = 0x1000_0000\nbytes = 0x10_0000\n\
                           [layout]\nstage0 = { at = 0x1000_0000, size = 0x4000 }\n\
@@ -1670,7 +1678,7 @@ mod tests {
     fn the_layout_regions_come_from_the_definition() {
         let rs = layout().rs();
         for want in [
-            "pub const MCU_WIRE_ID: u16 = 0x42;",
+            "pub const MCU_ID_BYTES: [u8; 8] = [24, 226, 216, 25, 151, 20, 117, 118];",
             "pub const DEFAULT_FLASH: (u32, u32) = (0x10000000, 0x100000);",
             "pub const RAM_REGION: (u32, u32) = (0x20000000, 0x10000);",
             "pub const BOOT_RECORD_REGION: (u32, u32) = (0x2000f000, 0x800);",
@@ -1690,8 +1698,7 @@ mod tests {
     /// them (its package has no use for them).
     #[test]
     fn facts_a_definition_leaves_out_are_not_made_up() {
-        let def =
-            format!("wire_id = 7\n[[flash_map]]\nname = \"x\"\nbase = 0\nbytes = 0x1000\n{DEF}");
+        let def = format!("[[flash_map]]\nname = \"x\"\nbase = 0\nbytes = 0x1000\n{DEF}");
         let rs = Definition::parse(&def, |f| panic!("no file {f}")).rs();
         for absent in [
             "STAGE0_REGION",
@@ -1708,7 +1715,7 @@ mod tests {
     /// table the definition names; the table itself is generated too.
     #[test]
     fn a_partition_slot_takes_the_partition_table() {
-        let def = "format = 3\nid = \"e\"\nwire_id = 3\npartitions = \"p.csv\"\n\
+        let def = "format = 4\nid = \"e\"\npartitions = \"p.csv\"\n\
                    [[flash_map]]\nname = \"e-16m\"\nxip = false\nbase = 0x0\nbytes = 0x100_0000\n\
                    [[slot]]\nimage = \"app\"\nbinding = \"any\"\nheader = \"detached\"\npartition = \"ota_0\"\n\
                    header_partition = \"dagon\"\nheader_offset = 0x1000\n\
@@ -1756,15 +1763,12 @@ mod tests {
     /// for this package's MCU, in this package's definition format.
     #[test]
     fn the_node_definition_is_the_packages_mcu_in_its_format() {
-        let own = "format = 3\nid = \"m\"\n";
-        assert_eq!(
-            same_mcu(own, "format = 3\nid = \"m\"\nwire_id = 1\n"),
-            Ok(())
-        );
-        let e = same_mcu(own, "format = 3\nid = \"other\"\n").unwrap_err();
+        let own = "format = 4\nid = \"m\"\n";
+        assert_eq!(same_mcu(own, "format = 4\nid = \"m\"\n"), Ok(()));
+        let e = same_mcu(own, "format = 4\nid = \"other\"\n").unwrap_err();
         assert!(e.contains("'other'") && e.contains("'m'"), "{e}");
-        let e = same_mcu(own, "format = 4\nid = \"m\"\n").unwrap_err();
-        assert!(e.contains("format 4") && e.contains("format 3"), "{e}");
+        let e = same_mcu(own, "format = 5\nid = \"m\"\n").unwrap_err();
+        assert!(e.contains("format 5") && e.contains("format 4"), "{e}");
         let e = same_mcu(own, "id = \"m\"\n").unwrap_err();
         assert!(e.contains("format 1"), "{e}");
         assert!(same_mcu(own, "not toml [").is_err());

@@ -9,7 +9,7 @@
 mod bench;
 
 use bench::*;
-use dagon_core::boot::{rebuild, rebuilt_records};
+use dagon_core::boot::{rebuild, Passing};
 
 /// Both faces garbage.
 fn lose_log(m: &mut Mem) {
@@ -189,14 +189,19 @@ fn a_valid_log_is_left_as_it_is() {
 #[test]
 fn the_records_follow_the_versions() {
     let r = |slot, minor| slot_ref(slot, &image(slot, minor).0);
-    assert_eq!(rebuilt_records([None, None]).1, 0);
-    let (recs, n) = rebuilt_records([None, Some(r(B, 1))]);
-    assert_eq!(&recs[..n], &[(kind::SLOT_PENDING, r(B, 1))]);
-    let (recs, n) = rebuilt_records([Some(r(A, 1)), Some(r(B, 0))]);
+    let of = |refs: &[SlotRef]| {
+        refs.iter()
+            .fold(Passing::default(), |p, &x| p.add(x))
+            .records()
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(of(&[]), []);
+    assert_eq!(of(&[r(B, 1)]), [(kind::SLOT_PENDING, r(B, 1))]);
     assert_eq!(
-        &recs[..n],
-        &[(kind::PROVISION, r(B, 0)), (kind::SLOT_PENDING, r(A, 1))]
+        of(&[r(A, 1), r(B, 0)]),
+        [(kind::PROVISION, r(B, 0)), (kind::SLOT_PENDING, r(A, 1))]
     );
+    assert_eq!(of(&[r(A, 2), r(B, 2)]), [(kind::PROVISION, r(A, 2))]);
 }
 
 /// A flash that stops at its `cut`-th erase or write: that step writes

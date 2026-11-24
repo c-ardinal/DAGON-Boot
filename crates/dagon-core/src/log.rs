@@ -343,7 +343,7 @@ impl Log {
     pub fn create<F: Flash>(
         flash: &mut F,
         layout: &LogLayout,
-        records: &[(u8, SlotRef)],
+        records: impl IntoIterator<Item = (u8, SlotRef)>,
     ) -> Result<Log, LogError> {
         match Log::load(flash, layout) {
             Err(LogError::NoValidFace) => {}
@@ -361,7 +361,7 @@ impl Log {
             next: Some(face + FACE_HEADER_SIZE as u32),
             next_seq: 1,
         };
-        for &(kind, at) in records {
+        for (kind, at) in records {
             log.append_in_place(flash, target::APP, kind, at, reason::NONE)?;
         }
         flash.write(face, &FaceHeader { generation: 1 }.to_bytes())?;

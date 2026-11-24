@@ -18,7 +18,7 @@ use dagon_proto::{
 
 use crate::images::{ImageStore, ImageView};
 use crate::{
-    node, protocol, requests, session, writer, AbortCause, Config, NameDigest, SlotStore,
+    node, protocol, relay, requests, session, writer, AbortCause, Config, NameDigest, SlotStore,
     TrialPolicy, Writer,
 };
 use core::marker::PhantomData;
@@ -116,6 +116,8 @@ pub struct Agent<S, X, V, W = writer::App, const L: usize = 1, C = Software> {
     session: session::Machine,
     requests: requests::Machine,
     node: node::Machine,
+    /// The relay's own work; it moves only on a node that relays.
+    relay: relay::Machine,
     hdr: [u8; HEADER_SIZE],
     /// One per link.
     links: [Requester; L],
@@ -164,24 +166,36 @@ impl<S: SlotStore, X: AppChain, V: SigVerifier, W: Writer> Agent<S, X, V, W> {
 }
 
 impl<S: SlotStore, X: AppChain, V: SigVerifier, W: Writer, const L: usize> Agent<S, X, V, W, L> {
+    /// The session of writer `W` for a node served over `L` links, with
+    /// DAGON's [`Software`] digest ([`Agent::with_crypto`]).
+    pub fn with_links(cfg: Config, verifier: V, store: S, chain: X) -> Self {
+        Self::with_crypto(cfg, verifier, store, chain, Software)
+    }
+}
+
+impl<S: SlotStore, X: AppChain, V: SigVerifier, W: Writer, const L: usize, C: CryptoProvider>
+    Agent<S, X, V, W, L, C>
+{
     /// The session of writer `W` for a node served over `L` links, named
     /// by the type it is made for. DAGON's start: `app.starting`, then the slot store is opened
     /// (`app.store_opened`), and in the app's session the store makes its
     /// log room and the boot core's changes it shows are replayed
     /// (`app.trial_started`, `app.rolled_back`). `verifier` checks every
-    /// image header under the node's key; HELLO reports its key id.
-    pub fn with_links(cfg: Config, verifier: V, store: S, mut chain: X) -> Self {
+    /// image header under the node's key; HELLO reports its key id. The
+    /// body digest comes from `crypto`.
+    pub fn with_crypto(cfg: Config, verifier: V, store: S, mut chain: X, crypto: C) -> Self {
         let mut node = node::Machine::new();
         let tag = NameDigest::of(NameDigest::TAG, &cfg.target_tag);
         noted(node.starting(&mut chain, tag, cfg.role, cfg.mode));
         let mut agent = Agent {
             verifier,
-            crypto: Software,
+            crypto,
             writer: PhantomData,
             images: ImageStore::open(store, cfg.trial_attempts, W::APP),
             cfg,
             chain,
             session: session::Machine::new(),
+            relay: relay::Machine::new(),
             requests: requests::Machine::new(),
             node,
             hdr: [0; HEADER_SIZE],
@@ -197,54 +211,6 @@ impl<S: SlotStore, X: AppChain, V: SigVerifier, W: Writer, const L: usize> Agent
         agent.opened();
         agent
     }
-}
-
-impl<S: SlotStore, X: AppChain, V: SigVerifier, W: Writer, const L: usize, C: CryptoProvider>
-    Agent<S, X, V, W, L, C>
-{
-    /// The same session with its body digest from `crypto`.
-    pub fn with_crypto<D: CryptoProvider>(self, crypto: D) -> Agent<S, X, V, W, L, D> {
-        let Agent {
-            cfg,
-            crypto: _,
-            writer,
-            verifier,
-            images,
-            chain,
-            session,
-            requests,
-            node,
-            hdr,
-            links,
-            on,
-            xfer_link,
-            now_us,
-            xfer_heard_us,
-            refusal,
-            front,
-            reset_cause,
-        } = self;
-        Agent {
-            cfg,
-            crypto,
-            writer,
-            verifier,
-            images,
-            chain,
-            session,
-            requests,
-            node,
-            hdr,
-            links,
-            on,
-            xfer_link,
-            now_us,
-            xfer_heard_us,
-            refusal,
-            front,
-            reset_cause,
-        }
-    }
 
     /// The app started again over the same store and chain, as after a
     /// reset (a simulator, a test bench): what the agent held in RAM is
@@ -259,6 +225,7 @@ impl<S: SlotStore, X: AppChain, V: SigVerifier, W: Writer, const L: usize, C: Cr
         self.session = session::Machine::new();
         self.requests = requests::Machine::new();
         self.links = [Requester::NEW; L];
+        self.relay = relay::Machine::new();
         self.reset_cause = payload::reset_cause::NONE;
         self.opened();
     }
@@ -357,6 +324,34 @@ impl<S: SlotStore, X: AppChain, V: SigVerifier, W: Writer, const L: usize, C: Cr
     /// (`app.replied`; [`reply_status`] reads it from the frame).
     pub fn replied(&mut self, status: u8, ms: u32) {
         noted(self.node.replied(&mut self.chain, status, ms));
+    }
+
+    /// A relay's PC link of kind `link` carries frames (`relay.pc_up`).
+    pub fn pc_up(&mut self, link: u8, addr: u8) {
+        noted(self.relay.pc_up(&mut self.chain, link, addr));
+    }
+
+    /// A relay's PC link of kind `link` is gone (`relay.pc_down`).
+    pub fn pc_down(&mut self, link: u8, addr: u8) {
+        noted(self.relay.pc_down(&mut self.chain, link, addr));
+    }
+
+    /// A relay passes an inner frame of command `cmd` to the node at
+    /// `addr` over its link `link` (`relay.relay_request`).
+    pub fn relayed(&mut self, link: u8, addr: u8, cmd: u8) {
+        noted(self.relay.relay_request(&mut self.chain, link, addr, cmd));
+    }
+
+    /// A relay drove the lines of the recovery target on link `link`
+    /// (`relay.child_control`).
+    pub fn child_control(&mut self, link: u8, nrst: u8, boot0: u8) {
+        noted(self.relay.child_control(&mut self.chain, link, nrst, boot0));
+    }
+
+    /// A relay reached the ROM loader at `addr` with `len` bytes written
+    /// and `read_len` asked back (`relay.child_raw`).
+    pub fn child_raw(&mut self, addr: u8, len: u16, read_len: u16) {
+        noted(self.relay.child_raw(&mut self.chain, addr, len, read_len));
     }
 
     /// Confirms the running image while it is on trial (an app that
@@ -623,6 +618,7 @@ impl<S: SlotStore, X: AppChain, V: SigVerifier, W: Writer, const L: usize, C: Cr
             core_slots: core,
             app_slots: Some(VersionSlots::of(&self.images.status())),
         };
+        noted(self.requests.version_asked(&mut self.chain));
         Ok((resp.encode(self.body()).expect("fits"), None))
     }
 

@@ -992,7 +992,14 @@ fn the_agent_declares_its_machines() {
         .collect();
     assert_eq!(
         names,
-        ["image", "core_image", "session", "node", "requests"]
+        [
+            "image",
+            "core_image",
+            "session",
+            "node",
+            "relay",
+            "requests"
+        ]
     );
     assert_eq!(session::CATALOG.initial, "Idle");
     assert_eq!(requests::CATALOG.states, ["Ready"]);
@@ -1185,4 +1192,28 @@ fn status_reports_the_reset_the_node_noted() {
     assert_eq!(cause(&mut n, target::APP), reset_cause::WATCHDOG);
     n.agent.restart();
     assert_eq!(cause(&mut n, target::APP), reset_cause::NONE);
+}
+
+/// A relay's own work is published as `relay.*` events, in the order the
+/// relay reports it: the PC link, a relayed request, the recovery lines
+/// and raw bus, the PC gone.
+#[test]
+fn a_relays_work_is_published() {
+    let mut n = Node::new(Probe::default());
+    n.events();
+    n.agent.pc_up(4, 0);
+    n.agent.relayed(1, 0x42, Cmd::Hello as u8);
+    n.agent.child_control(1, 2, 1);
+    n.agent.child_raw(0x39, 3, 1);
+    n.agent.pc_down(4, 0);
+    assert_eq!(
+        n.events(),
+        [
+            "pc_up",
+            "relay_request",
+            "child_control",
+            "child_raw",
+            "pc_down"
+        ]
+    );
 }

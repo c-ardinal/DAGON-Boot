@@ -122,6 +122,7 @@ where
         if !link_up {
             link_up = true;
             pc.r.agent.link_up(via, addr);
+            pc.r.agent.pc_up(via, addr);
         }
         let arrived = pc.r.clock.now_ms();
         pc.r.agent.request(request, via);
@@ -131,6 +132,7 @@ where
             // same reply (same seq).
             link_up = false;
             pc.r.agent.link_down(via, addr);
+            pc.r.agent.pc_down(via, addr);
             continue;
         }
         let ms = pc.r.clock.now_ms().saturating_sub(arrived);
@@ -292,6 +294,9 @@ where
         let Some(port) = route.port else {
             return (Status::Unsupported, 0);
         };
+        // Admitted: the inner frame is one whole frame.
+        let inner_cmd = Frame::decode(r.inner, usize::MAX).map_or(0, |(f, _)| f.cmd);
+        self.r.agent.relayed(r.link, r.addr, inner_cmd);
         let wait = r.timeout_ms.unwrap_or(dagon_port::timeout::RELAY_WAIT_MS);
         let req = self.req(Op::Relay, r.addr, wait, 0);
         self.via(port, req, r.inner, max).await
@@ -318,6 +323,8 @@ where
         let high = s.boot0 == boot0::HIGH;
         match self.r.recovery[i].lines.set_lines(line, high).await {
             Ok(()) => {
+                let link = self.r.recovery[i].link;
+                self.r.agent.child_control(link, s.nrst, s.boot0);
                 let bit = 1 << i;
                 self.boot0_high = if high {
                     self.boot0_high | bit
@@ -348,6 +355,8 @@ where
         if let Err(e) = cmd::i2c_raw(&raw, high, &link) {
             return (e, 0);
         }
+        let len = u16::try_from(raw.data.len()).unwrap_or(u16::MAX);
+        self.r.agent.child_raw(addr, len, raw.read_len);
         let timeout = self.r.config.raw_timeout_ms;
         let req = self.req(Op::Raw, addr, timeout, raw.read_len);
         self.via(port, req, raw.data, max).await

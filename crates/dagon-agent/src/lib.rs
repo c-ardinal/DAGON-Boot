@@ -750,10 +750,10 @@ pub mod protocol {
     pub const DAGON: u8 = 1;
 }
 
-/// A test bench's slot store, shared with the bench code that plays the
-/// boot core or inspects the flash. Host test builds only (feature
-/// `store-tests`).
-#[cfg(feature = "store-tests")]
+/// A slot store shared with other code, such as a test bench that plays
+/// the boot core or inspects the flash. Sharing gives that code no way to
+/// change image state: each mutator still takes the [`Transition`] only
+/// the agent's machines hold.
 impl<S: SlotStore + ?Sized> SlotStore for &core::cell::RefCell<S> {
     fn status(&mut self) -> StatusResp {
         self.borrow_mut().status()

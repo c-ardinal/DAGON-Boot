@@ -61,9 +61,11 @@ pub enum InTree {
     /// The code that carries it, as `crate::Item` paths: for a port, the
     /// trait a replacement implements.
     Has(&'static [&'static str]),
-    /// This tree lacks it: for a port, there is no trait to implement. The
-    /// text says more where the absence alone does not (required for a
-    /// part that is not a port).
+    /// A port this tree has no trait for: the `crate::Trait` path its
+    /// trait is to have. A trait of that name anywhere in the tree fails
+    /// the catalog's checks until the record says `Has`.
+    Planned(&'static str),
+    /// A part that is not a port, which this tree lacks: what it lacks.
     Lacks(&'static str),
 }
 
@@ -136,7 +138,7 @@ const KEY_FILE: &str = "a key file, whose path `--key` or `DAGON_SIGNING_KEY` na
 const NO_BOOT_RECORD: &str = "The firmware writes no boot record: its format exists only in the executable model (`dagon-retained-model`).";
 const NO_SANDBOX: &str = "There is no sandbox at run time (Service ABI, Entry Gate, Operation Cancellation, Fault Unwind, Lockup Fuse, Reset Cleanup, SandboxArch). Definitions are checked and protection maps are generated.";
 
-use InTree::{Has, Lacks};
+use InTree::{Has, Lacks, Planned};
 use Layer::{App, Boot, Host, Relay};
 use Service as S;
 use Trust::{Additive, Never, TrustedOnly, Untrusted};
@@ -161,7 +163,7 @@ pub const PORTS: &[Port] = &[
         Untrusted,
         "it cannot skip a guard: the session machine runs the guards, not the protocol",
         SANDBOXED,
-        Lacks(""),
+        Planned("dagon_agent::UpdateProtocol"),
     ),
     port(
         "ImageVerifier",
@@ -230,7 +232,7 @@ pub const PORTS: &[Port] = &[
         TrustedOnly,
         "",
         &[],
-        Lacks(""),
+        Planned("dagon_core::LogStorage"),
     ),
     port(
         "Recovery",
@@ -239,7 +241,7 @@ pub const PORTS: &[Port] = &[
         Additive,
         "an extension adds a path, never removes DAGON's",
         &[S::Return, S::Transport, S::Time, S::Memory],
-        Lacks(""),
+        Planned("dagon_port::Recovery"),
     ),
     port(
         "Diagnostics",
@@ -248,7 +250,7 @@ pub const PORTS: &[Port] = &[
         Untrusted,
         "",
         SANDBOXED,
-        Lacks(""),
+        Planned("dagon_agent::Diagnostics"),
     ),
     port(
         "Display",
@@ -264,7 +266,7 @@ pub const PORTS: &[Port] = &[
         Untrusted,
         "at boot it runs in the sandbox with the declared pins and buses",
         &[S::Return, S::Pins, S::Buses, S::Time, S::Memory],
-        Lacks(""),
+        Planned("dagon_events::Display"),
     ),
     port(
         "LogSink",
@@ -273,7 +275,7 @@ pub const PORTS: &[Port] = &[
         Untrusted,
         "",
         &[S::Return, S::Events, S::Time, S::Memory],
-        Lacks(""),
+        Planned("dagon_events::LogSink"),
     ),
     port(
         "SelfCheck",
@@ -345,7 +347,7 @@ pub const PORTS: &[Port] = &[
         Untrusted,
         "",
         &[],
-        Lacks(""),
+        Planned("dagon_host::Action"),
     ),
     port(
         "ImageLifecycle",
@@ -426,10 +428,18 @@ mod tests {
     }
 
     #[test]
-    fn a_part_that_is_not_a_port_says_what_it_lacks() {
+    fn a_port_lacking_its_trait_names_where_it_goes() {
         for p in PORTS {
-            if let (Trust::Never(_), InTree::Lacks(why)) = (p.trust, p.in_tree) {
-                assert!(!why.is_empty(), "{}", p.id);
+            match p.in_tree {
+                InTree::Has(paths) => assert!(!paths.is_empty(), "{}", p.id),
+                InTree::Planned(at) => {
+                    assert!(p.trust.is_port(), "{}", p.id);
+                    let (krate, name) = at.rsplit_once("::").expect("a crate::Trait path");
+                    assert!(krate.starts_with("dagon_") && name == p.id, "{}", p.id);
+                }
+                InTree::Lacks(why) => {
+                    assert!(!p.trust.is_port() && !why.is_empty(), "{}", p.id)
+                }
             }
         }
     }

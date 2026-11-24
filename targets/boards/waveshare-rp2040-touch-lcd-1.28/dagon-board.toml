@@ -23,12 +23,6 @@ header = [
 # I2C1 is used on the board itself (GPIO6/7).
 i2c = [{ controller = "i2c0", sda = "GPIO16", scl = "GPIO17" }]
 
-# As the coordinator: a new I2C bus is i2c0 on GPIO16/17 and a new PIO UART link
-# GPIO26 (TX) / GPIO27 (RX), DAGON's link buses below.
-[coordinator]
-i2c = { controller = "i2c0", sda = 16, scl = 17 }
-pio_uart = { tx = 26, rx = 27 }
-
 # X1, a 12 MHz crystal on XIN/XOUT (Waveshare RP2040-Touch-LCD-1.28
 # schematic, RP2040-Touch-LCD-1.28.pdf on the board's Waveshare wiki page).
 [clock]
@@ -79,7 +73,8 @@ sck = "GPIO10"
 mosi = "GPIO11"
 hz = 20_000_000
 
-# DAGON's links to the other nodes.
+# DAGON's links to the other nodes: as the coordinator, a new I2C bus is
+# child-i2c and a new PIO UART link child-uart.
 [[bus]]
 id = "child-i2c"
 kind = "i2c"

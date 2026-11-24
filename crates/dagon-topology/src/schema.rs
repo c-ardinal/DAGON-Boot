@@ -235,7 +235,7 @@ impl End {
 /// Generates [`LinkKind`] from the one list of link kinds
 /// (`dagon_format::with_link_kinds!`).
 macro_rules! link_kind_enum {
-    (() $( $v:ident = $c:literal, $n:literal; )*) => {
+    (() $( $v:ident = $c:literal, $n:literal, [$($t:ident)*]; )*) => {
         /// A hop's medium, by the name a 構成 uses.
         #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
         pub enum LinkKind {
@@ -269,31 +269,41 @@ macro_rules! link_kind_enum {
                     $( LinkKind::$v => stringify!($v), )*
                 }
             }
+
+            /// Kinds the compiled topology can carry between a coordinator
+            /// and a node linked to it (the list's `compiled` trait).
+            #[allow(clippy::nonminimal_bool, clippy::overly_complex_bool_expr)]
+            pub fn compiles(self) -> bool {
+                match self {
+                    $( LinkKind::$v => dagon_format::link_kind_has!(compiled; $($t)*), )*
+                }
+            }
+
+            /// Kinds whose nodes are reached at a 7-bit address an end
+            /// gives (`addr`; the list's `addressed` trait).
+            #[allow(clippy::nonminimal_bool, clippy::overly_complex_bool_expr)]
+            pub fn addressed(self) -> bool {
+                match self {
+                    $( LinkKind::$v => dagon_format::link_kind_has!(addressed; $($t)*), )*
+                }
+            }
+
+            /// Kinds the other end enumerates before they carry a frame
+            /// (USB; the list's `enumerated` trait): a link of such a kind
+            /// cannot take part in a boot stage's listen window, which
+            /// ends long before an enumeration.
+            #[allow(clippy::nonminimal_bool, clippy::overly_complex_bool_expr)]
+            pub fn enumerated(self) -> bool {
+                match self {
+                    $( LinkKind::$v => dagon_format::link_kind_has!(enumerated; $($t)*), )*
+                }
+            }
         }
     };
 }
 
 dagon_format::with_link_kinds!([link_kind_enum]());
 read_by_name!(LinkKind, "link kind");
-
-impl LinkKind {
-    /// Kinds the compiled topology can carry between a coordinator and a node linked to it.
-    pub fn compiles(self) -> bool {
-        matches!(self, LinkKind::I2c | LinkKind::Uart)
-    }
-
-    /// Kinds whose nodes are reached at a 7-bit address an end gives (`addr`).
-    pub fn addressed(self) -> bool {
-        matches!(self, LinkKind::I2c)
-    }
-
-    /// Kinds the other end enumerates before they carry a frame (USB): a
-    /// link of such a kind cannot take part in a boot stage's listen
-    /// window, which ends long before an enumeration.
-    pub fn enumerated(self) -> bool {
-        matches!(self, LinkKind::UsbCdc)
-    }
-}
 
 /// A node's I2C pin names (MCU pin names such as `PB4`).
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]

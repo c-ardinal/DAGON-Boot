@@ -25,7 +25,7 @@ description: "DAGONに新規のマイコンやリンクを追加する場合の�
 
 リンクの種類は固定の一覧で、コード内の1か所にあります。そのため`crates/`も変更します。
 
-1. `crates/dagon-format/src/link.rs`の`with_link_kinds!`に1行を追加します。構成で使用する名称とイベントのコードは、この行が起点です。
+1. `crates/dagon-format/src/link.rs`の`with_link_kinds!`に1行を追加します。構成で使用する名称とイベントのコードは、この行が起点です。行の特性は媒体の性質を記述します。`compiled`（コンパイル後のトポロジがコーディネーターとノードの間で搬送可能）、`addressed`（ノードを7ビットのアドレスで指定）、`enumerated`（フレームの搬送前に相手側が列挙を実行）の3種類です。
 2. そのリンクに対応するマイコンで、`dagon_port::Link`（コーディネータから接続先のノードへのバイト列の場合は`StreamPort`）を実装します。例は`targets/mcu/esp32s3/src/links.rs`です。
 3. マイコンの`dagon-mcu.toml`の`[links]`に追加します。パッケージの`LINK_KINDS`（`targets/mcu/rp2040/src/kinds.rs`）は`[links]`から生成するので、同時に変化します。
 4. DAGON Consoleでの表示用の文言を、`web/src/app/copy.ts`の`LINK_KIND_WORDS`に追加します（`label`はキャンバスと表、`choice`はインスペクタの一覧）。追加するまでDAGON Consoleのテストは失敗します。

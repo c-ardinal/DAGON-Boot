@@ -56,12 +56,12 @@ def rel(p):
 
 def kind_variants():
     text = (ROOT / "crates/dagon-format/src/link.rs").read_text(encoding="utf-8")
-    return set(re.findall(r"^\s*(\w+) = \d+, \"[a-z0-9-]+\";", text, re.M))
+    return set(re.findall(r"^\s*(\w+) = \d+, \"[a-z0-9-]+\", \[[a-z ]*\];", text, re.M))
 
 
 def kind_names():
     text = (ROOT / "crates/dagon-format/src/link.rs").read_text(encoding="utf-8")
-    return re.findall(r"^\s*\w+ = \d+, \"([a-z0-9-]+)\";", text, re.M)
+    return re.findall(r"^\s*\w+ = \d+, \"([a-z0-9-]+)\", \[[a-z ]*\];", text, re.M)
 
 
 def web_files():

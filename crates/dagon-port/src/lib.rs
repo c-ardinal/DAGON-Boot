@@ -165,7 +165,7 @@ pub trait Link {
 
 /// Generates [`LinkKind`] from `dagon_format::with_link_kinds!`.
 macro_rules! link_kind_enum {
-    (() $( $v:ident = $c:literal, $n:literal; )*) => {
+    (() $( $v:ident = $c:literal, $n:literal, [$($t:ident)*]; )*) => {
         /// A hop's medium, as the 構成 names it. The discriminant is the
         /// kind's code in events. Generated from the one list of link kinds
         /// (`dagon_format::with_link_kinds!`).

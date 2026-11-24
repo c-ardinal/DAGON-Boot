@@ -5,7 +5,7 @@ editUrl: false
 ---
 
 :::note
-`compat.toml`から生成しています。直接編集せず、`python site/scripts/gen.py`で再度生成してください。
+`compat.toml`, `crates/dagon-proto/src/lib.rs`から生成しています。直接編集せず、`python site/scripts/gen.py`で再度生成してください。
 :::
 
 DAGONの部品間の規約とその番号、部品ごとのバージョンと、読込と書込の対象とする形式番号です。
@@ -70,3 +70,22 @@ DAGONの部品間の規約とその番号、部品ごとのバージョンと、
 | `sim` | 0.1.0 | `dagon-sim` | `wire` 2, `image-header` 1, `state-log` 1 |
 | `conform` | 0.1.0 | `dagon-conform` | `wire` 2, `image-header` 1, `state-log` 1, `conform-result` 1 |
 | `romlink` | 0.1.0 | `dagon-romlink` |  |
+
+## フレーム（`wire`）
+
+フレームの`flags`バイトの各ビットです。`dagon-proto`の`flags`と同一です。
+
+| フラグ | 値 | 意味 |
+|---|---|---|
+| `RESP` | `0x01` | 同一の`seq`と`cmd`の要求に対する応答のフレームです。 |
+| `EVENT` | `0x02` | ノードが要求なしに送信するイベント用の予約ビットです。送信する部品はなく、受信側はこのビットのあるフレームを無視します。 |
+| `RETRY` | `0x04` | 期限内に応答がなかったため再送した要求です。 |
+
+リンクごとのペイロードの上限（`max_payload`）:
+
+| リンク | バイト数 | 意味 |
+|---|---|---|
+| `USB` | 1088 | PCとハブの間のUSB CDC。 |
+| `UART` | 1024 | UARTのリンク。 |
+| `I2C` | 256 | I2Cのリンク。 |
+| `SMALLEST` | 64 | 媒体に関係なくリンクが保証する最小値です。1回の転送量がこの値未満のリンクは、フレームより下の層で分割と結合を実施し、最低でもこの値のバイト数を転送します。全ノードのHELLOとCAPSの応答はこの値以下のため、要求元はどのリンク経由でもノードの機能を取得可能です。 |

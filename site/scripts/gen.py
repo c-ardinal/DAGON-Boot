@@ -386,6 +386,48 @@ def size(n):
     return f"{n // (1024 * 1024)} MiB" if n % (1024 * 1024) == 0 else f"{n // 1024} KiB"
 
 
+def hexa(n, width=0):
+    """`0x1000_8000`: hex in groups of four digits, as the definitions write it, padded to `width` digits."""
+    h = f"{n:0{width}X}"
+    groups = []
+    while h:
+        groups.insert(0, h[-4:])
+        h = h[:-4]
+    return "0x" + "_".join(groups)
+
+
+def kib(n):
+    """A region's size in KiB, exact: `127.5 KiB`."""
+    k = n / 1024
+    return f"{k:g} KiB" if k < 1024 or n % (1024 * 1024) else f"{n // (1024 * 1024)} MiB"
+
+
+def flash_layout(lang, path):
+    """The regions of one MCU definition, in address order: stage0, the log faces and every slot."""
+    m = tomllib.loads(path.read_text(encoding="utf-8"))
+    regions = {}
+    layout = m.get("layout", {})
+    if "stage0" in layout:
+        regions.setdefault((layout["stage0"]["at"], layout["stage0"]["size"]), ["stage0", ""])
+    for key in ("bootcore_log", "app_log"):
+        for i, at in enumerate(layout.get(key, {}).get("faces", [])):
+            # Two logs that share their faces (one log for both) are one row.
+            row = regions.setdefault((at, layout[key]["face_size"]), [[], ""])
+            row[0].append(tr(lang, f"`{key}`の面{i}", f"`{key}` face {i}"))
+    for s in m.get("slot_layout", []):
+        header = s["header"]
+        where = (tr(lang, f"`{hexa(header['detached'], 8)}`に別置", f"detached at `{hexa(header['detached'], 8)}`")
+                 if isinstance(header, dict) else tr(lang, "領域の先頭", "at the start"))
+        name = f"`{s['target']}` {s['slot']}" + (tr(lang, f"（`{s['partition']}`）", f" (`{s['partition']}`)") if "partition" in s else "")
+        regions[(s["start"], s["capacity"])] = [name, where]
+    head = tr(lang, "| 領域 | アドレス | 容量 | ヘッダ |", "| Region | Address | Size | Header |")
+    lines = []
+    for (at, n), (name, header) in sorted(regions.items()):
+        name = tr(lang, "、", ", ").join(name) if isinstance(name, list) else name
+        lines.append(f"| {name} | `{hexa(at, 8)}` | {kib(n)}{tr(lang, f'（`{hexa(n)}`）', f' (`{hexa(n)}`)')} | {header} |")
+    return f"### {m['name']} (`{m['id']}`)\n\n{head}\n|---|---|---|---|\n" + "\n".join(lines) + "\n"
+
+
 def boards(lang="en"):
     mcus, rows_m, rows_b = {}, [], []
     can = tr(lang, "可", "yes")
@@ -400,6 +442,7 @@ def boards(lang="en"):
             f"| {', '.join(links.get('up', []))} | {', '.join(links.get('down', []))} | {hub} "
             f"| `{m.get('writer', {}).get('kind', '')}` |"
         )
+    layouts = "\n".join(flash_layout(lang, f) for f in sorted((ROOT / "targets" / "mcu").glob("*/dagon-mcu.toml")))
     for f in sorted((ROOT / "targets" / "boards").glob("*/dagon-board.toml")):
         b = tomllib.loads(f.read_text(encoding="utf-8"))
         link = b.get("default_link", {}).get("kind", "—")
@@ -425,7 +468,13 @@ def boards(lang="en"):
 | Id | 製品 | マイコン | フラッシュ | 既定のリンク |
 |---|---|---|---|---|
 {table_b}
-"""
+
+## フラッシュの配置
+
+マイコンの定義の`[layout]`と`[[slot_layout]]`から作成した、領域ごとのアドレスと容量です。
+ESP32-S3のアドレスはフラッシュ内のオフセットです。
+
+{layouts}"""
     else:
         body = f"""
 Every MCU package in `targets/mcu/` and board package in `targets/boards/`
@@ -443,7 +492,14 @@ files is in [MCU and board definitions](/en/reference/definitions/).
 | Id | Product | MCU | Flash | Default link |
 |---|---|---|---|---|
 {table_b}
-"""
+
+## Flash layout
+
+Where each region of an MCU is and how much it holds, from the MCU
+definition's `[layout]` and `[[slot_layout]]`. ESP32-S3 addresses are
+offsets in the flash.
+
+{layouts}"""
     return page(lang, tr(lang, "ボードとマイコン", "Boards and MCUs"),
                 tr(lang, "このリリースで定義しているボードとマイコンです。", "Every board and MCU this release defines, from targets/."),
                 ["targets/mcu/*/dagon-mcu.toml", "targets/boards/*/dagon-board.toml"], body)
@@ -509,7 +565,12 @@ DAGONの部品間の規約とその番号、部品ごとのバージョンと、
 | 部品 | バージョン（最終リリース） | crate | 形式（本ツリー） |
 |---|---|---|---|
 {table_c}
-"""
+
+## フレーム（`wire`）
+
+フレームの`flags`バイトの各ビットです。`dagon-proto`の`flags`と同一です。
+
+{frame_flags(lang)}"""
     else:
         body = f"""
 Every contract between DAGON's components and the number it is at, and
@@ -532,10 +593,15 @@ format numbers are this tree's. Changes since the tag
 | Component | Version (last release) | Packages | Formats (this tree) |
 |---|---|---|---|
 {table_c}
-"""
+
+## Frames (`wire`)
+
+The bits of a frame's `flags` byte, as `dagon-proto`'s `flags` holds them.
+
+{frame_flags(lang)}"""
     return page(lang, tr(lang, "規約と部品", "Contracts and components"),
                 tr(lang, "規約ごとの形式の番号と、部品ごとのバージョンです。", "Every contract's format number and every component's version, from compat.toml."),
-                ["compat.toml"], body)
+                ["compat.toml", "crates/dagon-proto/src/lib.rs"], body)
 
 
 # ---------------------------------------------------------------- tools by MCU
@@ -819,6 +885,65 @@ def node_count(lang):
               f"and by a board setup of {fan} nodes (`hwt-fan.toml`).") + "\n"
 
 
+ESP = ROOT / "targets" / "mcu" / "esp32s3"
+
+
+def esp_first_write(lang):
+    """What `dagon flash` writes to an ESP32-S3 and where, from its MCU definition and partitions.csv."""
+    m = tomllib.loads((ESP / "dagon-mcu.toml").read_text(encoding="utf-8"))
+    parts = {}
+    for line in (ESP / m["partitions"]).read_text(encoding="utf-8").splitlines():
+        cols = [c.strip() for c in line.split(",")]
+        if len(cols) >= 4 and not cols[0].startswith("#"):
+            parts[cols[0]] = int(cols[3], 0)
+    slots = {(s["target"], s["slot"]): s for s in m["slot_layout"]}
+    app, agent = slots[("app", "a")], slots[("agent", "factory")]
+    at = lambda n: f"0x{n:X}"
+    table = f"targets/mcu/esp32s3/{m['partitions']}"
+    if lang == "ja":
+        rows = [f"- 同梱の無改変のESP-IDF 2nd stage（0x0）: SHA-256が`targets/mcu/esp32s3/{m['writer']['checksums']}`と不一致の場合は書込しません。",
+                f"- パーティション表（`{table}`、{at(m['writer']['table_at'])}）",
+                f"- factoryエージェント（{agent['partition']}、{at(agent['start'])}）",
+                f"- アプリ（{app['partition']}、{at(app['start'])}）",
+                f"- アプリの署名済ヘッダ（`dagon`パーティション、{at(app['header']['detached'])}）",
+                f"- 確定済として起動させるotadataの項目（{at(parts['otadata'])}）"]
+    else:
+        rows = [f"- The bundled unmodified ESP-IDF 2nd stage (0x0): refused unless its SHA-256 matches `targets/mcu/esp32s3/{m['writer']['checksums']}`.",
+                f"- The partition table (`{table}`, {at(m['writer']['table_at'])})",
+                f"- The factory agent ({agent['partition']}, {at(agent['start'])})",
+                f"- The app ({app['partition']}, {at(app['start'])})",
+                f"- The app's signed header (the `dagon` partition, {at(app['header']['detached'])})",
+                f"- The otadata entry that starts it as confirmed ({at(parts['otadata'])})"]
+    if parts.get("dagon") != app["header"]["detached"]:
+        sys.exit(f"{table}: the dagon partition is not where the app's header is detached to")
+    return "\n".join(rows) + "\n"
+
+
+PROTO = ROOT / "crates" / "dagon-proto" / "src" / "lib.rs"
+
+
+def frame_flags(lang):
+    """The bits of a frame's flags byte and the payload limit per link, from dagon-proto."""
+    src = PROTO.read_text(encoding="utf-8")
+    lines = src.splitlines()
+    rows = []
+    for mod, pat in (("flags", r"pub const (\w+): u8 = 1 << (\d+);"), ("max_payload", r"pub const (\w+): usize = (\d+);")):
+        start = next(i for i, l in enumerate(lines) if l.startswith(f"pub mod {mod} {{"))
+        end = next(i for i in range(start, len(lines)) if lines[i] == "}")
+        for i in range(start, end):
+            m = re.search(pat, lines[i])
+            if m:
+                value = f"`{1 << int(m[2]):#04x}`" if mod == "flags" else m[2]
+                rows.append((mod, m[1], value, say(lang, doc_before(lines, i))))
+    flag_rows = "\n".join(f"| `{n}` | {v} | {cell(d)} |" for mod, n, v, d in rows if mod == "flags")
+    limit_rows = "\n".join(f"| `{n}` | {v} | {cell(d)} |" for mod, n, v, d in rows if mod == "max_payload")
+    head_f = tr(lang, "| フラグ | 値 | 意味 |", "| Flag | Value | Meaning |")
+    head_l = tr(lang, "| リンク | バイト数 | 意味 |", "| Link | Bytes | Meaning |")
+    return (f"{head_f}\n|---|---|---|\n{flag_rows}\n\n"
+            + tr(lang, "リンクごとのペイロードの上限（`max_payload`）:", "The payload limit per link (`max_payload`):")
+            + f"\n\n{head_l}\n|---|---|---|\n{limit_rows}\n")
+
+
 REGION_BEGIN = "<!-- generated from {}: python site/scripts/gen.py -->\n"
 REGION_END = "<!-- end of generated table -->\n"
 # (hand-written page, what the region is generated from, the region's text); a page may hold several.
@@ -835,6 +960,7 @@ REGIONS = [
     ("explanation/limitations.md", "the MCU definitions' [links]", firmware_kinds),
     ("explanation/limitations.md", "site/scripts/architecture.py", architecture.gap_list),
     ("explanation/limitations.md", "MAX_NODES and the sample hardware test setups", node_count),
+    ("getting-started/first-project.md", "the ESP32-S3 MCU definition and its partitions.csv", esp_first_write),
     ("explanation/index.md", "site/scripts/architecture.py", lambda lang: f"<div>{architecture.node_svg(lang)}</div>\n\n{architecture.component_table(lang)}"),
 ]
 

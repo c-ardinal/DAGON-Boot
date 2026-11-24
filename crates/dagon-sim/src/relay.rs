@@ -388,6 +388,22 @@ impl SimRelay {
         p.index
     }
 
+    /// The node a RELAY over link `link` to `addr` reaches: on an I2C link
+    /// the one at `addr`, on a UART link the one behind the port.
+    pub fn node_behind(&self, link: u8, addr: u8) -> Option<&SimNode> {
+        let l = self.links.iter().find(|l| l.id == link)?;
+        match l.kind {
+            dagon_port::LinkKind::I2c => self
+                .bus
+                .i2c
+                .get(&l.port)?
+                .iter()
+                .find(|n| n.i2c_addr == Some(addr)),
+            dagon_port::LinkKind::Uart => self.bus.uart.get(&l.port).map(|s| &s.node),
+            _ => None,
+        }
+    }
+
     pub fn now_ms(&self) -> u64 {
         self.bus.now_ms
     }

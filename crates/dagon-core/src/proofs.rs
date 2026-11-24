@@ -412,11 +412,18 @@ fn any_record() -> dagon_format::statelog::Record {
 /// Records folded in [`compaction_carries_the_whole_state`].
 const FOLDED: usize = 4;
 
+/// Attempts the proof's states hold at most: one BOOT_ATTEMPT is carried
+/// per attempt, and 255 unrolled folds exhaust the solver's memory. The
+/// loop body is the same at every attempt; the exhaustive test
+/// `carry_is_exact` covers every count up to 255.
+const ATTEMPTS: u8 = 15;
+
 /// A compaction loses nothing: for every state a fold of [`FOLDED`]
-/// records of any kind, slot, reason and image reaches, the records
-/// [`LogState::carry`] writes fold from an empty log to that state again,
-/// every field of it (the exhaustive test `carry_is_exact` covers longer
-/// folds over a small alphabet).
+/// records of any kind, slot, reason and image reaches (with at most
+/// [`ATTEMPTS`] attempts), the records [`LogState::carry`] writes fold
+/// from an empty log to that state again, every field of it (the
+/// exhaustive test `carry_is_exact` covers longer folds over a small
+/// alphabet).
 #[kani::proof]
 // The SlotRef comparisons run memcmp over the 16-byte digest.
 #[kani::unwind(17)]
@@ -425,6 +432,7 @@ fn compaction_carries_the_whole_state() {
     for _ in 0..FOLDED {
         s = s.apply(&any_record());
     }
+    kani::assume(s.attempts <= ATTEMPTS);
     let again = s
         .carry()
         .fold(LogState::default(), |acc, (kind, at, reason)| {

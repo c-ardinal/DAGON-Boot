@@ -110,12 +110,10 @@ impl LogState {
             },
             // SNAPSHOT (compaction): the confirmed slot, with `reason`
             // holding the attempts of the pending slot copied before it.
-            // The rolled-back marker copied before it stays, even in the
-            // confirmed slot (one slot: the image rolled back replaced the
-            // confirmed one there).
             kind::SNAPSHOT => LogState {
                 confirmed: Some(this),
                 attempts: if self.pending.is_some() { r.reason } else { 0 },
+                reverted,
                 ..self
             },
             _ => self,
@@ -127,20 +125,20 @@ impl LogState {
     /// every state a fold of records reaches (`carry_is_exact` and the
     /// Kani proof `compaction_carries_the_whole_state`).
     ///
+    /// - the confirmed image as SNAPSHOT, first: a later SNAPSHOT would
+    ///   drop a rolled-back marker in the confirmed slot (one slot: the
+    ///   image rolled back replaced the confirmed one there);
     /// - the rolled-back image as SLOT_PENDING, then a ROLLBACK with the
     ///   last reason (only the ROLLBACK when no image is rolled back);
-    /// - the pending image as SLOT_PENDING;
-    /// - the confirmed image as SNAPSHOT with the attempts, or, with no
-    ///   confirmed image, one BOOT_ATTEMPT per attempt.
+    /// - the pending image as SLOT_PENDING, then one BOOT_ATTEMPT per
+    ///   attempt.
     pub fn carry(&self) -> impl Iterator<Item = (u8, SlotRef, u8)> {
         let back = self.confirmed.unwrap_or(NO_SLOT);
         let rolled = self.reverted.is_some() || self.last_reason != reason::NONE;
-        let attempts = match (self.confirmed, self.pending) {
-            (None, Some(_)) => self.attempts,
-            _ => 0,
-        };
         let pending = self.pending.unwrap_or(NO_SLOT);
+        let attempts = if self.pending.is_some() { self.attempts } else { 0 };
         [
+            self.confirmed.map(|c| (kind::SNAPSHOT, c, 0)),
             self.reverted.map(|r| (kind::SLOT_PENDING, r, reason::NONE)),
             rolled.then_some((kind::ROLLBACK, back, self.last_reason)),
             self.pending.map(|p| (kind::SLOT_PENDING, p, reason::NONE)),
@@ -151,7 +149,6 @@ impl LogState {
             (kind::BOOT_ATTEMPT, pending, reason::NONE),
             usize::from(attempts),
         ))
-        .chain(self.confirmed.map(|c| (kind::SNAPSHOT, c, self.attempts)))
     }
 
     /// True once the pending slot has been started at least once.
@@ -849,6 +846,8 @@ mod tests {
     fn carry_is_exact() {
         let all = reachable();
         assert!(all.len() > 1000, "{}", all.len());
+        // Every attempt count, the ones the Kani proof leaves out included.
+        assert!(all.iter().any(|s| s.attempts == u8::MAX && s.confirmed.is_some()));
         for s in &all {
             assert_eq!(&refold(s), s);
         }

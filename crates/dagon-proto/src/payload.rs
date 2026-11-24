@@ -1105,10 +1105,14 @@ pub struct RomTarget {
 }
 
 impl RomTarget {
-    /// Both fields, or neither (`None`); one alone is `Status::Arg`.
+    /// Both fields, or neither (`None`); one alone is `Status::Arg`. One
+    /// copy for both commands (it costs the relay's flash twice inlined).
+    #[inline(never)]
     fn of(p: &Parsed<'_>, link: &FieldSpec, addr: &FieldSpec) -> Result<Option<Self>, Status> {
-        match (val::<1>(p, link)?, val::<1>(p, addr)?) {
-            (Some([link]), Some([rom_addr])) => Ok(Some(RomTarget { link, rom_addr })),
+        // The reader has held both to their one byte.
+        let one = |f| p.field(f).and_then(|v: &[u8]| v.first().copied());
+        match (one(link), one(addr)) {
+            (Some(link), Some(rom_addr)) => Ok(Some(RomTarget { link, rom_addr })),
             (None, None) => Ok(None),
             _ => Err(Status::Arg),
         }

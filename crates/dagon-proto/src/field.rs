@@ -120,7 +120,9 @@ pub struct Parsed<'a> {
 }
 
 impl<'a> Parsed<'a> {
-    /// The value of a field of the message's spec, when it was sent.
+    /// The value of a field of the message's spec, when it was sent. One
+    /// copy for every reader: inlined, each lookup costs flash.
+    #[inline(never)]
     pub fn field(&self, f: &FieldSpec) -> Option<&'a [u8]> {
         let i = self.spec.iter().position(|s| s.num == f.num)?;
         *self.values.get(i)?

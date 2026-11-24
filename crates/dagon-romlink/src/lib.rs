@@ -26,13 +26,6 @@ pub const MAX_RW: usize = 256;
 pub const FRAME_GAP_MS: u64 = 500;
 /// Timeout of one raw I2C transaction.
 pub const FRAME_TIMEOUT_MS: u32 = 500;
-/// Per-sector erase budget: the datasheet maximum for a 128 KiB sector is
-/// 4 s; the procedure allows 10 s.
-pub const SECTOR_ERASE_MS: u32 = 10_000;
-/// Timeout of a clock-stretching erase of one sector.
-pub const STRETCH_ERASE_MS: u32 = SECTOR_ERASE_MS;
-/// How long a No-Stretch operation may answer BUSY.
-pub const BUSY_LIMIT_MS: u64 = SECTOR_ERASE_MS as u64;
 /// N in the Get reply of an I2C protocol V1.1 loader (STM32F401: 17
 /// command codes, No-Stretch variants included).
 pub const GET_GUESS_N: u8 = 17;
@@ -76,6 +69,16 @@ pub struct Region<'a> {
     pub data: &'a [u8],
 }
 
+/// One sector to erase and how long the loader may take over it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Erase {
+    pub sector: u16,
+    /// The sector's worst-case erase time (its MCU definition's
+    /// `unit_max_ms`) plus a margin: the clock-stretching erase's timeout,
+    /// and how long a No-Stretch erase may answer BUSY.
+    pub limit_ms: u32,
+}
+
 /// Where to write and what: the loader's I2C address, sectors to erase,
 /// then regions in this order.
 #[derive(Clone, Copy, Debug)]
@@ -83,7 +86,7 @@ pub struct Plan<'a> {
     /// The loader's 7-bit I2C address: the node's MCU definition's
     /// `[rom_i2c] addr`.
     pub addr: u8,
-    pub erase: &'a [u16],
+    pub erase: &'a [Erase],
     pub regions: &'a [Region<'a>],
 }
 
@@ -94,7 +97,8 @@ pub enum RomError {
     Refused(u8),
     /// The loader does not list Read Memory, or neither erase/write variant.
     MissingCommand(u8),
-    /// BUSY for longer than [`BUSY_LIMIT_MS`].
+    /// BUSY for longer than the operation's limit: [`Erase::limit_ms`],
+    /// or [`FRAME_TIMEOUT_MS`] for a write.
     Busy,
     /// More than [`FRAME_GAP_MS`] passed before the next frame could go out.
     Late,
@@ -227,8 +231,8 @@ impl<'l, L: RomLink> Session<'l, L> {
         self.l.set_timeout_ms(FRAME_TIMEOUT_MS);
         self.restart().await?;
         self.get().await?;
-        for &s in plan.erase {
-            self.erase(s).await?;
+        for &e in plan.erase {
+            self.erase(e).await?;
         }
         let total: usize = plan.regions.iter().map(|r| r.data.len()).sum::<usize>() * 2;
         let mut done = 0;
@@ -278,10 +282,10 @@ impl<'l, L: RomLink> Session<'l, L> {
     }
 
     /// Polls a No-Stretch operation's state until ACK.
-    async fn send_busy(&mut self, data: &[u8]) -> Result<(), RomError> {
+    async fn send_busy(&mut self, data: &[u8], limit_ms: u32) -> Result<(), RomError> {
         let mut a = [0u8];
         self.frame(data, &mut a).await?;
-        let until = self.l.now_ms() + BUSY_LIMIT_MS;
+        let until = self.l.now_ms() + u64::from(limit_ms);
         while a[0] == BUSY {
             if self.l.now_ms() >= until {
                 return Err(RomError::Busy);
@@ -356,7 +360,7 @@ impl<'l, L: RomLink> Session<'l, L> {
         Ok(())
     }
 
-    async fn erase(&mut self, sector: u16) -> Result<(), RomError> {
+    async fn erase(&mut self, Erase { sector, limit_ms }: Erase) -> Result<(), RomError> {
         let c = if self.no_stretch {
             cmd::NS_ERASE
         } else {
@@ -367,9 +371,9 @@ impl<'l, L: RomLink> Session<'l, L> {
         let [hi, lo] = sector.to_be_bytes();
         let f = [hi, lo, hi ^ lo];
         if self.no_stretch {
-            self.send_busy(&f).await
+            self.send_busy(&f, limit_ms).await
         } else {
-            self.l.set_timeout_ms(STRETCH_ERASE_MS);
+            self.l.set_timeout_ms(limit_ms);
             let r = self.send(&f).await;
             self.l.set_timeout_ms(FRAME_TIMEOUT_MS);
             r
@@ -394,8 +398,10 @@ impl<'l, L: RomLink> Session<'l, L> {
         f[1..=data.len()].copy_from_slice(data);
         f[data.len() + 1] = xor(&f[..=data.len()]);
         let f = &f[..data.len() + 2];
+        // A write takes milliseconds: the plain frame timeout bounds its
+        // stretch, and so its BUSY answers.
         if self.no_stretch {
-            self.send_busy(f).await
+            self.send_busy(f, FRAME_TIMEOUT_MS).await
         } else {
             self.send(f).await
         }
@@ -657,7 +663,10 @@ mod tests {
     const LOADER: u8 = 0x3B;
     const PLAN: Plan<'static> = Plan {
         addr: LOADER,
-        erase: &[5],
+        erase: &[Erase {
+            sector: 5,
+            limit_ms: 5_000,
+        }],
         regions: &REGIONS,
     };
 

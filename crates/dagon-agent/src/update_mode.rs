@@ -206,11 +206,13 @@ where
             None => port.poll(),
         };
         if let Some((on, request)) = request {
-            last = clock.now_us();
             transfer = true;
             let reply = agent.handle_on(on, request);
             reboot = reply.as_ref().is_some_and(|r| r.reboot);
             port.reply(reply.map(|r| r.frame), reboot);
+            // The request's own work (an erase) is not quiet time.
+            last = clock.now_us();
+            agent.reply_left(last);
             continue;
         }
         if reboot && port.delivered() {

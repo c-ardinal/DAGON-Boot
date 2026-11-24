@@ -209,7 +209,12 @@ fn a_link_takes_the_time_of_its_ports_kind() {
     let a = [i2c(1, "i2c0"), uart(2, "pio-uart")];
     let b = [uart(1, "pio-uart"), i2c(2, "i2c0")];
     let t = |links: &[RelayLinkDef], id| {
-        exchange_ms(&relay_frame(id, ADDR, &data), Medium::UsbCdc, links)
+        exchange_ms(
+            &relay_frame(id, ADDR, &data),
+            Medium::UsbCdc,
+            links,
+            |_, _, _| 0,
+        )
     };
     assert!(t(&a, 1) < t(&a, 2));
     assert_eq!(t(&a, 1), t(&b, 2));

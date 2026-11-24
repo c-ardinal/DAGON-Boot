@@ -74,6 +74,11 @@ These steps are for firmware that is not a `dagon new` project.
            },
        };
        host.after(agent, cmd);
+       // The idle deadline runs from the reply: the request's own work (an
+       // erase can take longer than IDLE_TIMEOUT_MS) is not silence.
+       if wrote.is_ok() {
+           last_request = Some(host.now_ms());
+       }
        match (wrote, status) {
            (Err(e), _) => {
                host.on_error(e);

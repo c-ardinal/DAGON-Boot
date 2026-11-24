@@ -208,6 +208,30 @@ impl SimNode {
         &self.cfg
     }
 
+    /// The reply to the last request left at `now_ms` (after the node's own
+    /// work on it): its boot core keeps the transfer, and update mode its
+    /// stay, from then ([`Agent::reply_left`]).
+    pub fn reply_left(&mut self, now_ms: u64) {
+        if let Some(core) = self.core.as_mut() {
+            core.reply_left(now_ms * 1_000);
+            self.core_served_ms = self.core_served_ms.max(now_ms);
+        }
+    }
+
+    /// Worst-case ms the erase for transfer `begin` takes on this node: the
+    /// erase its MCU definition plans for it, each unit at its
+    /// `unit_max_ms` (the wait a host allows, less its margin); 0 for a
+    /// transfer the definition plans none for (the node refuses it).
+    pub fn erase_ms(&self, begin: &dagon_proto::payload::XferBegin) -> u32 {
+        let Some(layout) = crate::mcu::simulated_mcu(self.store.layout.mcu).erase_layout() else {
+            return 0;
+        };
+        let body = begin.body_len().unwrap_or(0);
+        layout
+            .plan(begin.target, begin.slot, u32::from(begin.hdr_len), body)
+            .map_or(0, |p| p.map(|op| op.max_ms).sum())
+    }
+
     /// What a display task of the node's app reads now.
     pub fn app_snapshot(&self) -> AppSnapshot {
         self.events.latest().map(|l| l.state).unwrap_or_default()

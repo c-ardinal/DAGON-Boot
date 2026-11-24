@@ -291,3 +291,47 @@ fn the_boot_core_drops_a_transfer_left_idle() {
         Status::Ok
     );
 }
+
+/// A request whose own work (an erase) outlasts the idle deadline does
+/// not drop the transfer: the deadline runs from when its reply left.
+#[test]
+fn the_boot_core_keeps_a_transfer_through_a_long_erase() {
+    use dagon_port::Flash;
+    let mut node = hub();
+    for &(at, len) in Layout::of("rp2040").slots {
+        node.flash().erase(at, len).unwrap();
+    }
+    node.reset(0);
+    assert_eq!(node.run(), Run::BootCore(mode::RECOVERY));
+    let img = sample::HUB_1_0_0;
+    let mut p = [0u8; 600];
+    let n = XferBegin {
+        target: target::APP,
+        slot: 0,
+        total_len: img.len() as u32,
+        hdr_len: 512,
+    }
+    .encode(&mut p)
+    .unwrap();
+    assert_eq!(ask(&mut node, 1, Cmd::XferBegin, &p[..n], 1).0, Status::Ok);
+    let chunk = |offset: usize, p: &mut [u8]| {
+        XferChunk {
+            offset: offset as u32,
+            data: &img[offset..offset + 32],
+        }
+        .encode(p)
+        .unwrap()
+    };
+    let n = chunk(0, &mut p);
+    assert_eq!(ask(&mut node, 2, Cmd::XferHdr, &p[..n], 2).0, Status::Ok);
+    // Its reply leaves 15 s later, after the node's erase.
+    let idle = u64::from(dagon_agent::IDLE_TIMEOUT_MS);
+    let left = 2 + idle + 5_000;
+    node.reply_left(left);
+    node.tick(left + idle - 1);
+    let n = chunk(32, &mut p);
+    assert_eq!(
+        ask(&mut node, 3, Cmd::XferHdr, &p[..n], left + idle - 1).0,
+        Status::Ok
+    );
+}

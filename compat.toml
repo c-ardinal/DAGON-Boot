@@ -100,6 +100,15 @@ packages = ["dagon-mcu-common"]
 paths = ["targets/mcu/common"]
 formats = { wire = [2] }
 
+# The node's services on the driver helpers above: the agent's serving
+# loop, the state-log slot store, the watchdog guard, the boot core start.
+[[component]]
+name = "node"
+version = "0.1.0"
+packages = ["dagon-node"]
+paths = ["targets/mcu/node"]
+formats = { wire = [2], image-header = [1], state-log = [1] }
+
 [[component]]
 name = "mcu-build"
 version = "0.1.0"

@@ -13,7 +13,7 @@ use dagon_ed25519::Ed25519Compact;
 use dagon_events::{BoardBringUp, Ctx, Event, Extension, Health, Published, TrialInfo, Watchdog};
 use dagon_format::header::*;
 use dagon_format::{key_id, sha256, Version};
-use dagon_mcu_common::hooks::{
+use dagon_node::hooks::{
     finish_start, node_chain, App, AppEvents, BoardExtension, Confirm, NodeChain,
 };
 use dagon_proto::payload::*;
@@ -76,7 +76,7 @@ fn app(log: &Log, health: Option<Health>, confirm: Confirm) -> App {
         prefix: "",
     }));
     App {
-        self_check: dagon_mcu_common::hooks::always,
+        self_check: dagon_node::hooks::always,
         exts: Some(ext),
         confirm,
     }

@@ -38,9 +38,9 @@ image-bootcore = []
 # A panic blinks the last step code on the LED named by `arm::led::select`.
 diag-panic = []
 # An app built to measure how long DAGON's own code masks interrupts
-# (dagon-mcu-common's masked_time): the longest in DAGON_MASKED_MAX_US for
+# (dagon-node's masked_time): the longest in DAGON_MASKED_MAX_US for
 # a probe, and blinked on the board's diagnostic LED after a while.
-masked-time = ["usb", "dagon-mcu-common/masked-time"]
+masked-time = ["usb", "dagon-node/masked-time"]
 
 [dependencies]
 dagon-core = { path = "../../../crates/dagon-core" }
@@ -49,6 +49,7 @@ dagon-port = { path = "../../../crates/dagon-port" }
 dagon-proto = { path = "../../../crates/dagon-proto" }
 dagon-relay = { path = "../../../crates/dagon-relay" }
 dagon-mcu-common = { path = "../common" }
+dagon-node = { path = "../node" }
 # The session, and the boot core's receiving around it (boot_receive, host-tested).
 dagon-agent = { path = "../../../crates/dagon-agent" }
 embassy-futures = "0.1"

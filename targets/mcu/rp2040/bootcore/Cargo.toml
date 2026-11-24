@@ -42,6 +42,7 @@ dagon-mcu-rp2040 = { path = "..", default-features = false, features = ["usb", "
 # The update session (the boot core writer) and the loop that serves it.
 dagon-agent = { path = "../../../../crates/dagon-agent" }
 dagon-mcu-common = { path = "../../common" }
+dagon-node = { path = "../../node" }
 dagon-proto = { path = "../../../../crates/dagon-proto" }
 # Byte-loop memory copy and fill keep the image small.
 dagon-boot = { path = "../../../../crates/dagon-boot", features = ["small-mem"] }

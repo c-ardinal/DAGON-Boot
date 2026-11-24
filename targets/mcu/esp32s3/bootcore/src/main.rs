@@ -5,7 +5,7 @@
 //! flash driver and UART0 as the ROM left them, and the RTC watchdog
 //! armed for its own run (the trial period, fed while it waits).
 //!
-//! At its start (`dagon_mcu_common::handed::begin`) it settles its own
+//! At its start (`dagon_node::handed::begin`) it settles its own
 //! trial, then
 //!
 //! - serves recovery mode when stage0's decision started no app (the
@@ -16,7 +16,7 @@
 //!   resets.
 //!
 //! The session is dagon-agent's with the boot core writer over the shared
-//! state-log store (`dagon_mcu_common::log_store`): it writes the APP slots
+//! state-log store (`dagon_node::log_store`): it writes the APP slots
 //! (detached headers) and sets one pending, checking each image with
 //! stage0's verifier under the key built in. After REBOOT, or update mode's
 //! 60 s without a request, the core resets without a request, so the next
@@ -55,9 +55,9 @@ use dagon_core::boot::{rebuild, BootConfig, SlotLayout};
 use dagon_ed25519::Ed25519Small;
 use dagon_events::{compose, Bounds, Composed, Layer, Nop, Published, Watchdog};
 use dagon_format::header::{mcu_id, port_kind};
-use dagon_mcu_common::handed::{begin, CellIo, Logs, Next, Window};
-use dagon_mcu_common::log_store::{LogMcu, LogStore};
 use dagon_mcu_esp32s3::{PUBKEY, TRIAL_ATTEMPTS, TRIAL_WDT_MS};
+use dagon_node::handed::{begin, CellIo, Logs, Next, Window};
+use dagon_node::log_store::{LogMcu, LogStore};
 use dagon_port::{Flash, FlashError, FlashRegion};
 use dagon_proto::max_payload;
 use dagon_proto::payload::role;

@@ -20,7 +20,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 RUST_DIRS = ("crates", "targets", "samples")
 PORT = ROOT / "crates/dagon-port"
-SERVE = ROOT / "targets/mcu/common/src/serve.rs"
+SERVE = ROOT / "targets/mcu/node/src/serve.rs"
 GUIDES = [
     ROOT / "site/src/content/docs/how-to/existing-firmware.md",
     ROOT / "site/src/content/docs/en/how-to/existing-firmware.md",

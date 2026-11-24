@@ -49,6 +49,7 @@ DAGONの部品間の規約とその番号、部品ごとのバージョンと、
 | `mcu-stm32f401re` | 0.1.0 | `dagon-mcu-stm32f401re` | `wire` 2, `image-header` 1, `state-log` 1, `definitions` 3 |
 | `mcu-esp32s3` | 0.1.0 | `dagon-mcu-esp32s3` | `wire` 2, `image-header` 1, `state-log` 1, `definitions` 3 |
 | `mcu-common` | 0.1.0 | `dagon-mcu-common` | `wire` 2 |
+| `node` | 0.1.0 | `dagon-node` | `wire` 2, `image-header` 1, `state-log` 1 |
 | `mcu-build` | 0.1.0 | `dagon-mcu-build` |  |
 | `board-waveshare-rp2040-touch-lcd-1.28` | 0.1.0 | `dagon-board-waveshare-rp2040-touch-lcd-1-28` | `definitions` 3 |
 | `board-nucleo-f401re` | 0.1.0 | `dagon-board-nucleo-f401re` | `definitions` 3 |

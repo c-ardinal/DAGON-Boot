@@ -1,6 +1,6 @@
 """What every board tells its MCU package's start has one home.
 
-- One `trait BoardCore`, in mcu-common, declaring exactly the board id,
+- One `trait BoardCore`, in dagon-node, declaring exactly the board id,
   the flash size, the bring-up port and the board extension, each with its
   type or signature and its default.
 - Comments and literals are not code (rust_source.code_only).
@@ -15,7 +15,7 @@ import unittest
 
 from rust_source import code_only, rust_texts
 
-HOME = "targets/mcu/common/src/hooks.rs"
+HOME = "targets/mcu/node/src/hooks.rs"
 SHARED_CONSTS = ("BOARD_ID", "FLASH_SIZE")
 MEMBER_NAMES = (*SHARED_CONSTS, "bring_up_port", "extension")
 

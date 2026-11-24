@@ -163,10 +163,6 @@ dependencies = [
 name = "dagon-mcu-common"
 version = "0.1.0"
 dependencies = [
- "critical-section",
- "dagon-agent",
- "dagon-core",
- "dagon-events",
  "dagon-format",
  "dagon-port",
  "dagon-proto",
@@ -182,6 +178,21 @@ dependencies = [
  "dagon-events",
  "dagon-format",
  "dagon-mcu-build",
+ "dagon-mcu-common",
+ "dagon-node",
+ "dagon-port",
+ "dagon-proto",
+]
+
+[[package]]
+name = "dagon-node"
+version = "0.1.0"
+dependencies = [
+ "critical-section",
+ "dagon-agent",
+ "dagon-core",
+ "dagon-events",
+ "dagon-format",
  "dagon-mcu-common",
  "dagon-port",
  "dagon-proto",

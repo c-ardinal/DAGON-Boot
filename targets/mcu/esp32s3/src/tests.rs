@@ -574,7 +574,7 @@ fn a_cut_erase_never_boots_a_partial_image() {
 }
 
 /// A board without extras has no bring-up: the start runs none and emits
-/// no `app.bring_up` (`dagon_mcu_common::hooks::finish_start` gets `None`).
+/// no `app.bring_up` (`dagon_node::hooks::finish_start` gets `None`).
 #[test]
 fn a_plain_board_has_no_bring_up() {
     use crate::board::{BoardDef, PlainBoard};

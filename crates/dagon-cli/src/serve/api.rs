@@ -526,7 +526,7 @@ fn hello(server: &Server) -> Response {
     // Definitions that do not load offer nothing to flash (GET
     // /v1/definitions says why).
     let mut defined: Vec<_> = registry_of(server).map_or(Vec::new(), |r| r.mcus().to_vec());
-    defined.sort_by_key(|m| m.wire_id);
+    defined.sort_by(|a, b| a.id.cmp(&b.id));
     let flash_mcus: Vec<String> = defined
         .into_iter()
         .map(|m| m.id)

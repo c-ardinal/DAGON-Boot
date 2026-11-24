@@ -61,7 +61,6 @@ use dagon_core::boot::{BootConfig, Decision};
 use dagon_core::bootcore::CLEARED;
 use dagon_ed25519::Ed25519Small;
 use dagon_events::{compose_boot, BootExtension, Extension};
-use dagon_format::header::mcu_id;
 #[cfg(any(feature = "listen-time", feature = "decide-time"))]
 use dagon_mcu_common::boot_time;
 use dagon_mcu_rp2040::arm::{jump, led, step, trial};
@@ -72,7 +71,7 @@ use dagon_mcu_rp2040::clock::Setup;
 use dagon_mcu_rp2040::flash::RpFlash;
 use dagon_mcu_rp2040::layout::{watchdog_ms, APP_LOG_LAYOUT, APP_SLOTS};
 use dagon_mcu_rp2040::tag::checked_tag;
-use dagon_mcu_rp2040::{LINKED_SLOT, PUBKEY, TARGET_TAG, TRIAL_ATTEMPTS};
+use dagon_mcu_rp2040::{LINKED_SLOT, MCU_ID, PUBKEY, TARGET_TAG, TRIAL_ATTEMPTS};
 use embassy_rp::watchdog::Watchdog;
 use embassy_time::Duration;
 #[cfg(not(feature = "diag"))]
@@ -236,7 +235,7 @@ fn receive_step(
 }
 
 const CONFIG: BootConfig = BootConfig {
-    mcu_id: mcu_id::RP2040,
+    mcu_id: MCU_ID,
     target_tag: checked_tag(TARGET_TAG),
     max_attempts: TRIAL_ATTEMPTS,
 };

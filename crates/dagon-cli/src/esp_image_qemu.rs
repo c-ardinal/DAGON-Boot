@@ -13,8 +13,8 @@
 
 use super::*;
 use dagon_format::header::{
-    build_flags, capabilities, header_digest16, image_kind, mcu_id, placement, port_kind,
-    ImageHeader, HEADER_SIZE, SIGNED_LEN, SIGN_DOMAIN,
+    build_flags, capabilities, header_digest16, image_kind, placement, port_kind, ImageHeader,
+    McuId, HEADER_SIZE, SIGNED_LEN, SIGN_DOMAIN,
 };
 use dagon_format::statelog::{kind, reason, target, FaceHeader, Record};
 use dagon_format::{key_id, Version};
@@ -119,7 +119,7 @@ fn header(kind: u8, load_addr: u32, body: &[u8], tag: &str) -> [u8; HEADER_SIZE]
     let mut h = ImageHeader {
         image_kind: kind,
         port_kind: port_kind::SELF_BOOT,
-        mcu_id: mcu_id::ESP32S3,
+        mcu_id: McuId::of_name("esp32s3"),
         slot_binding: 0,
         placement: placement::DETACHED,
         load_addr,

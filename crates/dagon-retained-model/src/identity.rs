@@ -1,9 +1,9 @@
 //! MCU identity: derived from the MCU definition's `id`, never assigned.
 //!
 //! `identity(id)` = the first 8 bytes of `SHA-256("dagon-mcu/" ‖ id)` as a
-//! little-endian u64. Every carrier holds all 64 bits, so there is one
-//! width to check and nothing to truncate: the image header, the identity
-//! reply, VERSION 0x06 and the compiled topology's node.
+//! little-endian u64. The image header, VERSION 0x06 and the compiled
+//! topology's node hold all 64 bits; the identity reply holds the low 16,
+//! so the loader checks both widths.
 
 use dagon_format::sha256;
 use std::collections::BTreeMap;
@@ -14,7 +14,7 @@ pub const PREFIX: &str = "dagon-mcu/";
 /// the loader check that width too.
 pub const CARRIERS: &[(&str, u32)] = &[
     ("image-header", 64),
-    ("identity-reply", 64),
+    ("identity-reply", 16),
     ("version-0x06", 64),
     ("topology-node", 64),
 ];
@@ -132,7 +132,7 @@ mod tests {
             LoadError::Collision {
                 a: "aa".into(),
                 b: "bb".into(),
-                bits: 64
+                bits: 16
             }
         );
     }

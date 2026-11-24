@@ -30,7 +30,7 @@ describe('frame codec (dagon-wasm) against the Rust golden frames', () => {
     expect(f.flags & WIRE.FLAG_RESP).toBe(WIRE.FLAG_RESP);
     expect(f.payload[0]).toBe(0);
     const h = decodeHelloResp(f.payload.subarray(1));
-    expect(h).toMatchObject({ protoVer: 2, role: 1, portKind: 1, mcuId: 2, mode: 0, trial: true, maxPayload: 256 });
+    expect(h).toMatchObject({ protoVer: 2, role: 1, portKind: 1, mcuId: 0x5c5d, mode: 0, trial: true, maxPayload: 256 });
     expect(versionText(h.activeVersion)).toBe('1.1.0');
     expect(Array.from(h.keyId)).toEqual([0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88]);
     const body = encodeHelloResp(h);

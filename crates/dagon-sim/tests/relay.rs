@@ -32,7 +32,7 @@ fn image(slot: u8, version: Version, body: &[u8]) -> Vec<u8> {
     let mut h = ImageHeader {
         image_kind: image_kind::APP,
         port_kind: port_kind::SELF_BOOT,
-        mcu_id: mcu_id::STM32F401XE,
+        mcu_id: McuId::of_name("stm32f401re"),
         slot_binding: slot,
         placement: placement::INLINE,
         load_addr: Layout::of("stm32f401re").slots[slot as usize].0 + 0x200,
@@ -193,12 +193,15 @@ fn hello_and_status_through_the_relaying_node() {
     let (s, body) = pc.ask(&mut relay, Cmd::Hello, &hello());
     assert_eq!(s, Status::Ok);
     let h = HelloResp::parse(&body).unwrap();
-    assert_eq!((h.role, h.mcu_id), (role::HUB, mcu_id::RP2040));
+    assert_eq!(
+        (h.role, h.mcu_id),
+        (role::HUB, McuId::of_name("rp2040").low16())
+    );
 
     let h = HelloResp::parse(&pc.ok(&mut relay, Cmd::Hello, &hello())).unwrap();
     assert_eq!(
         (h.role, h.mcu_id, h.trial),
-        (role::NODE, mcu_id::STM32F401XE, false)
+        (role::NODE, McuId::of_name("stm32f401re").low16(), false)
     );
     assert_eq!(h.active_version, Version::new(1, 0, 0));
     assert_eq!(h.key_id, key_id(&kp().pk));

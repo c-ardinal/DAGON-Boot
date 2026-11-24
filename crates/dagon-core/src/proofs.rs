@@ -327,7 +327,7 @@ fn check_inline_stub<F: Flash, V: SigVerifier + ?Sized>(
     at: Place,
     _: u8,
     _: (Option<&SlotRef>, &V),
-    _: u16,
+    _: dagon_format::header::McuId,
 ) -> Result<u32, bootcore::CoreFail> {
     if kani::any() {
         Ok(at.body)
@@ -345,7 +345,7 @@ fn read_state_stub<F: Flash>(_: &mut F, _: &LogLayout) -> Option<LogState> {
 fn confirmed_app_stub<F: Flash, V: SigVerifier + ?Sized>(
     _: &mut F,
     _: &Apps<'_>,
-    _: u16,
+    _: dagon_format::header::McuId,
     _: &V,
 ) -> Option<(u8, u32)> {
     let slot: u8 = kani::any();
@@ -375,7 +375,7 @@ fn stage0_decision_never_panics() {
             &CORE_SLOTS[..1]
         },
         max: kani::any(),
-        mcu_id: kani::any(),
+        mcu_id: dagon_format::header::McuId(kani::any()),
     };
     let apps = Apps {
         log: &LOG,

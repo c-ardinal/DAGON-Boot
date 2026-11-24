@@ -28,7 +28,7 @@ const AT: Stage0<'static> = Stage0 {
     log: &LOG,
     slots: &CORE,
     max: MAX,
-    mcu_id: mcu_id::STM32F401XE,
+    mcu_id: McuId([0x02; 8]),
 };
 const APPS: Apps<'static> = Apps {
     log: &LOG,
@@ -47,7 +47,7 @@ fn app_header(slot: u8, body: &[u8]) -> ImageHeader {
     ImageHeader {
         image_kind: image_kind::APP,
         port_kind: port_kind::SELF_BOOT,
-        mcu_id: mcu_id::STM32F401XE,
+        mcu_id: McuId([0x02; 8]),
         slot_binding: slot,
         placement: placement::INLINE,
         load_addr: entry_of(slot),
@@ -289,7 +289,7 @@ fn an_app_failing_any_check_never_starts() {
             SEED
         }),
         ("another MCU", |h, _| {
-            h.mcu_id = mcu_id::RP2040;
+            h.mcu_id = McuId([0x01; 8]);
             SEED
         }),
         ("another node's tag", |h, _| {

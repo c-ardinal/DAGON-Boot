@@ -56,6 +56,10 @@ pub mod sys;
 // `CONFORM_SCRATCH`. The boot stage and the app layer read these.
 include!(concat!(env!("OUT_DIR"), "/definition.rs"));
 
+/// This MCU's identity in image headers and answers, taken from its
+/// definition's id.
+pub const MCU_ID: dagon_format::header::McuId = dagon_format::header::McuId(MCU_ID_BYTES);
+
 /// An erase region, for a board's `BoardDef` (`EraseRegion::table` turns its
 /// generated `ERASE_REGIONS` rows into them).
 pub use dagon_port::timeout::EraseRegion;
@@ -69,7 +73,7 @@ fn panic(_: &core::panic::PanicInfo) -> ! {
 }
 
 use dagon_agent::Config;
-use dagon_format::header::{mcu_id, port_kind};
+use dagon_format::header::port_kind;
 /// Image version (re-exported for `node::running_version`).
 pub use dagon_format::Version;
 use dagon_proto::payload::role;
@@ -92,7 +96,7 @@ pub const fn target_tag(board_default: &str) -> [u8; 16] {
 /// Agent identity; `mode` is `payload::mode::APP` or `AGENT`.
 pub fn config(mode: u8, target_tag: [u8; 16]) -> Config {
     Config {
-        mcu_id: mcu_id::ESP32S3,
+        mcu_id: MCU_ID,
         port_kind: port_kind::VENDOR_STAGE2,
         target_tag,
         role: role::NODE,

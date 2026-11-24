@@ -3,10 +3,9 @@
 # move (a project moves its slots by overriding them). Sector 0
 # stage0, 1-2 the state log, 3 conformance scratch, 4 boot core A, 5-6 APP
 # A/B, 7 boot core B.
-format = 3
+format = 4
 id = "stm32f401re"
 name = "STM32F401RE"
-wire_id = 0x0002
 port = "self-boot"
 # Pins are named by port (PB4), not numbered.
 gpio_count = 0

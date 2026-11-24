@@ -37,7 +37,7 @@ fn image(slot: u8, body: &[u8]) -> Vec<u8> {
     let mut h = ImageHeader {
         image_kind: image_kind::APP,
         port_kind: port_kind::SELF_BOOT,
-        mcu_id: mcu_id::STM32F401XE,
+        mcu_id: McuId::of_name("stm32f401re"),
         slot_binding: slot,
         placement: placement::INLINE,
         load_addr: 0x0802_0200,
@@ -277,7 +277,7 @@ fn chain(probe: Probe) -> Chain {
 
 fn config() -> Config {
     Config {
-        mcu_id: mcu_id::STM32F401XE,
+        mcu_id: McuId::of_name("stm32f401re"),
         port_kind: port_kind::SELF_BOOT,
         target_tag: TAG,
         role: role::NODE,

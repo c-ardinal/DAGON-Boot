@@ -2,7 +2,7 @@
 //! roles, links, addresses, pins), without canvas positions or node names.
 //! Unsigned; a release binds it through the manifest `topology_sha256`.
 //!
-//! Layout: 32-byte head, `node_count` 32-byte nodes, `link_count` 20-byte
+//! Layout: 32-byte head, `node_count` 40-byte nodes, `link_count` 20-byte
 //! links, `constraint_count` 16-byte constraints (manifest constraint layout).
 //! A link has two ends and no direction; its GPIOs say which end's node they
 //! are on. Canonical form: node `index` equals
@@ -10,14 +10,15 @@
 //! (no two links join the same two nodes), every reserved byte zero, so equal
 //! topologies give equal bytes and equal SHA-256.
 
+use crate::header::McuId;
 use crate::le::{arr, put_u16, put_u32, u16_at, u32_at};
 use crate::manifest::{Constraint, CONSTRAINT_SIZE, MAX_CONSTRAINTS};
 use crate::FormatError;
 
 pub const MAGIC: [u8; 4] = *b"DGTP";
-pub const TP_VERSION: u16 = 2;
+pub const TP_VERSION: u16 = 3;
 pub const HEAD_SIZE: usize = 0x20;
-pub const NODE_SIZE: usize = 32;
+pub const NODE_SIZE: usize = 40;
 pub const LINK_SIZE: usize = 20;
 pub use crate::MAX_NODES;
 /// One link per node but one: a set of links that joins every node.
@@ -75,8 +76,8 @@ pub const NONE: u8 = 0xFF;
 pub struct TopoNode {
     pub index: u8,
     pub role: u8,
-    /// Image header `mcu_id` values.
-    pub mcu_id: u16,
+    /// The node's MCU, as its image headers name it.
+    pub mcu_id: McuId,
     /// Image header `port_kind` values.
     pub port_kind: u8,
     pub max_attempts: u8,
@@ -94,7 +95,6 @@ impl TopoNode {
         TopoNode {
             index: b[0],
             role: b[1],
-            mcu_id: u16_at(b, 2),
             port_kind: b[4],
             max_attempts: b[5],
             listen_window_ms: u16_at(b, 6),
@@ -102,6 +102,7 @@ impl TopoNode {
             recovery_tiers: arr(b, 9),
             order_rank: b[12],
             target_tag: arr(b, 16),
+            mcu_id: McuId(arr(b, 32)),
         }
     }
 
@@ -109,7 +110,6 @@ impl TopoNode {
         let mut b = [0u8; NODE_SIZE];
         b[0] = self.index;
         b[1] = self.role;
-        put_u16(&mut b, 2, self.mcu_id);
         b[4] = self.port_kind;
         b[5] = self.max_attempts;
         put_u16(&mut b, 6, self.listen_window_ms);
@@ -117,6 +117,7 @@ impl TopoNode {
         b[9..12].copy_from_slice(&self.recovery_tiers);
         b[12] = self.order_rank;
         b[16..32].copy_from_slice(&self.target_tag);
+        b[32..40].copy_from_slice(&self.mcu_id.0);
         b
     }
 }
@@ -366,7 +367,7 @@ impl<'a> TopologyView<'a> {
     /// loader's address; the host takes the ROM path to a node only as a
     /// peer. The reset and boot lines are not part of it: the board wires
     /// them.
-    pub fn rom_peer(&self, node: u8, has_loader: impl Fn(u16) -> bool) -> Option<u8> {
+    pub fn rom_peer(&self, node: u8, has_loader: impl Fn(McuId) -> bool) -> Option<u8> {
         (0..self.link_count())
             .map(|i| self.link(i))
             .filter(TopoLink::reaches_rom_i2c)

@@ -6,7 +6,7 @@ use std::rc::Rc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
-use dagon_format::header::{image_kind, mcu_id, target_tag};
+use dagon_format::header::{image_kind, target_tag, McuId};
 use dagon_format::Version;
 use dagon_host::{
     rom, ConfirmOutcome, Error, Event, Host, HostClock, NodeOutcome, Outcome, RecoverAssets,
@@ -391,8 +391,8 @@ fn version_of_the_hub_and_a_node_and_of_an_agent_that_predates_it() {
     let s = sim();
     let mut h = host(&s);
     for (to, mcu) in [
-        (Target::Local, mcu_id::RP2040),
-        (seg_at(), mcu_id::STM32F401XE),
+        (Target::Local, McuId::of_name("rp2040")),
+        (seg_at(), McuId::of_name("stm32f401re")),
     ] {
         let v = block_on(h.version(to)).unwrap().expect("answers VERSION");
         assert_eq!((v.wire, v.mcu_id), (Some(2), Some(mcu)), "{to:?}");
@@ -1722,7 +1722,7 @@ fn rom_addrs() -> Vec<u8> {
 
 fn f401_rom() -> rom::RomMap {
     let wire = image::mcu_id_of("stm32f401re").unwrap();
-    roms().into_iter().find(|m| m.wire_id == wire).unwrap()
+    roms().into_iter().find(|m| m.mcu_id == wire).unwrap()
 }
 
 /// A host whose retry notes are counted.

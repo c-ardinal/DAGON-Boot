@@ -28,10 +28,9 @@ errors; kind fields accept only the values listed below.
 <!-- generated from dagon-topology's McuDef: python site/scripts/gen.py -->
 | Key | Type | Required | Meaning |
 |---|---|---|---|
-| `format` | integer | no | Definition format number (`3`; left out means 1). A dagon that does not read the number refuses the file (site/src/content/docs/explanation/versioning.md). |
-| `id` | string | yes | MCU id used in topologies (`stm32f401re`). |
+| `format` | integer | no | Definition format number (`4`; left out means 1). A dagon that does not read the number refuses the file (site/src/content/docs/explanation/versioning.md). |
+| `id` | string | yes | MCU id used in topologies (`stm32f401re`). The identity that images and nodes carry is taken from it. |
 | `name` | string | yes | Display name (`STM32F401RE`). |
-| `wire_id` | integer | yes | Image header `mcu_id`; unique. |
 | `port` | string | yes | `self-boot` or `vendor-stage2`. |
 | `gpio_count` | integer | no | GPIO0..n-1 checked for nodes without a board; 0 when pins are named by port. |
 | `[[flash_map]]` | tables | yes | `name` (unique), `base` (address of flash byte 0), `bytes`, `xip` (required; `true`: the CPU reads flash at `base`, so flash shares the address space with RAM and register blocks; `false`: `base` and the slots are flash offsets an MMU maps elsewhere). The first is the default. |
@@ -166,7 +165,7 @@ definition that leaves a class out is refused with the class named.
 <!-- generated from dagon-topology's BoardDef: python site/scripts/gen.py -->
 | Key | Type | Required | Meaning |
 |---|---|---|---|
-| `format` | integer | no | Definition format number (`3`; left out means 1). A dagon that does not read the number refuses the file (site/src/content/docs/explanation/versioning.md). |
+| `format` | integer | no | Definition format number (`4`; left out means 1). A dagon that does not read the number refuses the file (site/src/content/docs/explanation/versioning.md). |
 | `id` | string | yes | Board id used in `nodes[].board`. |
 | `product` | string | yes | Product name. |
 | `mcu` | string | yes | MCU id (must be defined). |
@@ -400,7 +399,7 @@ the merged definition's normal loading and checks, the error naming the
 override. `dagon-remove`, `dagon-unset` and `dagon-order` are read by the
 merge only and never reach the merged definition.
 
-Fields that may not change: `id`, `wire_id`, a board's `mcu`, `format`,
+Fields that may not change: `id`, a board's `mcu`, `format`,
 `port`, `partitions`, the write tool's files (`writer.bootloader`,
 `writer.checksums`) and part folders (`part.sub`) are the definition's
 identity or name files of its folder, so an override that changes one is
@@ -462,7 +461,6 @@ and the fields that may not change:
 | MCU | `bootcore.clock` | replaced whole when given |
 | MCU | `app.clock` | replaced whole when given |
 | MCU | `id` | may not change (the definition's identity or a file of its package) |
-| MCU | `wire_id` | may not change (the definition's identity or a file of its package) |
 | MCU | `format` | may not change (the definition's identity or a file of its package) |
 | MCU | `port` | may not change (the definition's identity or a file of its package) |
 | MCU | `partitions` | may not change (the definition's identity or a file of its package) |
@@ -498,7 +496,7 @@ at least 256; log `face_size`: at least 96 bytes; slots larger than a
 header; every region inside every flash map, none overlapping; and so on).
 A numeric field without a declared requirement fails the tests.
 
-Also on load: unknown fields; unique MCU ids, wire ids, flash map names and board
+Also on load: unknown fields; unique MCU ids and identities (the full value and the 16 bits HELLO carries; a value that is all zeros or all ones is refused), flash map names and board
 ids; unique keys in each array the override table gives a key; a board's MCU exists; every slot, detached header and layout region
 lies inside every flash map of the MCU and none overlap; one slot per image
 and binding; detached headers inside their partition; referenced files are

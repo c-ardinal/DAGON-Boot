@@ -131,7 +131,7 @@ fn sign(
         image_kind: kind,
         port_kind: image::port_kind_of(&n.port)
             .ok_or_else(|| format!("node {}: no port kind {}", n.id, n.port))?,
-        mcu_id: def.wire_id,
+        mcu_id: def.mcu_id(),
         slot: at,
         version: v,
         build_flags: flags,

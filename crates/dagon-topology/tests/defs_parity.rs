@@ -61,7 +61,10 @@ fn host_rom_path_matches() {
     let maps = rom_maps(reg());
     assert_eq!(maps.len(), 1, "only the F401 has a ROM I2C loader");
     let m = &maps[0];
-    assert_eq!(m.wire_id, dagon_format::header::mcu_id::STM32F401XE);
+    assert_eq!(
+        m.mcu_id,
+        dagon_format::header::McuId::of_name("stm32f401re")
+    );
     assert_eq!(
         m.bootcore,
         RomSlot {

@@ -17,7 +17,7 @@
 use dagon_core::boot::{places, Place, SlotLayout};
 use dagon_core::bootcore::{Apps, Stage0};
 use dagon_core::log::LogLayout;
-use dagon_format::header::HEADER_SIZE;
+use dagon_format::header::{McuId, HEADER_SIZE};
 use dagon_port::FlashRegion;
 
 /// Stage0: where the core fetches its reset vector.
@@ -51,8 +51,9 @@ pub const CORE_PLACES: [Place; crate::slots::BOOTCORE.len()] =
 pub const APP_PLACES: [Place; crate::slots::APP.len()] = places(crate::slots::APP_PLACES);
 pub const SLOTS: SlotLayout = SlotLayout { slots: &APP_PLACES };
 
-/// The MCU id in image headers (`wire_id`).
-pub const MCU_ID: u16 = crate::MCU_WIRE_ID;
+/// The MCU's identity in image headers and answers, taken from its
+/// definition's id.
+pub const MCU_ID: McuId = McuId(crate::MCU_ID_BYTES);
 
 /// What stage0 knows of this MCU (`dagon_core::bootcore::decide`): the
 /// log, the boot core slots and the trial's starts.

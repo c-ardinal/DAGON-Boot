@@ -43,7 +43,7 @@ mod tests_writers;
 use std::collections::BTreeMap;
 use std::sync::OnceLock;
 
-use dagon_format::header::{image_kind, placement, port_kind, slot_binding};
+use dagon_format::header::{image_kind, placement, port_kind, slot_binding, McuId};
 use serde::Deserialize;
 
 use crate::schema::{ControlKind, LinkKind, RomEntry, UartIface};
@@ -58,7 +58,7 @@ pub use slot_layout::{HeaderDef, OwnedLayout, SlotLayoutDef, SlotName, TargetNam
 
 /// The `dagon-mcu.toml` / `dagon-board.toml` format number this reader
 /// reads (their `format` key; absent means 1, which this reader refuses).
-pub const FORMAT: u32 = 3;
+pub const FORMAT: u32 = 4;
 
 use requirements::HEADER;
 
@@ -517,15 +517,13 @@ pub struct DoctorCheck {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct McuDef {
-    /// Definition format number (`3`; left out means 1). A dagon that does not read the number
+    /// Definition format number (`4`; left out means 1). A dagon that does not read the number
     /// refuses the file (site/src/content/docs/explanation/versioning.md).
     pub format: Option<u32>,
-    /// MCU id used in topologies (`stm32f401re`).
+    /// MCU id used in topologies (`stm32f401re`). The identity that images and nodes carry is taken from it.
     pub id: String,
     /// Display name (`STM32F401RE`).
     pub name: String,
-    /// Image header `mcu_id`; unique.
-    pub wire_id: u16,
     /// `self-boot` or `vendor-stage2`.
     pub port: PortKind,
     /// GPIO0..n-1 checked for nodes without a board; 0 when pins are named by port.
@@ -770,6 +768,12 @@ pub struct McuDef {
 }
 
 impl McuDef {
+    /// What images and the wire name this MCU by: taken from its `id`
+    /// ([`McuId::of_name`]), so a definition carries no number for it.
+    pub fn mcu_id(&self) -> McuId {
+        McuId::of_name(&self.id)
+    }
+
     pub fn default_flash_map(&self) -> &FlashMapDef {
         &self.flash_maps[0]
     }
@@ -867,7 +871,7 @@ pub struct DefaultLink {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct BoardDef {
-    /// Definition format number (`3`; left out means 1). A dagon that does not read the number
+    /// Definition format number (`4`; left out means 1). A dagon that does not read the number
     /// refuses the file (site/src/content/docs/explanation/versioning.md).
     pub format: Option<u32>,
     /// Board id used in `nodes[].board`.
@@ -1147,8 +1151,13 @@ impl Registry {
     }
 
     /// MCU by image header `mcu_id`.
-    pub fn mcu_by_wire(&self, wire_id: u16) -> Option<&McuDef> {
-        self.mcus.iter().find(|m| m.wire_id == wire_id)
+    pub fn mcu_by_id(&self, id: McuId) -> Option<&McuDef> {
+        self.mcus.iter().find(|m| m.mcu_id() == id)
+    }
+
+    /// MCU by the low 16 bits of its identity, as HELLO carries them.
+    pub fn mcu_by_low16(&self, low: u16) -> Option<&McuDef> {
+        self.mcus.iter().find(|m| m.mcu_id().low16() == low)
     }
 
     /// Slot for an image of header kind `kind` in slot `slot`

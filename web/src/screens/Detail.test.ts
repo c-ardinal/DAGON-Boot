@@ -43,7 +43,7 @@ function row(body: string, key: string): string | null {
 
 const VERSION: VersionResp = {
   wire: 2,
-  mcuId: 2,
+  mcuId: "5d5cf11b0a9a0c54",
   stage0: V(0, 1, 0),
   bootCore: V(1, 0, 0),
   coreSlots: { active: 0, slots: [{ state: 4, version: V(1, 0, 0) }, { state: 1, version: V(1, 1, 0) }] },

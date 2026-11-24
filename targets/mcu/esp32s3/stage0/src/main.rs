@@ -47,7 +47,7 @@ use dagon_core::boot::Place;
 use dagon_core::bootcore::{refuse_app, start_handed, Apps, Handed, NoDiag, Refusal, Stage0};
 use dagon_ed25519::Ed25519Small;
 use dagon_mcu_esp32s3::app_image::Refused;
-use dagon_mcu_esp32s3::{CONFIRMED_WDT_MS, MCU_WIRE_ID, PUBKEY, TRIAL_ATTEMPTS, TRIAL_WDT_MS};
+use dagon_mcu_esp32s3::{CONFIRMED_WDT_MS, MCU_ID, PUBKEY, TRIAL_ATTEMPTS, TRIAL_WDT_MS};
 use flash::RomFlash;
 use qemu_layout as layout;
 
@@ -65,7 +65,7 @@ static STAGE0: Stage0<'static> = Stage0 {
     log: &layout::CORE_LOG,
     slots: &layout::CORE_PLACES,
     max: TRIAL_ATTEMPTS,
-    mcu_id: MCU_WIRE_ID,
+    mcu_id: MCU_ID,
 };
 
 static APPS: Apps<'static> = Apps {

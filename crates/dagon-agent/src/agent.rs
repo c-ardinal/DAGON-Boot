@@ -564,7 +564,7 @@ impl<S: SlotStore, X: AppChain, V: SigVerifier, W: Writer, const L: usize, C: Cr
             proto_ver: dagon_proto::PROTO_VERSION as u32,
             role: self.cfg.role,
             port_kind: self.cfg.port_kind,
-            mcu_id: self.cfg.mcu_id,
+            mcu_id: self.cfg.mcu_id.low16(),
             mode: self.cfg.mode,
             active_version: active.version,
             trial: active.state == SlotState::Trying,

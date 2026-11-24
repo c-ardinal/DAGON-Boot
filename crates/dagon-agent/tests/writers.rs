@@ -18,7 +18,7 @@ use dagon_proto::{flags, max_payload, plant, split_status, Cmd, Frame, Status};
 use ed25519_compact::{KeyPair, Seed};
 
 /// A node of an MCU that only this file knows: its id, tag and slot size.
-const FAKE_MCU: u16 = 0x7E57;
+const FAKE_MCU: McuId = McuId(*b"fake-mcu");
 const TAG: [u8; 16] = target_tag("fake-node");
 const CAP: u32 = 4096;
 const BODY: usize = 1000;

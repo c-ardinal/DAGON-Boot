@@ -43,6 +43,10 @@ pub use dagon_mcu_common::{frames, liveness, mapped, tag, uart};
 // node's boot folder). The boot stage and the app layer read these.
 include!(concat!(env!("OUT_DIR"), "/definition.rs"));
 
+/// This MCU's identity in image headers and answers, taken from its
+/// definition's id.
+pub const MCU_ID: dagon_format::header::McuId = dagon_format::header::McuId(MCU_ID_BYTES);
+
 /// An erase region, for a board's `BoardDef` (`EraseRegion::table` turns its
 /// generated `ERASE_REGIONS` rows into them).
 pub use dagon_port::timeout::EraseRegion;

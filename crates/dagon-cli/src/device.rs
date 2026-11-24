@@ -274,7 +274,7 @@ pub(crate) fn version_line<E: std::fmt::Debug>(
         .app_slots
         .map_or_else(unknown, |a| slots_text(&a, rows.map(|r| &r.app)));
     let wire = v.wire.map_or_else(unknown, |w| w.to_string());
-    let mcu = v.mcu_id.map_or_else(unknown, |m| format!("{m:#06x}"));
+    let mcu = v.mcu_id.map_or_else(unknown, |m| m.to_string());
     format!(
         "{name}: versions: stage0 {stage0}; boot core {core}; app {app}; wire {wire}; mcu {mcu}"
     )
@@ -708,7 +708,7 @@ mod tests {
         let sv = |state, version| SlotVersion { state, version };
         let v = VersionResp {
             wire: Some(2),
-            mcu_id: Some(2),
+            mcu_id: Some(dagon_format::header::McuId([2; 8])),
             stage0: Some(Version::new(0, 1, 0)),
             boot_core: Some(Version::new(1, 0, 0)),
             core_slots: Some(VersionSlots {
@@ -731,7 +731,7 @@ mod tests {
         assert_eq!(
             version_line::<()>("seg", Ok(Some(v)), self_boot, None),
             "seg: versions: stage0 0.1.0; boot core A:Confirmed 1.0.0 (running), B:Empty; \
-             app A:Written 1.0.0, B:Confirmed 1.1.0 (running), F:Empty; wire 2; mcu 0x0002"
+             app A:Written 1.0.0, B:Confirmed 1.1.0 (running), F:Empty; wire 2; mcu 0202020202020202"
         );
         let left_out = VersionResp {
             stage0: None,
@@ -803,7 +803,7 @@ mod tests {
         };
         let v = VersionResp {
             wire: Some(2),
-            mcu_id: Some(2),
+            mcu_id: Some(dagon_format::header::McuId([2; 8])),
             stage0: None,
             boot_core: None,
             core_slots: Some(VersionSlots {

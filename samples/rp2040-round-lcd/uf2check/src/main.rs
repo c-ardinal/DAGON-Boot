@@ -13,7 +13,7 @@ use std::{env, fs};
 use dagon_core::boot::{self, BootConfig, Decision};
 use dagon_core::log::Log;
 use dagon_ed25519::Ed25519Compact;
-use dagon_format::header::{mcu_id, target_tag};
+use dagon_format::header::{target_tag, McuId};
 use dagon_mcu_rp2040::bl;
 use dagon_mcu_rp2040::layout::*;
 use dagon_mcu_rp2040::mapped::Mapped;
@@ -59,7 +59,7 @@ fn run() -> Result<String, String> {
 
     let mut log = Log::load(&mut flash, &APP_LOG_LAYOUT).map_err(|e| format!("app log: {e:?}"))?;
     let cfg = BootConfig {
-        mcu_id: mcu_id::RP2040,
+        mcu_id: McuId::of_name("rp2040"),
         target_tag: target_tag(tag),
         max_attempts: dagon_mcu_rp2040::TRIAL_ATTEMPTS,
     };

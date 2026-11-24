@@ -32,10 +32,6 @@ from test_builtin_registry import declared_test_files
 
 # File -> (most names it may hold, why naming a chip or board is right there).
 ALLOWED = {
-    "crates/dagon-format/src/header.rs": (
-        2,
-        "mcu_id wire constants of the built-in images' header (to be replaced by a hash of the MCU's name)",
-    ),
     "crates/dagon-topology/src/defs/clock.rs": (
         13,
         "PLL_RULES rows are PLL designs named after the chip they come from; a definition picks a row by its pll fields, never by its MCU id",

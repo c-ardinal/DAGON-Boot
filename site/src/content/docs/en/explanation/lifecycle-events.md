@@ -952,7 +952,7 @@ link payload (10).
 | 0x03 | agent (`dagon-agent`) version |
 | 0x04 | MCU definition version |
 | 0x05 | board definition version |
-| 0x06 | MCU identity (5.5): the image header's `mcu_id`, u16 LE |
+| 0x06 | MCU identity (5.5): the image header's `mcu_id`, 8 bytes |
 | 0x07 | isolation (4.5): `level u8`, `kind u8`, `boot_extensions u8`, `root_protection` (kind and exact level as the definition enumerates them, e.g. `rdp1`/`rdp2`, the write-protected sectors, and whether the level is reversible), `fuse` (Clear, or Tripped with the disabled extension's identity as the model encodes it, 5.5) |
 | 0x08 | extensions, for display: a packed array, per linked extension `id` (32 bytes, zero padded), `trusted u8`, first 8 bytes of its source hash (4.7) |
 | 0x09 | extensions, for identity: a packed array, per trusted extension its full 32-byte source hash (4.7) |

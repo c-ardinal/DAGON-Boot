@@ -60,7 +60,6 @@ Links:
 
 Identity and VERSION:
 
-- The MCU identity is a hand-assigned 16-bit `wire_id`, carried in the image header, the identity reply, VERSION 0x06 and the topology node. It is not the 64-bit name hash of the design.
 - VERSION answers only ids 0x01, 0x06, 0x0A, 0x0B, 0x0C and 0x0D, and refuses a non-empty request.
 
 Values:
@@ -81,5 +80,5 @@ Parts of the design the code lacks, in whole or in part:
 <!-- generated from site/scripts/architecture.py: python site/scripts/gen.py -->
 - AI Agent Link: `dagon serve` has no job that ports DAGON to a board: `POST /v1/ai/port` answers 501.
 - Boot Action Interpreter: Not in the code.
-- Retained Codecs: The firmware has none of the retained codecs: the topology body is `dagon-format`'s (a 32-byte head, 32-byte nodes), not the one in [Retained and persistent formats](/en/explanation/retained-formats/). No node stores the topology: it stays in the host's package, and target 3 (where a node once stored it) stays a reserved number no node takes.
+- Retained Codecs: The firmware has none of the retained codecs: the topology body is `dagon-format`'s (a 32-byte head, 40-byte nodes), as section 3.1 of [Retained and persistent formats](/en/explanation/retained-formats/) gives it. No node stores the topology: it stays in the host's package, and target 3 (where a node once stored it) stays a reserved number no node takes.
 <!-- end of generated table -->

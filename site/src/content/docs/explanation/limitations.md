@@ -60,7 +60,6 @@ description: "DAGONの設計上の範囲外、利用者の責任範囲、設計�
 
 識別とVERSION:
 
-- マイコンの識別は手動で割当てた16ビットの`wire_id`です。イメージのヘッダ、識別の応答、VERSIONの0x06、構成のノードが保持します。設計で規定した、名称のハッシュから導出する64ビットの識別ではありません。
 - VERSIONが応答するのはid 0x01、0x06、0x0A、0x0B、0x0C、0x0Dだけです。サイズが0ではないリクエストは拒否します。
 
 値:
@@ -81,5 +80,5 @@ description: "DAGONの設計上の範囲外、利用者の責任範囲、設計�
 <!-- generated from site/scripts/architecture.py: python site/scripts/gen.py -->
 - AI Agent Link: `dagon serve`にボード移植の作業は存在しません。`POST /v1/ai/port`の応答は501です。
 - Boot Action Interpreter: コードに存在しません。
-- Retained Codecs: ファームウェアに保持形式のコーデックは存在しません。構成本体の形式は`dagon-format`の形式（先頭32バイト、ノード32バイト）で、[保持と永続の形式](/explanation/retained-formats/)の形式ではありません。ノードは構成を保存しません。構成はホストのパッケージにだけ存在し、ターゲット3（旧来の構成の保存先）は予約番号として残存し、どのノードも受理しません。
+- Retained Codecs: ファームウェアに保持形式のコーデックは存在しません。構成本体の形式は`dagon-format`の形式（先頭32バイト、ノード40バイト）で、[保持と永続の形式](/explanation/retained-formats/)の3.1に記載しています。ノードは構成を保存しません。構成はホストのパッケージにだけ存在し、ターゲット3（旧来の構成の保存先）は予約番号として残存し、どのノードも受理しません。
 <!-- end of generated table -->

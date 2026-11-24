@@ -445,11 +445,6 @@ fn doctor_identity_and_file_fields_are_refused() {
     for (name, body, field) in [
         ("id", "[mcu_override.rp2040]\nid = \"rp2041\"\n", "`id`"),
         (
-            "wire",
-            "[mcu_override.rp2040]\nwire_id = 0x0042\n",
-            "wire_id",
-        ),
-        (
             "port",
             "[mcu_override.rp2040]\nport = \"vendor-stage2\"\n",
             "port",
@@ -599,7 +594,7 @@ fn an_override_error_names_the_override_file_and_key() {
 fn a_projects_own_definition_is_changed_in_its_own_file_not_overridden() {
     let e = load(
         "own",
-        "[board.mine]\nformat = 3\nproduct = \"Mine\"\nmcu = \"rp2040\"\n\
+        "[board.mine]\nformat = 4\nproduct = \"Mine\"\nmcu = \"rp2040\"\n\
          flash_bytes = 0x40_0000\ndrawing = \"pico\"\n\n\
          [board_override.mine]\nproduct = \"x\"\n",
     )
@@ -894,7 +889,7 @@ fn a_new_uniqueness_check_refuses_a_header_pin_or_i2c_pair_given_twice() {
     ] {
         let key = extra.split(' ').next().unwrap();
         let body = format!(
-            "format = 1\n[board.dup]\nformat = 3\nproduct = \"Dup\"\nmcu = \"rp2040\"\n\
+            "format = 1\n[board.dup]\nformat = 4\nproduct = \"Dup\"\nmcu = \"rp2040\"\n\
              flash_bytes = 0x40_0000\ndrawing = \"pico\"\n{extra}\n"
         );
         let e = load_raw(name, None, &body).unwrap_err().to_string();

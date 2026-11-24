@@ -70,7 +70,7 @@ fn image(slot: u8) -> Vec<u8> {
     let mut h = ImageHeader {
         image_kind: image_kind::APP,
         port_kind: port_kind::SELF_BOOT,
-        mcu_id: mcu_id::STM32F401XE,
+        mcu_id: McuId::of_name("stm32f401re"),
         slot_binding: slot,
         placement: placement::INLINE,
         load_addr: slot_base + 0x200,
@@ -111,7 +111,7 @@ fn topology() -> Vec<u8> {
         node(
             0,
             tp::role::COORDINATOR,
-            mcu_id::RP2040,
+            McuId::of_name("rp2040"),
             port_kind::SELF_BOOT,
             3,
             0,
@@ -122,7 +122,7 @@ fn topology() -> Vec<u8> {
         node(
             1,
             tp::role::NODE,
-            mcu_id::STM32F401XE,
+            McuId::of_name("stm32f401re"),
             port_kind::SELF_BOOT,
             3,
             50,
@@ -133,7 +133,7 @@ fn topology() -> Vec<u8> {
         node(
             2,
             tp::role::NODE,
-            mcu_id::ESP32S3,
+            McuId::of_name("esp32s3"),
             port_kind::VENDOR_STAGE2,
             1,
             0,
@@ -304,10 +304,10 @@ fn image_header_vector() {
         &file,
         &[
             (0x000, b"DGIM"),
-            (0x004, &[1, 0]),                   // hdr_version
+            (0x004, &[2, 0]),                   // hdr_version
             (0x006, &[0x00, 0x02]),             // hdr_size 512
             (0x008, &[0x01, 0x01]),             // image_kind APP, port_kind SELF_BOOT
-            (0x00A, &[0x02, 0x00]),             // mcu_id STM32F401xE
+            (0x00A, &[0x00, 0x00]),             // reserved
             (0x00C, &[0x00, 0x00, 0x00, 0x00]), // slot A, inline, reserved
             (0x010, &le32(0x0802_0200)),        // load_addr
             (0x014, &le32(1024)),               // payload_size
@@ -320,7 +320,8 @@ fn image_header_vector() {
             (0x050, b"seg-f401-7seg\0\0\0"),
             (0x060, &le32(1)), // proto_version
             (0x064, &le32(1)), // capabilities CONFIRM_BY_HUB
-            (0x068, &[0; 0x1C0 - 0x068]),
+            (0x068, &[0x5D, 0x5C, 0xF1, 0x1B, 0x0A, 0x9A, 0x0C, 0x54]), // mcu_id stm32f401re
+            (0x070, &[0; 0x1C0 - 0x070]),
         ],
     );
 
@@ -535,37 +536,32 @@ fn topology_sample_vector() {
         &file,
         &[
             (0x00, b"DGTP"),
-            (0x04, &[2, 0, 3, 2]), // tp_version, node_count, link_count
-            (0x08, &le32(0xA8)),   // body_size = whole binary
+            (0x04, &[3, 0, 3, 2]), // tp_version, node_count, link_count
+            (0x08, &le32(0xC0)),   // body_size = whole binary
             (0x0C, &[0; 20]),      // unused key_id, constraint_count 0, reserved
-            // nodes: index, role, mcu_id, port_kind, max_attempts,
-            // listen_window_ms, map_id, recovery_tiers[3], order_rank, reserved[3], tag
-            (
-                0x20,
-                &[0, 0, 0x01, 0x00, 1, 3, 0, 0, 0, 1, 0, 0, 2, 0, 0, 0],
-            ),
+            // nodes: index, role, reserved[2], port_kind, max_attempts,
+            // listen_window_ms, map_id, recovery_tiers[3], order_rank,
+            // reserved[3], tag, mcu_id (SHA-256("dagon-mcu/" + id)[0..8])
+            (0x20, &[0, 0, 0, 0, 1, 3, 0, 0, 0, 1, 0, 0, 2, 0, 0, 0]),
             (0x30, b"hub-rp2040-lcd\0\0"),
-            (
-                0x40,
-                &[1, 1, 0x02, 0x00, 1, 3, 50, 0, 0, 1, 2, 3, 0, 0, 0, 0],
-            ),
-            (0x50, b"seg-f401-7seg\0\0\0"),
-            (
-                0x60,
-                &[2, 1, 0x03, 0x00, 2, 1, 0, 0, 0, 1, 2, 4, 1, 0, 0, 0],
-            ),
-            (0x70, b"watch-s3\0\0\0\0\0\0\0\0"),
+            (0x40, &[0x64, 0x47, 0x20, 0xC5, 0xDA, 0x08, 0xD0, 0x19]), // rp2040
+            (0x48, &[1, 1, 0, 0, 1, 3, 50, 0, 0, 1, 2, 3, 0, 0, 0, 0]),
+            (0x58, b"seg-f401-7seg\0\0\0"),
+            (0x68, &[0x5D, 0x5C, 0xF1, 0x1B, 0x0A, 0x9A, 0x0C, 0x54]), // stm32f401re
+            (0x70, &[2, 1, 0, 0, 2, 1, 0, 0, 0, 1, 2, 4, 1, 0, 0, 0]),
+            (0x80, b"watch-s3\0\0\0\0\0\0\0\0"),
+            (0x90, &[0xD0, 0xA9, 0xA5, 0x34, 0x38, 0xE9, 0x46, 0x46]), // esp32s3
             // links: two ends (node, port, addr), iface, control, tx/SDA,
             // rx/SCL, nrst, boot, baud u32, rom_entry, bus_id, gpio_end, reserved
             (
-                0x80,
+                0x98,
                 &[
                     0, 1, 0xFF, 1, 3, 0x42, 3, 1, 16, 17, 18, 28, 0x80, 0x1A, 0x06, 0x00, 3, 0, 0,
                     0,
                 ],
             ),
             (
-                0x94,
+                0xAC,
                 &[
                     0, 5, 0xFF, 2, 1, 0xFF, 2, 2, 26, 27, 0xFF, 0xFF, 0x00, 0xC2, 0x01, 0x00, 1,
                     0xFF, 0, 0,
@@ -573,7 +569,7 @@ fn topology_sample_vector() {
             ),
         ],
     );
-    assert_eq!(file.len(), 0xA8);
+    assert_eq!(file.len(), 0xC0);
 
     // Non-canonical inputs are rejected both ways.
     let mut bad = file.clone();
@@ -581,6 +577,9 @@ fn topology_sample_vector() {
     assert_eq!(TopologyView::parse(&bad).err(), Some(FormatError::BadField));
     let mut bad = file.clone();
     bad[0x2D] = 1; // reserved node byte
+    assert_eq!(TopologyView::parse(&bad).err(), Some(FormatError::BadField));
+    let mut bad = file.clone();
+    bad[0x22] = 1; // reserved node byte (where topology-bin 2 had the MCU id)
     assert_eq!(TopologyView::parse(&bad).err(), Some(FormatError::BadField));
     let (n0, n1) = (t.node(0), t.node(1));
     let mut out = [0u8; tp::MAX_SIZE];
@@ -604,15 +603,53 @@ fn topology_sample_vector() {
         Err(FormatError::BadField)
     );
     let mut bad = file.clone();
-    bad[0x80 + 19] = 1; // reserved link byte
+    bad[0x98 + 19] = 1; // reserved link byte
     assert_eq!(TopologyView::parse(&bad).err(), Some(FormatError::BadField));
     let mut bad = file.clone();
-    bad[0x80 + 18] = 2; // gpio_end: 0, 1 or none
+    bad[0x98 + 18] = 2; // gpio_end: 0, 1 or none
     assert_eq!(TopologyView::parse(&bad).err(), Some(FormatError::BadField));
     let mut old = file.clone();
-    old[4] = 1; // topology-bin 1: refused, never read as 2
+    old[4] = 2; // an older topology-bin: refused, never read as the current one
     assert_eq!(
         TopologyView::parse(&old).err(),
         Some(FormatError::UnsupportedVersion)
     );
+}
+
+/// An MCU's identity is the first 8 bytes of SHA-256 over `dagon-mcu/` and
+/// its definition's id; a HELLO answer carries bytes 0 and 1 as a u16 LE.
+#[test]
+fn mcu_identity_vectors() {
+    for (id, bytes, low) in [
+        (
+            "rp2040",
+            [0x64, 0x47, 0x20, 0xC5, 0xDA, 0x08, 0xD0, 0x19],
+            0x4764,
+        ),
+        (
+            "stm32f401re",
+            [0x5D, 0x5C, 0xF1, 0x1B, 0x0A, 0x9A, 0x0C, 0x54],
+            0x5C5D,
+        ),
+        (
+            "esp32s3",
+            [0xD0, 0xA9, 0xA5, 0x34, 0x38, 0xE9, 0x46, 0x46],
+            0xA9D0,
+        ),
+    ] {
+        let mcu = McuId::of_name(id);
+        assert_eq!(mcu, McuId(bytes), "{id}");
+        assert_eq!(mcu.0, sha256(format!("dagon-mcu/{id}").as_bytes())[..8]);
+        assert_eq!(mcu.low16(), low, "{id}");
+    }
+    assert_eq!(McuId::of_name("rp2040").to_string(), "644720c5da08d019");
+}
+
+/// Header format 2 keeps the bytes format 1 had the MCU id in zero.
+#[test]
+fn the_header_bytes_of_the_old_mcu_id_are_reserved() {
+    let mut raw: [u8; HEADER_SIZE] = image(0)[..HEADER_SIZE].try_into().unwrap();
+    assert!(ImageHeader::parse(&raw).is_ok());
+    raw[0x00A] = 2;
+    assert_eq!(ImageHeader::parse(&raw).err(), Some(FormatError::BadField));
 }

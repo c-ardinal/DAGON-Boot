@@ -10,7 +10,8 @@
 
 use std::fmt;
 
-use dagon_format::header::target_tag;
+use crate::defs::McuDef;
+use dagon_format::header::{target_tag, McuId};
 use dagon_format::manifest::{constraint_kind, Constraint as BinConstraint};
 use dagon_format::topology::{self as tp, TopoEnd, TopoLink, TopoNode};
 use dagon_format::Version;
@@ -87,11 +88,7 @@ pub fn recovery_peer_mcu(reg: &Registry, t: &Topology, id: &str) -> Option<Strin
     let bin = encode(reg, &part).ok()?;
     let view = tp::TopologyView::parse(&bin).ok()?;
     let at = u8::try_from(part.nodes.iter().position(|n| n.id == id)?).ok()?;
-    let has_loader = |w: u16| {
-        reg.mcus()
-            .iter()
-            .any(|m| m.wire_id == w && m.has_rom_loader())
-    };
+    let has_loader = |w: McuId| reg.mcu_by_id(w).is_some_and(McuDef::has_rom_loader);
     let peer = view.rom_peer(at, has_loader)?;
     Some(part.nodes.get(usize::from(peer))?.mcu.clone())
 }
@@ -105,8 +102,8 @@ pub fn compile_str(yaml: &str) -> Result<Vec<u8>, CompileError> {
 }
 
 /// Image header `mcu_id` for a topology MCU id (builtin definitions).
-pub fn mcu_id_of(mcu: &str) -> Option<u16> {
-    Registry::builtin().mcu(mcu).map(|m| m.wire_id)
+pub fn mcu_id_of(mcu: &str) -> Option<McuId> {
+    Registry::builtin().mcu(mcu).map(McuDef::mcu_id)
 }
 
 /// Image header `port_kind` for a topology port name.
@@ -173,7 +170,7 @@ fn nodes(reg: &Registry, t: &Topology) -> Result<Vec<TopoNode>, CompileError> {
                 },
                 mcu_id: reg
                     .mcu(&n.mcu)
-                    .map(|m| m.wire_id)
+                    .map(McuDef::mcu_id)
                     .ok_or_else(|| bad(format!("unknown MCU '{}'", n.mcu)))?,
                 port_kind: port_kind_of(&n.port)
                     .ok_or_else(|| bad(format!("unknown port '{}'", n.port)))?,

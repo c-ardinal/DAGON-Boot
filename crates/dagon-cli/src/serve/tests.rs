@@ -144,7 +144,7 @@ fn definitions_are_served_behind_the_same_guards_with_the_projects_boards() {
     std::fs::write(
         a.dir.join("dagon.toml"),
         format!(
-            "{toml}\n[board.my-pico]\nformat = 3\nproduct = \"My Pico\"\nmcu = \"rp2040\"\n\
+            "{toml}\n[board.my-pico]\nformat = 4\nproduct = \"My Pico\"\nmcu = \"rp2040\"\n\
              flash_bytes = 0x40_0000\ndrawing = \"pico\"\n\
              default_link = {{ kind = \"i2c\", addr = 0x44, control = \"full\" }}\n"
         ),
@@ -679,11 +679,11 @@ fn a_projects_own_words_reach_the_page_only_as_plain_names() {
     std::fs::write(
         a.dir.join("dagon.toml"),
         format!(
-            "{toml}\n[board.my-pico]\nformat = 3\nproduct = \"{secret}\"\nmcu = \"rp2040\"\n\
+            "{toml}\n[board.my-pico]\nformat = 4\nproduct = \"{secret}\"\nmcu = \"rp2040\"\n\
              flash_bytes = 0x40_0000\ndrawing = \"pico\"\n\
              header = [{{ pin = \"GPIO4\", label = \"{secret}\" }}]\n\
              default_link = {{ kind = \"i2c\", addr = 0x44, control = \"full\" }}\n\
-             [board.my-two]\nformat = 3\nproduct = \"My Two\"\nmcu = \"rp2040\"\n\
+             [board.my-two]\nformat = 4\nproduct = \"My Two\"\nmcu = \"rp2040\"\n\
              flash_bytes = 0x40_0000\ndrawing = \"pico\"\n\
              default_link = {{ kind = \"i2c\", addr = 0x45, control = \"full\" }}\n"
         ),
@@ -977,7 +977,7 @@ fn gen_is_a_job_and_listed_in_hello() {
     let v: serde_json::Value = serde_json::from_str(&hello).unwrap();
     assert_eq!(
         v["flash_mcus"],
-        serde_json::json!(["rp2040", "stm32f401re", "esp32s3"])
+        serde_json::json!(["esp32s3", "rp2040", "stm32f401re"])
     );
     assert_eq!(
         post(&a, "/v1/project/new", serde_json::json!({ "path": "g" })).0,

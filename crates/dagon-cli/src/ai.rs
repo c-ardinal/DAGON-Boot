@@ -468,7 +468,6 @@ mod tests {
                 "id = \"rp2040\"",
                 &format!("# {secret} at {tool}\nid = \"my-m0\""),
             )
-            .replace("wire_id = 0x0001", "wire_id = 0x00F2")
             .replace("name = \"rp2040-4m\"", "name = \"my-m0-4m\"");
         let doctor = format!(
             "\n[[doctor]]\nwhat = \"my tool\"\nprobe = [\"{tool}\", \"--token\", \"{secret}\"]\n\
@@ -479,11 +478,11 @@ mod tests {
         std::fs::write(
             &toml,
             "format = 1\nmcu_files = [\"m/dagon-mcu.toml\"]\n\
-             [board.my-pico]\nformat = 3\nproduct = \"My Pico\"\nmcu = \"my-m0\"\ndefault = true\n\
+             [board.my-pico]\nformat = 4\nproduct = \"My Pico\"\nmcu = \"my-m0\"\ndefault = true\n\
              flash_bytes = 0x40_0000\ndrawing = \"pico\"\n\
              header = [{ pin = \"GPIO4\", label = \"D4\" }]\n\
              default_link = { kind = \"i2c\", addr = 0x44, control = \"full\" }\n\
-             [board.my-path]\nformat = 3\nproduct = \"C:/Users/me/project\"\nmcu = \"my-m0\"\n\
+             [board.my-path]\nformat = 4\nproduct = \"C:/Users/me/project\"\nmcu = \"my-m0\"\n\
              flash_bytes = 0x40_0000\ndrawing = \"pico\"\n\
              header = [{ pin = \"GPIO4\", label = \"see C:/Users/me/notes\" }]\n\
              default_link = { kind = \"i2c\", addr = 0x45, control = \"full\" }\n",

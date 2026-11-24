@@ -26,7 +26,7 @@ fn image(minor: u8, body: &[u8], kp: &KeyPair) -> Vec<u8> {
     let mut h = ImageHeader {
         image_kind: image_kind::APP,
         port_kind: port_kind::VENDOR_STAGE2,
-        mcu_id: mcu_id::ESP32S3,
+        mcu_id: McuId::of_name("esp32s3"),
         slot_binding: slot_binding::ANY,
         placement: placement::DETACHED,
         load_addr: OTA_0.offset,

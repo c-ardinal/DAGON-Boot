@@ -21,7 +21,7 @@ use dagon_core::log::{trial_room, Log, LogLayout, LogState, SlotRef};
 use dagon_ed25519::Ed25519Compact;
 use dagon_format::header::{
     self, build_flags, capabilities, image_kind, placement, port_kind, slot_binding, ImageHeader,
-    HEADER_SIZE,
+    McuId, HEADER_SIZE,
 };
 use dagon_format::statelog::{self, kind, reason, FaceHeader, Record, RECORD_SIZE};
 use dagon_format::{sha256, stage0, Version};
@@ -243,7 +243,7 @@ pub struct SimStore {
     /// The MCU id and node tag stage0 is built with, for the app it starts
     /// when no boot core may; `None`: it starts none (a stage0 built
     /// without a node tag).
-    pub stage0_node: Option<(u16, [u8; 16])>,
+    pub stage0_node: Option<(McuId, [u8; 16])>,
     /// The APP slot the last reset started (`slot::NONE`: none), as the
     /// running app knows its own slot; STATUS reports it as the active one.
     running: Arc<AtomicU8>,
@@ -548,10 +548,10 @@ impl SimStore {
 
     /// The MCU id stage0 is built with: [`SimStore::stage0_node`]'s, else
     /// the layout's MCU definition's.
-    fn stage0_mcu_id(&self) -> u16 {
+    fn stage0_mcu_id(&self) -> McuId {
         self.stage0_node
             .map(|(id, _)| id)
-            .unwrap_or_else(|| self.layout.definition().wire_id)
+            .unwrap_or_else(|| self.layout.definition().mcu_id())
     }
 
     /// Stage0 and the boot core over the boot core slots

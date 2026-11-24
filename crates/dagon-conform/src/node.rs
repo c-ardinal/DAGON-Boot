@@ -310,7 +310,7 @@ const SIGNED_HEADER: &[u8; HEADER_SIZE] = include_bytes!("../vectors/ct07_header
 /// signature (R and S).
 const FLIP_BITS: [(usize, u8); 10] = [
     (0x008, 0),
-    (0x00A, 1),
+    (0x068, 1),
     (0x014, 2),
     (0x018, 3),
     (0x028, 4),

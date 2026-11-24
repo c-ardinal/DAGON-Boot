@@ -59,7 +59,7 @@ fn every_id_the_reply_encodes_is_in_the_table() {
     let mut b = [0u8; 64];
     let full = VersionResp {
         wire: Some(2),
-        mcu_id: Some(1),
+        mcu_id: Some(dagon_format::header::McuId([1; 8])),
         stage0: Some(Version::new(0, 1, 0)),
         boot_core: Some(Version::new(1, 0, 0)),
         core_slots: Some(VersionSlots::default()),

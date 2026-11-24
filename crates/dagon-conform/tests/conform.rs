@@ -70,7 +70,7 @@ fn image(slot: u8, version: Version, len: usize) -> Vec<u8> {
     let mut h = ImageHeader {
         image_kind: image_kind::APP,
         port_kind: port_kind::SELF_BOOT,
-        mcu_id: mcu_id::STM32F401XE,
+        mcu_id: McuId::of_name("stm32f401re"),
         slot_binding: slot,
         placement: placement::INLINE,
         load_addr: 0x0802_0200,
@@ -333,7 +333,7 @@ impl FakeNode {
         let max_payload =
             link_limits(link).map_or(dagon_proto::max_payload::UART, |l| l.max_payload);
         let cfg = Config {
-            mcu_id: mcu_id::STM32F401XE,
+            mcu_id: McuId::of_name("stm32f401re"),
             port_kind: port_kind::SELF_BOOT,
             target_tag: TAG,
             role: role::NODE,

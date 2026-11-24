@@ -286,7 +286,7 @@ fn place<'a>(
             )
         })?;
     let n = &t.nodes[node];
-    let mcu_id = reg.mcu(&n.mcu).map(|m| m.wire_id);
+    let mcu_id = reg.mcu(&n.mcu).map(|m| m.mcu_id());
     if mcu_id != Some(h.mcu_id) || port_kind_of(&n.port) != Some(h.port_kind) {
         return Err(fail(
             "RB-02",

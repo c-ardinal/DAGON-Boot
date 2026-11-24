@@ -4,7 +4,7 @@ use alloc::format;
 use alloc::vec::Vec;
 use dagon_ed25519::Ed25519Compact;
 use dagon_format::bundle::BundleView;
-use dagon_format::header::{header_digest16, image_kind, slot_binding, HEADER_SIZE};
+use dagon_format::header::{header_digest16, image_kind, slot_binding, McuId, HEADER_SIZE};
 use dagon_format::topology::TopologyView;
 use dagon_format::{sha256, ImageHeader, Version};
 use dagon_port::timeout::{
@@ -1072,10 +1072,10 @@ fn rom_map<'m>(topo: &TopologyView<'_>, node: u8, roms: &'m [RomMap]) -> Option<
     }
     let map_of = |n: u8| {
         let mcu = topo.node(usize::from(n)).mcu_id;
-        roms.iter().find(|m| m.wire_id == mcu)
+        roms.iter().find(|m| m.mcu_id == mcu)
     };
     let map = map_of(node)?;
-    let has_loader = |w: u16| roms.iter().any(|m| m.wire_id == w);
+    let has_loader = |w: McuId| roms.iter().any(|m| m.mcu_id == w);
     let linked = |r: u8| {
         (0..topo.link_count())
             .map(|i| topo.link(i))

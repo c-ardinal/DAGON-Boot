@@ -46,7 +46,7 @@ fn image(slot: u8, minor: u16) -> Vec<u8> {
     let mut h = ImageHeader {
         image_kind: image_kind::APP,
         port_kind: port_kind::SELF_BOOT,
-        mcu_id: mcu_id::STM32F401XE,
+        mcu_id: McuId::of_name("stm32f401re"),
         slot_binding: slot,
         placement: placement::INLINE,
         load_addr: one().slots[usize::from(slot)].0 + 0x200,
@@ -168,16 +168,16 @@ fn with_no_core_to_start_stage0_starts_the_confirmed_app() {
     let mut store = node();
     store.flash().erase(base, len).unwrap();
     assert_eq!(store.boot(), Boot::Nothing, "a stage0 with no node tag");
-    store.stage0_node = Some((mcu_id::STM32F401XE, tag));
+    store.stage0_node = Some((McuId::of_name("stm32f401re"), tag));
     assert_eq!(store.boot(), Boot::Run(0));
     // An app built for another node is not started.
-    store.stage0_node = Some((mcu_id::STM32F401XE, target_tag("another-node")));
+    store.stage0_node = Some((McuId::of_name("stm32f401re"), target_tag("another-node")));
     assert_eq!(store.boot(), Boot::Nothing);
 
     // An app on trial: the log says the trial image runs, so stage0 does
     // not start the confirmed one under it.
     let mut store = node();
-    store.stage0_node = Some((mcu_id::STM32F401XE, tag));
+    store.stage0_node = Some((McuId::of_name("stm32f401re"), tag));
     store.flash().erase(base, len).unwrap();
     let hdr: [u8; HEADER_SIZE] = image(0, 0)[..HEADER_SIZE].try_into().unwrap();
     for k in [kind::SLOT_PENDING, kind::BOOT_ATTEMPT] {

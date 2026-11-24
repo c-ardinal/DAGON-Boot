@@ -224,8 +224,6 @@ fn coordinator_and_rom_numbers_are_usable() {
         let e = parse_mcu_text(&f4.replace(from, to), &[]).unwrap_err();
         assert!(e.msg.contains("V-18/V-20"), "{to}: {e}");
     }
-    let e = mcu_err(&FAKE_MCU.replace("0x7F01", "0"));
-    assert!(e.contains("wire_id 0"), "{e}");
 }
 
 #[test]

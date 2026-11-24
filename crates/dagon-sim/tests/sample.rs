@@ -1,7 +1,7 @@
 //! The sample: three nodes on 1.0.0 and the pre-signed 1.1.0 release.
 
 use dagon_format::bundle::BundleView;
-use dagon_format::header::{mcu_id, ImageHeader, HEADER_SIZE};
+use dagon_format::header::{ImageHeader, McuId, HEADER_SIZE};
 use dagon_format::{sha256, Version};
 use dagon_proto::payload::{self, *};
 use dagon_proto::{max_payload, split_status, Cmd, Frame, Status};
@@ -97,14 +97,14 @@ fn three_nodes_on_1_0_0() {
     };
     let v = Version::new(1, 0, 0);
     for (to, mcu, role) in [
-        (None, mcu_id::RP2040, role::HUB),
-        (seg(), mcu_id::STM32F401XE, role::NODE),
-        (watch(), mcu_id::ESP32S3, role::NODE),
+        (None, McuId::of_name("rp2040"), role::HUB),
+        (seg(), McuId::of_name("stm32f401re"), role::NODE),
+        (watch(), McuId::of_name("esp32s3"), role::NODE),
     ] {
         let h = HelloResp::parse(&pc.call(to, Cmd::Hello, &hello())).unwrap();
         assert_eq!(
             (h.mcu_id, h.role, h.active_version, h.trial),
-            (mcu, role, v, false)
+            (mcu.low16(), role, v, false)
         );
         let st = StatusResp::parse(&pc.call(to, Cmd::Status, &[])).unwrap();
         assert_eq!((st.active, st.confirmed), (0, 0));
@@ -127,7 +127,7 @@ fn release_verifies_and_updates_the_watch() {
             let h: Option<&[u8; HEADER_SIZE]> =
                 b.get(..HEADER_SIZE).and_then(|h| h.try_into().ok());
             h.and_then(|h| ImageHeader::parse(h).ok())
-                .is_some_and(|h| h.mcu_id == mcu_id::ESP32S3)
+                .is_some_and(|h| h.mcu_id == McuId::of_name("esp32s3"))
         })
         .expect("watch image in the release");
 

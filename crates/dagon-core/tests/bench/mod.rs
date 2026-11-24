@@ -84,7 +84,7 @@ impl Flash for Mem {
 
 pub fn cfg() -> BootConfig {
     BootConfig {
-        mcu_id: mcu_id::STM32F401XE,
+        mcu_id: McuId::of_name("stm32f401re"),
         target_tag: TAG,
         max_attempts: 3,
     }
@@ -106,7 +106,7 @@ pub fn image_at(slot: u8, minor: u8, load_addr: u32) -> ([u8; HEADER_SIZE], Vec<
     let mut h = ImageHeader {
         image_kind: image_kind::APP,
         port_kind: port_kind::SELF_BOOT,
-        mcu_id: mcu_id::STM32F401XE,
+        mcu_id: McuId::of_name("stm32f401re"),
         slot_binding: slot,
         placement: placement::INLINE,
         load_addr,

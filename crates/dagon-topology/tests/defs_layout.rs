@@ -73,7 +73,10 @@ fn the_generated_layout_is_the_loaders() {
         );
         let rs = def.rs();
         assert!(
-            rs.contains(&format!("pub const MCU_WIRE_ID: u16 = {:#x};", m.wire_id)),
+            rs.contains(&format!(
+                "pub const MCU_ID_BYTES: [u8; 8] = {:?};",
+                m.mcu_id().0
+            )),
             "{id}"
         );
     }

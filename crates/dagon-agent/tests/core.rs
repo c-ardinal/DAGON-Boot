@@ -46,7 +46,7 @@ fn core_image(slot: u8, minor: u8, kind: u8, flags: u32, caps: u32) -> Vec<u8> {
     let mut h = ImageHeader {
         image_kind: kind,
         port_kind: port_kind::SELF_BOOT,
-        mcu_id: mcu_id::RP2040,
+        mcu_id: McuId::of_name("rp2040"),
         slot_binding: slot,
         placement: placement::INLINE,
         load_addr: CORE[slot as usize] + HEADER_SIZE as u32,
@@ -300,7 +300,7 @@ fn now() -> u64 {
 
 fn config() -> Config {
     Config {
-        mcu_id: mcu_id::RP2040,
+        mcu_id: McuId::of_name("rp2040"),
         port_kind: port_kind::SELF_BOOT,
         target_tag: TAG,
         role: role::HUB,
@@ -763,7 +763,10 @@ fn version(n: &mut Node) -> VersionResp {
 fn version_names_stage0_the_boot_core_slots_and_the_app() {
     let mut n = Node::new(installed(true));
     let v = version(&mut n);
-    assert_eq!((v.wire, v.mcu_id), (Some(2), Some(mcu_id::RP2040)));
+    assert_eq!(
+        (v.wire, v.mcu_id),
+        (Some(2), Some(McuId::of_name("rp2040")))
+    );
     assert_eq!(v.stage0, Some(STAGE0));
     let core = v.core_slots.expect("boot core slots");
     assert_eq!(core.active, 0);

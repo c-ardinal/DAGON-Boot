@@ -158,6 +158,21 @@ impl OwnAgent for RpAgent {
     fn ceiling(&self) -> dagon_proto::handler::Ceiling {
         self.0.ceiling()
     }
+    fn pc_up(&mut self, link: u8, addr: u8) {
+        self.0.pc_up(link, addr)
+    }
+    fn pc_down(&mut self, link: u8, addr: u8) {
+        self.0.pc_down(link, addr)
+    }
+    fn relayed(&mut self, link: u8, addr: u8, cmd: u8) {
+        self.0.relayed(link, addr, cmd)
+    }
+    fn child_control(&mut self, link: u8, nrst: u8, boot0: u8) {
+        self.0.child_control(link, nrst, boot0)
+    }
+    fn child_raw(&mut self, addr: u8, len: u16, read_len: u16) {
+        self.0.child_raw(addr, len, read_len)
+    }
 }
 
 type RpRelay = dagon_relay::Relay<'static, RpAgent, SubLines<'static>, RpWatch, RpClock>;

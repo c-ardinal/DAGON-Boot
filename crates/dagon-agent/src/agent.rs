@@ -18,7 +18,7 @@ use dagon_proto::{
 
 use crate::images::{ImageStore, ImageView};
 use crate::{
-    node, protocol, requests, session, writer, AbortCause, Config, NameDigest, SlotStore,
+    node, protocol, relay, requests, session, writer, AbortCause, Config, NameDigest, SlotStore,
     TrialPolicy, Writer,
 };
 use core::marker::PhantomData;
@@ -113,6 +113,8 @@ pub struct Agent<S, X, V, W = writer::App, const L: usize = 1> {
     session: session::Machine,
     requests: requests::Machine,
     node: node::Machine,
+    /// The relay's own work; it moves only on a node that relays.
+    relay: relay::Machine,
     hdr: [u8; HEADER_SIZE],
     /// One per link.
     links: [Requester; L],
@@ -178,6 +180,7 @@ impl<S: SlotStore, X: AppChain, V: SigVerifier, W: Writer, const L: usize> Agent
             cfg,
             chain,
             session: session::Machine::new(),
+            relay: relay::Machine::new(),
             requests: requests::Machine::new(),
             node,
             hdr: [0; HEADER_SIZE],
@@ -207,6 +210,7 @@ impl<S: SlotStore, X: AppChain, V: SigVerifier, W: Writer, const L: usize> Agent
         self.session = session::Machine::new();
         self.requests = requests::Machine::new();
         self.links = [Requester::NEW; L];
+        self.relay = relay::Machine::new();
         self.reset_cause = payload::reset_cause::NONE;
         self.opened();
     }
@@ -305,6 +309,34 @@ impl<S: SlotStore, X: AppChain, V: SigVerifier, W: Writer, const L: usize> Agent
     /// (`app.replied`; [`reply_status`] reads it from the frame).
     pub fn replied(&mut self, status: u8, ms: u32) {
         noted(self.node.replied(&mut self.chain, status, ms));
+    }
+
+    /// A relay's PC link of kind `link` carries frames (`relay.pc_up`).
+    pub fn pc_up(&mut self, link: u8, addr: u8) {
+        noted(self.relay.pc_up(&mut self.chain, link, addr));
+    }
+
+    /// A relay's PC link of kind `link` is gone (`relay.pc_down`).
+    pub fn pc_down(&mut self, link: u8, addr: u8) {
+        noted(self.relay.pc_down(&mut self.chain, link, addr));
+    }
+
+    /// A relay passes an inner frame of command `cmd` to the node at
+    /// `addr` over its link `link` (`relay.relay_request`).
+    pub fn relayed(&mut self, link: u8, addr: u8, cmd: u8) {
+        noted(self.relay.relay_request(&mut self.chain, link, addr, cmd));
+    }
+
+    /// A relay drove the lines of the recovery target on link `link`
+    /// (`relay.child_control`).
+    pub fn child_control(&mut self, link: u8, nrst: u8, boot0: u8) {
+        noted(self.relay.child_control(&mut self.chain, link, nrst, boot0));
+    }
+
+    /// A relay reached the ROM loader at `addr` with `len` bytes written
+    /// and `read_len` asked back (`relay.child_raw`).
+    pub fn child_raw(&mut self, addr: u8, len: u16, read_len: u16) {
+        noted(self.relay.child_raw(&mut self.chain, addr, len, read_len));
     }
 
     /// Confirms the running image while it is on trial (an app that

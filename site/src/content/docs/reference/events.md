@@ -168,3 +168,19 @@ stage0のあるself-bootのマイコンの、ブートローダのスロット1�
 | `app.reboot_requested` | 0x3b | `reboot_requested`: Ready → Ready | `mode: u8` (1 B), `delay_ms: u32` (4 B) | live, host |  | `allow_reboot_now`の後に、再起動を受理しました。 |
 | `app.before_reboot` | 0x3c | `before_reboot`: Ready → Ready | – | live |  | 返答を送信しました。その後にリセットします。 |
 | `app.percent_told` | 0x3d | `percent_told`: Ready → Ready | `percent: u8` (1 B) | live |  | ホストが、書込の進捗率（1つの数値）をノードに通知しました。ホストの呼出側がこのノードについて表示する数値と同一です。 |
+
+## レイヤー`relay`
+
+### 状態機械`relay`
+
+リレー（マイコン定義のコードが`dagon-relay`を実行するノード）自身の処理です。対象は、PCとのリンク、中継するリクエスト、ROMでの復旧で操作する子ノードの制御線と直接のバスアクセスです。リレー自身のエージェントの`app.*`イベントは、他のノードと同様に発行します。
+
+状態: `Down` (初期状態), `Up`。
+
+| 種類 | コード | 遷移 | ペイロード | 受信側 | 備考 | 説明 |
+|---|---|---|---|---|---|---|
+| `relay.pc_up` | 0x01 | `pc_up`: * → Up | `link: u8` (1 B), `addr: u8` (1 B) | live |  | PCとのリンクがフレームを送受信します: 起動時か、リンク切断後の最初のフレームが到着しました。`link`: その種類のコード。`addr`: そのリンクでのリレー自身のアドレス。 |
+| `relay.pc_down` | 0x02 | `pc_down`: * → Down | `link: u8` (1 B), `addr: u8` (1 B) | live |  | PCへの返答の送信に失敗しました。PCは切断済です。 |
+| `relay.relay_request` | 0x03 | `relay_request`: Up → Up | `link: u8` (1 B), `addr: u8` (1 B), `cmd: u8` (1 B) | live |  | RELAYのリクエストを受理し、リンク`link`（そのid）経由でアドレス`addr`のノードへ転送します。`cmd`: 内側のフレームのコマンド。 |
+| `relay.child_control` | 0x04 | `child_control`: Up → Up | `link: u8` (1 B), `nrst: u8` (1 B), `boot0: u8` (1 B) | live |  | SUBCTLが、リンク`link`（そのid）上の復旧対象のリセット線とブートモード線を操作しました: `nrst`と`boot0`はリクエストの指定値（`payload::nrst`、`payload::boot0`）です。 |
+| `relay.child_raw` | 0x05 | `child_raw`: Up → Up | `addr: u8` (1 B), `len: u16` (2 B), `read_len: u16` (2 B) | live |  | I2C_RAWがアドレス`addr`のROMローダに到達しました: `len`バイトを書込し、`read_len`バイトの読出を要求しました。 |

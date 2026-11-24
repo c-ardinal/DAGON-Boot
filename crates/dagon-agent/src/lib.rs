@@ -247,6 +247,44 @@ dagon_events::state_machine! {
         }
     }
 
+    /// A relay's own work (a node whose MCU package runs `dagon-relay`):
+    /// its PC link, the requests it relays and the child lines and raw
+    /// bus it drives for a ROM recovery. Its own agent's `app.*` events
+    /// are emitted as on any node.
+    pub machine relay in Relay {
+        initial Down;
+        states { Down, Up }
+        transitions {
+            /// The PC link carries frames: the first one arrived, at start
+            /// or after the link went down. `link`: its kind's code;
+            /// `addr`: the relay's own address on it.
+            pc_up(link: u8, addr: u8): * => Up
+                emits PcUp = 0x01 { link: u8, addr: u8 }
+                observe(live);
+            /// A reply to the PC could not be sent: the PC is gone.
+            pc_down(link: u8, addr: u8): * => Down
+                emits PcDown = 0x02 { link: u8, addr: u8 }
+                observe(live);
+            /// A RELAY request was admitted and goes to the node at `addr`
+            /// over the link `link` (its id); `cmd`: the inner frame's
+            /// command.
+            relay_request(link: u8, addr: u8, cmd: u8): Up => Up
+                emits RelayRequest = 0x03 { link: u8, addr: u8, cmd: u8 }
+                observe(live);
+            /// SUBCTL drove the reset and boot-mode lines of the recovery
+            /// target on link `link` (its id): `nrst` and `boot0` as the
+            /// request named them (`payload::nrst`, `payload::boot0`).
+            child_control(link: u8, nrst: u8, boot0: u8): Up => Up
+                emits ChildControl = 0x04 { link: u8, nrst: u8, boot0: u8 }
+                observe(live);
+            /// I2C_RAW reached the ROM loader at `addr`: `len` bytes
+            /// written and `read_len` asked back.
+            child_raw(addr: u8, len: u16, read_len: u16): Up => Up
+                emits ChildRaw = 0x05 { addr: u8, len: u16, read_len: u16 }
+                observe(live);
+        }
+    }
+
     /// Requests answered or refused, and the decision points asked.
     pub machine requests in App {
         initial Ready;

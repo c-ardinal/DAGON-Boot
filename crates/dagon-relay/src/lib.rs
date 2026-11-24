@@ -99,6 +99,18 @@ pub trait OwnAgent {
     /// reaches this agent: its HELLO and CAPS name them with its own
     /// (`dagon_agent::Agent::also_serves`).
     fn also_serves(&mut self, front: dagon_proto::payload::CmdSet);
+    /// The PC link of kind `link` carries frames (`relay.pc_up`).
+    fn pc_up(&mut self, _link: u8, _addr: u8) {}
+    /// The PC link is gone (`relay.pc_down`).
+    fn pc_down(&mut self, _link: u8, _addr: u8) {}
+    /// A RELAY request was admitted: an inner frame of command `cmd` goes
+    /// to the node at `addr` over link `link` (`relay.relay_request`).
+    fn relayed(&mut self, _link: u8, _addr: u8, _cmd: u8) {}
+    /// SUBCTL drove the lines of the recovery target on link `link`
+    /// (`relay.child_control`).
+    fn child_control(&mut self, _link: u8, _nrst: u8, _boot0: u8) {}
+    /// I2C_RAW reached the ROM loader at `addr` (`relay.child_raw`).
+    fn child_raw(&mut self, _addr: u8, _len: u16, _read_len: u16) {}
     /// What the requester's HELLO named as the payload it takes
     /// (`dagon_agent::Agent::ceiling`); the relay holds it over its own
     /// uplink.

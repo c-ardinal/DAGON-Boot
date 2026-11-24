@@ -271,6 +271,15 @@ impl Liveness for NoWatchdog {
 
 type Chain = Composed<&'static Published<AppSnapshot, 8>, Nop, Nop, fn() -> u64>;
 
+thread_local! {
+    /// The relay's own events this thread's relay reported, in order.
+    static RELAY_EVENTS: RefCell<Vec<&'static str>> = const { RefCell::new(Vec::new()) };
+}
+
+fn noted_relay(kind: &'static str) {
+    RELAY_EVENTS.with(|e| e.borrow_mut().push(kind));
+}
+
 /// This node's agent: the agent crate's, over the simulator's store.
 struct NodeAgent(dagon_agent::Agent<SimStore, Chain, Ed25519Compact>);
 
@@ -301,6 +310,26 @@ impl OwnAgent for NodeAgent {
     }
     fn ceiling(&self) -> dagon_proto::handler::Ceiling {
         self.0.ceiling()
+    }
+    fn pc_up(&mut self, link: u8, addr: u8) {
+        noted_relay("pc_up");
+        self.0.pc_up(link, addr)
+    }
+    fn pc_down(&mut self, link: u8, addr: u8) {
+        noted_relay("pc_down");
+        self.0.pc_down(link, addr)
+    }
+    fn relayed(&mut self, link: u8, addr: u8, cmd: u8) {
+        noted_relay("relay_request");
+        self.0.relayed(link, addr, cmd)
+    }
+    fn child_control(&mut self, link: u8, nrst: u8, boot0: u8) {
+        noted_relay("child_control");
+        self.0.child_control(link, nrst, boot0)
+    }
+    fn child_raw(&mut self, addr: u8, len: u16, read_len: u16) {
+        noted_relay("child_raw");
+        self.0.child_raw(addr, len, read_len)
     }
 }
 
@@ -641,6 +670,13 @@ fn the_relay_serves_the_pc_over_its_links() {
         let before = bus_asked.borrow().len();
         clock.wait_until(clock.now_ms() + 60_000).await;
         assert_eq!(bus_asked.borrow().len(), before, "nothing sent unasked");
+
+        // The relay's own work went out as its events: the PC link first.
+        let seen = RELAY_EVENTS.with(|e| e.borrow().clone());
+        assert_eq!(seen.first(), Some(&"pc_up"));
+        for kind in ["relay_request", "child_control", "child_raw"] {
+            assert!(seen.contains(&kind), "{kind} in {seen:?}");
+        }
     };
 
     let serving = async move {

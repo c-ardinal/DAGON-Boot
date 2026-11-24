@@ -41,9 +41,9 @@ mod tests {
 
     #[test]
     fn tag_fills_the_field() {
-        let t = checked_tag("seg-f401-7seg");
-        assert_eq!(&t[..13], b"seg-f401-7seg");
-        assert_eq!(t[13..], [0, 0, 0]);
+        let t = checked_tag("node-f401");
+        assert_eq!(&t[..9], b"node-f401");
+        assert_eq!(t[9..], [0; 7]);
     }
 
     #[test]

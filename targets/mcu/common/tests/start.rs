@@ -133,7 +133,7 @@ fn image(slot: u8, version: Version, body: &[u8]) -> Vec<u8> {
         min_bootcore_version: Version::new(1, 0, 0),
         payload_sha256: sha256(body),
         key_id: key_id(&kp.pk),
-        target_tag: target_tag("seg-f401-7seg"),
+        target_tag: f401_config().target_tag,
         proto_version: 1,
         capabilities: capabilities::CONFIRM_BY_HUB,
         signature: [0; 64],

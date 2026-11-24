@@ -34,7 +34,7 @@ const DEPTH: usize = 6;
 /// Body bytes of the images the host writes: two chunks.
 const BODY: usize = 400;
 const CHUNK: usize = 250;
-const TAG: &str = "seg-f401-7seg";
+const TAG: &str = "node-f401";
 
 type Chain = Composed<&'static Published<(), 4>, Nop, Nop, fn() -> u64>;
 type NodeAgent = Agent<KindSStore<Cut>, Chain, Ed25519Compact>;

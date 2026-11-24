@@ -59,7 +59,7 @@ fn bootcore(slot: u8, minor: u8) -> Vec<u8> {
         min_bootcore_version: Version::default(),
         payload_sha256: sha256(&body),
         key_id: key_id(&kp.pk),
-        target_tag: target_tag("hub-rp2040-lcd"),
+        target_tag: target_tag("hub-rp2040"),
         proto_version: 1,
         capabilities: capabilities::SIG_VERIFIER,
         signature: [0; 64],
@@ -449,7 +449,7 @@ const ONE: Stage0<'static> = Stage0 {
     ..bl::STAGE0
 };
 const APPS: Apps<'static> = Apps {
-    target_tag: target_tag("hub-rp2040-lcd"),
+    target_tag: target_tag("hub-rp2040"),
     ..bl::APPS
 };
 
@@ -474,7 +474,7 @@ fn app_a() -> Vec<u8> {
         min_bootcore_version: Version::default(),
         payload_sha256: sha256(&body),
         key_id: key_id(&kp.pk),
-        target_tag: target_tag("hub-rp2040-lcd"),
+        target_tag: target_tag("hub-rp2040"),
         proto_version: 1,
         capabilities: capabilities::CONFIRM_BY_HUB,
         signature: [0; 64],

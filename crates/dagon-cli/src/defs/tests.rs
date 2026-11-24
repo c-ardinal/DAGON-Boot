@@ -424,8 +424,9 @@ fn a_projects_overrides_reach_every_command() {
         assert_eq!(r.unit_max_ms, ERASE_MAX_MS, "{node}");
         let wire = reg.mcu(mcu).unwrap().wire_id;
         let map = roms.iter().find(|m| m.wire_id == wire).unwrap();
+        let sectors: Vec<_> = map.erase.iter().map(|e| e.sector).collect();
         assert_eq!(
-            (map.addr, &map.erase[..]),
+            (map.addr, &sectors[..]),
             (ROM_ADDR, &ROM_ERASE[..]),
             "{node}"
         );

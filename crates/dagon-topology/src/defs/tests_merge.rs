@@ -975,3 +975,19 @@ fn the_esp32s3_watchdog_range_ends_at_3_600_000_ms() {
         "{e}"
     );
 }
+
+#[test]
+fn a_rom_erase_sector_past_the_erase_regions_is_refused() {
+    // The STM32F401RE has 8 erase units (sectors 0-7); the ROM loader's
+    // wait for a sector comes from its unit.
+    refused(
+        "rom-sector",
+        "[mcu_override.stm32f401re.rom_i2c]\nerase_sectors = [0, 8]\n",
+        "sector 8 is not an erase unit",
+    );
+    load(
+        "rom-sector-ok",
+        "[mcu_override.stm32f401re.rom_i2c]\nerase_sectors = [0, 7]\n",
+    )
+    .unwrap();
+}

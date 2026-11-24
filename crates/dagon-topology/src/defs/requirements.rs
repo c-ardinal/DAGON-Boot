@@ -282,7 +282,7 @@ pub const MCU: &[Requirement<McuCheck>] = &[
     Requirement {
         engine: "topology check V-18/V-20, host ROM path",
         fields: &["rom_i2c.addr", "rom_i2c.max_hz", "rom_i2c.erase_sectors[]"],
-        rule: "addr in 0x08..=0x77; max_hz >= 1; erase_sectors unique; each pin pair (sda, scl) once, so a pair names one controller",
+        rule: "addr in 0x08..=0x77; max_hz >= 1; erase_sectors unique, each an erase unit of execution.erase_regions (counted from the first region); each pin pair (sda, scl) once, so a pair names one controller",
         check: rom_i2c,
     },
     Requirement {
@@ -1046,6 +1046,15 @@ fn rom_i2c(m: &McuDef) -> Result<(), String> {
     fail(!r.erase_sectors.iter().all(|s| seen.insert(s)), || {
         "rom_i2c.erase_sectors repeats a sector".into()
     })?;
+    if let Some(s) = r
+        .erase_sectors
+        .iter()
+        .find(|&&s| m.erase_unit(u32::from(s)).is_none())
+    {
+        return Err(format!(
+            "rom_i2c.erase_sectors: sector {s} is not an erase unit of execution.erase_regions"
+        ));
+    }
     for (i, p) in r.pairs.iter().enumerate() {
         if let Some(q) = r.pairs[..i]
             .iter()

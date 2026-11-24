@@ -71,7 +71,7 @@
 "Porting DAGON to a board: answers 501." = "DAGONのボード移植: 応答は501です。"
 "Ports that exist in every listed layer; a trusted-only port needs `trusted = true`." = "一覧の全レイヤーにあるポート。信頼された拡張専用のポートには`trusted = true`が必要です。"
 "Product name." = "製品名。"
-"ROM I2C bootloader (`stm32-i2c-rom`): `name` (as check messages call it), `addr`, `max_hz`, `erase_sectors`, `pairs = [{ controller, sda, scl }]` it listens on." = "ROMのI2Cブートローダ（`stm32-i2c-rom`）: `name`（確認のメッセージでの名称）、`addr`、`max_hz`、`erase_sectors`、待受対象の`pairs = [{ controller, sda, scl }]`。"
+"ROM I2C bootloader (`stm32-i2c-rom`): `name` (as check messages call it), `addr`, `max_hz`, `erase_sectors` (erase units of `execution.erase_regions`, counted from the first region; the host waits each one's `unit_max_ms` and a margin), `pairs = [{ controller, sda, scl }]` it listens on." = "ROMのI2Cブートローダ（`stm32-i2c-rom`）: `name`（確認のメッセージでの名称）、`addr`、`max_hz`、`erase_sectors`（`execution.erase_regions`の消去単位の番号。先頭の領域を起点に計数します。ホストは各単位の`unit_max_ms`に余裕時間を加算して待機します）、待受対象の`pairs = [{ controller, sda, scl }]`。"
 "Read first; a number this dagon does not read is refused with both numbers." = "最初に読込します。このdagonが解釈しない番号は、両方の番号を明示して拒否します。"
 "Records the user's consent to send to that agent that way; anything short of an explicit yes for a defined agent and way records nothing." = "そのエージェントにその接続方法で送信することへの利用者の同意を記録します。定義済のエージェントと接続方法への明示的な同意以外は、何も記録しません。"
 "Registers the way's key in the OS credential store. The answer is GET /v1/agent's body (whether a key is registered, never the key)." = "接続方法のキーをOSの資格情報ストアに登録します。応答はGET /v1/agentの本文です（キーの登録の有無で、キー自体は対象外です）。"

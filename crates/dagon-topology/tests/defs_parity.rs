@@ -81,7 +81,12 @@ fn host_rom_path_matches() {
     assert_eq!(m.log_a, 0x0800_4000);
     assert_eq!(m.stage0, Some((0x0800_0000, 0x4000)));
     assert!(m.shared_log);
-    assert_eq!(m.erase, [0, 1, 2, 4, 5]);
+    // Each sector waits its unit's unit_max_ms and the 1 s margin.
+    let erase: Vec<_> = m.erase.iter().map(|e| (e.sector, e.limit_ms)).collect();
+    assert_eq!(
+        erase,
+        [(0, 1_800), (1, 1_800), (2, 1_800), (4, 3_400), (5, 5_000)]
+    );
 }
 
 /// The part of a source file before its tests.

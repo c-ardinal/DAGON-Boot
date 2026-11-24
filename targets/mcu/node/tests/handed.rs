@@ -1,5 +1,5 @@
 //! The start of a boot core whose stage0 starts the app on its request
-//! (`dagon_mcu_common::handed::begin`), over an in-memory flash with a
+//! (`dagon_node::handed::begin`), over an in-memory flash with a
 //! boot core log and an app log: recovery mode on stage0's result, update
 //! mode on the app's hand-over or a STAY in the window, else the request
 //! for the app; the core's own trial settled first.
@@ -14,7 +14,7 @@ use dagon_events::Clock;
 use dagon_format::header::{header_digest16, HEADER_SIZE};
 use dagon_format::statelog::{kind, reason, target, FaceHeader, Record};
 use dagon_format::Version;
-use dagon_mcu_common::handed::{begin, CellIo, Logs, Next, Window};
+use dagon_node::handed::{begin, CellIo, Logs, Next, Window};
 use dagon_port::{Flash, FlashError, FlashRegion};
 use dagon_proto::{Cmd, Frame};
 

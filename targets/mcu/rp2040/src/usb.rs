@@ -23,7 +23,7 @@ use crate::frames::FrameReader;
 use crate::watchdog::Watch;
 use dagon_format::SigVerifier;
 use dagon_mcu_common::link::{Kind, Link, LinkError, Reconnect};
-use dagon_mcu_common::serve::{serve, Exit, ServeHost};
+use dagon_node::serve::{serve, Exit, ServeHost};
 
 // This package owns the USB interrupt: apps must not bind USBCTRL_IRQ.
 bind_interrupts!(struct UsbIrqs {

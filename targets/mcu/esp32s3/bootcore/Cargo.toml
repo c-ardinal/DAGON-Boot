@@ -10,7 +10,7 @@ publish = false
 # trial, serves update mode (a STAY in its listen window on UART0, or the
 # app's hand-over) or recovery mode (stage0's decision started no app),
 # and otherwise asks stage0 for the app by reset
-# (dagon_mcu_common::handed). It is not written to nodes yet: like stage0
+# (dagon_node::handed). It is not written to nodes yet: like stage0
 # it takes the emulator's provisional layout (`qemu-layout`) until the
 # definition gives stage0's after the hardware measurement.
 # Firmware clippy runs in CI (scripts/ci_crates.py --firmware-lint).
@@ -24,6 +24,7 @@ lint = { features = ["qemu-layout"], env = { DAGON_ALLOW_TEST_KEY = "1", DAGON_T
 # The pure modules only (frame cutter, definition constants, key): no esp-hal.
 dagon-mcu-esp32s3 = { path = "..", default-features = false }
 dagon-mcu-common = { path = "../../common" }
+dagon-node = { path = "../../node" }
 dagon-agent = { path = "../../../../crates/dagon-agent" }
 dagon-core = { path = "../../../../crates/dagon-core" }
 dagon-ed25519 = { path = "../../../../crates/dagon-ed25519" }

@@ -25,12 +25,10 @@ use dagon_ed25519::Ed25519Compact;
 use dagon_events::{Published, Watchdog as Periods};
 use dagon_format::header::{port_kind, target_tag, ImageHeader, HEADER_SIZE};
 use dagon_format::Version;
-pub use dagon_mcu_common::hooks::{
-    always, App, AppEvents, BoardCore, Confirm, NodeChain, SelfCheck,
-};
-use dagon_mcu_common::hooks::{finish_start, node_chain, BoardExtension, Events, UserExtensions};
 use dagon_mcu_common::link::LinkError;
-use dagon_mcu_common::serve::{serve as dagon_serve, Exit, ServeHost};
+pub use dagon_node::hooks::{always, App, AppEvents, BoardCore, Confirm, NodeChain, SelfCheck};
+use dagon_node::hooks::{finish_start, node_chain, BoardExtension, Events, UserExtensions};
+use dagon_node::serve::{serve as dagon_serve, Exit, ServeHost};
 use dagon_proto::max_payload;
 use dagon_proto::payload::{mode, role};
 use defmt::{info, warn};
@@ -273,7 +271,7 @@ async fn feed(watch: &'static dyn Watch) -> ! {
 }
 
 /// The serving loop over the I2C target link (the generic loop of
-/// `dagon_mcu_common::serve`). Requests are handled synchronously with the
+/// `dagon_node::serve`). Requests are handled synchronously with the
 /// own address NACKed, so a hub poll during an erase or write never meets
 /// a stretched clock (instruction fetch from flash stalls while it is
 /// busy). Run it on an executor that preempts the app's (guard task

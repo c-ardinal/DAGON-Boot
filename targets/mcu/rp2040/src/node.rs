@@ -13,10 +13,8 @@ use dagon_agent::{Agent, Config, SlotStore};
 use dagon_ed25519::Ed25519Compact;
 use dagon_events::{Published, Watchdog as Periods};
 use dagon_format::header::{mcu_id, port_kind, target_tag};
-pub use dagon_mcu_common::hooks::{
-    always, App, AppEvents, BoardCore, Confirm, NodeChain, SelfCheck,
-};
-use dagon_mcu_common::hooks::{finish_start, node_chain, Events};
+pub use dagon_node::hooks::{always, App, AppEvents, BoardCore, Confirm, NodeChain, SelfCheck};
+use dagon_node::hooks::{finish_start, node_chain, Events};
 use dagon_proto::max_payload;
 use dagon_proto::payload::{mode, SlotState, StatusResp};
 use embassy_rp::peripherals::{FLASH, USB, WATCHDOG};
@@ -202,7 +200,7 @@ pub(crate) fn spawn_masked_readout<B: BoardDef>(spawner: embassy_executor::Spawn
     }
 }
 
-/// `dagon_mcu_common::masked_time::READOUT_AFTER_S` after the start, takes
+/// `dagon_node::masked_time::READOUT_AFTER_S` after the start, takes
 /// the diagnostic LED (the one the board definition names) and blinks
 /// the longest masking seen until then, in microseconds, as decimal digit
 /// groups the way a measuring boot core blinks its value: a long dark
@@ -214,7 +212,7 @@ async fn masked_readout(gpio: u8, active_high: bool) -> ! {
     use core::sync::atomic::Ordering;
 
     use crate::arm::led;
-    use dagon_mcu_common::masked_time::{digits, DAGON_MASKED_MAX_US, READOUT_AFTER_S};
+    use dagon_node::masked_time::{digits, DAGON_MASKED_MAX_US, READOUT_AFTER_S};
     use embassy_time::Timer;
 
     Timer::after_secs(READOUT_AFTER_S).await;

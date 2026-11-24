@@ -1,5 +1,5 @@
 //! The RP2040 watchdog behind the liveness-gated [`Guard`] (see
-//! `dagon_mcu_common::guard`). The boot core starts it before the jump with
+//! `dagon_node::guard`). The boot core starts it before the jump with
 //! the trial period (`[watchdog] trial_ms`) for an image on trial, else the
 //! confirmed one (`confirmed_ms`); the app takes it over with
 //! [`Guard::install`], and every feed restarts the period of the image's
@@ -10,10 +10,10 @@ use embassy_rp::watchdog::Watchdog;
 use embassy_rp::Peri;
 use embassy_time::{Duration, Instant, Timer};
 
-pub use dagon_mcu_common::guard::{
+pub use dagon_mcu_common::liveness::Level;
+pub use dagon_node::guard::{
     levels, Dog, Lease, PeriodDog, Rearm, Trial, Watch, BUSY_LIMIT_MS, BUSY_MARGIN_MS,
 };
-pub use dagon_mcu_common::liveness::Level;
 
 /// The RP2040 watchdog and the period it runs (embassy-rp's feed loads
 /// the period it is given).
@@ -48,7 +48,7 @@ pub fn wdt(p: Peri<'static, WATCHDOG>) -> Wdt {
 }
 
 /// The app's guard over `N` tasks.
-pub type Guard<const N: usize> = dagon_mcu_common::guard::Guard<Wdt, N>;
+pub type Guard<const N: usize> = dagon_node::guard::Guard<Wdt, N>;
 
 /// Milliseconds since boot (the guard's clock).
 pub fn now_ms() -> u64 {

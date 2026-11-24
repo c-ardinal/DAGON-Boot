@@ -5,19 +5,16 @@ license = "MIT OR Apache-2.0"
 version = "0.1.0"
 publish = false
 
-# MCU-independent parts of the DAGON MCU packages, host-testable:
+# MCU-independent driver helpers of the DAGON MCU packages, host-testable:
 #   cargo test --target <host triple>
+# They depend on the port, protocol and format crates only; the node's
+# services (agent, slot store, guard) are dagon-node's (../node).
 [workspace]
 
 [dependencies]
-dagon-agent = { path = "../../../crates/dagon-agent" }
-# log_store: the state log the store appends to.
-dagon-core = { path = "../../../crates/dagon-core" }
-dagon-events = { path = "../../../crates/dagon-events" }
 dagon-format = { path = "../../../crates/dagon-format" }
 dagon-port = { path = "../../../crates/dagon-port" }
 dagon-proto = { path = "../../../crates/dagon-proto" }
-critical-section = "1"
 # SharedFlash: a lock taken without masking interrupts for the operation.
 embassy-sync = "0.8"
 
@@ -28,14 +25,8 @@ verify-time = []
 # boot_time: a boot core built to measure its listen window or its boot
 # decision.
 boot-time = []
-# masked_time: an app built to measure how long DAGON's own code masks
-# interrupts.
-masked-time = []
 
 [dev-dependencies]
 critical-section = { version = "1", features = ["std"] }
+# uart's tests run their futures on the simulator's executor.
 dagon-sim = { path = "../../../crates/dagon-sim" }
-# The agents of the tests verify with the key the simulator's images are signed under.
-dagon-ed25519 = { path = "../../../crates/dagon-ed25519", features = ["compact"] }
-# tests/start.rs signs the update it sends.
-ed25519-compact = { version = "2.6", default-features = false }

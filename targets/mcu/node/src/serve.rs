@@ -11,7 +11,7 @@ use dagon_agent::writer::App;
 use dagon_agent::{reply_status, Agent, AppChain, SlotStore, Writer, IDLE_TIMEOUT_MS};
 use dagon_format::SigVerifier;
 
-use crate::link::{Link, LinkError};
+use dagon_mcu_common::link::{Link, LinkError};
 
 /// What the serving loop asks of its MCU.
 #[allow(async_fn_in_trait)]
@@ -184,8 +184,8 @@ mod tests {
     use dagon_sim::store::SimStore;
 
     use super::*;
-    use crate::link::{Kind, Reconnect};
-    use crate::uart::hello_request;
+    use dagon_mcu_common::link::{Kind, Reconnect};
+    use dagon_mcu_common::uart::hello_request;
 
     /// A link fed from a queue: `None` entries are read timeouts; when the
     /// queue is empty the link is closed.

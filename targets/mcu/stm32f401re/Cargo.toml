@@ -36,8 +36,8 @@ image-bootcore = []
 # The boot core's measuring builds (dagon-mcu-common's boot_time).
 boot-time = ["dagon-mcu-common/boot-time"]
 # An app built to measure how long DAGON's own code masks interrupts
-# (dagon-mcu-common's masked_time): the longest in DAGON_MASKED_MAX_US.
-masked-time = ["dagon-mcu-common/masked-time"]
+# (dagon-node's masked_time): the longest in DAGON_MASKED_MAX_US.
+masked-time = ["dagon-node/masked-time"]
 
 [dependencies]
 dagon-agent = { path = "../../../crates/dagon-agent" }
@@ -47,6 +47,7 @@ dagon-format = { path = "../../../crates/dagon-format" }
 dagon-port = { path = "../../../crates/dagon-port" }
 dagon-proto = { path = "../../../crates/dagon-proto" }
 dagon-mcu-common = { path = "../common" }
+dagon-node = { path = "../node" }
 dagon-conform = { path = "../../../crates/dagon-conform", optional = true }
 # The verifier the node's agent checks images with.
 dagon-ed25519 = { path = "../../../crates/dagon-ed25519", features = ["compact"], optional = true }

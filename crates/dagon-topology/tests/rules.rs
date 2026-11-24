@@ -374,7 +374,7 @@ fn v22_missing_reset_pin_is_only_a_warning() {
 fn json_report_shape() {
     assert_eq!(
         check_str(DEMO).to_json(),
-        r#"{"ok":true,"errors":0,"warnings":0,"issues":[]}"#
+        r#"{"ok":true,"errors":0,"warnings":0,"issues":[],"format":1}"#
     );
     let json = check_str(&mutate(", nrst: 18", "")).to_json();
     assert!(json.starts_with(r#"{"ok":true,"errors":0,"warnings":1,"issues":[{"rule":"V-22","severity":"warning","path":"links[0].control","#));

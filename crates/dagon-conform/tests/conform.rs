@@ -897,6 +897,10 @@ fn result_file_shape() {
         elapsed_s: None,
     };
     r.write_json(&mut s, "seg", p).unwrap();
+    assert_eq!(
+        dagon_conform::report::SCHEMA,
+        format!("dagon-conform/{}", dagon_conform::report::SCHEMA_VERSION)
+    );
     assert!(s.starts_with(
         "{\n  \"schema\": \"dagon-conform/1\",\n  \"node\": \"seg\",\n  \"mcu_id\": null,"
     ));

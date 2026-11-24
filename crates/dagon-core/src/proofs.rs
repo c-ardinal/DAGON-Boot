@@ -15,7 +15,9 @@
 //!   each other, and a request cut half-way is none;
 //! - stage0 tries a pending core only while its starts last, and starts
 //!   no core that the log does not name, nor one in a slot the MCU
-//!   definition does not give.
+//!   definition does not give;
+//! - a compaction of the log carries the whole folded state: the records
+//!   it writes fold to the state they were made from.
 //!
 //! What is assumed: the flash reads back anything (every read returns
 //! arbitrary bytes, even the same address twice); the signature verifier
@@ -391,4 +393,50 @@ fn stage0_decision_never_panics() {
         }
         Err(_) => {}
     }
+}
+
+/// Any record of target APP: any kind, slot, reason and image.
+fn any_record() -> dagon_format::statelog::Record {
+    let at = any_ref();
+    dagon_format::statelog::Record {
+        kind: kani::any(),
+        target: dagon_format::statelog::target::APP,
+        slot: at.slot,
+        reason: kani::any(),
+        seq: 0,
+        version: at.version,
+        digest16: at.digest16,
+    }
+}
+
+/// Records folded in [`compaction_carries_the_whole_state`].
+const FOLDED: usize = 4;
+
+/// A compaction loses nothing: for every state a fold of [`FOLDED`]
+/// records of any kind, slot, reason and image reaches, the records
+/// [`LogState::carry`] writes fold from an empty log to that state again,
+/// every field of it (the exhaustive test `carry_is_exact` covers longer
+/// folds over a small alphabet).
+#[kani::proof]
+// The SlotRef comparisons run memcmp over the 16-byte digest.
+#[kani::unwind(17)]
+fn compaction_carries_the_whole_state() {
+    let mut s = LogState::default();
+    for _ in 0..FOLDED {
+        s = s.apply(&any_record());
+    }
+    let again = s
+        .carry()
+        .fold(LogState::default(), |acc, (kind, at, reason)| {
+            acc.apply(&dagon_format::statelog::Record {
+                kind,
+                target: dagon_format::statelog::target::APP,
+                slot: at.slot,
+                reason,
+                seq: 0,
+                version: at.version,
+                digest16: at.digest16,
+            })
+        });
+    assert!(again == s);
 }

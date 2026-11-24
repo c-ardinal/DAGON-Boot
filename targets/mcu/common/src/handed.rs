@@ -48,8 +48,10 @@ pub struct Logs<'a> {
     pub core: &'a LogLayout,
     /// The app log (the app's UPDATE_STAY).
     pub app: &'a LogLayout,
-    /// The boot core slot this core runs from.
-    pub running: u8,
+    /// The boot core slot this core runs from, and the address of that
+    /// slot's header: the core is the pending image only when its own
+    /// header is the one the record names (`settle_log`).
+    pub running: (u8, u32),
     /// Starts a pending core gets (`trial_attempts`).
     pub max: u8,
 }

@@ -6,13 +6,12 @@
 //!
 //! When the face is full or ends in a record failing its CRC (a write cut by
 //! power loss), the next append first compacts: it erases the other face,
-//! copies the folded state there (ROLLBACK for the last reason, SLOT_PENDING,
-//! SNAPSHOT carrying the confirmed slot and the attempts) and writes that
-//! face's header with `generation + 1` last, for each target. Until that header is written the
-//! old face stays the valid one, so a cut compaction is simply redone. The
-//! rolled-back marker of STATUS is not carried over. An unconsumed
-//! UPDATE_STAY is carried over too, so a hand-over to the boot core's
-//! update mode survives a compaction.
+//! copies the folded state of each target there ([`LogState::carry`]: the
+//! records whose fold is that state again, every field of it) and writes
+//! that face's header with `generation + 1` last. Until that header is
+//! written the old face stays the valid one, so a cut compaction is simply
+//! redone. An unconsumed UPDATE_STAY is carried over too, so a hand-over
+//! to the boot core's update mode survives a compaction.
 
 use dagon_format::statelog::{
     kind, reason, slot, target, FaceHeader, Record, FACE_HEADER_SIZE, RECORD_SIZE,
@@ -111,14 +110,48 @@ impl LogState {
             },
             // SNAPSHOT (compaction): the confirmed slot, with `reason`
             // holding the attempts of the pending slot copied before it.
+            // The rolled-back marker copied before it stays, even in the
+            // confirmed slot (one slot: the image rolled back replaced the
+            // confirmed one there).
             kind::SNAPSHOT => LogState {
                 confirmed: Some(this),
                 attempts: if self.pending.is_some() { r.reason } else { 0 },
-                reverted,
                 ..self
             },
             _ => self,
         }
+    }
+
+    /// The records a compaction writes for this state, oldest first: their
+    /// fold from an empty log is this state again, every field of it, for
+    /// every state a fold of records reaches (`carry_is_exact` and the
+    /// Kani proof `compaction_carries_the_whole_state`).
+    ///
+    /// - the rolled-back image as SLOT_PENDING, then a ROLLBACK with the
+    ///   last reason (only the ROLLBACK when no image is rolled back);
+    /// - the pending image as SLOT_PENDING;
+    /// - the confirmed image as SNAPSHOT with the attempts, or, with no
+    ///   confirmed image, one BOOT_ATTEMPT per attempt.
+    pub fn carry(&self) -> impl Iterator<Item = (u8, SlotRef, u8)> {
+        let back = self.confirmed.unwrap_or(NO_SLOT);
+        let rolled = self.reverted.is_some() || self.last_reason != reason::NONE;
+        let attempts = match (self.confirmed, self.pending) {
+            (None, Some(_)) => self.attempts,
+            _ => 0,
+        };
+        let pending = self.pending.unwrap_or(NO_SLOT);
+        [
+            self.reverted.map(|r| (kind::SLOT_PENDING, r, reason::NONE)),
+            rolled.then_some((kind::ROLLBACK, back, self.last_reason)),
+            self.pending.map(|p| (kind::SLOT_PENDING, p, reason::NONE)),
+        ]
+        .into_iter()
+        .flatten()
+        .chain(core::iter::repeat_n(
+            (kind::BOOT_ATTEMPT, pending, reason::NONE),
+            usize::from(attempts),
+        ))
+        .chain(self.confirmed.map(|c| (kind::SNAPSHOT, c, self.attempts)))
     }
 
     /// True once the pending slot has been started at least once.
@@ -191,6 +224,14 @@ pub const fn trial_room(max: u8) -> u32 {
 /// UPDATE_STAY ([`Log::request_stay`]): the stay and the boot core's
 /// UPDATE_DONE.
 pub const STAY_ROOM: u32 = 2;
+
+/// The reference of a record that names no slot (UPDATE_STAY, UPDATE_DONE,
+/// a carried ROLLBACK with no confirmed image to go back to).
+pub const NO_SLOT: SlotRef = SlotRef {
+    slot: slot::NONE,
+    version: Version::new(0, 0, 0),
+    digest16: [0; 16],
+};
 
 /// Where the two log faces live.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -384,12 +425,7 @@ impl Log {
 
     /// Appends a node-wide record (UPDATE_STAY, UPDATE_DONE) in place.
     fn append_marker<F: Flash>(&mut self, flash: &mut F, k: u8) -> Result<(), LogError> {
-        let none = SlotRef {
-            slot: slot::NONE,
-            version: Version::default(),
-            digest16: [0; 16],
-        };
-        self.append_in_place(flash, target::APP, k, none, reason::NONE)
+        self.append_in_place(flash, target::APP, k, NO_SLOT, reason::NONE)
     }
 
     fn append_for<F: Flash>(
@@ -468,14 +504,7 @@ impl Log {
         self.core = LogState::default();
         self.update_stay = false;
         for (t, s) in carried {
-            let carry = [
-                s.confirmed
-                    .filter(|_| s.last_reason != reason::NONE)
-                    .map(|c| (kind::ROLLBACK, c, s.last_reason)),
-                s.pending.map(|p| (kind::SLOT_PENDING, p, reason::NONE)),
-                s.confirmed.map(|c| (kind::SNAPSHOT, c, s.attempts)),
-            ];
-            for (kind, at, why) in carry.into_iter().flatten() {
+            for (kind, at, why) in s.carry() {
                 let addr = self.next.ok_or(LogError::Full)?;
                 let r = self.record(t, kind, at, why);
                 flash.write(addr, &r.to_bytes())?;
@@ -728,6 +757,130 @@ mod tests {
             ..rec(kind::SNAPSHOT, 0)
         }]);
         assert_eq!((s.attempts, s.pending), (0, None));
+    }
+
+    /// Every state a fold of records reaches, over two slots, two images
+    /// per slot and two reasons: the closure of the empty state under
+    /// every record of that alphabet.
+    fn reachable() -> std::vec::Vec<LogState> {
+        let mut alphabet = std::vec::Vec::new();
+        for k in [
+            kind::PROVISION,
+            kind::CONFIRMED,
+            kind::SLOT_PENDING,
+            kind::BOOT_ATTEMPT,
+            kind::ROLLBACK,
+            kind::SNAPSHOT,
+        ] {
+            for slot in [0, 1] {
+                for d in [0, 1] {
+                    for why in [reason::NONE, reason::TRIAL_EXHAUSTED] {
+                        alphabet.push(Record {
+                            reason: why,
+                            digest16: [d; 16],
+                            ..rec(k, slot)
+                        });
+                    }
+                }
+            }
+        }
+        let mut seen = std::collections::BTreeSet::new();
+        let mut todo = std::vec![LogState::default()];
+        let mut all = std::vec::Vec::new();
+        while let Some(s) = todo.pop() {
+            if !seen.insert(std::format!("{s:?}")) {
+                continue;
+            }
+            all.push(s);
+            todo.extend(alphabet.iter().map(|r| s.apply(r)));
+        }
+        all
+    }
+
+    fn refold(s: &LogState) -> LogState {
+        s.carry().fold(LogState::default(), |acc, (k, at, why)| {
+            acc.apply(&Record {
+                kind: k,
+                target: target::APP,
+                slot: at.slot,
+                reason: why,
+                seq: 0,
+                version: at.version,
+                digest16: at.digest16,
+            })
+        })
+    }
+
+    #[test]
+    fn carry_is_exact() {
+        let all = reachable();
+        assert!(all.len() > 1000, "{}", all.len());
+        for s in &all {
+            assert_eq!(&refold(s), s);
+        }
+    }
+
+    /// A compaction on flash: the new face folds to the same state of
+    /// both targets and keeps an unconsumed stay.
+    #[test]
+    fn compaction_keeps_the_whole_state() {
+        let layout = LogLayout {
+            faces: [0, 1024],
+            face_len: 1024,
+        };
+        let a = SlotRef::of(&rec(kind::PROVISION, 0));
+        let b = SlotRef::of(&rec(kind::SLOT_PENDING, 1));
+        // The next image goes over the confirmed one, in slot A.
+        let a2 = SlotRef {
+            digest16: [7; 16],
+            ..a
+        };
+        let core_a = SlotRef {
+            digest16: [5; 16],
+            ..a
+        };
+        let core_a2 = SlotRef {
+            digest16: [6; 16],
+            ..a
+        };
+        let mut flash = Tiny(std::vec![0xFF; 2048]);
+        flash
+            .write(0, &FaceHeader { generation: 1 }.to_bytes())
+            .unwrap();
+        let mut log = Log::load(&mut flash, &layout).unwrap();
+        let why = reason::TRIAL_EXHAUSTED;
+        for (k, at, r) in [
+            (kind::PROVISION, a, 0),
+            (kind::SLOT_PENDING, b, 0),
+            (kind::BOOT_ATTEMPT, b, 0),
+            (kind::ROLLBACK, a, why),
+            (kind::SLOT_PENDING, a2, 0),
+            (kind::BOOT_ATTEMPT, a2, 0),
+        ] {
+            log.append(&mut flash, k, at, r).unwrap();
+        }
+        // One boot core slot: the new core replaced the confirmed one
+        // there and was rolled back.
+        for (k, at, r) in [
+            (kind::PROVISION, core_a, 0),
+            (kind::SLOT_PENDING, core_a2, 0),
+            (kind::ROLLBACK, core_a, why),
+        ] {
+            log.append_core(&mut flash, k, at, r).unwrap();
+        }
+        log.request_stay(&mut flash, 0).unwrap();
+        let before = log;
+        log.compact(&mut flash).unwrap();
+        let after = Log::load(&mut flash, &layout).unwrap();
+        assert_eq!(after.face, 1);
+        assert_eq!(after.generation, before.generation + 1);
+        assert_eq!(
+            (after.state, after.core, after.update_stay),
+            (before.state, before.core, true)
+        );
+        assert_eq!(after.state.reverted, Some(b));
+        assert_eq!((after.state.pending, after.state.attempts), (Some(a2), 1));
+        assert_eq!(after.core.reverted, Some(core_a2));
     }
 
     #[test]

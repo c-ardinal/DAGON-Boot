@@ -64,6 +64,10 @@ ALLOWED = {
         8,
         "the simulator's fixed sample world",
     ),
+    "crates/dagon-sim/src/rom.rs": (
+        1,
+        "the simulator's fixed sample ROM loader (its default chip's erase times)",
+    ),
     "crates/dagon-sim/src/store.rs": (
         3,
         "the simulator's fixed sample layouts",

@@ -81,5 +81,5 @@ Parts of the design the code lacks, in whole or in part:
 <!-- generated from site/scripts/architecture.py: python site/scripts/gen.py -->
 - AI Agent Link: `dagon serve` has no job that ports DAGON to a board: `POST /v1/ai/port` answers 501.
 - Boot Action Interpreter: Not in the code.
-- Retained Codecs: The firmware has none of the retained codecs: the topology body is `dagon-format`'s (a 32-byte head, 32-byte nodes), not the one in [Retained and persistent formats](/en/explanation/retained-formats/). The hub stores it in one region, with no two-bank replacement.
+- Retained Codecs: The firmware has none of the retained codecs: the topology body is `dagon-format`'s (a 32-byte head, 32-byte nodes), not the one in [Retained and persistent formats](/en/explanation/retained-formats/). No node stores the topology: it stays in the host's package, and target 3 (where a node once stored it) stays a reserved number no node takes.
 <!-- end of generated table -->

@@ -333,7 +333,7 @@ where
                 };
                 Status::Ok
             }
-            Err(_) => Status::Timeout,
+            Err(_) => dagon_proto::table::subctl::LINES_FAILED,
         }
     }
 

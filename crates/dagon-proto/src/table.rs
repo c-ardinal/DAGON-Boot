@@ -259,8 +259,20 @@ pub mod relay {
 }
 
 /// SUBCTL request. No core.
+///
+/// A relay answers a SUBCTL it cannot carry out the same way wherever it
+/// runs (a node's firmware or the simulator):
+///
+/// | Status | When |
+/// |---|---|
+/// | `E_UNSUPPORTED` | The relay has no recovery target. |
+/// | `E_ARG` | The request names a target (a link and a loader address) the relay does not have, or names only one of the two. |
+/// | `E_TIMEOUT` | The target's lines could not be set ([`LINES_FAILED`]); nothing is reported as set. |
 pub mod subctl {
     use super::FieldSpec;
+    use crate::Status;
+    /// The answer when the recovery lines could not be set.
+    pub const LINES_FAILED: Status = Status::Timeout;
     pub const NRST: FieldSpec = FieldSpec::must(1, 1, 1);
     pub const BOOT0: FieldSpec = FieldSpec::must(2, 1, 1);
     /// The recovery target whose lines are set: the link its node is on

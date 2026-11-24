@@ -292,6 +292,21 @@ fn erased_log_has_no_valid_face() {
 }
 
 #[test]
+fn a_lost_log_is_created_empty_and_a_valid_one_is_kept() {
+    let mut m = Mem::new();
+    let log = Log::load_or_create(&mut m, &LOG).unwrap();
+    assert_eq!((log.generation, log.state), (1, Default::default()));
+    assert_eq!(Log::load(&mut m, &LOG).unwrap().generation, 1);
+    let a = install(&mut m, A, &image(A, 0));
+    write_log(&mut m, 1, 7, &[(kind::PROVISION, a)]);
+    let writes = m.writes;
+    let log = Log::load_or_create(&mut m, &LOG).unwrap();
+    assert_eq!(log.generation, 7);
+    assert_eq!(log.state.confirmed, Some(a));
+    assert_eq!(m.writes, writes, "a valid log is not rewritten");
+}
+
+#[test]
 fn newer_face_wins() {
     let mut m = Mem::new();
     let a = install(&mut m, A, &image(A, 0));

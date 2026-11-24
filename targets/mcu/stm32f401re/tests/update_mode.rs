@@ -56,7 +56,7 @@ fn session(f: &Cut) -> Option<Agent<KindSStore<Cut>, Chain, Ed25519Small, BootCo
     let cfg = Config {
         mcu_id: MCU_ID,
         port_kind: port_kind::SELF_BOOT,
-        target_tag: target_tag("seg-f401-7seg"),
+        target_tag: target_tag("node-f401"),
         role: role::NODE,
         mode: mode::UPDATE,
         max_payload: max_payload::I2C as u16,
@@ -133,7 +133,7 @@ fn boots(f: &mut Cut) -> Option<Decision> {
     let mut log = Log::load(f, &LOG).ok()?;
     let cfg = BootConfig {
         mcu_id: MCU_ID,
-        target_tag: target_tag("seg-f401-7seg"),
+        target_tag: target_tag("node-f401"),
         max_attempts: TRIAL_ATTEMPTS,
     };
     Some(decide(f, &mut log, &SLOTS, &cfg, &verifier()))

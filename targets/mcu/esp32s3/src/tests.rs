@@ -168,7 +168,7 @@ fn header(minor: u8, len: u32) -> [u8; HEADER_SIZE] {
         min_bootcore_version: Version::default(),
         payload_sha256: [0; 32],
         key_id: [0; 8],
-        target_tag: *b"watch-s3\0\0\0\0\0\0\0\0",
+        target_tag: *b"node-s3x\0\0\0\0\0\0\0\0",
         proto_version: 1,
         capabilities: 0,
         signature: [0; 64],

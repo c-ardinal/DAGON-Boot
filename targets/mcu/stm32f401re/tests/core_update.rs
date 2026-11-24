@@ -307,7 +307,7 @@ fn the_store_plans_over_its_boards_regions() {
 
 static ONE_CORE: [(u32, u32); 1] = [CORE_SLOTS[0]];
 static ONE_PLACE: [dagon_core::boot::Place; 1] = [CORE_PLACES[0]];
-const TAG: [u8; 16] = target_tag("seg-f401-7seg");
+const TAG: [u8; 16] = target_tag("node-f401");
 
 /// What a stage0 built for a node with one boot core slot and this tag
 /// knows (the package's, with its slot list and tag).

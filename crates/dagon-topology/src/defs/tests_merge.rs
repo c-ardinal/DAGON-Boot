@@ -985,6 +985,14 @@ fn a_rom_erase_sector_past_the_erase_regions_is_refused() {
         "[mcu_override.stm32f401re.rom_i2c]\nerase_sectors = [0, 8]\n",
         "sector 8 is not an erase unit",
     );
+    // An erase unit of 0 is refused as such, not divided by.
+    let e = load(
+        "rom-sector-unit",
+        "[[mcu_override.stm32f401re.execution.erase_regions]]\nstart = 0x0800_0000\nunit = 0\n",
+    )
+    .expect_err("unit 0")
+    .to_string();
+    assert!(!e.contains("is not an erase unit"), "{e}");
     load(
         "rom-sector-ok",
         "[mcu_override.stm32f401re.rom_i2c]\nerase_sectors = [0, 7]\n",

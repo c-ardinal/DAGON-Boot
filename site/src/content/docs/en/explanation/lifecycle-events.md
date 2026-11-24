@@ -749,8 +749,8 @@ The one authentication rule, applied by every verifier
   dagon-format, the MCU package, and the rest) against the most bytes
   the package's `stage0/budget.toml` gives it, from the linker map, and
   its static RAM against that file's `[ram]`. `scripts/bootcore_size.py`
-  checks each boot core the same way against its `bootcore/budget.toml`,
-  its slot as the hard limit and no margin, since a boot core is updated
+  checks each core the same way against its `bootcore/budget.toml`,
+  its slot as the hard limit and no margin, since a core is written
   in the field. Stage0 is never written
   in the field but is rebuilt for every new node with the toolchain of
   that build, so an image without spare room becomes a first write that

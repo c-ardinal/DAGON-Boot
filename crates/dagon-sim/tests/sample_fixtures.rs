@@ -165,6 +165,14 @@ fn agent_release() -> Vec<u8> {
     .bundle
 }
 
+/// The first install's boot core stand-in of the sample's node on layout
+/// `layout` (what [`dagon_sim::SimStore::first_core`] makes).
+fn first_core(flash: dagon_sim::SimFlash, layout: dagon_sim::Layout) -> Vec<u8> {
+    dagon_sim::SimStore::new(flash, layout, TEST_PUBLIC_KEY)
+        .first_core(|m| *key().sk.sign(m, None))
+        .unwrap()
+}
+
 fn generated() -> Vec<(&'static str, Vec<u8>)> {
     use dagon_sim::sample::{HUB_APP_BYTES, SEG_APP_BYTES, WATCH_APP_BYTES};
     let v0 = Version::new(1, 0, 0);
@@ -173,6 +181,20 @@ fn generated() -> Vec<(&'static str, Vec<u8>)> {
         ("sample-seg-1.0.0.img", seg(0, v0, SMALL)),
         ("sample-watch-1.0.0.img", watch(v0, SMALL)),
         ("sample-1.1.0.dgb", release(SMALL, SMALL, SMALL)),
+        (
+            "sample-hub-core-1.0.0.img",
+            first_core(
+                dagon_sim::SimFlash::rp2040_4m(0),
+                dagon_sim::Layout::RP2040_HUB,
+            ),
+        ),
+        (
+            "sample-seg-core-1.0.0.img",
+            first_core(
+                dagon_sim::SimFlash::stm32f401xe(0),
+                dagon_sim::Layout::STM32F401XE,
+            ),
+        ),
         ("sample-core-1.1.0.dgb", core_release()),
         ("sample-agent-1.1.0.dgb", agent_release()),
         // What the browser demo writes: the apps at their real size.
@@ -204,6 +226,8 @@ fn committed_fixtures_match_signing() {
         dagon_sim::sample::SEG_1_0_0,
         dagon_sim::sample::WATCH_1_0_0,
         dagon_sim::sample::RELEASE_1_1_0,
+        dagon_sim::sample::HUB_CORE_1_0_0,
+        dagon_sim::sample::SEG_CORE_1_0_0,
     ];
     for ((name, bytes), e) in g.iter().zip(embedded) {
         assert!(e == &bytes[..], "{name}: embedded copy differs");

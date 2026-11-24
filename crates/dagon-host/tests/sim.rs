@@ -117,11 +117,13 @@ fn release() -> Vec<u8> {
 fn sim() -> Sim {
     let mut hub = demo_hub(*key().pk, 7);
     let v = Version::new(1, 0, 0);
-    hub.node.provision(&hub_img(0, v), 0).unwrap();
-    hub.i2c_node(NODE_I2C_PORT, NODE_I2C_ADDR)
-        .unwrap()
-        .provision(&seg_img(0, v), 0)
+    hub.node
+        .provision_core(|m| *key().sk.sign(m, None))
         .unwrap();
+    hub.node.provision(&hub_img(0, v), 0).unwrap();
+    let seg = hub.i2c_node(NODE_I2C_PORT, NODE_I2C_ADDR).unwrap();
+    seg.provision_core(|m| *key().sk.sign(m, None)).unwrap();
+    seg.provision(&seg_img(0, v), 0).unwrap();
     sim_of(hub)
 }
 
@@ -797,6 +799,9 @@ fn node_that_falls_back_stops_the_run_and_confirm_rule() {
 fn a_node_that_was_never_written_does_not_stop_the_others() {
     let mut hub = demo_hub(*key().pk, 7);
     hub.node
+        .provision_core(|m| *key().sk.sign(m, None))
+        .unwrap();
+    hub.node
         .provision(&hub_img(0, Version::new(1, 0, 0)), 0)
         .unwrap();
     let s = sim_of(hub);
@@ -1203,6 +1208,7 @@ fn one_write_reaches_every_node_of_a_topology_at_the_limit() {
                 dagon_sim::Layout::STM32F401XE,
             );
             n.i2c_addr = Some(0x10 + i as u8);
+            n.provision_core(|m| *key().sk.sign(m, None)).unwrap();
             n.provision(&img("stm32f401re", &tag(i), 0, old, 0x20), 0)
                 .unwrap();
             n.reset(now);
@@ -1926,6 +1932,7 @@ fn one_core_sim() -> Sim {
     );
     let mut hub =
         dagon_sim::SimNode::new(dagon_sim::hub_config(), *key().pk, flash, one_core_layout());
+    hub.provision_core(|m| *key().sk.sign(m, None)).unwrap();
     hub.provision(&hub_img(0, Version::new(1, 0, 0)), 0)
         .unwrap();
     sim_of(SimRelay::new(hub))

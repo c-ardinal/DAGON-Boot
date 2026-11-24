@@ -13,7 +13,8 @@ use crate::flash::SimFlash;
 use dagon_agent::{SlotStore, StoreError, Transition};
 use dagon_core::boot::Place;
 use dagon_core::bootcore::{
-    choose, confirmed_app, read_state, settle_log, Apps, Cell, MustReset, Settled, CLEARED,
+    check_inline, choose, confirmed_app, read_state, settle_log, Apps, Cell, CoreFail, MustReset,
+    Settled, CLEARED,
 };
 use dagon_core::log::{trial_room, Log, LogLayout, LogState, SlotRef};
 use dagon_ed25519::Ed25519Compact;
@@ -82,18 +83,20 @@ impl Layout {
         }),
     };
 
-    /// Hub on RP2040 with 2 MiB flash: stage0 (the `bootcore` region),
-    /// boot core slots A/B with their log.
+    /// Hub on RP2040 with 4 MiB flash, where its MCU definition puts things
+    /// (stage0 checks that a boot core is linked for its slot): stage0 (the
+    /// `bootcore` region), the boot core log, the APP log, boot core slots
+    /// A/B, APP-A and APP-B.
     pub const RP2040_HUB: Layout = Layout {
         mcu: "rp2040",
-        bootcore: (0x1000_0000, 0x1_0000),
-        log: (0x1001_0000, 0x1000),
-        slots: &[(0x1002_0000, 0x8_0000), (0x100A_0000, 0x8_0000)],
+        bootcore: (0x1000_0000, 0x4000),
+        log: (0x1000_6000, 0x1000),
+        slots: &[(0x1004_8000, 0x10_0000), (0x1014_8000, 0x10_0000)],
         factory: None,
         cores: Some(Cores {
-            slots: &[(0x1013_0000, 0x1_0000), (0x1014_0000, 0x1_0000)],
+            slots: &[(0x1000_8000, 0x2_0000), (0x1002_8000, 0x2_0000)],
             log: LogLayout {
-                faces: [0x1015_0000, 0x1015_1000],
+                faces: [0x1000_4000, 0x1000_5000],
                 face_len: 0x1000,
             },
         }),
@@ -374,7 +377,6 @@ impl SimStore {
                 self.program(b + STAGE0_MARK_AT, &stage0::Mark::of(STAGE0_VERSION).0)?;
             }
         }
-        self.provision_core()?;
         let hdr: [u8; HEADER_SIZE] = image
             .get(..HEADER_SIZE)
             .and_then(|h| h.try_into().ok())
@@ -412,21 +414,18 @@ impl SimStore {
         self.program(base, &image[..HEADER_SIZE])
     }
 
-    /// The first install's boot core in slot A (version 1.0.0; stage0
-    /// checks no signature, so the stand-in is unsigned) and the boot core
-    /// log naming it, unless the log already holds one.
-    fn provision_core(&mut self) -> Result<(), StoreError> {
-        let Some(c) = self.layout.cores else {
-            return Ok(());
-        };
-        if read_state(&mut Paged(self.flash()), &c.log).is_some() {
-            return Ok(());
-        }
+    /// The first install's boot core for boot core slot A of this layout
+    /// (version 1.0.0, for the MCU stage0 is built for), its header signed
+    /// by `sign`: Ed25519 of the message it is given (`SIGN_DOMAIN` and the
+    /// header's signed bytes) under the secret key of this store's public key, as
+    /// the factory's image is. `None` on a layout with no boot core slots.
+    pub fn first_core(&self, sign: impl FnOnce(&[u8]) -> [u8; 64]) -> Option<Vec<u8>> {
+        let c = self.layout.cores?;
         let body = b"DGBC".repeat(64);
-        let h = ImageHeader {
+        let mut h = ImageHeader {
             image_kind: image_kind::BOOTCORE,
             port_kind: port_kind::SELF_BOOT,
-            mcu_id: 0,
+            mcu_id: self.stage0_mcu_id(),
             slot_binding: slot_binding::A,
             placement: placement::INLINE,
             load_addr: c.slots[0].0 + HEADER_SIZE as u32,
@@ -436,22 +435,39 @@ impl SimStore {
             release_seq: 0,
             min_bootcore_version: Version::default(),
             payload_sha256: sha256(&body),
-            key_id: [0; 8],
+            key_id: dagon_format::key_id(&self.pubkey),
             target_tag: [0; 16],
             proto_version: 1,
             capabilities: capabilities::SIG_VERIFIER,
             signature: [0; 64],
+        };
+        let raw = h.to_bytes();
+        h.signature = sign(&[header::SIGN_DOMAIN, &raw[..header::SIGNED_LEN]].concat());
+        Some([&h.to_bytes()[..], &body].concat())
+    }
+
+    /// Writes the boot core image `core` (header inline, then body; as
+    /// [`SimStore::first_core`] makes it) into boot core slot A and
+    /// appends to the boot core log (started when there is none) the
+    /// records naming it as provisioned and confirmed, as the factory does.
+    /// Stage0 checks it at reset as any core.
+    pub fn provision_core(&mut self, core: &[u8]) -> Result<(), StoreError> {
+        let c = self.layout.cores.ok_or(StoreError::Unsupported)?;
+        let (base, len) = c.slots[0];
+        if core.len() < HEADER_SIZE || core.len() > len as usize {
+            return Err(StoreError::Range);
         }
-        .to_bytes();
-        self.erase_range(c.slots[0].0, c.slots[0].0 + c.slots[0].1)?;
-        self.program(c.slots[0].0 + HEADER_SIZE as u32, &body)?;
-        self.program(c.slots[0].0, &h)?;
-        for face in c.log.faces {
-            self.erase_range(face, face + c.log.face_len)?;
+        self.erase_range(base, base + len)?;
+        self.program(base + HEADER_SIZE as u32, &core[HEADER_SIZE..])?;
+        self.program(base, &core[..HEADER_SIZE])?;
+        if Log::load(&mut Paged(self.flash()), &c.log).is_err() {
+            for face in c.log.faces {
+                self.erase_range(face, face + c.log.face_len)?;
+            }
+            let fh = FaceHeader { generation: 1 }.to_bytes();
+            self.program(c.log.faces[0], &fh)?;
         }
-        let fh = FaceHeader { generation: 1 }.to_bytes();
-        self.program(c.log.faces[0], &fh)?;
-        let at = self.core_head(0).ok_or(StoreError::Flash)?;
+        let at = self.core_head(0).ok_or(StoreError::Range)?;
         let mut f = Paged(self.flash());
         let mut log = Log::load(&mut f, &c.log).map_err(|_| StoreError::Flash)?;
         for k in [kind::PROVISION, kind::CONFIRMED] {
@@ -474,35 +490,36 @@ impl SimStore {
     }
 
     /// Stage0's check of the core in slot `s`, against the record `r`
-    /// when one names it: a boot core for that slot,
-    /// and its body hashes to the header's digest. No signature, as on the
-    /// hub.
-    fn core_check(&mut self, s: u8, r: Option<&SlotRef>) -> Result<(), ()> {
-        let head = self.core_head(s).ok_or(())?;
-        if r.is_some_and(|r| *r != head) {
-            return Err(());
-        }
+    /// when one names it: the real stage0's (`dagon_core::bootcore::check_inline`),
+    /// its signature under the store's key included, for the MCU stage0 is
+    /// built for ([`SimStore::stage0_mcu_id`]).
+    fn core_check(&mut self, s: u8, r: Option<&SlotRef>) -> Result<(), CoreFail> {
         let &(base, len) = self
             .layout
             .cores
-            .ok_or(())?
+            .ok_or(CoreFail::Kind)?
             .slots
             .get(usize::from(s))
-            .ok_or(())?;
-        let mut raw = [0u8; HEADER_SIZE];
-        self.flash().read(base, &mut raw).map_err(|_| ())?;
-        let h = ImageHeader::parse(&raw).map_err(|_| ())?;
-        if h.image_kind != image_kind::BOOTCORE
-            || h.slot_binding != s
-            || h.payload_size > len - HEADER_SIZE as u32
-        {
-            return Err(());
-        }
-        let mut body = vec![0u8; h.payload_size as usize];
-        self.flash()
-            .read(base + HEADER_SIZE as u32, &mut body)
-            .map_err(|_| ())?;
-        (sha256(&body) == h.payload_sha256).then_some(()).ok_or(())
+            .ok_or(CoreFail::Kind)?;
+        let verifier = Ed25519Compact::new(self.pubkey);
+        let mcu_id = self.stage0_mcu_id();
+        check_inline(
+            &mut Paged(self.flash()),
+            Place::inline(base, len),
+            s,
+            (r, &verifier),
+            mcu_id,
+        )
+        .map(|_| ())
+    }
+
+    /// The MCU id stage0 is built with: [`SimStore::stage0_node`]'s, else
+    /// the layout's MCU definition's.
+    fn stage0_mcu_id(&self) -> u16 {
+        self.stage0_node
+            .map(|(id, _)| id)
+            .or_else(|| dagon_topology::mcu_id_of(self.layout.mcu))
+            .unwrap_or_else(|| panic!("MCU definition {} has no MCU id", self.layout.mcu))
     }
 
     /// Stage0 and the boot core over the boot core slots

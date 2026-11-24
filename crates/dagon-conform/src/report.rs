@@ -47,9 +47,14 @@ use core::fmt::{self, Write};
 use dagon_port::LinkKind;
 use dagon_proto::payload::HelloResp;
 
+/// The `conform-result` format number, the `N` of [`SCHEMA`]
+/// (`dagon-conform/N`). It rises when a field is removed or its meaning
+/// changes; a new field or [`Verdict`] leaves it.
+pub const SCHEMA_VERSION: u32 = 1;
 pub const SCHEMA: &str = "dagon-conform/1";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Verdict {
     Pass,
     Fail,

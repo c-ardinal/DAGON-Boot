@@ -2,7 +2,13 @@
 
 use std::fmt::Write as _;
 
+/// The `check-json` format number: the shape of [`Report::to_json`]. It
+/// rises when a field is removed or its meaning changes; a new field or
+/// [`Severity`] leaves it.
+pub const CHECK_JSON_FORMAT: u32 = 1;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Severity {
     /// Blocks compiling the topology, and so building a release.
     Error,
@@ -64,6 +70,9 @@ impl Report {
         self.errors().next().is_none()
     }
 
+    /// The report as JSON (`dagon topo check --json`, the page's check):
+    /// `ok`, `errors`, `warnings`, `issues` and `format`, the
+    /// [`CHECK_JSON_FORMAT`] it is written in.
     pub fn to_json(&self) -> String {
         let mut out = format!(
             "{{\"ok\":{},\"errors\":{},\"warnings\":{},\"issues\":[",
@@ -84,7 +93,7 @@ impl Report {
                 json_str(&issue.message)
             );
         }
-        out.push_str("]}");
+        let _ = write!(out, "],\"format\":{CHECK_JSON_FORMAT}}}");
         out
     }
 }

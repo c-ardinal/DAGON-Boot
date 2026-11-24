@@ -44,13 +44,17 @@ event = 1           # lifecycle event kinds, codes, payloads and EventRecord (da
 extension-manifest = 1  # dagon-extension.toml: its `format` key (dagon-extension MANIFEST_FORMAT)
 boot-program = 1    # boot action program ops in a board's [boot]: the generated BOOT_PROGRAM_FORMAT (dagon-topology defs::board_boot::BOOT_PROGRAM_FORMAT)
 project = 1         # dagon.toml: its `format` key, required (dagon-topology project::FORMAT)
+agent-def = 1       # agent definition (agents/*.toml, ~/.dagon/agents/*.toml): its `dagon_agent` key (dagon-cli agents::FORMAT)
+agent-link = 1      # the consent to an agent, ~/.dagon/agent.json: its `version` (dagon-cli consent::FILE_VERSION)
+check-json = 1      # the check report as JSON (dagon topo check --json, the page's check): its `format` (dagon-topology CHECK_JSON_FORMAT)
+conform-result = 1  # conformance result file: the N of its `schema` "dagon-conform/N" (dagon-conform report::SCHEMA_VERSION)
 
 [[component]]
 name = "cli"
 version = "0.1.0"
 packages = ["dagon-cli"]
 paths = ["crates/dagon-cli", "crates/dagon-wasm", "web"]
-formats = { wire = [2], image-header = [1], state-log = [1], manifest = [1], bundle = [1], topology-bin = [2], topology-yaml = [2], definitions = [3], serve-api = [1], layout = [1], event = [1], extension-manifest = [1], boot-program = [1], project = [1] }
+formats = { wire = [2], image-header = [1], state-log = [1], manifest = [1], bundle = [1], topology-bin = [2], topology-yaml = [2], definitions = [3], serve-api = [1], layout = [1], event = [1], extension-manifest = [1], boot-program = [1], project = [1], agent-def = [1], agent-link = [1], check-json = [1], conform-result = [1] }
 
 [[component]]
 name = "boot-rp2040"
@@ -203,7 +207,7 @@ name = "topology"
 version = "0.1.0"
 packages = ["dagon-topology"]
 paths = ["crates/dagon-topology"]
-formats = { topology-bin = [2], topology-yaml = [2], definitions = [3], boot-program = [1], project = [1] }
+formats = { topology-bin = [2], topology-yaml = [2], definitions = [3], boot-program = [1], project = [1], check-json = [1] }
 
 [[component]]
 name = "sign"
@@ -224,7 +228,7 @@ name = "conform"
 version = "0.1.0"
 packages = ["dagon-conform"]
 paths = ["crates/dagon-conform"]
-formats = { wire = [2], image-header = [1], state-log = [1] }
+formats = { wire = [2], image-header = [1], state-log = [1], conform-result = [1] }
 
 [[component]]
 name = "romlink"

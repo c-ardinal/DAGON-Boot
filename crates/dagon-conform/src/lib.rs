@@ -24,6 +24,7 @@ use core::fmt;
 
 /// Where a test runs.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Side {
     /// Inside the node, started by CONF_RUN.
     Node,

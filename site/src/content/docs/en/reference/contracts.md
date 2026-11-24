@@ -35,12 +35,16 @@ format numbers are this tree's. Changes since the tag
 | `extension-manifest` | 1 | dagon-extension.toml: its `format` key (dagon-extension MANIFEST_FORMAT) |
 | `boot-program` | 1 | boot action program ops in a board's [boot]: the generated BOOT_PROGRAM_FORMAT (dagon-topology defs::board_boot::BOOT_PROGRAM_FORMAT) |
 | `project` | 1 | dagon.toml: its `format` key, required (dagon-topology project::FORMAT) |
+| `agent-def` | 1 | agent definition (agents/*.toml, ~/.dagon/agents/*.toml): its `dagon_agent` key (dagon-cli agents::FORMAT) |
+| `agent-link` | 1 | the consent to an agent, ~/.dagon/agent.json: its `version` (dagon-cli consent::FILE_VERSION) |
+| `check-json` | 1 | the check report as JSON (dagon topo check --json, the page's check): its `format` (dagon-topology CHECK_JSON_FORMAT) |
+| `conform-result` | 1 | conformance result file: the N of its `schema` "dagon-conform/N" (dagon-conform report::SCHEMA_VERSION) |
 
 ## Components
 
 | Component | Version (last release) | Packages | Formats (this tree) |
 |---|---|---|---|
-| `cli` | 0.1.0 | `dagon-cli` | `wire` 2, `image-header` 1, `state-log` 1, `manifest` 1, `bundle` 1, `topology-bin` 2, `topology-yaml` 2, `definitions` 3, `serve-api` 1, `layout` 1, `event` 1, `extension-manifest` 1, `boot-program` 1, `project` 1 |
+| `cli` | 0.1.0 | `dagon-cli` | `wire` 2, `image-header` 1, `state-log` 1, `manifest` 1, `bundle` 1, `topology-bin` 2, `topology-yaml` 2, `definitions` 3, `serve-api` 1, `layout` 1, `event` 1, `extension-manifest` 1, `boot-program` 1, `project` 1, `agent-def` 1, `agent-link` 1, `check-json` 1, `conform-result` 1 |
 | `boot-rp2040` | 0.1.0 | `dagon-rp2040-stage0`, `dagon-rp2040-bootcore` | `image-header` 1, `state-log` 1, `event` 1 |
 | `boot-stm32f401re` | 0.1.0 | `dagon-stm32f401re-stage0`, `dagon-stm32f401re-bootcore` | `image-header` 1, `state-log` 1, `event` 1 |
 | `mcu-rp2040` | 0.1.0 | `dagon-mcu-rp2040` | `wire` 2, `image-header` 1, `state-log` 1, `definitions` 3 |
@@ -62,8 +66,8 @@ format numbers are this tree's. Changes since the tag
 | `relay` | 0.1.0 | `dagon-relay` | `wire` 2 |
 | `host` | 0.1.0 | `dagon-host` | `wire` 2, `image-header` 1, `state-log` 1, `bundle` 1, `topology-bin` 2 |
 | `extension` | 0.1.0 | `dagon-extension` | `extension-manifest` 1, `definitions` 3, `boot-program` 1 |
-| `topology` | 0.1.0 | `dagon-topology` | `topology-bin` 2, `topology-yaml` 2, `definitions` 3, `boot-program` 1, `project` 1 |
+| `topology` | 0.1.0 | `dagon-topology` | `topology-bin` 2, `topology-yaml` 2, `definitions` 3, `boot-program` 1, `project` 1, `check-json` 1 |
 | `sign` | 0.1.0 | `dagon-sign` | `image-header` 1, `state-log` 1, `manifest` 1, `bundle` 1, `topology-bin` 2 |
 | `sim` | 0.1.0 | `dagon-sim` | `wire` 2, `image-header` 1, `state-log` 1 |
-| `conform` | 0.1.0 | `dagon-conform` | `wire` 2, `image-header` 1, `state-log` 1 |
+| `conform` | 0.1.0 | `dagon-conform` | `wire` 2, `image-header` 1, `state-log` 1, `conform-result` 1 |
 | `romlink` | 0.1.0 | `dagon-romlink` |  |

@@ -147,6 +147,9 @@ next release.
 - A component that stops reading or writing an old number: breaking.
 - A change an old reader handles correctly (for example a field in a
   reserved area that old readers ignore by design) keeps the number.
+- A Rust enum whose values a contract carries (a verdict, a severity) is
+  `#[non_exhaustive]`: a new value is a feature in its crate, and code in
+  other crates already handles a value it does not know.
 
 ## Decision flow
 

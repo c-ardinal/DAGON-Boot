@@ -35,6 +35,9 @@ const REGIONS: [FlashRegion; 1] = [FlashRegion {
     erased_value: 0xFF,
 }];
 const WINDOW_MS: u16 = 50;
+/// The running core's header (outside both logs).
+const CORE_HEADER: u32 = 0x7000;
+const CORE_RAW: [u8; HEADER_SIZE] = [0x5A; HEADER_SIZE];
 const MAX: u8 = 3;
 
 struct Mem(Vec<u8>);
@@ -71,15 +74,11 @@ impl Flash for Mem {
     }
 }
 
-/// Where the running core's header is: 512 bytes of 0xC0.
-const CORE_HEADER: u32 = 0x7000;
-const CORE_HEADER_BYTES: [u8; HEADER_SIZE] = [0xC0; HEADER_SIZE];
-
 fn core_ref() -> SlotRef {
     SlotRef {
         slot: 0,
         version: Version::new(1, 0, 0),
-        digest16: header_digest16(&CORE_HEADER_BYTES),
+        digest16: header_digest16(&CORE_RAW),
     }
 }
 
@@ -87,6 +86,7 @@ fn core_ref() -> SlotRef {
 /// (pending: on trial).
 fn flash(pending: bool) -> Mem {
     let mut m = Mem(vec![0xFF; 0x8000]);
+    m.0[CORE_HEADER as usize..][..HEADER_SIZE].copy_from_slice(&CORE_RAW);
     let face = FaceHeader { generation: 1 }.to_bytes();
     for at in [CORE_LOG.faces[0], APP_LOG.faces[0]] {
         m.0[at as usize..][..face.len()].copy_from_slice(&face);
@@ -108,7 +108,6 @@ fn flash(pending: bool) -> Mem {
     .to_bytes();
     let at = CORE_LOG.faces[0] as usize + face.len();
     m.0[at..][..rec.len()].copy_from_slice(&rec);
-    m.0[CORE_HEADER as usize..][..HEADER_SIZE].copy_from_slice(&CORE_HEADER_BYTES);
     m
 }
 

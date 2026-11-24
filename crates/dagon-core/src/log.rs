@@ -136,7 +136,11 @@ impl LogState {
         let back = self.confirmed.unwrap_or(NO_SLOT);
         let rolled = self.reverted.is_some() || self.last_reason != reason::NONE;
         let pending = self.pending.unwrap_or(NO_SLOT);
-        let attempts = if self.pending.is_some() { self.attempts } else { 0 };
+        let attempts = if self.pending.is_some() {
+            self.attempts
+        } else {
+            0
+        };
         [
             self.confirmed.map(|c| (kind::SNAPSHOT, c, 0)),
             self.reverted.map(|r| (kind::SLOT_PENDING, r, reason::NONE)),
@@ -847,7 +851,9 @@ mod tests {
         let all = reachable();
         assert!(all.len() > 1000, "{}", all.len());
         // Every attempt count, the ones the Kani proof leaves out included.
-        assert!(all.iter().any(|s| s.attempts == u8::MAX && s.confirmed.is_some()));
+        assert!(all
+            .iter()
+            .any(|s| s.attempts == u8::MAX && s.confirmed.is_some()));
         for s in &all {
             assert_eq!(&refold(s), s);
         }

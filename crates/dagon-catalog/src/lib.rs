@@ -2,12 +2,13 @@
 //! generated from it and from the port catalog. Code that reads events
 //! (the CLI, host tools) depends on this crate, not on `dagon-events`.
 //!
-//! Every workspace crate that depends on `dagon-events` (directly or
-//! through another crate, other than through this one) declares its
-//! machines in one `dagon_events::state_machine!` at its root (none is
-//! allowed), which defines its `MACHINES` static; [`REGISTRY`] lists each
-//! crate's `MACHINES` by path, and a test fails while such a crate is
-//! missing from it. A crate that depends on this one (the CLI) reads the
+//! A workspace crate declares its machines in one
+//! `dagon_events::state_machine!` at its root, which defines its
+//! `MACHINES` static; [`REGISTRY`] lists each such crate's `MACHINES` by
+//! path, and a test fails while a crate that invokes the macro is missing
+//! from it. A crate without the macro has no machine and is not listed
+//! (the simulator, whose nodes run the agent's machines). A crate that
+//! depends on this one (the CLI) reads the
 //! catalogs and declares no machine. The tests also check the layers'
 //! event codes and regenerate the site's Events page; its Ports page and
 //! the port table of its Lifecycle events page come from
@@ -39,7 +40,7 @@ macro_rules! registry {
 }
 
 /// Each machine-declaring crate's `MACHINES`, one entry per crate.
-pub static REGISTRY: &[&Machines] = registry![dagon_events, dagon_boot, dagon_agent, dagon_sim];
+pub static REGISTRY: &[&Machines] = registry![dagon_events, dagon_boot, dagon_agent];
 
 /// Every machine of every layer.
 pub fn machines() -> Vec<Catalog> {

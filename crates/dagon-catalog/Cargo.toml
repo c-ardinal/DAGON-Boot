@@ -11,7 +11,6 @@ dagon-agent = { path = "../dagon-agent" }
 dagon-boot = { path = "../dagon-boot" }
 # It prints the catalogs' docs.
 dagon-events = { path = "../dagon-events", features = ["catalog-docs"] }
-dagon-sim = { path = "../dagon-sim" }
 
 [dev-dependencies]
 # The port traits the catalog names, checked by the build (tests/docs.rs).

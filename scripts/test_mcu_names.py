@@ -100,6 +100,43 @@ def web_texts():
     return out
 
 
+def web_comments_blanked(text):
+    """A Console source (`.ts`, `.svelte`) with each comment blanked: `//`
+    and `/* */` outside its '…', "…" and `…` strings, and `<!-- -->` of a
+    Svelte file's markup; spaces in their place, line breaks kept, so it is
+    as long as `text`."""
+    out, i, n = list(text), 0, len(text)
+
+    def blank(start, end):
+        for k in range(start, min(end, n)):
+            if out[k] != "\n":
+                out[k] = " "
+
+    while i < n:
+        c = text[i]
+        if text.startswith("<!--", i):
+            j = text.find("-->", i + 4)
+            j = n if j < 0 else j + 3
+            blank(i, j)
+        elif text.startswith("//", i):
+            j = text.find("\n", i)
+            j = n if j < 0 else j
+            blank(i, j)
+        elif text.startswith("/*", i):
+            j = text.find("*/", i + 2)
+            j = n if j < 0 else j + 2
+            blank(i, j)
+        elif c in "'\"`":
+            j = i + 1
+            while j < n and text[j] != c and (c == "`" or text[j] != "\n"):
+                j += 2 if text[j] == "\\" else 1
+            j += 1
+        else:
+            j = i + 1
+        i = j
+    return "".join(out)
+
+
 def production_texts():
     """Path -> text of every file in scope (crates/ Rust, web/src)."""
     rust = {path: text for path, text in rust_texts().items() if path.startswith("crates/")}
@@ -109,7 +146,10 @@ def production_texts():
 def counts(texts, ids):
     """Path -> how many times its non-test code names a definition id."""
     pattern = name_pattern(ids)
-    blank = {path: blanked(text) for path, text in texts.items()}
+    blank = {
+        path: blanked(text) if path.endswith(".rs") else (web_comments_blanked(text), "")
+        for path, text in texts.items()
+    }
     tests = declared_test_files({path: code for path, (_, code) in blank.items() if path.endswith(".rs")})
     out = {}
     for path, (no_comments, code) in sorted(blank.items()):
@@ -175,6 +215,13 @@ class McuAndBoardNames(unittest.TestCase):
                    + "\n// rp2040\n/* esp32s3 */\nconst F: &str = \"rp2040b\";\n"
                    "#[cfg(test)]\nmod more {\n    fn f() -> &'static str { \"stm32f401re\" }\n}\n"}
         self.assertEqual(problems(planted, self.ids), [])
+
+    def test_console_strings_and_comments_are_read_as_typescript(self):
+        ids = ["rp2040"]
+        self.assertEqual(counts({"web/src/a.ts": "export const u = 'https://example.com/rp2040';\n"}, ids), {"web/src/a.ts": 1})
+        self.assertEqual(counts({"web/src/a.ts": "const t = `x // ${'rp2040'}`;\n"}, ids), {"web/src/a.ts": 1})
+        self.assertEqual(counts({"web/src/a.ts": "const q = 'abc\"def'; // rp2040\n/* rp2040 */\n"}, ids), {})
+        self.assertEqual(counts({"web/src/A.svelte": "<!-- rp2040 -->\n<p>{x}</p>\n"}, ids), {})
 
     def test_an_unused_allowed_entry_fails(self):
         without = {**self.texts, "web/src/app/sample.ts": "export const NONE = 1;\n"}

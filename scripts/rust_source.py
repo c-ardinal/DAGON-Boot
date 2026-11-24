@@ -73,7 +73,7 @@ def blanked(text):
     keep, code, i, n = list(text), list(text), 0, len(text)
 
     def blank(chars, start, end):
-        for k in range(start, end):
+        for k in range(start, min(end, n)):
             if chars[k] != "\n":
                 chars[k] = " "
 

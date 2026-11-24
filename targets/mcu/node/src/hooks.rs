@@ -2,19 +2,20 @@
 //! board package's extension, the application's extensions, its
 //! self-check function), what the application hands that start ([`App`])
 //! and gets back ([`AppEvents`]: the published [`AppSnapshot`] and recent
-//! events), and the start's last steps ([`finish_start`]): the board's
-//! bring-up and confirming the app's own trial. The agent itself stays
-//! the start's and its serving task's.
+//! events), and what every MCU package's start does with its agent before
+//! the links serve ([`run_start`]): the reset cause, the watchdog taken
+//! over, the board's bring-up and confirming the app's own trial. The
+//! agent itself stays the start's and its serving task's.
 
 use dagon_agent::snapshot::AppSnapshot;
 use dagon_agent::Transition;
-use dagon_agent::{Agent, AppChain};
+use dagon_agent::{Agent, AppChain, TrialPolicy};
 use dagon_events::{
     compose, BoardBringUp, Bounds, Chain, Composed, Ctx, Extension, Health, Layer, Published,
     Reader, TrialInfo, Watchdog,
 };
 use dagon_format::SigVerifier;
-use dagon_port::SlotStore;
+use dagon_port::{ResetCause, SlotStore};
 
 /// Recent events a node keeps for its display and log tasks.
 pub const RECENT: usize = 8;
@@ -180,4 +181,36 @@ pub fn finish_start<
         let _ = agent.confirm_own();
     }
     agent.images().on_trial()
+}
+
+/// What an MCU package's start tells [`run_start`] of its chip.
+#[derive(Clone, Copy, Debug)]
+pub struct Taken {
+    /// The cause of the last reset (the MCU's `Reset` port).
+    pub reset: ResetCause,
+    /// The period the watchdog runs now.
+    pub watchdog_ms: u32,
+    /// What the watchdog guard does while the image is on trial.
+    pub trial: TrialPolicy,
+}
+
+/// A node's start from its opened agent to its links serving, the same on
+/// every MCU: the reset cause is noted, `app.watchdog_taken` names the
+/// watchdog the guard took over, then [`finish_start`] runs the board's
+/// bring-up and, with [`Confirm::Own`], confirms the trial. Returns
+/// whether the image is still on trial (for the watchdog guard).
+pub fn run_start<
+    S: SlotStore<Transition = Transition>,
+    X: AppChain,
+    V: SigVerifier,
+    const L: usize,
+>(
+    agent: &mut Agent<S, X, V, dagon_agent::writer::App, L>,
+    taken: Taken,
+    board: Option<(&str, &mut dyn BoardBringUp)>,
+    confirm: Confirm,
+) -> bool {
+    agent.note_reset(taken.reset);
+    agent.watchdog_taken(taken.watchdog_ms, taken.trial);
+    finish_start(agent, board, confirm)
 }

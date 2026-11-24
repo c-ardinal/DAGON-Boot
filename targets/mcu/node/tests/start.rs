@@ -15,7 +15,7 @@ use dagon_events::{BoardBringUp, Ctx, Event, Extension, Health, Published, Trial
 use dagon_format::header::*;
 use dagon_format::{key_id, sha256, Version};
 use dagon_node::hooks::{
-    finish_start, node_chain, App, AppEvents, BoardExtension, Confirm, NodeChain,
+    finish_start, node_chain, run_start, App, AppEvents, BoardExtension, Confirm, NodeChain, Taken,
 };
 use dagon_proto::payload::*;
 use dagon_proto::{split_status, Cmd, Frame, Status};
@@ -303,6 +303,45 @@ fn an_apps_extensions_see_the_update_its_trial_and_its_own_confirm() {
         ]
     );
     assert_eq!(store.clone().status().slots[1].state, SlotState::Confirmed);
+}
+
+/// The start every MCU package runs: the watchdog taken over is announced
+/// before the board's bring-up, and the reset cause is the one STATUS
+/// reports.
+#[test]
+fn run_start_announces_the_watchdog_before_the_bring_up_and_notes_the_reset() {
+    let log: Log = Arc::default();
+    let mut store = provisioned();
+    update(&mut store, &log, Confirm::ByHost, None);
+    take(&log);
+    let mut a = start(&store, app(&log, None, Confirm::ByHost));
+    let mut port = Port(log.clone());
+    let taken = Taken {
+        reset: dagon_port::ResetCause::Watchdog,
+        watchdog_ms: 4_000,
+        trial: dagon_agent::TrialPolicy::NeverFeed,
+    };
+    let board: Option<(&str, &mut dyn BoardBringUp)> = Some(("nucleo-f401re", &mut port));
+    assert!(run_start(&mut a, taken, board, Confirm::ByHost));
+    let seen = take(&log);
+    let from = seen.iter().position(|k| k == "watchdog_taken");
+    let from = from.unwrap_or_else(|| panic!("watchdog_taken in {seen:?}"));
+    assert_eq!(seen[from..], ["watchdog_taken", "port", "bring_up"]);
+    let mut out = [0u8; 64];
+    let n = Frame {
+        flags: 0,
+        seq: 1,
+        cmd: Cmd::Status as u8,
+        payload: &[],
+    }
+    .encode(&mut out)
+    .unwrap();
+    let reply = a.handle(&out[..n]).expect("a reply").frame.to_vec();
+    let (f, _) = Frame::decode(&reply, 300).unwrap();
+    let (status, body) = split_status(f.payload).unwrap();
+    assert_eq!(status, Status::Ok);
+    let st = StatusResp::parse(body).unwrap();
+    assert_eq!(st.reset_cause, dagon_port::ResetCause::Watchdog.code());
 }
 
 #[test]

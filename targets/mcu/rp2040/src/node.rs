@@ -14,7 +14,7 @@ use dagon_ed25519::Ed25519Compact;
 use dagon_events::{Published, Watchdog as Periods};
 use dagon_format::header::{port_kind, target_tag};
 pub use dagon_node::hooks::{always, App, AppEvents, BoardCore, Confirm, NodeChain, SelfCheck};
-use dagon_node::hooks::{finish_start, node_chain, Events};
+use dagon_node::hooks::{node_chain, run_start, Events, Taken};
 use dagon_port::SlotStore;
 use dagon_proto::max_payload;
 use dagon_proto::payload::{mode, SlotState, StatusResp};
@@ -108,7 +108,7 @@ pub fn on_trial(st: &StatusResp) -> bool {
 /// Opens the slot store, takes over the watchdog the boot core started
 /// (fed once right away), builds the agent with the app's chain, runs the
 /// board's bring-up and, with [`Confirm::Own`], confirms the app's trial
-/// ([`finish_start`]); returns the agent with the flash chip's [`serial`]
+/// ([`run_start`]); returns the agent with the flash chip's [`serial`]
 /// and the node's events. `task` is the guard
 /// task that serves the agent; `tag` and `role` are the node's image
 /// target tag and topology role; `app` holds the self-check, the app's
@@ -158,10 +158,13 @@ pub(crate) fn open<B: BoardDef, const N: usize>(
     );
     let verifier = Ed25519Compact::new(crate::PUBKEY);
     let mut agent = Agent::new(config(tag, role), verifier, store, chain);
-    agent.note_reset(crate::reset::read());
-    agent.watchdog_taken(crate::layout::watchdog_ms(trial), guard.trial_policy());
+    let taken = Taken {
+        reset: crate::reset::read(),
+        watchdog_ms: crate::layout::watchdog_ms(trial),
+        trial: guard.trial_policy(),
+    };
     let board = B::bring_up_port().map(|p| (B::BOARD_ID, p));
-    guard.set_trial(finish_start(&mut agent, board, app.confirm));
+    guard.set_trial(run_start(&mut agent, taken, board, app.confirm));
     Opened {
         agent,
         serial,

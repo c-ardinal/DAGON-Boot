@@ -125,7 +125,7 @@ fn image(slot: u8, version: Version, body: &[u8]) -> Vec<u8> {
         mcu_id: mcu_id::STM32F401XE,
         slot_binding: slot,
         placement: placement::INLINE,
-        load_addr: Layout::STM32F401XE.slots[slot as usize].0 + HEADER_SIZE as u32,
+        load_addr: Layout::of("stm32f401re").slots[slot as usize].0 + HEADER_SIZE as u32,
         payload_size: body.len() as u32,
         version,
         build_flags: build_flags::TEST_KEY,
@@ -225,7 +225,7 @@ impl Wire {
 fn provisioned() -> SimStore {
     let mut store = SimStore::new(
         SimFlash::stm32f401xe(1),
-        Layout::STM32F401XE,
+        Layout::of("stm32f401re"),
         sample::PUBKEY,
     );
     store.provision_core(sample::SEG_CORE_1_0_0).unwrap();

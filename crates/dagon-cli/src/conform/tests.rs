@@ -321,7 +321,7 @@ fn twelve_of_twelve_on_usb_as_uart() {
         cfg,
         *key().pk,
         SimFlash::stm32f401xe(5),
-        Layout::STM32F401XE,
+        Layout::of("stm32f401re"),
     );
     node.provision_core(|m| *key().sk.sign(m, None)).unwrap();
     node.provision(&old_image(), 0).unwrap();

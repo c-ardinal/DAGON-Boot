@@ -10,6 +10,7 @@ use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use crate::flash::SimFlash;
+use crate::mcu::simulated_mcu;
 use dagon_agent::{SlotStore, StoreError, Transition};
 use dagon_core::boot::Place;
 use dagon_core::bootcore::{
@@ -65,42 +66,53 @@ pub struct Cores {
 }
 
 impl Layout {
-    /// STM32F401xE: stage0 sector 0, the state log (APP and boot core
-    /// records in one face pair) sectors 1-2, boot core A sector 4, APP-A
-    /// sector 5, APP-B sector 6, boot core B sector 7.
-    pub const STM32F401XE: Layout = Layout {
-        mcu: "stm32f401re",
-        bootcore: (0x0800_0000, 0x4000),
-        log: (0x0800_4000, 0x4000),
-        slots: &[(0x0802_0000, 0x2_0000), (0x0804_0000, 0x2_0000)],
-        factory: None,
-        cores: Some(Cores {
-            slots: &[(0x0801_0000, 0x1_0000), (0x0806_0000, 0x2_0000)],
-            log: LogLayout {
-                faces: [0x0800_4000, 0x0800_8000],
-                face_len: 0x4000,
-            },
-        }),
-    };
+    /// The kind S layout built-in MCU definition `mcu` gives: `[layout]
+    /// stage0` as the `bootcore` region, the first `app_log` face as `log`,
+    /// the app slots, the agent slot as `factory`, and the boot core slots
+    /// with `bootcore_log` as `cores`. Panics for an MCU the built-in
+    /// definitions lack or give no kind S layout (no stage0 or app log).
+    pub fn of(mcu: &str) -> Layout {
+        static MADE: Mutex<Vec<Layout>> = Mutex::new(Vec::new());
+        let mut made = MADE.lock().unwrap_or_else(PoisonError::into_inner);
+        if let Some(l) = made.iter().find(|l| l.mcu == mcu) {
+            return *l;
+        }
+        let l = Layout::of_def(simulated_mcu(mcu))
+            .unwrap_or_else(|| panic!("no kind S layout in MCU definition {mcu}"));
+        made.push(l);
+        l
+    }
 
-    /// Hub on RP2040 with 4 MiB flash, where its MCU definition puts things
-    /// (stage0 checks that a boot core is linked for its slot): stage0 (the
-    /// `bootcore` region), the boot core log, the APP log, boot core slots
-    /// A/B, APP-A and APP-B.
-    pub const RP2040_HUB: Layout = Layout {
-        mcu: "rp2040",
-        bootcore: (0x1000_0000, 0x4000),
-        log: (0x1000_6000, 0x1000),
-        slots: &[(0x1004_8000, 0x10_0000), (0x1014_8000, 0x10_0000)],
-        factory: None,
-        cores: Some(Cores {
-            slots: &[(0x1000_8000, 0x2_0000), (0x1002_8000, 0x2_0000)],
-            log: LogLayout {
-                faces: [0x1000_4000, 0x1000_5000],
-                face_len: 0x1000,
+    /// [`Layout::of`] for one definition; `None` without a stage0 or an
+    /// app log.
+    fn of_def(m: &'static dagon_topology::defs::McuDef) -> Option<Layout> {
+        use dagon_topology::defs::ImageKind;
+        let stage0 = m.layout.stage0?;
+        let app_log = m.layout.app_log?;
+        let slots_of = |kind: ImageKind| -> &'static [(u32, u32)] {
+            let mut v: Vec<_> = m.slots.iter().filter(|s| s.image == kind).collect();
+            v.sort_by_key(|s| s.binding.wire());
+            Box::leak(v.iter().map(|s| (s.start, s.size)).collect())
+        };
+        let cores = slots_of(ImageKind::Bootcore);
+        Some(Layout {
+            mcu: m.id.as_str(),
+            bootcore: (stage0.at, stage0.size),
+            log: (app_log.faces[0], app_log.face_size),
+            slots: slots_of(ImageKind::App),
+            factory: slots_of(ImageKind::Agent).first().copied(),
+            cores: match (cores.is_empty(), m.layout.bootcore_log) {
+                (false, Some(l)) => Some(Cores {
+                    slots: cores,
+                    log: LogLayout {
+                        faces: l.faces,
+                        face_len: l.face_size,
+                    },
+                }),
+                _ => None,
             },
-        }),
-    };
+        })
+    }
 
     /// ESP32-S3 watch (4 MiB modelled): loader, selection data, two OTA
     /// slots and a factory slot. Simplified to kind S semantics.
@@ -129,14 +141,6 @@ pub fn trial_attempts(mcu: &str) -> u8 {
         .and_then(|m| m.watchdog)
         .map(|w| w.trial_attempts)
         .unwrap_or_else(|| panic!("MCU definition {mcu} has no [watchdog] trial_attempts"))
-}
-
-/// The built-in definition of a simulated MCU (for a simulation given no
-/// definitions).
-pub(crate) fn simulated_mcu(mcu: &str) -> &'static dagon_topology::defs::McuDef {
-    dagon_topology::defs::Registry::builtin()
-        .mcu(mcu)
-        .unwrap_or_else(|| panic!("no MCU definition {mcu}"))
 }
 
 /// `[[relay_link]]` of MCU definition `mcu`: the links its relay reaches
@@ -218,7 +222,7 @@ pub struct SimStore {
 
 impl Default for SimStore {
     fn default() -> Self {
-        SimStore::new(SimFlash::new(&[], 0), Layout::STM32F401XE, [0; 32])
+        SimStore::new(SimFlash::new(&[], 0), Layout::of("stm32f401re"), [0; 32])
     }
 }
 
@@ -1011,5 +1015,40 @@ impl SlotStore for SimStore {
             }
             _ => self.set_pending(slot, hdr, tr),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The layouts the definitions give are where the boards' firmware
+    /// puts things (the values this model held before it read them).
+    #[test]
+    fn the_kind_s_layouts_come_from_the_definitions() {
+        let f401 = Layout::of("stm32f401re");
+        assert_eq!(f401.bootcore, (0x0800_0000, 0x4000));
+        assert_eq!(f401.log, (0x0800_4000, 0x4000));
+        assert_eq!(
+            f401.slots,
+            &[(0x0802_0000, 0x2_0000), (0x0804_0000, 0x2_0000)]
+        );
+        assert_eq!(f401.factory, None);
+        let c = f401.cores.unwrap();
+        assert_eq!(c.slots, &[(0x0801_0000, 0x1_0000), (0x0806_0000, 0x2_0000)]);
+        assert_eq!(c.log.faces, [0x0800_4000, 0x0800_8000]);
+        let rp = Layout::of("rp2040");
+        assert_eq!(rp.bootcore, (0x1000_0000, 0x4000));
+        assert_eq!(rp.log, (0x1000_6000, 0x1000));
+        assert_eq!(
+            rp.slots,
+            &[(0x1004_8000, 0x10_0000), (0x1014_8000, 0x10_0000)]
+        );
+        let c = rp.cores.unwrap();
+        assert_eq!(c.slots, &[(0x1000_8000, 0x2_0000), (0x1002_8000, 0x2_0000)]);
+        assert_eq!(
+            (c.log.faces, c.log.face_len),
+            ([0x1000_4000, 0x1000_5000], 0x1000)
+        );
     }
 }

@@ -27,8 +27,8 @@ ALLOWED = {
         "slots of the built-in sample images of `dagon demo` and `dagon sim`; a project signs with slot_with",
     ("crates/dagon-sim/src/store.rs", "trial_attempts"):
         "the simulator's modelled boot stage over its fixed sample layouts; no project is in scope",
-    ("crates/dagon-sim/src/store.rs", "simulated_mcu"):
-        "the relay links of the simulator's modelled hub over its fixed sample layouts; no project is in scope",
+    ("crates/dagon-sim/src/mcu.rs", "simulated_mcu"):
+        "the simulator's modelled nodes (layouts, flash, relay links) over its fixed sample MCUs; no project is in scope",
     ("crates/dagon-cli/src/simrun.rs", "world"):
         "`dagon sim` scenarios run the built-in sample world",
     ("crates/dagon-cli/src/simrun.rs", "host"):

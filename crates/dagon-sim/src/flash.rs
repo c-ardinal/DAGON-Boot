@@ -53,39 +53,37 @@ impl SimFlash {
         }
     }
 
-    /// STM32F401xE: 4 x 16 KiB, 1 x 64 KiB, 3 x 128 KiB at 0x0800_0000,
-    /// byte programming.
-    pub fn stm32f401xe(seed: u64) -> Self {
-        let r = |start, len, erase_size| FlashRegion {
-            start,
-            len,
-            erase_size,
-            write_size: 1,
-            erased_value: 0xFF,
-        };
-        SimFlash::new(
-            &[
-                r(0x0800_0000, 0x1_0000, 0x4000),
-                r(0x0801_0000, 0x1_0000, 0x1_0000),
-                r(0x0802_0000, 0x6_0000, 0x2_0000),
-            ],
-            seed,
-        )
+    /// The flash built-in MCU definition `mcu` gives in `[execution]`:
+    /// its erase regions and erased value, programmed `write_size` bytes
+    /// at a time. That is the chip's own unit, which a ROM loader writes
+    /// in, finer than the definition's `write_unit` (DAGON's firmware's).
+    pub fn of(mcu: &str, write_size: u32, seed: u64) -> Self {
+        let e = crate::mcu::simulated_mcu(mcu)
+            .execution
+            .as_ref()
+            .unwrap_or_else(|| panic!("MCU definition {mcu} has no [execution]"));
+        let regions: Vec<_> = e
+            .erase_regions
+            .iter()
+            .map(|r| FlashRegion {
+                start: r.start,
+                len: r.len,
+                erase_size: r.unit,
+                write_size,
+                erased_value: e.erased_value,
+            })
+            .collect();
+        SimFlash::new(&regions, seed)
     }
 
-    /// RP2040 with 4 MiB external QSPI flash at 0x1000_0000 (4 KiB sectors,
-    /// 256-byte pages), as its MCU definition's flash map.
+    /// STM32F401xE as its definition gives it, byte programming.
+    pub fn stm32f401xe(seed: u64) -> Self {
+        SimFlash::of("stm32f401re", 1, seed)
+    }
+
+    /// RP2040 with 4 MiB flash as its definition gives it, 256-byte pages.
     pub fn rp2040_4m(seed: u64) -> Self {
-        SimFlash::new(
-            &[FlashRegion {
-                start: 0x1000_0000,
-                len: 0x40_0000,
-                erase_size: 0x1000,
-                write_size: 256,
-                erased_value: 0xFF,
-            }],
-            seed,
-        )
+        SimFlash::of("rp2040", 256, seed)
     }
 
     /// ESP32-S3 SPI flash, first 4 MiB from offset 0 (4 KiB sectors, 4-byte

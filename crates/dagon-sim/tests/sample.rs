@@ -76,7 +76,7 @@ fn watch() -> Option<(u8, u8)> {
 }
 
 fn link_on(port: &str) -> u8 {
-    store::relay_link_id(store::Layout::RP2040_HUB.mcu, port)
+    store::relay_link_id(store::Layout::of("rp2040").mcu, port)
 }
 
 fn hello() -> Vec<u8> {

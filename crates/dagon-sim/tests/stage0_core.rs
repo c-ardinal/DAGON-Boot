@@ -29,13 +29,13 @@ fn nodes() -> [Node; 2] {
         (
             "stm32f401re",
             SimFlash::stm32f401xe,
-            Layout::STM32F401XE,
+            Layout::of("stm32f401re"),
             sample::SEG_1_0_0,
         ),
         (
             "rp2040",
             SimFlash::rp2040_4m,
-            Layout::RP2040_HUB,
+            Layout::of("rp2040"),
             sample::HUB_1_0_0,
         ),
     ]

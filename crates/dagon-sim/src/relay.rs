@@ -338,7 +338,7 @@ impl SimRelay {
     /// The relaying node with the built-in definition of its MCU (for
     /// when no definitions are given).
     pub fn new(mut node: SimNode) -> Self {
-        let def = crate::store::simulated_mcu(node.store().layout.mcu);
+        let def = crate::mcu::simulated_mcu(node.store().layout.mcu);
         SimRelay::with_definition(node, def)
     }
 

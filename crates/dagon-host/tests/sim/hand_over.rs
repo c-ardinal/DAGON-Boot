@@ -11,21 +11,30 @@ const V1: Version = Version::new(1, 0, 0);
 const V2: Version = Version::new(1, 1, 0);
 
 /// The seg's and the hub's layouts with app slot A only.
-const SEG_ONE: Layout = Layout {
-    slots: &[(0x0802_0000, 0x2_0000)],
-    ..Layout::STM32F401XE
-};
-const HUB_ONE: Layout = Layout {
-    slots: &[(0x1004_8000, 0x10_0000)],
-    ..Layout::RP2040_HUB
-};
+fn seg_one() -> Layout {
+    Layout {
+        slots: &[(0x0802_0000, 0x2_0000)],
+        ..Layout::of("stm32f401re")
+    }
+}
+fn hub_one() -> Layout {
+    Layout {
+        slots: &[(0x1004_8000, 0x10_0000)],
+        ..Layout::of("rp2040")
+    }
+}
 
 /// Hub and seg, each with one app slot, running 1.0.0 from it.
 fn one_slot_sim() -> Sim {
-    let mut hub = SimNode::new(hub_config(), *key().pk, SimFlash::rp2040_4m(7), HUB_ONE);
+    let mut hub = SimNode::new(hub_config(), *key().pk, SimFlash::rp2040_4m(7), hub_one());
     hub.provision_core(|m| *key().sk.sign(m, None)).unwrap();
     hub.provision(&hub_img(0, V1), 0).unwrap();
-    let mut seg = SimNode::new(f401_config(), *key().pk, SimFlash::stm32f401xe(6), SEG_ONE);
+    let mut seg = SimNode::new(
+        f401_config(),
+        *key().pk,
+        SimFlash::stm32f401xe(6),
+        seg_one(),
+    );
     seg.i2c_addr = Some(NODE_I2C_ADDR);
     seg.provision_core(|m| *key().sk.sign(m, None)).unwrap();
     seg.provision(&seg_img(0, V1), 0).unwrap();
@@ -182,7 +191,7 @@ fn a_seg_with_both_app_slots_broken_is_recovered_through_the_boot_core() {
     use dagon_port::Flash;
     let s = sim();
     with_seg(&s, |seg, now| {
-        for &(at, len) in Layout::STM32F401XE.slots {
+        for &(at, len) in Layout::of("stm32f401re").slots {
             seg.flash().erase(at, len).unwrap();
         }
         seg.reset(now);

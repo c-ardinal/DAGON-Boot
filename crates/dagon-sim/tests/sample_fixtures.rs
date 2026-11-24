@@ -185,14 +185,14 @@ fn generated() -> Vec<(&'static str, Vec<u8>)> {
             "sample-hub-core-1.0.0.img",
             first_core(
                 dagon_sim::SimFlash::rp2040_4m(0),
-                dagon_sim::Layout::RP2040_HUB,
+                dagon_sim::Layout::of("rp2040"),
             ),
         ),
         (
             "sample-seg-core-1.0.0.img",
             first_core(
                 dagon_sim::SimFlash::stm32f401xe(0),
-                dagon_sim::Layout::STM32F401XE,
+                dagon_sim::Layout::of("stm32f401re"),
             ),
         ),
         ("sample-core-1.1.0.dgb", core_release()),

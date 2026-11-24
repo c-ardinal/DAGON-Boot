@@ -202,6 +202,7 @@ impl LinkKind {
     }
 }
 
+/// What reset the MCU last, as its reset flags report it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ResetCause {
     PowerOn,
@@ -209,6 +210,20 @@ pub enum ResetCause {
     Software,
     Pin,
     Unknown,
+}
+
+impl ResetCause {
+    /// Its STATUS `reset_cause` code (`dagon_proto::payload::reset_cause`).
+    pub const fn code(self) -> u8 {
+        use dagon_proto::payload::reset_cause as c;
+        match self {
+            ResetCause::PowerOn => c::POWER_ON,
+            ResetCause::Watchdog => c::WATCHDOG,
+            ResetCause::Software => c::SOFTWARE,
+            ResetCause::Pin => c::PIN,
+            ResetCause::Unknown => c::UNKNOWN,
+        }
+    }
 }
 
 pub trait Reset {

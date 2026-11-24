@@ -69,11 +69,22 @@ fn slots_of(st: &StatusResp, rows: Option<&Vec<u8>>) -> String {
     parts.join(", ")
 }
 
+/// `, reset watchdog` for the reset cause the node reported (its code for
+/// one this build does not know); nothing for a node that reports none.
+fn reset_of(st: &StatusResp) -> String {
+    use dagon_proto::payload::reset_cause;
+    match (st.reset_cause, reset_cause::name(st.reset_cause)) {
+        (reset_cause::NONE, _) => String::new(),
+        (_, Some(name)) => format!(", reset {name}"),
+        (code, None) => format!(", reset {code}"),
+    }
+}
+
 fn show_state(name: &str, s: &NodeState, rows: Option<&Rows>) {
     let st = &s.status;
     let slots = slots_of(st, rows.map(|r| &r.app));
     println!(
-        "{name}: version {}{}, mcu {:#06x}, wire {}, active {}, confirmed {}, attempts {}, last reason {}, [{}]",
+        "{name}: version {}{}, mcu {:#06x}, wire {}, active {}, confirmed {}, attempts {}, last reason {}{}, [{}]",
         s.hello.active_version,
         if s.hello.trial { " (on trial)" } else { "" },
         s.hello.mcu_id,
@@ -82,6 +93,7 @@ fn show_state(name: &str, s: &NodeState, rows: Option<&Rows>) {
         st.confirmed,
         st.attempts,
         st.last_reason,
+        reset_of(st),
         slots
     );
     if let Some(w) = crate::versions::wire_warning(name, s.hello.proto_ver) {
@@ -644,6 +656,21 @@ mod tests {
     use super::*;
     use dagon_proto::payload::{SlotInfo, SlotVersion};
     use dagon_proto::Cmd;
+
+    #[test]
+    fn status_names_the_reset_cause_a_node_reports() {
+        use dagon_proto::payload::reset_cause;
+        let of = |reset_cause| {
+            reset_of(&StatusResp {
+                reset_cause,
+                ..Default::default()
+            })
+        };
+        assert_eq!(of(reset_cause::NONE), "");
+        assert_eq!(of(reset_cause::WATCHDOG), ", reset watchdog");
+        assert_eq!(of(reset_cause::PIN), ", reset pin");
+        assert_eq!(of(200), ", reset 200");
+    }
 
     #[test]
     fn status_shows_the_running_boot_core_or_why_there_is_none() {

@@ -30,6 +30,7 @@ pub mod iwdg;
 pub mod layout;
 pub mod links;
 pub mod mailbox;
+pub mod reset;
 mod store;
 pub use store::KindSStore;
 #[cfg(target_os = "none")]

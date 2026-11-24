@@ -7,6 +7,7 @@
 //! SHA-256 and the version. Signing takes only what that record lists, so
 //! a failed build or a slot no longer configured leaves nothing to sign.
 
+use dagon_host::ports::{BuildJob, BuildRunner};
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -350,30 +351,25 @@ pub(crate) fn link_baud(cfg: &Config, id: &str) -> Result<Option<u32>, String> {
     crate::config::read_topology(cfg, path)?.uart_baud(id)
 }
 
-/// Sets (or removes) the firmware build inputs of `fw` on `cmd`.
-fn firmware_env(cmd: &mut Command, fw: FirmwareEnv<'_>) {
-    for (name, value) in [(PUBKEY_ENV, fw.pubkey_hex), (TARGET_TAG_ENV, fw.target_tag)] {
-        match value {
-            Some(v) => cmd.env(name, v),
-            None => cmd.env_remove(name),
-        };
-    }
-    match fw.boot_crate {
-        Some(d) => cmd.env(dagon_topology::defs::boot_folder::BOOT_FOLDER_ENV, d),
-        None => cmd.env_remove(dagon_topology::defs::boot_folder::BOOT_FOLDER_ENV),
-    };
-    let baud = dagon_topology::defs::codegen::LINK_BAUD_ENV;
-    match fw.link_baud {
-        Some(b) => cmd.env(baud, b.to_string()),
-        None => cmd.env_remove(baud),
-    };
+/// The firmware build inputs of `fw`, each set or (`None`) removed.
+fn firmware_env(fw: FirmwareEnv<'_>) -> Vec<(&'static str, Option<String>)> {
+    vec![
+        (PUBKEY_ENV, fw.pubkey_hex.map(str::to_string)),
+        (TARGET_TAG_ENV, fw.target_tag.map(str::to_string)),
+        (
+            dagon_topology::defs::boot_folder::BOOT_FOLDER_ENV,
+            fw.boot_crate.map(|d| d.to_string_lossy().into_owned()),
+        ),
+        (
+            dagon_topology::defs::codegen::LINK_BAUD_ENV,
+            fw.link_baud.map(|b| b.to_string()),
+        ),
+    ]
 }
 
-/// Runs `cargo build --release --locked` in `dir`; returns the executable
-/// of binary `bin`. A crate without Cargo.lock yet (just generated) is
-/// resolved once without --locked, and keeps the lock file cargo writes.
-/// A version raised in its Cargo.toml is brought into its own lock entry
-/// first ([`crate::srcver::lock_own_version`]).
+/// Builds `bin` in `dir` with the firmware inputs `fw` through DAGON's
+/// [`BuildRunner`] ([`Cargo`]); returns the executable. The node folder's
+/// definitions are checked first.
 pub(crate) fn cargo_build(
     dir: &Path,
     bin: &str,
@@ -386,76 +382,116 @@ pub(crate) fn cargo_build(
     if let Some(d) = fw.boot_crate {
         node_definitions(d)?;
     }
-    let mut cmd = Command::new("cargo");
-    scrub(&mut cmd);
-    firmware_env(&mut cmd, fw);
-    cmd.args([
-        "build",
-        "--release",
-        "--message-format=json-render-diagnostics",
-        "--bin",
+    let env = firmware_env(fw);
+    let job = BuildJob {
+        dir,
         bin,
-    ])
-    .current_dir(dir)
-    .stdin(Stdio::null())
-    .stdout(Stdio::piped())
-    .stderr(Stdio::piped());
-    if let Some(v) = crate::srcver::lock_own_version(dir)? {
-        log(&format!("Cargo.lock: the crate's own entry is now {v}"));
-    }
-    if dir.join("Cargo.lock").is_file() {
-        cmd.arg("--locked");
-    } else {
-        log("no Cargo.lock yet: resolving the dependencies once; keep the Cargo.lock it writes");
-    }
-    if !features.is_empty() {
-        cmd.args(["--features", &features.join(",")]);
-    }
-    if let Some(t) = target_dir {
-        cmd.arg("--target-dir").arg(t);
-    }
-    let mut child = cmd
-        .spawn()
-        .map_err(|e| format!("cannot run cargo in {}: {e}", dir.display()))?;
-    let (tx, rx) = mpsc::channel();
-    let out = child.stdout.take().expect("piped");
-    let err = child.stderr.take().expect("piped");
-    let t1 = tx.clone();
-    std::thread::spawn(move || {
-        BufReader::new(out)
-            .lines()
-            .map_while(Result::ok)
-            .for_each(|l| drop(t1.send(Line::Out(l))))
-    });
-    std::thread::spawn(move || {
-        BufReader::new(err)
-            .lines()
-            .map_while(Result::ok)
-            .for_each(|l| drop(tx.send(Line::Err(l))))
-    });
-    let mut exe = None;
-    loop {
-        if cancel.load(Ordering::Relaxed) {
-            let _ = child.kill();
-            let _ = child.wait();
-            return Err("cancelled".into());
+        features,
+        target_dir,
+        env: &env,
+    };
+    Cargo.build(&job, log, cancel)
+}
+
+/// DAGON's [`BuildRunner`]: `cargo build --release --locked` in the
+/// package folder. A crate without Cargo.lock yet (just generated) is
+/// resolved once without --locked, and keeps the lock file cargo writes.
+/// A version raised in its Cargo.toml is brought into its own lock entry
+/// first ([`crate::srcver::lock_own_version`]).
+pub(crate) struct Cargo;
+
+impl BuildRunner for Cargo {
+    fn build(
+        &self,
+        job: &BuildJob<'_>,
+        log: &mut dyn FnMut(&str),
+        cancel: &AtomicBool,
+    ) -> Result<PathBuf, String> {
+        let BuildJob {
+            dir,
+            bin,
+            features,
+            target_dir,
+            env,
+        } = *job;
+        let mut cmd = Command::new("cargo");
+        scrub(&mut cmd);
+        for (name, value) in env {
+            match value {
+                Some(v) => cmd.env(name, v),
+                None => cmd.env_remove(name),
+            };
         }
-        match rx.recv_timeout(POLL) {
-            Ok(Line::Err(l)) => log(&l),
-            Ok(Line::Out(l)) => {
-                if let Some(p) = artifact(&l, bin) {
-                    exe = Some(p);
-                }
+        cmd.args([
+            "build",
+            "--release",
+            "--message-format=json-render-diagnostics",
+            "--bin",
+            bin,
+        ])
+        .current_dir(dir)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+        if let Some(v) = crate::srcver::lock_own_version(dir)? {
+            log(&format!("Cargo.lock: the crate's own entry is now {v}"));
+        }
+        if dir.join("Cargo.lock").is_file() {
+            cmd.arg("--locked");
+        } else {
+            log(
+                "no Cargo.lock yet: resolving the dependencies once; keep the Cargo.lock it writes",
+            );
+        }
+        if !features.is_empty() {
+            cmd.args(["--features", &features.join(",")]);
+        }
+        if let Some(t) = target_dir {
+            cmd.arg("--target-dir").arg(t);
+        }
+        let mut child = cmd
+            .spawn()
+            .map_err(|e| format!("cannot run cargo in {}: {e}", dir.display()))?;
+        let (tx, rx) = mpsc::channel();
+        let out = child.stdout.take().expect("piped");
+        let err = child.stderr.take().expect("piped");
+        let t1 = tx.clone();
+        std::thread::spawn(move || {
+            BufReader::new(out)
+                .lines()
+                .map_while(Result::ok)
+                .for_each(|l| drop(t1.send(Line::Out(l))))
+        });
+        std::thread::spawn(move || {
+            BufReader::new(err)
+                .lines()
+                .map_while(Result::ok)
+                .for_each(|l| drop(tx.send(Line::Err(l))))
+        });
+        let mut exe = None;
+        loop {
+            if cancel.load(Ordering::Relaxed) {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err("cancelled".into());
             }
-            Err(mpsc::RecvTimeoutError::Timeout) => {}
-            Err(mpsc::RecvTimeoutError::Disconnected) => break,
+            match rx.recv_timeout(POLL) {
+                Ok(Line::Err(l)) => log(&l),
+                Ok(Line::Out(l)) => {
+                    if let Some(p) = artifact(&l, bin) {
+                        exe = Some(p);
+                    }
+                }
+                Err(mpsc::RecvTimeoutError::Timeout) => {}
+                Err(mpsc::RecvTimeoutError::Disconnected) => break,
+            }
         }
+        let status = child.wait().map_err(|e| format!("cargo: {e}"))?;
+        if !status.success() {
+            return Err(format!("cargo build failed in {}", dir.display()));
+        }
+        exe.ok_or_else(|| format!("cargo built no binary named '{bin}' in {}", dir.display()))
     }
-    let status = child.wait().map_err(|e| format!("cargo: {e}"))?;
-    if !status.success() {
-        return Err(format!("cargo build failed in {}", dir.display()));
-    }
-    exe.ok_or_else(|| format!("cargo built no binary named '{bin}' in {}", dir.display()))
 }
 
 /// The executable of `bin` in one line of cargo's JSON messages.
@@ -646,27 +682,18 @@ mod tests {
         assert_eq!(link_baud(&cfg, "hub"), Ok(Some(230_400)));
         assert_eq!(link_baud(&cfg, "watch"), Ok(Some(230_400)));
         assert_eq!(link_baud(&cfg, "seg"), Ok(None));
-        let mut cmd = Command::new("cargo");
         let fw = FirmwareEnv {
             link_baud: Some(230_400),
             ..FirmwareEnv::default()
         };
-        firmware_env(&mut cmd, fw);
-        let env = |k: &str| {
-            cmd.get_envs()
-                .find(|(n, _)| *n == k)
-                .map(|(_, v)| v.map(|v| v.to_string_lossy().into_owned()))
+        let baud = |env: Vec<(&str, Option<String>)>| {
+            env.into_iter()
+                .find(|(n, _)| *n == dagon_topology::defs::codegen::LINK_BAUD_ENV)
+                .map(|(_, v)| v)
         };
-        assert_eq!(
-            env(dagon_topology::defs::codegen::LINK_BAUD_ENV),
-            Some(Some("230400".into()))
-        );
+        assert_eq!(baud(firmware_env(fw)), Some(Some("230400".into())));
         // Not given: removed, never inherited from the caller's shell.
-        let mut cmd = Command::new("cargo");
-        firmware_env(&mut cmd, FirmwareEnv::default());
-        assert!(cmd
-            .get_envs()
-            .any(|(n, v)| n == dagon_topology::defs::codegen::LINK_BAUD_ENV && v.is_none()));
+        assert_eq!(baud(firmware_env(FirmwareEnv::default())), Some(None));
         // An out-of-range speed is refused before anything builds.
         std::fs::write(
             base.join("topology.yaml"),

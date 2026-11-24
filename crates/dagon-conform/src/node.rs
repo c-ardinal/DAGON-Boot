@@ -22,7 +22,7 @@
 use crate::{detail, Detail};
 use dagon_ed25519::Ed25519Compact;
 use dagon_format::header::{self, HEADER_SIZE};
-use dagon_format::{sha256, verify_signed, Sha256};
+use dagon_format::{sha256, verify_signed, CryptoProvider, Digest, Software};
 use dagon_port::{Flash, FlashRegion};
 use dagon_proto::handler::{self, Ceiling, Handler};
 use dagon_proto::payload::{verdict, CmdSet, ConfRunReq, ConfRunResp, CONF_DETAIL_MAX};
@@ -367,13 +367,13 @@ fn ct08_sha256(feed: &mut dyn FnMut()) -> TestResult {
         if sha256(msg) != *want {
             return Err(detail!("vector {} one-shot mismatch", i));
         }
-        let mut h = Sha256::new();
+        let mut h = Software.sha256();
         msg.chunks(3).for_each(|c| h.update(c));
         if h.finalize() != *want {
             return Err(detail!("vector {} incremental mismatch", i));
         }
     }
-    let mut h = Sha256::new();
+    let mut h = Software.sha256();
     for i in 0..1_000_000u32 / 64 {
         if i.is_multiple_of(BLOCKS_PER_FEED) {
             feed();

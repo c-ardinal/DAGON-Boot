@@ -6,7 +6,7 @@
 //! `[S]B - [k]A` is one double-scalar loop (Shamir's trick).
 #![allow(clippy::needless_range_loop)]
 
-use sha2::{Digest, Sha512};
+use dagon_format::Digest;
 
 /// A field element mod p = 2^255 - 19; every limb below 2^16 between
 /// operations.
@@ -255,8 +255,10 @@ fn bit(s: &[u8], i: usize) -> bool {
 /// `domain` || `msg` under `pk`; `tick` at every step of the double
 /// scalar multiplication (and of the exponentiations it calls). One copy
 /// serves every tick (one `dyn` call per step), so an image that checks
-/// with and without a tick links the arithmetic once.
+/// with and without a tick links the arithmetic once. `h` is an empty
+/// SHA-512 from the verifier's [`dagon_format::CryptoProvider`].
 pub fn verify(
+    mut h: impl Digest<64>,
     pk: &[u8; 32],
     domain: &[u8],
     msg: &[&[u8]],
@@ -273,7 +275,6 @@ pub fn verify(
     if small_order(&neg_a) {
         return false;
     }
-    let mut h = Sha512::new();
     h.update(r);
     h.update(pk);
     h.update(domain);

@@ -694,7 +694,8 @@ impl NameDigest {
     /// The digest of `name` (trailing NULs left out) in `domain`.
     pub fn of(domain: &str, name: &[u8]) -> Self {
         let end = name.iter().rposition(|&b| b != 0).map_or(0, |i| i + 1);
-        let mut h = dagon_format::Sha256::new();
+        use dagon_format::{CryptoProvider, Digest};
+        let mut h = dagon_format::Software.sha256();
         h.update(domain.as_bytes());
         h.update(&name[..end]);
         let d = h.finalize();

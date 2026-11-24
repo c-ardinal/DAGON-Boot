@@ -114,7 +114,6 @@ version = "0.1.0"
 dependencies = [
  "dagon-format",
  "ed25519-compact",
- "sha2",
 ]
 
 [[package]]

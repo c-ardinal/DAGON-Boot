@@ -2,7 +2,7 @@
 
 use dagon_events::{Accept, Delay, Health, RebootRequest, Refused, TrialInfo, UpdateOffer};
 use dagon_format::header::{self, image_kind, slot_binding, ImageHeader, HEADER_SIZE};
-use dagon_format::{FormatError, Sha256, SigVerifier};
+use dagon_format::{CryptoProvider, Digest, FormatError, SigVerifier, Software};
 use dagon_proto::handler::{self, Ceiling, Handler};
 use dagon_proto::payload::{
     self, mode, phase, reboot_mode, target, CapsReq, CapsResp, CmdSet, HelloReq, HelloResp,
@@ -74,8 +74,11 @@ impl Requester {
 /// The update session of writer `W` (the app's by default), for a node
 /// whose requests come over `L` links (one by default). The links are
 /// numbered from 0 by the node that serves them ([`Agent::handle_on`]).
-pub struct Agent<S, X, V, W = writer::App, const L: usize = 1> {
+/// The body digest comes from `C` (DAGON's [`Software`] by default,
+/// another through [`Agent::with_crypto`]).
+pub struct Agent<S, X, V, W = writer::App, const L: usize = 1, C = Software> {
     cfg: Config,
+    crypto: C,
     writer: PhantomData<W>,
     verifier: V,
     images: ImageStore<S>,
@@ -133,18 +136,30 @@ impl<S: SlotStore, X: AppChain, V: SigVerifier, W: Writer> Agent<S, X, V, W> {
 }
 
 impl<S: SlotStore, X: AppChain, V: SigVerifier, W: Writer, const L: usize> Agent<S, X, V, W, L> {
+    /// The session of writer `W` for a node served over `L` links, with
+    /// DAGON's [`Software`] digest ([`Agent::with_crypto`]).
+    pub fn with_links(cfg: Config, verifier: V, store: S, chain: X) -> Self {
+        Self::with_crypto(cfg, verifier, store, chain, Software)
+    }
+}
+
+impl<S: SlotStore, X: AppChain, V: SigVerifier, W: Writer, const L: usize, C: CryptoProvider>
+    Agent<S, X, V, W, L, C>
+{
     /// The session of writer `W` for a node served over `L` links, named
     /// by the type it is made for. DAGON's start: `app.starting`, then the slot store is opened
     /// (`app.store_opened`), and in the app's session the store makes its
     /// log room and the boot core's changes it shows are replayed
     /// (`app.trial_started`, `app.rolled_back`). `verifier` checks every
-    /// image header under the node's key; HELLO reports its key id.
-    pub fn with_links(cfg: Config, verifier: V, store: S, mut chain: X) -> Self {
+    /// image header under the node's key; HELLO reports its key id. The
+    /// body digest comes from `crypto`.
+    pub fn with_crypto(cfg: Config, verifier: V, store: S, mut chain: X, crypto: C) -> Self {
         let mut node = node::Machine::new();
         let tag = NameDigest::of(NameDigest::TAG, &cfg.target_tag);
         noted(node.starting(&mut chain, tag, cfg.role, cfg.mode));
         let mut agent = Agent {
             verifier,
+            crypto,
             writer: PhantomData,
             images: ImageStore::open(store, cfg.trial_attempts, W::APP),
             cfg,
@@ -863,7 +878,7 @@ impl<S: SlotStore, X: AppChain, V: SigVerifier, W: Writer, const L: usize> Agent
     }
 
     fn hash_body(&mut self, target: u8, slot: u8, len: u32) -> Result<[u8; 32], Status> {
-        let mut h = Sha256::new();
+        let mut h = self.crypto.sha256();
         let mut buf = [0u8; READ_CHUNK];
         let mut off = 0u32;
         while off < len {

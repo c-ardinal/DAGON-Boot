@@ -11,7 +11,6 @@ compact = ["dep:ed25519-compact"]
 [dependencies]
 dagon-format = { path = "../dagon-format" }
 ed25519-compact = { version = "2.6", default-features = false, optional = true }
-sha2 = { version = "0.11", default-features = false }
 
 [dev-dependencies]
 # Its own tests check both verifiers.
@@ -21,3 +20,4 @@ dagon-ed25519 = { path = ".", features = ["compact"] }
 curve25519-dalek = { version = "5", default-features = false }
 ed25519-dalek = { version = "3", default-features = false }
 serde_json = "1"
+sha2 = { version = "0.11", default-features = false }

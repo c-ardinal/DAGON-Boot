@@ -39,7 +39,7 @@ editUrl: false
 | `BoardBringUp` | アプリ起動時のボードの電源、ピン、バス | app, relay | ボードの定義 | untrusted | return, pins, buses, time, memory |
 | `NodeLink` | `dagon_port::NodeLink`による、リンク経由での別ノードへの到達方法 | relay | I2Cコントローラ、PIO UART | untrusted | return, buses, transport, dma, time, memory |
 | `Signer` | イメージとリリースの署名 | host | ファイルのキーの組 | untrusted (ホストは定義上信頼されます。検証の担当はデバイスです) | – |
-| `KeyStore` | 利用者が選択した格納先（環境変数、OSのキーストア、1Passwordなど）から署名のキーを受信 | host | ファイルのキーの組 | untrusted (ホストは定義上信頼されます。検証の担当はデバイスです) | – |
+| `KeyStore` | 利用者が選択した格納先（環境変数、OSのキーストア、1Passwordなど）から署名のキーを受信 | host | `--key`または`DAGON_SIGNING_KEY`でパスを指定するキーファイル | untrusted (ホストは定義上信頼されます。検証の担当はデバイスです) | – |
 | `BuildRunner` | ノードのイメージのビルド | host | cargo | untrusted | – |
 | `Agent` | CLIとページがリクエストを委託する外部のエージェント | host | データ定義（エージェントの定義） | untrusted | – |
 | `Action` | ホストのイベントの後に実行するプログラムやリクエスト | host | データ定義（アクションの定義） | untrusted | – |

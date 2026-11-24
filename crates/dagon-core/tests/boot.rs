@@ -65,6 +65,41 @@ fn three_trials_then_rollback() {
     assert_eq!(m.writes, writes, "boot after rollback writes nothing");
 }
 
+/// The decision policy decides the trials: one that allows a single trial
+/// rolls back on the second boot, whatever `max_attempts` says.
+#[test]
+fn the_decision_policy_sets_the_trials() {
+    use dagon_core::boot::{decide_with, DecisionPolicy};
+    struct Once;
+    impl DecisionPolicy for Once {
+        fn trial(&self, attempts: u8) -> bool {
+            attempts < 1
+        }
+    }
+    let mut m = with_pending_b();
+    let run = |m: &mut Mem| {
+        let mut log = Log::load(m, &LOG).unwrap();
+        decide_with(m, &mut log, &SLOTS, &cfg(), &verifier(), &Once)
+    };
+    assert_eq!(
+        run(&mut m),
+        Decision::Boot {
+            slot: B,
+            entry: entry(B),
+            trial: true
+        }
+    );
+    assert_eq!(
+        run(&mut m),
+        Decision::Boot {
+            slot: A,
+            entry: entry(A),
+            trial: false
+        }
+    );
+    assert_eq!(state(&mut m).last_reason, reason::TRIAL_EXHAUSTED);
+}
+
 #[test]
 fn confirm_on_trial_makes_slot_the_confirmed_one() {
     let mut m = with_pending_b();

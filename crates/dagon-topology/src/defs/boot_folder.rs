@@ -19,6 +19,7 @@
 
 use std::path::{Path, PathBuf};
 
+use dagon_format::{CryptoProvider as _, Digest as _};
 use serde::Deserialize;
 
 /// The environment variable a boot stage's build reads: the node's
@@ -355,7 +356,7 @@ fn source_files_sha256(dir: &Path) -> Result<(String, Vec<PathBuf>), String> {
     let mut files = Vec::new();
     walk(dir, "", &mut files)?;
     files.sort();
-    let mut sha = dagon_format::Sha256::new();
+    let mut sha = dagon_format::Software.sha256();
     for (rel, path) in &files {
         let bytes = std::fs::read(path).map_err(|e| err(path, e))?;
         let mut text = Vec::with_capacity(bytes.len());
@@ -423,7 +424,7 @@ impl BootFolder {
     /// recomputes it ([`BootFolder::verify_stamp`]).
     pub fn stamp(&self) -> Result<String, String> {
         self.check_hashes()?;
-        let mut sha = dagon_format::Sha256::new();
+        let mut sha = dagon_format::Software.sha256();
         sha.update(b"dagon boot graph 1\0");
         let read = |f: &str| {
             let bytes = normalized(&std::fs::read(self.dir.join(f)).unwrap_or_default());

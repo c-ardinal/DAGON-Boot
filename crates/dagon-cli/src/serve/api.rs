@@ -348,8 +348,10 @@ fn agent_api(
     }
     let keys = server.keys().clone();
     crate::agents::ready(&home, &keys)?;
-    Ok(Box::new(move |p: &crate::agents::Prompt| {
-        crate::agents::call(&home, &keys, p, timeout)
+    Ok(Box::new(crate::agents::Linked {
+        home,
+        keys,
+        timeout,
     }))
 }
 

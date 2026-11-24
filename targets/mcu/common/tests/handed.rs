@@ -11,6 +11,7 @@ use dagon_agent::update_mode::{Entry, Port};
 use dagon_core::bootcore::{app_result, trial_cell, Refusal, CLEARED, START_APP};
 use dagon_core::log::{trial_room, Log, LogLayout, SlotRef};
 use dagon_events::Clock;
+use dagon_format::header::{header_digest16, HEADER_SIZE};
 use dagon_format::statelog::{kind, reason, target, FaceHeader, Record};
 use dagon_format::Version;
 use dagon_mcu_common::handed::{begin, CellIo, Logs, Next, Window};
@@ -34,6 +35,9 @@ const REGIONS: [FlashRegion; 1] = [FlashRegion {
     erased_value: 0xFF,
 }];
 const WINDOW_MS: u16 = 50;
+/// The running core's header (outside both logs).
+const CORE_HEADER: u32 = 0x7000;
+const CORE_RAW: [u8; HEADER_SIZE] = [0x5A; HEADER_SIZE];
 const MAX: u8 = 3;
 
 struct Mem(Vec<u8>);
@@ -74,7 +78,7 @@ fn core_ref() -> SlotRef {
     SlotRef {
         slot: 0,
         version: Version::new(1, 0, 0),
-        digest16: [0xC0; 16],
+        digest16: header_digest16(&CORE_RAW),
     }
 }
 
@@ -82,6 +86,7 @@ fn core_ref() -> SlotRef {
 /// (pending: on trial).
 fn flash(pending: bool) -> Mem {
     let mut m = Mem(vec![0xFF; 0x8000]);
+    m.0[CORE_HEADER as usize..][..HEADER_SIZE].copy_from_slice(&CORE_RAW);
     let face = FaceHeader { generation: 1 }.to_bytes();
     for at in [CORE_LOG.faces[0], APP_LOG.faces[0]] {
         m.0[at as usize..][..face.len()].copy_from_slice(&face);
@@ -172,7 +177,7 @@ fn start(f: &mut Mem, cell: [u32; 2], requests: &[Cmd]) -> (Next, [u32; 2], usiz
         Logs {
             core: &CORE_LOG,
             app: &APP_LOG,
-            running: 0,
+            running: (0, CORE_HEADER),
             max: MAX,
         },
         CellIo {
@@ -290,7 +295,7 @@ fn a_pending_core_whose_cell_does_not_hold_resets() {
         Logs {
             core: &CORE_LOG,
             app: &APP_LOG,
-            running: 0,
+            running: (0, CORE_HEADER),
             max: MAX,
         },
         CellIo {

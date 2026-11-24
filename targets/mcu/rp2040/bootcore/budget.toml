@@ -1,0 +1,63 @@
+# The parts of this boot core's image and the most bytes each may take
+# (scripts/bootcore_size.py, CT-16). A section of the linker map belongs to
+# the first part one of whose `match` prefixes starts its symbol's
+# demangled path, its section name or its output section's name; the rest
+# (anonymous constants, padding) are `other`. The slot of the MCU
+# definition is the hard limit; these catch the part that grew. Each is
+# the largest of the builds (no board and every board of the MCU) plus a
+# quarter, in 256-byte steps; measured 49,580 (no board) and
+# 61,244 bytes (waveshare-rp2040-touch-lcd-1.28) when set.
+
+[ram]
+# Static RAM (allocated, writable sections: .data, .bss, .uninit); the
+# stack is not counted. Measured 1696 bytes.
+max_bytes = 2304
+
+[[part]]
+name = "verifier"
+match = ["dagon_ed25519"]
+max_bytes = 1536
+
+[[part]]
+name = "sha2"
+match = ["sha2", "digest", "hybrid_array", "block_buffer"]
+max_bytes = 2560
+
+[[part]]
+name = "agent"
+match = ["dagon_agent"]
+max_bytes = 2816
+
+[[part]]
+name = "proto"
+match = ["dagon_proto"]
+max_bytes = 3584
+
+[[part]]
+name = "dagon-core"
+match = ["dagon_core"]
+max_bytes = 4864
+
+[[part]]
+name = "dagon-format"
+match = ["dagon_format"]
+max_bytes = 4864
+
+[[part]]
+name = "mcu-package"
+match = ["dagon_mcu_rp2040", "dagon_rp2040_bootcore", "dagon_mcu_common", "dagon_port", "dagon_events"]
+max_bytes = 29952
+
+[[part]]
+name = "hal"
+match = ["embassy_", "pio", "rp2040_", "rp_pac", "cortex_m"]
+max_bytes = 7680
+
+[[part]]
+name = "rust-core"
+match = ["core::", "compiler_builtins", "memcpy", "memset", "memcmp", "__aeabi"]
+max_bytes = 11776
+
+[[part]]
+name = "other"
+max_bytes = 7936

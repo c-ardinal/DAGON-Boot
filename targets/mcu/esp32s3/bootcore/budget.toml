@@ -1,0 +1,66 @@
+# The ESP32-S3 boot core and the most bytes each part of it may take
+# (scripts/bootcore_size.py, CT-16). Stage0 copies it into RAM and starts
+# it there (bootcore.x: 128 KiB of IRAM for its code, 64 KiB of DRAM for
+# its data), so its limit is [image] max_bytes, the two regions together,
+# against the bytes of its loadable segments; the linker script holds each
+# region on its own. It is updated in the field, so it keeps no margin.
+# The parts come from the symbol table (`nm`, Rust paths) as for the
+# ESP32-S3 stage0; each is the build's plus a quarter, in 256-byte steps;
+# measured 49,032 bytes when set.
+
+[image]
+max_bytes = 196608
+# The only layout it builds with until the definition gives stage0's.
+features = ["qemu-layout"]
+# The symbol table reader of the Xtensa toolchain, by either name espup
+# installs.
+nm = ["xtensa-esp-elf-nm", "xtensa-esp32s3-elf-nm"]
+
+[ram]
+# Static RAM (allocated, writable sections: .data, .bss); the stack (the
+# ROM's) is not counted. Measured 1,376 bytes.
+max_bytes = 1792
+
+[[part]]
+name = "verifier"
+match = ["dagon_ed25519"]
+max_bytes = 2304
+
+[[part]]
+name = "sha2"
+match = ["sha2", "digest", "hybrid_array", "block_buffer"]
+max_bytes = 3584
+
+[[part]]
+name = "agent"
+match = ["dagon_agent"]
+max_bytes = 23040
+
+[[part]]
+name = "proto"
+match = ["dagon_proto"]
+max_bytes = 4096
+
+[[part]]
+name = "dagon-core"
+match = ["dagon_core"]
+max_bytes = 4864
+
+[[part]]
+name = "dagon-format"
+match = ["dagon_format"]
+max_bytes = 3328
+
+[[part]]
+name = "mcu-package"
+match = ["dagon_esp32s3_bootcore", "dagon_mcu_esp32s3", "dagon_mcu_common", "dagon_port", "dagon_events", "core_start"]
+max_bytes = 13568
+
+[[part]]
+name = "rust-core"
+match = ["core::", "compiler_builtins", "memcpy", "memset", "memcmp"]
+max_bytes = 3584
+
+[[part]]
+name = "other"
+max_bytes = 4352

@@ -747,7 +747,11 @@ The one authentication rule, applied by every verifier
   the MCU, since a board puts its diagnostic output into stage0, and
   checks each part of the image (the verifier, SHA-2, dagon-core,
   dagon-format, the MCU package, and the rest) against the most bytes
-  the package's `stage0/budget.toml` gives it, from the linker map. Stage0 is never written
+  the package's `stage0/budget.toml` gives it, from the linker map, and
+  its static RAM against that file's `[ram]`. `scripts/bootcore_size.py`
+  checks each boot core the same way against its `bootcore/budget.toml`,
+  its slot as the hard limit and no margin, since a boot core is updated
+  in the field. Stage0 is never written
   in the field but is rebuilt for every new node with the toolchain of
   that build, so an image without spare room becomes a first write that
   cannot be built. Both stage0s use the compact SHA-256 rounds, since

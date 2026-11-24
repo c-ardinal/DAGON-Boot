@@ -216,10 +216,10 @@ describe('define document', () => {
       expect(c.reach).toEqual(c.nodes.filter((n) => !n.skip).map((n) => n.id));
       expect(c.reach).toContain('hub');
       // The compiled table (dagon-wasm's topo_compile) lists its nodes in reach's order. Layout
-      // (dagon-format topology): node_count at byte 6, nodes of 32 bytes from 0x20, target_tag at +16.
+      // (dagon-format topology): node_count at byte 6, nodes of 40 bytes from 0x20, target_tag at +16.
       const bin = topo_compile(c.yaml);
       const tags = Array.from({ length: bin[6] }, (_, i) =>
-        new TextDecoder().decode(bin.slice(0x20 + 32 * i + 16, 0x20 + 32 * i + 32)).replace(/\0+$/, ''),
+        new TextDecoder().decode(bin.slice(0x20 + 40 * i + 16, 0x20 + 40 * i + 32)).replace(/\0+$/, ''),
       );
       expect(tags).toEqual(c.reach.map((id) => doc.topo.nodes.find((n) => n.id === id)!.tag));
       compiled++;

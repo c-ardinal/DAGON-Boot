@@ -62,7 +62,7 @@ fn node_of(
         .ok_or_else(|| format!("node {}: no MCU definition {}", n.id, n.mcu))?;
     let (flash, layout) = modelled(def, seed).map_err(|e| format!("node {}: {e}", n.id))?;
     let cfg = Config {
-        mcu_id: def.wire_id,
+        mcu_id: def.mcu_id(),
         port_kind: def.port.wire(),
         target_tag: target_tag(&n.tag),
         role: if hub { role::HUB } else { role::NODE },

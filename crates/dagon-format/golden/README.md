@@ -16,13 +16,13 @@ data; images carry the `TEST_KEY` build flag). Public key:
 
 | File | Content |
 |---|---|
-| `image_f401_app_a.img` | Signed F401 APP image for slot A: 512-byte header (version 1.1.0 as `0x01010000` LE at 0x018, inline, `seg-f401-7seg`) + 1024-byte body |
+| `image_f401_app_a.img` | Signed F401 APP image for slot A: 512-byte header (image-header 2, the F401 identity at 0x068, version 1.1.0 as `0x01010000` LE at 0x018, inline, `seg-f401-7seg`) + 1024-byte body |
 | `manifest.bin` | Signed manifest, 2 entries (F401 APP A and B), no constraints, `topology_sha256` = SHA-256 of `topology_sample.bin` |
 | `release.dgb` | Bundle: manifest, both F401 images (`dest = 2`), topology item (`dest = 3`, `entry_index = 0xFF`, length = topology length, CRC-32 as for every item) holding `topology_sample.bin` |
-| `topology_sample.bin` | Topology canonical binary (topology-bin 2) of the sample (168 B): hub RP2040 coordinator; seg F401 linked hub port 1 (i2c0) to seg port 3 (i2c3) at address 0x42, SDA/SCL GPIO16/17 at 400 kHz, NRST GPIO18 and BOOT0 GPIO28 on the hub end, STM32 I2C ROM entry; watch ESP32-S3 linked hub port 5 (pio-uart) to watch port 1 (uart0), TX/RX GPIO26/27 on the hub end at 115200, cooperative; update order seg, watch, hub |
+| `topology_sample.bin` | Topology canonical binary (topology-bin 3) of the sample (192 B): hub RP2040 coordinator; seg F401 linked hub port 1 (i2c0) to seg port 3 (i2c3) at address 0x42, SDA/SCL GPIO16/17 at 400 kHz, NRST GPIO18 and BOOT0 GPIO28 on the hub end, STM32 I2C ROM entry; watch ESP32-S3 linked hub port 5 (pio-uart) to watch port 1 (uart0), TX/RX GPIO26/27 on the hub end at 115200, cooperative; update order seg, watch, hub |
 | `statelog_face.bin` | State log face: header (generation 1), PROVISION A, CONFIRMED A, SLOT_PENDING B, BOOT_ATTEMPT B, ROLLBACK to A (TRIAL_EXHAUSTED), one erased record |
 | `frame_hello_req.bin` | HELLO request (proto_ver 1, max_payload 1088), seq 0x01 |
-| `frame_hello_resp.bin` | HELLO response: OK + 24-byte body (node, kind S, F401, app mode, 1.1.0, trial, max_payload 256) |
+| `frame_hello_resp.bin` | HELLO response: OK + 24-byte body (node, kind S, the low 16 bits of the F401 identity, app mode, 1.1.0, trial, max_payload 256) |
 | `frame_status_resp.bin` | STATUS response: OK + 71-byte body (A written 1.0.0, B trying 1.1.0, factory empty) |
 | `frame_xfer_begin.bin` | XFER_BEGIN APP slot B, total_len 1536, hdr_len 512 |
 | `frame_xfer_hdr.bin` | XFER_HDR offset 252 with 252 bytes: a maximal 268-byte I2C frame |
@@ -35,6 +35,6 @@ data; images carry the `TEST_KEY` build flag). Public key:
 | `frame_caps_req.bin` | CAPS (0x04) request about RELAY (0x50) and its tunnel over the RP2040's I2C0 link, seq 0x16. Additive: the files above are unchanged |
 | `frame_caps_resp.bin` | CAPS response: OK, request fields 1 and 2, no response fields, a tunnel of 268 bytes over the link asked about. One link is asked about at a time, so that the answer fits the smallest payload a link offers (64 bytes) |
 | `frame_version_req.bin` | VERSION (0x03) request, empty (the summary set), seq 0x15. Additive: the files above are unchanged |
-| `frame_version_resp.bin` | VERSION response: OK, 6 TLVs: wire 1, mcu_id F401, stage0 0.1.0, running boot core 1.0.0, boot core slots (A confirmed 1.0.0 running, B empty), app slots (A written 1.0.0, B trying 1.1.0 running, factory empty) |
+| `frame_version_resp.bin` | VERSION response: OK, 6 TLVs: wire 1, the F401 identity (8 bytes), stage0 0.1.0, running boot core 1.0.0, boot core slots (A confirmed 1.0.0 running, B empty), app slots (A written 1.0.0, B trying 1.1.0 running, factory empty) |
 | `frame_subctl_target.bin` | SUBCTL nrst = pulse, boot0 = high, naming its recovery target: field 3 `link` 1 (I2C0) and field 4 `rom_addr` 0x39, seq 0x17. Additive: `frame_subctl.bin`, which names none (the relay's first target), is unchanged |
 | `frame_i2c_raw_target.bin` | I2C_RAW writing `00 FF`, reading 1 byte, naming its recovery target: field 2 `link` 1 (I2C0) and field 3 `rom_addr` 0x39, seq 0x18. Additive: `frame_i2c_raw_get.bin` is unchanged |

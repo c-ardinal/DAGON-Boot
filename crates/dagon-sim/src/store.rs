@@ -551,7 +551,7 @@ impl SimStore {
     fn stage0_mcu_id(&self) -> McuId {
         self.stage0_node
             .map(|(id, _)| id)
-            .unwrap_or_else(|| self.layout.definition().wire_id)
+            .unwrap_or_else(|| self.layout.definition().mcu_id())
     }
 
     /// Stage0 and the boot core over the boot core slots

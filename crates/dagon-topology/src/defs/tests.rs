@@ -676,6 +676,17 @@ fn project_may_not_redefine_an_id() {
     let e = Registry::load(&[Source::Project(&dir.join("dagon.toml"))]).unwrap_err();
     assert!(e.msg.contains("reads as none"), "{e}");
 
+    // A definition of the format that assigned the MCU a number is refused
+    // by that format's number.
+    write(
+        &dir.join("m/dagon-mcu.toml"),
+        &FAKE_MCU
+            .replace("format = 4", "format = 3\nwire_id = 9")
+            .replace("fake-m0", "fake-m9"),
+    );
+    let e = Registry::load(&[Source::Project(&dir.join("dagon.toml"))]).unwrap_err();
+    assert!(e.msg.contains("definition format 3"), "{e}");
+
     write(&dir.join("dagon.toml"), "[board.x]\nid = \"x\"\n");
     let e = Registry::load(&[Source::Project(&dir.join("dagon.toml"))]).unwrap_err();
     assert!(e.msg.contains("table name"), "{e}");

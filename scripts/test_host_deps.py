@@ -1,4 +1,4 @@
-"""The host's time limits have one home, and no MCU is chosen by its id.
+"""The host's time limits have one home, and no MCU has an assigned number.
 
 - dagon-host's normal dependencies, followed through path dependencies,
   reach neither dagon-conform nor dagon-sim (renamed and workspace entries
@@ -6,9 +6,9 @@
 - Every `const` declared in dagon_port::timeout (found by reading that
   module, never listed here) has no second definition of the same name in
   non-test Rust under crates/ or targets/.
-- No non-test Rust under crates/ compares a value with an `mcu_id::`
-  constant, matches on one or imports one by name: a time limit, a size or
-  a path for an MCU comes from its definition, so a new MCU is data.
+- No non-test Rust under crates/ or targets/ holds a table of MCU numbers
+  (a `mod mcu_id`) or a definition's `wire_id`: an MCU's identity is taken
+  from its definition's id (`McuId::of_name`), so a new MCU is data.
 
     python -m unittest discover -s scripts -p "test_*.py"
 """
@@ -23,17 +23,8 @@ HOST_MANIFEST = "crates/dagon-host/Cargo.toml"
 HOST_FORBIDDEN = {"dagon-conform", "dagon-sim"}
 TIMEOUT = "crates/dagon-port/src/timeout.rs"
 CONST_DIRS = ("crates/", "targets/")
-MCU_ID_DIR = "crates/"
-
 CONST = re.compile(r"\bconst\s+([A-Za-z_]\w*)\s*:")
-MCU_ID = r"\bmcu_id\s*::\s*[A-Z_][A-Z0-9_]*\b"
-MCU_ID_RULES = (
-    (re.compile(rf"(?:==|!=)\s*(?:[\w:]*::\s*)?{MCU_ID}"), "compares with"),
-    (re.compile(rf"{MCU_ID}\s*(?:==|!=)"), "compares with"),
-    (re.compile(rf"{MCU_ID}\s*(?:=>|\||if\b)"), "matches on"),
-    (re.compile(rf"\bmatches!\s*\([^;]*?{MCU_ID}"), "matches on"),
-    (re.compile(r"\buse\s+[^;]*\bmcu_id\s*::\s*(?:\{[^}]*\}|[A-Z_][A-Z0-9_]*|\*)"), "imports"),
-)
+MCU_TABLE = re.compile(r"\bmod\s+mcu_id\b|\bwire_id\b")
 
 
 def production(codes, prefixes):
@@ -78,13 +69,12 @@ def const_problems(codes):
     return out
 
 
-def mcu_id_problems(codes):
-    out = []
-    for path, code in production(codes, (MCU_ID_DIR,)):
-        for rule, what in MCU_ID_RULES:
-            if m := rule.search(code):
-                out.append(f"{path} {what} an MCU id: {' '.join(m.group(0).split())}")
-    return out
+def mcu_table_problems(codes):
+    return [
+        f"{path} holds an assigned MCU number: {m.group(0)}"
+        for path, code in production(codes, CONST_DIRS)
+        if (m := MCU_TABLE.search(code))
+    ]
 
 
 def dependency_problems(read):
@@ -94,7 +84,7 @@ def dependency_problems(read):
 
 def problems(texts, read=relay.read_manifest):
     codes = {path: relay.code_of(text) for path, text in texts.items()}
-    return dependency_problems(read) + const_problems(codes) + mcu_id_problems(codes)
+    return dependency_problems(read) + const_problems(codes) + mcu_table_problems(codes)
 
 
 class HostDeps(unittest.TestCase):
@@ -180,30 +170,20 @@ class HostDeps(unittest.TestCase):
     def test_a_missing_timeout_module_fails(self):
         self.assertTrue(problems({p: t for p, t in self.texts.items() if p != TIMEOUT}))
 
-    def test_choosing_by_mcu_id_fails(self):
-        for code in (
-            "fn f(id: u16) -> u32 { if id == dagon_format::header::mcu_id::STM32F401XE { 1 } else { 2 } }",
-            "fn f(id: u16) -> bool { mcu_id::RP2040 != id }",
-            "fn f(id: u16) -> u32 { match id { mcu_id::ESP32S3 => 1, _ => 2 } }",
-            "fn f(id: u16) -> u32 { match id { mcu_id::ESP32S3 | mcu_id::RP2040 => 1, _ => 2 } }",
-            "fn f(id: u16) -> bool { matches!(id, header::mcu_id::RP2040) }",
-            "use dagon_format::header::mcu_id::STM32F401XE;",
-            "use dagon_format::header::mcu_id::{RP2040, ESP32S3};",
-        ):
-            for path in ("crates/dagon-host/src/ops.rs", "crates/dagon-conform/src/pc.rs"):
+    def test_an_assigned_mcu_number_fails(self):
+        for code in ("pub mod mcu_id { pub const RP2040: u16 = 1; }", "struct McuDef { wire_id: u16 }"):
+            for path in ("crates/dagon-format/src/header.rs", "targets/mcu/build/src/lib.rs"):
                 with self.subTest(code=code, path=path):
                     self.assertTrue(problems(self.planted(path, f"\n{code}\n")))
 
-    def test_naming_an_mcu_id_without_choosing_by_it_passes(self):
+    def test_an_identity_taken_from_the_id_passes(self):
         for extra in (
-            "\nconst X: Config = Config { mcu_id: mcu_id::RP2040 };\n",
-            "\n// if id == mcu_id::RP2040\n",
-            "\n#[cfg(test)]\nmod tests {\n    fn f(id: u16) -> bool { id == mcu_id::RP2040 }\n}\n",
+            "\nfn f(h: &ImageHeader, d: &McuDef) -> bool { h.mcu_id == d.mcu_id() }\n",
+            "\n// the old wire_id\n",
+            "\n#[cfg(test)]\nmod tests {\n    const OLD: &str = \"wire_id = 1\";\n}\n",
         ):
             with self.subTest(extra=extra):
                 self.assertEqual(problems(self.planted("crates/dagon-sim/src/lib.rs", extra)), [])
-        self.assertEqual(problems({**self.texts, "crates/dagon-host/tests/x.rs": "fn f(i: u16) -> bool { i == mcu_id::RP2040 }\n"}), [])
-        self.assertEqual(problems(self.planted("targets/mcu/stm32f401re/src/layout.rs", "\nfn f(i: u16) -> bool { i == mcu_id::RP2040 }\n")), [])
 
 
 if __name__ == "__main__":

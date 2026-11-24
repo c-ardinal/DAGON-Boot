@@ -1,7 +1,7 @@
 // What the page knows about each node in an update: its last answers, where its write is and its one %,
 // the chosen release's verdict, and how dagon-host's results read as the node's chip.
 import type { HelloResp } from '../serial/hello.ts';
-import { release_topology, releaseAppDigest, trialPercent, versionText, type ConfirmResult, type Refusal, type StatusResp, type VersionResp } from '../wasm/dagon.ts';
+import { SLOT_STATE, release_topology, releaseAppDigest, trialPercent, versionText, type ConfirmResult, type Refusal, type StatusResp, type VersionResp } from '../wasm/dagon.ts';
 import { ANNOUNCE, WRITE } from './copy.ts';
 import { topoFromNames, type Topo } from './define/model.ts';
 
@@ -32,17 +32,11 @@ export interface Progress {
   core?: number;
 }
 
-/** The recovery agent's slot in STATUS. */
-export const FACTORY_SLOT = 2;
-
 export const sameBytes = (a: Uint8Array | null, b: Uint8Array): boolean => a !== null && a.length === b.length && a.every((x, i) => x === b[i]);
-
-/** STATUS slot states (dagon_proto::payload::SlotState) that decide what the next reset runs. */
-const SLOT = { pending: 2, trying: 3, confirmed: 4 } as const;
 
 /** The running slot is the confirmed one and no slot waits for the next boot or is on trial (dagon-host's slots_settled). */
 export function slotsSettled(st: StatusResp): boolean {
-  return st.active === st.confirmed && st.slots[st.active]?.state === SLOT.confirmed && !st.slots.some((s) => s.state === SLOT.pending || s.state === SLOT.trying);
+  return st.active === st.confirmed && st.slots[st.active]?.state === SLOT_STATE.confirmed && !st.slots.some((s) => s.state === SLOT_STATE.pending || s.state === SLOT_STATE.trying);
 }
 
 /** The package's app for a node is what it runs, and nothing else is about to: dagon-host's normal write leaves it out. */

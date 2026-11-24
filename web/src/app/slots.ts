@@ -1,9 +1,6 @@
 // Reading a node's slots (STATUS) for what the detail offers.
-import { statusRows, versionOlder, versionText, type StatusResp } from '../wasm/dagon.ts';
+import { SLOT_STATE, statusRows, versionOlder, versionText, type StatusResp } from '../wasm/dagon.ts';
 import { MENU, SLOT } from './copy.ts';
-
-const SLOT_WRITTEN = 1;
-const SLOT_CONFIRMED = 4;
 
 /** Every STATUS entry a label names: what a node of an MCU the definitions do not name shows. */
 const every = (labels: readonly string[]) => labels.map((_, i) => i);
@@ -42,7 +39,7 @@ export function previousVersion(s: StatusResp | null | undefined, rows: number[]
   for (const i of rows) {
     if (i === s.active) continue;
     const other = s.slots[i];
-    const before = other.state === SLOT_CONFIRMED || (other.state === SLOT_WRITTEN && versionOlder(other.version, running));
+    const before = other.state === SLOT_STATE.confirmed || (other.state === SLOT_STATE.written && versionOlder(other.version, running));
     if (before) return versionText(other.version);
   }
   return null;

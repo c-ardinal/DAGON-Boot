@@ -1,8 +1,9 @@
 import { describe, expect, test } from 'vitest';
 import { CMD, encodeFrame, parseFrame, STATUS, WIRE } from './frame.ts';
-import { ROLE_NODE, encodeHelloResp, versionRaw, type HelloResp } from './hello.ts';
-import { SAMPLE_HUB_HELLO } from './mock.ts';
+import { encodeHelloResp, versionRaw, type HelloResp } from './hello.ts';
+import { SAMPLE_HUB_HELLO, nextWireRefusal } from './mock.ts';
 import { WebSerialTransport } from './transport.ts';
+import { HELLO_ROLE, wireVersion } from '../wasm/dagon.ts';
 
 interface FakeReadable {
   used: boolean;
@@ -120,7 +121,7 @@ describe('WebSerialTransport read loop', () => {
     const V110 = versionRaw(1, 1, 0);
 
     /** A port that answers HELLO with `hello` (null: never answers), like a real PC-connected node over USB. */
-    function answering(hello: HelloResp | null) {
+    function answering(hello: HelloResp | null | 'nextWire') {
       let ctrl: ReadableStreamDefaultController<Uint8Array> | null = null;
       const p = {
         readable: null as ReadableStream<Uint8Array> | null,
@@ -133,6 +134,12 @@ describe('WebSerialTransport read loop', () => {
             write(raw) {
               const req = parseFrame(raw);
               if (!hello) return;
+              if (hello === 'nextWire') {
+                // The whole refusal frame, its CRC in the next version's place: the cutter hands its start over.
+                const whole = encodeFrame({ flags: WIRE.FLAG_RESP, seq: req.seq, cmd: req.cmd, payload: Uint8Array.of(STATUS.ARG) });
+                whole.set(nextWireRefusal(raw));
+                return void ctrl?.enqueue(whole);
+              }
               const body = Uint8Array.of(STATUS.OK, ...encodeHelloResp(hello));
               ctrl?.enqueue(encodeFrame({ flags: WIRE.FLAG_RESP, seq: req.seq, cmd: req.cmd, payload: body }));
             },
@@ -227,13 +234,19 @@ describe('WebSerialTransport read loop', () => {
     });
 
     test('a candidate that does not answer, and none at all, are noted for the diagnostic log', async () => {
-      const t = await rebooted([answering(null), answering({ ...hub(V110, true), role: ROLE_NODE })], V110);
+      const t = await rebooted([answering(null), answering({ ...hub(V110, true), role: HELLO_ROLE.node })], V110);
       await expect(t.open()).rejects.toThrow('lost');
       expect(t.notes()).toEqual([{ kind: 'away' }, { kind: 'silent' }, { kind: 'notHub' }]);
 
       const u = await rebooted([], V110);
       await expect(u.open()).rejects.toThrow('lost');
       expect(u.notes()).toEqual([{ kind: 'away' }, { kind: 'none' }]);
+    });
+
+    test('a candidate of another wire version is noted as such, not as silent', async () => {
+      const t = await rebooted([answering('nextWire')], V110);
+      await expect(t.open()).rejects.toThrow('lost');
+      expect(t.notes()).toEqual([{ kind: 'away' }, { kind: 'wire', peer: wireVersion() + 1 }]);
     });
 
     test('a port the browser reported connected again is a candidate even though it was allowed before', async () => {

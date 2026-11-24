@@ -228,6 +228,18 @@ pub fn is_refused_start(buf: &[u8]) -> bool {
         .is_some_and(|rest| !rest.contains(&SOF[0]))
 }
 
+/// What a link that reads a frame in one piece (an I2C mailbox) hands over
+/// of `buf`: its length when it is one whole frame, or [`REFUSED_LEN`] when
+/// it starts a frame of another wire version (its sender's refusal, read
+/// with [`refusing_version`]), as the stream cutters do. `None` otherwise.
+pub fn whole_or_refused(buf: &[u8], max_payload: usize) -> Option<usize> {
+    match Frame::decode(buf, max_payload) {
+        Ok((_, n)) if n == buf.len() => Some(n),
+        Err(FrameError::BadVersion) if is_refused_start(buf) => Some(REFUSED_LEN),
+        _ => None,
+    }
+}
+
 /// Offset of the next possible frame start (`0xDA`) at or after `from`.
 pub fn find_sof(buf: &[u8], from: usize) -> Option<usize> {
     buf.get(from..)?

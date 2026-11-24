@@ -5,7 +5,7 @@
 //! for kind S, [`BootSelectV`] for kind V), [`Watchdog`].
 //! Hub side: [`StreamPort`], [`I2cBus`], [`SubControl`], and [`NodeLink`]
 //! for each link the relay reaches other nodes over (with its HELLO frames,
-//! [`hello_request`] and [`hello_answer`]).
+//! [`hello_request`], [`hello_answer`] and [`hello_reply`]).
 //!
 //! Link-type and hub-side traits are async (they wait on peripherals or on a
 //! remote hub); flash and watchdog are blocking. This crate only
@@ -290,6 +290,26 @@ pub fn hello_answer(resp: &[u8], max: usize) -> Option<HelloResp> {
     }
 }
 
+/// Why the node at the other end gave no HELLO answer.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NoHello {
+    /// Nothing that answers the request: silence, noise, a refusal of
+    /// this wire version's HELLO by status, or a broken frame.
+    NoAnswer,
+    /// The node speaks another wire version, the one it names: it refused
+    /// the request as [`dagon_proto::version_refusal`] makes the refusal.
+    WireVersion(u8),
+}
+
+/// The HELLO answer in `resp`, the response frame to the HELLO request
+/// `seq`; a refusal in another wire version is told apart from no answer.
+pub fn hello_reply(resp: &[u8], max: usize, seq: u8) -> Result<HelloResp, NoHello> {
+    if let Some(v) = dagon_proto::refusing_version(resp, seq, Cmd::Hello as u8) {
+        return Err(NoHello::WireVersion(v));
+    }
+    hello_answer(resp, max).ok_or(NoHello::NoAnswer)
+}
+
 /// Room for the longest HELLO answer frame in [`NodeLink::hello`]: its
 /// status, then the longest body. A longer frame is not a HELLO answer.
 const HELLO_ANSWER_MAX: usize = dagon_proto::frame_len(1 + HelloResp::MAX_LEN);
@@ -322,16 +342,22 @@ pub trait NodeLink {
     /// Asks the node at `addr` for its HELLO with request `seq`; `None`
     /// without a valid answer within [`NodeLink::hello_timeout_ms`].
     async fn hello(&mut self, addr: u8, seq: u8) -> Option<HelloResp> {
+        self.ask_hello(addr, seq).await.ok()
+    }
+
+    /// [`NodeLink::hello`], telling a node of another wire version
+    /// ([`NoHello::WireVersion`]) apart from one that does not answer.
+    async fn ask_hello(&mut self, addr: u8, seq: u8) -> Result<HelloResp, NoHello> {
         let max = self.max_payload();
         let mut req = [0u8; 32];
-        let n = hello_request(max, seq, &mut req)?;
+        let n = hello_request(max, seq, &mut req).ok_or(NoHello::NoAnswer)?;
         let mut resp = [0u8; HELLO_ANSWER_MAX];
         let timeout_ms = self.hello_timeout_ms();
         let len = self
             .exchange(addr, &req[..n], timeout_ms, &mut resp)
             .await
-            .ok()?;
-        hello_answer(&resp[..len], max)
+            .map_err(|_| NoHello::NoAnswer)?;
+        hello_reply(&resp[..len], max, seq)
     }
 
     /// Raw bus access to `addr`, outside DAGON frames: one write
@@ -463,6 +489,52 @@ mod tests {
         let (f, _) = Frame::decode(&req[..n], 256).unwrap();
         assert_eq!((f.seq, f.cmd), (0x85, Cmd::Hello as u8));
         assert_eq!(HelloReq::parse(f.payload).unwrap().max_payload, 256);
+    }
+
+    /// A node of the next wire version: it refuses every request as
+    /// `version_refusal` makes the refusal, in its own version.
+    struct NextWire;
+
+    impl NodeLink for NextWire {
+        fn link_id(&self) -> u8 {
+            7
+        }
+        fn max_payload(&self) -> usize {
+            256
+        }
+        fn hello_timeout_ms(&self) -> u16 {
+            40
+        }
+        async fn exchange(
+            &mut self,
+            _addr: u8,
+            frame: &[u8],
+            _timeout_ms: u16,
+            out: &mut [u8],
+        ) -> Result<usize, Status> {
+            // The request as the node reads it: of a version not its own.
+            let mut theirs = [0u8; 32];
+            theirs[..frame.len()].copy_from_slice(frame);
+            theirs[2] = PROTO_VERSION + 1;
+            let n = dagon_proto::version_refusal(&theirs[..frame.len()], out).unwrap();
+            out[2] = PROTO_VERSION + 1;
+            Ok(n)
+        }
+    }
+
+    #[test]
+    fn a_node_of_another_wire_version_is_told_apart_from_silence() {
+        assert_eq!(
+            ready(NextWire.ask_hello(0x42, 0x87)),
+            Err(NoHello::WireVersion(PROTO_VERSION + 1))
+        );
+        assert!(ready(NextWire.hello(0x42, 0x87)).is_none());
+        let mut link = OneNode {
+            addr: 0x42,
+            asked: None,
+        };
+        assert_eq!(ready(link.ask_hello(0x43, 0x88)), Err(NoHello::NoAnswer));
+        assert!(ready(link.ask_hello(0x42, 0x89)).is_ok());
     }
 
     #[test]

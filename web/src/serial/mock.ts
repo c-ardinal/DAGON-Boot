@@ -8,19 +8,12 @@
 // every response is written by its writer (dagon-wasm): no command, status
 // or field number and no payload layout is written here.
 import { CMD, encodeFrame, parseFrame, STATUS, WIRE } from './frame.ts';
-import { ROLE_HUB, ROLE_NODE, encodeHelloResp, versionRaw, type HelloResp } from './hello.ts';
+import { encodeHelloResp, versionRaw, type HelloResp } from './hello.ts';
 import { FrameQueue, type Transport } from './transport.ts';
 import sampleYaml from '../../../topology/sample.yaml?raw';
-import { readRequest, respond, servedCmds, topo_targets, wireVersion, type Target, type WireRequest } from '../wasm/dagon.ts';
+import { HELLO_MODE, HELLO_ROLE, PORT_KIND, SLOT_STATE, readRequest, respond, servedCmds, topo_targets, wireVersion, type Target, type WireRequest } from '../wasm/dagon.ts';
 
 const HDR_VERSION_AT = 0x018;
-const SLOT_EMPTY = 0;
-const SLOT_WRITTEN = 1;
-const SLOT_PENDING = 2;
-const SLOT_TRYING = 3;
-const SLOT_CONFIRMED = 4;
-const MODE_APP = 0;
-const MODE_AGENT = 3;
 
 const KEY_ID = Uint8Array.of(0x3f, 0x9a, 0x21, 0xc7, 0x00, 0x00, 0x00, 0x00);
 const V100 = versionRaw(1, 0, 0);
@@ -30,10 +23,16 @@ export const SAMPLE_HUB_HELLO: HelloResp = {
   get protoVer() {
     return wireVersion();
   },
-  role: ROLE_HUB,
-  portKind: 1,
+  get role() {
+    return HELLO_ROLE.hub;
+  },
+  get portKind() {
+    return PORT_KIND.selfBoot;
+  },
   mcuId: 1,
-  mode: 0,
+  get mode() {
+    return HELLO_MODE.app;
+  },
   activeVersion: V100,
   trial: false,
   keyId: KEY_ID,
@@ -47,7 +46,7 @@ export const SAMPLE_HUB_HELLO: HelloResp = {
 
 const node = (portKind: number, mcuId: number, maxPayload: number): HelloResp => ({
   ...SAMPLE_HUB_HELLO,
-  role: ROLE_NODE,
+  role: HELLO_ROLE.node,
   portKind,
   mcuId,
   maxPayload,
@@ -89,9 +88,9 @@ function deviceAt(link: number, addr: number): DeviceKey | null {
 }
 
 const aConfirmed = (): Slot[] => [
-  { state: SLOT_CONFIRMED, version: V100 },
-  { state: SLOT_EMPTY, version: 0 },
-  { state: SLOT_EMPTY, version: 0 },
+  { state: SLOT_STATE.confirmed, version: V100 },
+  { state: SLOT_STATE.empty, version: 0 },
+  { state: SLOT_STATE.empty, version: 0 },
 ];
 
 function device(hello: HelloResp, slots = aConfirmed()): Device {
@@ -101,11 +100,11 @@ function device(hello: HelloResp, slots = aConfirmed()): Device {
 /** Start state of the sample: every device on 1.0.0 in slot A; the watch also has its factory image. */
 function sampleDevices(hub: HelloResp): Map<DeviceKey, Device> {
   const watch = aConfirmed();
-  watch[2] = { state: SLOT_WRITTEN, version: V100 };
+  watch[2] = { state: SLOT_STATE.written, version: V100 };
   return new Map<DeviceKey, Device>([
     ['hub', device(hub)],
-    ['i2c:66', device(node(1, 2, WIRE.MAX_PAYLOAD_I2C))],
-    ['uart', device(node(2, 3, WIRE.MAX_PAYLOAD_UART), watch)],
+    ['i2c:66', device(node(PORT_KIND.selfBoot, 2, WIRE.MAX_PAYLOAD_I2C))],
+    ['uart', device(node(PORT_KIND.vendorStage2, 3, WIRE.MAX_PAYLOAD_UART), watch)],
   ]);
 }
 
@@ -113,6 +112,8 @@ export interface MockOptions {
   hello?: HelloResp;
   /** Never answer (a device that is not a node connected to the PC). */
   silent?: boolean;
+  /** Speak the next wire version: refuse every request in it, as dagon-proto's version_refusal does. */
+  nextWire?: boolean;
   /** Delay of the PC-connected node's HELLO reply, to make the checking state visible. */
   delayMs?: number;
   /** Nodes behind the node connected to the PC that do not answer RELAY. */
@@ -129,6 +130,13 @@ export interface MockOptions {
    * browser cannot reopen it without the user choosing it again.
    */
   hubAway?: number;
+}
+
+/** The refusal of `request` by a device of the next wire version, as the page's stream cutter hands it over: its first header bytes. */
+export function nextWireRefusal(request: Uint8Array): Uint8Array {
+  const head = encodeFrame({ flags: WIRE.FLAG_RESP, seq: request[4], cmd: request[5], payload: new Uint8Array(0) }).slice(0, WIRE.HEADER_LEN);
+  head[2] = wireVersion() + 1;
+  return head;
 }
 
 export class MockTransport implements Transport {
@@ -154,7 +162,7 @@ export class MockTransport implements Transport {
     const made = sampleDevices(this.opts.hello ?? SAMPLE_HUB_HELLO);
     for (const k of this.opts.factory ?? []) {
       const d = made.get(k);
-      if (d) d.hello = { ...d.hello, mode: MODE_AGENT };
+      if (d) d.hello = { ...d.hello, mode: HELLO_MODE.agent };
     }
     this.made = made;
     return made;
@@ -203,6 +211,7 @@ export class MockTransport implements Transport {
     if (!this.isOpen) throw new Error('port not open');
     if (this.opts.silent) return;
     const frame = parseFrame(raw);
+    if (this.opts.nextWire) return this.queue.put(nextWireRefusal(raw));
     const req = readRequest(frame.cmd, frame.payload, true);
     const hub = this.devices.get('hub')!;
     const body = req.refusal ?? (frame.cmd === CMD.RELAY ? await this.relay(req) : await answer(hub, frame.cmd, req, this.fellBack('hub'), this.refuse.hub));
@@ -240,8 +249,6 @@ function helloOf(dev: Device): HelloResp {
   return { ...dev.hello, activeVersion: dev.slots[dev.active].version, trial: dev.active !== dev.confirmed };
 }
 
-const SLOT_REVERTED = 5;
-
 /** Answers a request dagon-proto's reader accepted (`req`): the response payload. */
 async function answer(dev: Device, cmd: number, req: WireRequest, fallBack: boolean, refuse?: number): Promise<Uint8Array> {
   const ok = respond.status(STATUS.OK);
@@ -264,17 +271,17 @@ async function answer(dev: Device, cmd: number, req: WireRequest, fallBack: bool
       }
       return end(dev);
     case CMD.SET_PENDING:
-      if (dev.slots[req.slot]?.state !== SLOT_WRITTEN) return state;
+      if (dev.slots[req.slot]?.state !== SLOT_STATE.written) return state;
       dev.pending = req.slot;
-      dev.slots[req.slot].state = SLOT_PENDING;
+      dev.slots[req.slot].state = SLOT_STATE.pending;
       return ok;
     case CMD.REBOOT:
       reboot(dev, fallBack);
       return ok;
     case CMD.CONFIRM:
       if (dev.active === dev.confirmed) return state;
-      dev.slots[dev.confirmed].state = SLOT_WRITTEN;
-      dev.slots[dev.active].state = SLOT_CONFIRMED;
+      dev.slots[dev.confirmed].state = SLOT_STATE.written;
+      dev.slots[dev.active].state = SLOT_STATE.confirmed;
       dev.confirmed = dev.active;
       return ok;
     case CMD.SHOW:
@@ -299,7 +306,7 @@ async function end(dev: Device): Promise<Uint8Array> {
   dev.xfer = null;
   const body = new Uint8Array(x.body);
   const version = new DataView(new Uint8Array(x.hdr).buffer).getUint32(HDR_VERSION_AT, true);
-  dev.slots[x.slot] = { state: SLOT_WRITTEN, version };
+  dev.slots[x.slot] = { state: SLOT_STATE.written, version };
   return respond.digest(new Uint8Array(await crypto.subtle.digest('SHA-256', body)));
 }
 
@@ -307,15 +314,15 @@ async function end(dev: Device): Promise<Uint8Array> {
 function reboot(dev: Device, fallBack: boolean): void {
   const next = dev.pending;
   dev.pending = null;
-  dev.hello = { ...dev.hello, mode: MODE_APP };
+  dev.hello = { ...dev.hello, mode: HELLO_MODE.app };
   if (next === null) return;
   if (fallBack) {
-    dev.slots[next].state = SLOT_REVERTED;
+    dev.slots[next].state = SLOT_STATE.reverted;
     dev.fellBack = true;
     return;
   }
   dev.active = next;
-  dev.slots[next].state = SLOT_TRYING;
+  dev.slots[next].state = SLOT_STATE.trying;
 }
 
 const LOG_GENERATION = 12;
@@ -328,7 +335,7 @@ function encodeStatus(dev: Device): Uint8Array {
   const slots = dev.slots.map((s, i) => ({
     state: s.state,
     version: s.version,
-    digest16: new Uint8Array(DIGEST16_LEN).fill(s.state === SLOT_EMPTY ? 0 : 0xa4 + i),
+    digest16: new Uint8Array(DIGEST16_LEN).fill(s.state === SLOT_STATE.empty ? 0 : 0xa4 + i),
   }));
   return respond.slots(slots, {
     active: dev.active,

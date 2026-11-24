@@ -3,9 +3,6 @@
 // encoder here exists only for the mock PC-connected node, and is dagon-proto's too.
 import { respond } from '../wasm/dagon.ts';
 
-export const ROLE_HUB = 0;
-export const ROLE_NODE = 1;
-
 export interface HelloReq {
   protoVer: number;
   maxPayload: number;

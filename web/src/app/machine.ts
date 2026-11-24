@@ -27,7 +27,8 @@ export type Ev =
   | 'disconnect';
 
 /** Why connecting stopped (notChosen, portFailed, silentHub). */
-export type ConnectFailure = 'not-found' | 'busy' | 'denied' | 'no-response' | 'unavailable';
+/** `wire`: the node connected to the PC answered in another wire version. */
+export type ConnectFailure = 'not-found' | 'busy' | 'denied' | 'no-response' | 'wire' | 'unavailable';
 
 export interface Ctx {
   /** A configuration is on the canvas. */

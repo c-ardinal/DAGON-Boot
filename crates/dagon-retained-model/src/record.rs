@@ -9,7 +9,7 @@ use dagon_format::crc32;
 use std::collections::HashMap;
 use std::ops::Range;
 
-/// Largest region (VERSION 0x21 addresses it with `offset u16`).
+/// Largest region (VERSION field 0x12 addresses it with `offset u16`).
 pub const RECORD_MAX: usize = 4096;
 /// Writers per record (the opener field is 4 bits).
 pub const WRITERS_MAX: usize = 16;
@@ -776,8 +776,10 @@ pub fn summary(layout: u8, r: &Replay) -> Vec<u8> {
     s
 }
 
-/// VERSION 0x21 fixed overhead: status, TLV count, id, len, offset u16.
-pub const VERSION_PAGE_OVERHEAD: usize = 6;
+/// Fixed overhead of a VERSION response carrying one record page as field
+/// 0x12: status u8, the field key (1 byte for 0x12), its LEB128 len (2
+/// bytes for 128..=255) and `offset u16`.
+pub const VERSION_PAGE_OVERHEAD: usize = 1 + 1 + 2 + 2;
 
 /// `min(255 - 2, max_payload - overhead)`.
 pub const fn record_page(max_payload: usize) -> usize {

@@ -311,9 +311,11 @@ export class OperateLink {
     this.go('chosen');
     try {
       this.hubHello = await this.call((h) => h.hello(LOCAL));
-    } catch {
+    } catch (e) {
       await this.drop();
-      return this.fail(my, 'noAnswer', 'no-response');
+      // dagon-host's reason for an answer in another wire version (dagon_host::reason).
+      const wire = e instanceof Error && e.message === 'WIRE VERSION';
+      return this.fail(my, 'noAnswer', wire ? 'wire' : 'no-response');
     }
     if (my !== this.session) return;
     this.status = ANNOUNCE.hubConnected;

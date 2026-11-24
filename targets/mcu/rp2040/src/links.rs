@@ -16,10 +16,10 @@ pub type I2c<'d, T> = I2cLink<RpI2c<'d, T>>;
 pub type Uart<'d, P, const TX: usize, const RX: usize> =
     crate::uart::UartLink<PioStream<'d, P, TX, RX>, fn() -> u64>;
 
-use dagon_port::{BusError, I2cBus, NodeLink, StreamPort};
+use dagon_port::{BusError, I2cBus, NoHello, NodeLink, StreamPort};
 use dagon_proto::mailbox::{self, STATE_LEN};
 use dagon_proto::payload::HelloResp;
-use dagon_proto::{frame_len, max_payload, Frame, Status};
+use dagon_proto::{frame_len, max_payload, whole_or_refused, Status};
 use embassy_rp::i2c::Instance as I2cInstance;
 use embassy_rp::i2c::{self, AbortReason, Async};
 use embassy_rp::pio::Instance as PioInstance;
@@ -176,6 +176,12 @@ impl<I: I2cBus> I2cLink<I> {
     pub async fn hello(&mut self, addr: u8, seq: u8) -> Option<HelloResp> {
         NodeLink::hello(self, addr, seq).await
     }
+
+    /// [`I2cLink::hello`], telling a node of another wire version apart
+    /// from one that does not answer.
+    pub async fn ask_hello(&mut self, addr: u8, seq: u8) -> Result<HelloResp, NoHello> {
+        NodeLink::ask_hello(self, addr, seq).await
+    }
 }
 
 /// `raw` is the I2C_RAW transfer ([`I2cLink::rom`]).
@@ -251,9 +257,11 @@ impl<I: I2cBus> Link for I2cLink<I> {
                 .await
                 .map_err(timeout)?
                 .map_err(|_| LinkError::Corrupt)?;
-            return match Frame::decode(&self.buf[..n], max_payload::I2C) {
-                Ok((_, len)) if len == n => Ok(&self.buf[..n]),
-                _ => Err(LinkError::Corrupt),
+            // A frame of another wire version is handed over as its start:
+            // the node's refusal, read by the requester.
+            return match whole_or_refused(&self.buf[..n], max_payload::I2C) {
+                Some(len) => Ok(&self.buf[..len]),
+                None => Err(LinkError::Corrupt),
             };
         }
     }

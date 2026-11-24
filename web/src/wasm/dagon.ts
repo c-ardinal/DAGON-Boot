@@ -25,6 +25,7 @@ import init, {
   release_app_digest,
   release_core_versions,
   release_versions,
+  refusing_version,
   use_builtin_definitions,
   supported_boards as boards,
   version_older,
@@ -116,8 +117,6 @@ export interface UpdateEvent {
   bootCore: boolean;
 }
 
-/** SHOW phases (dagon_proto::payload::phase). */
-export const PHASE = { transfer: 1, verify: 2, reboot: 3, confirm: 4, rejected: 5, failed: 6, rom: 7 } as const;
 
 export interface NodeFailure {
   /** dagon-host's short reason: `NO ANSWER`, `ROLLED BACK`, `E_SIGNATURE`, ... */
@@ -242,6 +241,18 @@ export interface WireNumbers {
   maxPayloadUsb: number;
   maxPayloadUart: number;
   maxPayloadI2c: number;
+  /** HELLO `role` (dagon_proto::payload::role). */
+  role: { hub: number; node: number };
+  /** HELLO `mode` (dagon_proto::payload::mode). */
+  mode: { app: number; update: number; recovery: number; agent: number };
+  /** STATUS slot states (dagon_proto::payload::SlotState). */
+  slot: { empty: number; written: number; pending: number; trying: number; confirmed: number; reverted: number };
+  /** The recovery agent's entry in STATUS's slots (dagon_format::statelog::slot::FACTORY). */
+  factorySlot: number;
+  /** HELLO `port_kind` (dagon_format::header::port_kind). */
+  port: { selfBoot: number; vendorStage2: number };
+  /** SHOW phases (dagon_proto::payload::phase). */
+  phase: { transfer: number; verify: number; reboot: number; confirm: number; rejected: number; failed: number; rom: number };
 }
 
 let numbers: WireNumbers | undefined;
@@ -275,12 +286,36 @@ export function wireNumbers(): WireNumbers {
       maxPayloadUsb: w.max_payload_usb,
       maxPayloadUart: w.max_payload_uart,
       maxPayloadI2c: w.max_payload_i2c,
+      role: { hub: w.role_hub, node: w.role_node },
+      mode: { app: w.mode_app, update: w.mode_update, recovery: w.mode_recovery, agent: w.mode_agent },
+      slot: { empty: w.slot_empty, written: w.slot_written, pending: w.slot_pending, trying: w.slot_trying, confirmed: w.slot_confirmed, reverted: w.slot_reverted },
+      factorySlot: w.slot_factory,
+      port: { selfBoot: w.port_self_boot, vendorStage2: w.port_vendor_stage2 },
+      phase: { transfer: w.phase_transfer, verify: w.phase_verify, reboot: w.phase_reboot, confirm: w.phase_confirm, rejected: w.phase_rejected, failed: w.phase_failed, rom: w.phase_rom },
     };
     return numbers;
   } finally {
     w.free();
   }
 }
+
+/** A group of the wire's numbers, read from dagon-wasm when a member is first read (it is loaded by then, not when this module is). */
+function named<K extends string>(group: (w: WireNumbers) => Record<K, number>): Readonly<Record<K, number>> {
+  return new Proxy({} as Record<K, number>, { get: (_, k) => group(wireNumbers())[k as K] });
+}
+
+/** HELLO `role`. */
+export const HELLO_ROLE = named((w) => w.role);
+/** HELLO `mode`. */
+export const HELLO_MODE = named((w) => w.mode);
+/** HELLO `port_kind`. */
+export const PORT_KIND = named((w) => w.port);
+/** STATUS slot states. */
+export const SLOT_STATE = named((w) => w.slot);
+/** The recovery agent's entry in STATUS's slots. */
+export const factorySlot = (): number => wireNumbers().factorySlot;
+/** SHOW phases. */
+export const PHASE = named((w) => w.phase);
 
 /** A request read by dagon-proto's reader; only the members of its command mean something. */
 export interface WireRequest {
@@ -445,6 +480,11 @@ export function supportedBoards(): Board[] {
 /** The board a node naming only `mcu` stands for; undefined when the MCU has none (several boards, none marked). */
 export function defaultBoard(mcu: string): string | undefined {
   return supportedBoards().find((b) => b.mcu === mcu && b.isDefault)?.id;
+}
+
+/** The peer's wire version when `frame` is its refusal, in another wire version, of the request (`seq`, `cmd`); null otherwise (dagon_proto::refusing_version). */
+export function refusingVersion(frame: Uint8Array, seq: number, cmd: number): number | null {
+  return refusing_version(frame, seq, cmd) ?? null;
 }
 
 /** The wire version this page speaks (dagon_proto::PROTO_VERSION). */

@@ -128,6 +128,12 @@ describe('operating mode against the in-memory PC-connected node', () => {
     expect([op.state, op.failure, op.status]).toEqual(['silentHub', 'no-response', BAND.noResponse.chip]);
   }, 20_000);
 
+  test('a node connected to the PC of another wire version: told as such, not as no answer', async () => {
+    const { op } = session({ nextWire: true });
+    await op.connect();
+    expect([op.state, op.failure, op.status]).toEqual(['silentHub', 'wire', BAND.wireVersion.chip]);
+  }, 20_000);
+
   test('closing the chooser and a busy port end in their own states', async () => {
     for (const [f, want] of [['not-found', 'notChosen'], ['busy', 'portFailed']] as const) {
       const op = new Operate({ open: () => Promise.reject(new ConnectError(f)) });

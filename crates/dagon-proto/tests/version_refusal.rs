@@ -50,6 +50,13 @@ fn unknown_version_is_refused_explicitly() {
     // The stream cutters hand over the first HEADER_LEN bytes: enough.
     assert_eq!(version_refusal(&req[..HEADER_LEN], &mut out), Some(n));
     assert!(dagon_proto::is_refused_start(&req));
+    // A link reading one frame in one piece hands over the same start.
+    assert_eq!(
+        dagon_proto::whole_or_refused(&theirs, 256),
+        Some(HEADER_LEN)
+    );
+    assert_eq!(dagon_proto::whole_or_refused(&out[..n], 256), Some(n));
+    assert_eq!(dagon_proto::whole_or_refused(&out[..n - 1], 256), None);
     // Noise that looks like a start right before a frame is not handed over.
     assert!(!dagon_proto::is_refused_start(b"\xDA\x6F junk\xDA\x6F"));
     assert!(!dagon_proto::is_refused_start(b"\xDA\x6F j"));

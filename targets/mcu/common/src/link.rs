@@ -1,7 +1,8 @@
 //! One interface for every DAGON hop: [`Link`] carries whole frames up (to
 //! the PC) or down (away from it), whatever the medium.
-//! Each MCU package lists the link kinds it offers in a [`KindInfo`] table
-//! (`LINK_KINDS`) and constructs them as `links::<Kind>::new(..)`; a board
+//! Each MCU package's [`KindInfo`] table (`LINK_KINDS`) comes from its MCU
+//! definition's `[links]` ([`kinds_of_definition`]); the package constructs
+//! them as `links::<Kind>::new(..)`; a board
 //! package names the pins (`uplink_<kind>()` / `downlink_<kind>()`).
 //!
 //! The kind names are the 構成's, from the one list of link kinds
@@ -63,6 +64,88 @@ pub fn write_matrix(table: &[KindInfo], out: &mut impl core::fmt::Write) -> core
         writeln!(out, "| `{}` | {up} | {down} |", k.name())?;
     }
     Ok(())
+}
+
+/// The number of link kinds (rows of a `LINK_KINDS` table).
+pub const KIND_COUNT: usize = Kind::ALL.len();
+
+/// The `LINK_KINDS` table of an MCU definition's `[links]` (`up`, `down`:
+/// the kinds the firmware implements, as `dagon-mcu-build` writes them,
+/// `LINKS_UP` and `LINKS_DOWN`): one row per kind, in code order. A listed
+/// kind is `Yes`; another is `NotYet` upwards, and downwards `NotYet` on an
+/// MCU with downlinks and `No` on one without (a node). A name that is no
+/// link kind stops the build.
+pub const fn kinds_of_definition(up: &[&str], down: &[&str]) -> [KindInfo; KIND_COUNT] {
+    known(up);
+    known(down);
+    let mut out = [KindInfo {
+        kind: Kind::ALL[0],
+        up: Support::No,
+        down: Support::No,
+    }; KIND_COUNT];
+    let mut i = 0;
+    while i < KIND_COUNT {
+        let kind = Kind::ALL[i];
+        out[i] = KindInfo {
+            kind,
+            up: of(kind, up, true),
+            down: of(kind, down, !down.is_empty()),
+        };
+        i += 1;
+    }
+    out
+}
+
+/// `kind`'s support when `listed` names the kinds that are `Yes`.
+const fn of(kind: Kind, listed: &[&str], else_not_yet: bool) -> Support {
+    if names(listed, kind.name()) {
+        Support::Yes
+    } else if else_not_yet {
+        Support::NotYet
+    } else {
+        Support::No
+    }
+}
+
+/// Stops the build on a name of `listed` that is no link kind.
+const fn known(listed: &[&str]) {
+    let mut i = 0;
+    while i < listed.len() {
+        let mut k = 0;
+        let mut found = false;
+        while k < KIND_COUNT {
+            found |= same(listed[i], Kind::ALL[k].name());
+            k += 1;
+        }
+        assert!(found, "[links] names a link kind that does not exist");
+        i += 1;
+    }
+}
+
+const fn names(listed: &[&str], name: &str) -> bool {
+    let mut i = 0;
+    while i < listed.len() {
+        if same(listed[i], name) {
+            return true;
+        }
+        i += 1;
+    }
+    false
+}
+
+const fn same(a: &str, b: &str) -> bool {
+    let (a, b) = (a.as_bytes(), b.as_bytes());
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut i = 0;
+    while i < a.len() {
+        if a[i] != b[i] {
+            return false;
+        }
+        i += 1;
+    }
+    true
 }
 
 /// `kind`'s support in `dir` according to `table` (`No` if absent).

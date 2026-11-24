@@ -72,55 +72,22 @@ mod tests {
         assert!(!known("unknown-mcu"));
     }
 
-    /// `[links]` of each MCU definition is the firmware's `LINK_KINDS`
-    /// (the rows marked `Support::Yes`), as sets.
+    /// The firmware's `LINK_KINDS` is its MCU definition's `[links]`: each
+    /// package builds the table from what `dagon-mcu-build` writes of it, and
+    /// holds no second list.
     #[test]
-    fn definitions_match_the_firmware_link_kinds() {
-        const FW: [(&str, &str); 3] = [
-            (
-                "rp2040",
-                include_str!("../../../targets/mcu/rp2040/src/kinds.rs"),
-            ),
-            (
-                "stm32f401re",
-                include_str!("../../../targets/mcu/stm32f401re/src/links.rs"),
-            ),
-            (
-                "esp32s3",
-                include_str!("../../../targets/mcu/esp32s3/src/links.rs"),
-            ),
+    fn the_firmware_link_kinds_come_from_the_definitions() {
+        const FW: [&str; 3] = [
+            include_str!("../../../targets/mcu/rp2040/src/kinds.rs"),
+            include_str!("../../../targets/mcu/stm32f401re/src/links.rs"),
+            include_str!("../../../targets/mcu/esp32s3/src/links.rs"),
         ];
-        for (mcu, src) in FW {
-            let (mut up, mut down) = (Vec::new(), Vec::new());
-            for row in src.split("KindInfo {").skip(1) {
-                let field = |name: &str| {
-                    let at = row.find(&format!("{name}: ")).unwrap() + name.len() + 2;
-                    row[at..].split(',').next().unwrap().trim().to_string()
-                };
-                let variant = field("kind");
-                let kind = LinkKind::ALL
-                    .iter()
-                    .copied()
-                    .find(|k| format!("Kind::{k:?}") == variant)
-                    .unwrap_or_else(|| panic!("{mcu}: {variant}"));
-                if field("up") == "Support::Yes" {
-                    up.push(kind);
-                }
-                if field("down") == "Support::Yes" {
-                    down.push(kind);
-                }
-            }
-            let sorted = |v: &[LinkKind]| {
-                let mut v = v.to_vec();
-                v.sort();
-                v
-            };
-            assert_eq!(sorted(available(mcu, Dir::Up)), sorted(&up), "{mcu} up");
-            assert_eq!(
-                sorted(available(mcu, Dir::Down)),
-                sorted(&down),
-                "{mcu} down"
+        for src in FW {
+            assert!(
+                src.contains("kinds_of_definition(crate::LINKS_UP, crate::LINKS_DOWN)"),
+                "{src}"
             );
+            assert!(!src.contains("KindInfo {"), "{src}");
         }
     }
 }

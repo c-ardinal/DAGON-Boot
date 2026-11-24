@@ -628,7 +628,8 @@ pub struct McuDef {
     /// ROM I2C bootloader (`stm32-i2c-rom`): `name` (as check messages call it), `addr`, `max_hz`,
     /// `erase_sectors`, `pairs = [{ controller, sda, scl }]` it listens on.
     pub rom_i2c: Option<RomI2c>,
-    /// Link kinds the MCU package's firmware implements (its `LINK_KINDS`).
+    /// Link kinds the MCU package's firmware implements, `up` and `down`: the one source of its
+    /// `LINK_KINDS`, which the package builds from them.
     #[serde(default)]
     pub links: Links,
     /// How the boot stage that writes the app (`[writers] app` names a kind other than `app`)

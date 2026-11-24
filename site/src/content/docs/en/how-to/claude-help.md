@@ -3,7 +3,7 @@ title: "Claude help in your project"
 description: "The Claude Code instructions and skills a new project comes with, and the plugin used to port DAGON."
 ---
 
-`dagon new` also writes Claude Code files into the project. Claude Code opened in the project folder starts out knowing the layout, the commands and the rules.
+`dagon new` also writes the project files of one agent into the project, the ones its [agent definition](/en/reference/agent-definition/) lists: by default the builtin Claude's Claude Code files below. `--agent <id>` writes another agent's files instead, and `--no-agent` writes none. Claude Code opened in the project folder starts out knowing the layout, the commands and the rules.
 
 | File | What it is for |
 |---|---|

@@ -1,6 +1,6 @@
 ---
 name: add-a-board-by-mcu
-description: Add a node on a board that is not in DAGON's board table, chosen by its MCU (rp2040, stm32f401re or esp32s3), writing the board's definition in dagon.toml from the board's documents. Use when the developer wants to use their own or an unlisted board.
+description: Add a node on a board that is not in DAGON's board table, chosen by its MCU, writing the board's definition in dagon.toml from the board's documents. Use when the developer wants to use their own or an unlisted board.
 argument-hint: <node id> <mcu> [board document URL or text]
 ---
 
@@ -11,8 +11,12 @@ given).
 
 ## What DAGON needs
 
-- MCU ids and the smallest flash each layout needs: `rp2040` (4 MiB),
-  `stm32f401re` (512 KiB), `esp32s3` (16 MiB). A board with less flash
+- The MCU ids, and each MCU's flash maps with their sizes, are in the
+  MCU definitions of the DAGON this project builds with (the MCU and
+  board definitions page of its documentation, Reference); this file
+  copies none of them. The board's `flash_bytes` must hold one of its
+  MCU's flash maps, and `dagon topo check` reports a board that does not
+  and an MCU id DAGON does not know. A board with too little flash
   cannot be used; say so instead of continuing.
 - A board definition in `dagon.toml`, `[board.<board id>]`: the board
   schema without `id` (the table name is the board id, never a node id).
@@ -34,7 +38,7 @@ given).
   does not build.
 - The node in `topology.yaml` with `mcu:` and `board: <board id>`, its
   `role` (`coordinator` or `node`), `port`
-  (`self-boot`; `vendor-stage2` for `esp32s3`), a `tag`, and a link from
+  (the `port` of its MCU definition, `self-boot` or `vendor-stage2`), a `tag`, and a link from
   the node nearer the PC. Copy the shape of an existing node in the file.
 - On the link, each end's `port`: a `[[link_port]]` name of that node's MCU.
   For a node linked over I2C: its end's address and `node_pins` (SDA and SCL on the

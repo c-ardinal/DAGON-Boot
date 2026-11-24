@@ -444,6 +444,13 @@ pub struct NewArgs {
     /// Git tag of DAGON [default: cli-v<this CLI's version>]
     #[arg(long, value_name = "TAG")]
     pub dagon_tag: Option<String>,
+    /// Agent whose project files (instructions, skills) to write, from its
+    /// definition [default: the first agent]
+    #[arg(long, value_name = "ID")]
+    pub agent: Option<String>,
+    /// Write no agent's project files
+    #[arg(long, conflicts_with = "agent")]
+    pub no_agent: bool,
 }
 
 #[derive(Debug, Default, PartialEq, Args)]

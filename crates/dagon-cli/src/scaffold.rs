@@ -1104,7 +1104,14 @@ pub fn new_command(a: &NewArgs) -> Result<(), String> {
         a.dagon_git.as_deref(),
         a.dagon_tag.as_deref(),
     )?;
-    let made = new_project(&dir, &name, &yaml, &keys, &src)?;
+    let agent = if a.no_agent {
+        Vec::new()
+    } else {
+        let home = crate::consent::home().ok();
+        crate::agents::Agents::load(home.as_deref())
+            .project_files(a.agent.as_deref(), home.as_deref())?
+    };
+    let made = new_project_with(&dir, &name, &yaml, &keys, &src, &agent)?;
     for line in &made {
         println!("{line}");
     }
@@ -1121,26 +1128,9 @@ fn home() -> Result<PathBuf, String> {
     crate::consent::home().map_err(|_| "cannot find the home folder; pass --keys <dir>".into())
 }
 
-/// Claude Code instructions and skills for the developer's own Claude Code:
-/// fixed text, so a project never carries keys or paths of this PC in them.
-const CLAUDE_FILES: [(&str, &str); 4] = [
-    ("CLAUDE.md", include_str!("scaffold/claude/CLAUDE.md")),
-    (
-        ".claude/skills/fix-a-failing-build/SKILL.md",
-        include_str!("scaffold/claude/fix-a-failing-build.md"),
-    ),
-    (
-        ".claude/skills/add-a-board-by-mcu/SKILL.md",
-        include_str!("scaffold/claude/add-a-board-by-mcu.md"),
-    ),
-    (
-        ".claude/skills/explain-a-topology-problem/SKILL.md",
-        include_str!("scaffold/claude/explain-a-topology-problem.md"),
-    ),
-];
-
 /// The documentation's words page: the one list of DAGON's words, which
-/// the project's CLAUDE.md carries in place of `WORDS_AT`.
+/// an agent's project file (the builtin Claude's CLAUDE.md) carries in
+/// place of `WORDS_AT`.
 const WORDS_PAGE: &str = include_str!("../../../site/src/content/docs/explanation/words.md");
 const WORDS_AT: &str = "<!-- words -->";
 
@@ -1162,13 +1152,22 @@ fn word_list() -> String {
     out.join("\n")
 }
 
-/// A file's text as `dagon new` writes it: CLAUDE.md with the word list.
-fn project_text(file: &str, text: &str) -> String {
-    if file == "CLAUDE.md" {
+/// An agent's project file as `dagon new` writes it: with the word list
+/// in place of `WORDS_AT`.
+fn project_text(text: &str) -> String {
+    if text.contains(WORDS_AT) {
         text.replace(WORDS_AT, &word_list())
     } else {
         text.to_string()
     }
+}
+
+/// The project files of the first builtin agent (`dagon new` without
+/// `--agent`).
+pub(crate) fn default_agent_files() -> Vec<(String, String)> {
+    crate::agents::Agents::load(None)
+        .project_files(None, None)
+        .expect("the builtin agents' project files are built in")
 }
 
 /// `path` as its folder and its last name, for the genfs calls.
@@ -1185,10 +1184,7 @@ fn split(path: &Path) -> Result<(&Path, String), String> {
     Ok((dir, name))
 }
 
-/// Creates the project folder: dagon.toml, topology.yaml, .gitignore, the
-/// Claude Code files and,
-/// when `keys` holds none, a signing key pair there (outside any git work
-/// tree). Refuses a non-empty folder.
+/// [`new_project_with`] the first builtin agent's project files.
 pub fn new_project(
     dir: &Path,
     name: &str,
@@ -1196,46 +1192,57 @@ pub fn new_project(
     keys: &Path,
     src: &crate::dagonsrc::NewSource,
 ) -> Result<Vec<String>, String> {
+    new_project_with(dir, name, yaml, keys, src, &default_agent_files())
+}
+
+/// Creates the project folder: dagon.toml, topology.yaml, .gitignore, the
+/// chosen agent's project files `agent` ((path, text), from its
+/// definition) and, when `keys` holds none, a signing key pair there
+/// (outside any git work tree). Refuses a non-empty folder.
+pub fn new_project_with(
+    dir: &Path,
+    name: &str,
+    yaml: &str,
+    keys: &Path,
+    src: &crate::dagonsrc::NewSource,
+    agent: &[(String, String)],
+) -> Result<Vec<String>, String> {
     if dir.exists() && std::fs::read_dir(dir).map_or(true, |mut d| d.next().is_some()) {
         return Err(format!("{} exists and is not empty", dir.display()));
     }
     dagon_topology::parse_str(yaml).map_err(|e| format!("topology: {e}"))?;
     let existed = dir.exists();
     std::fs::create_dir_all(dir).map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
-    let files = [("topology.yaml", yaml), (".gitignore", "/out/\ntarget/\n")];
-    let written = files
+    let own = [("topology.yaml", yaml), (".gitignore", "/out/\ntarget/\n")];
+    let files: Vec<(&str, String)> = own
         .into_iter()
-        .chain(CLAUDE_FILES)
-        .try_for_each(|(f, text)| {
-            genfs::write(dir, &genfs::Rel::new(f)?, project_text(f, text).as_bytes())
-        });
+        .map(|(f, t)| (f, t.to_string()))
+        .chain(agent.iter().map(|(f, t)| (f.as_str(), project_text(t))))
+        .collect();
+    let written = files
+        .iter()
+        .try_for_each(|(f, text)| genfs::write(dir, &genfs::Rel::new(f)?, text.as_bytes()));
     let made = written.and_then(|_| init_project(dir, name, "topology.yaml", keys, src));
     let mut made = match made {
         Ok(m) => m,
         Err(e) => {
             // The folder was empty (or not there): what is in it now is this
             // call's, so taking it away lets the next try start clean.
-            undo_new(dir, existed);
+            undo_new(dir, existed, files.iter().map(|(f, _)| *f));
             return Err(e);
         }
     };
-    for (f, _) in files.into_iter().chain(CLAUDE_FILES) {
+    for (f, _) in &files {
         made.push(format!("created    {f}"));
     }
     Ok(made)
 }
 
 /// Removes what a failed `new_project` wrote into `dir` (empty before):
-/// its files and the folders they made, and `dir` itself when it was new.
-fn undo_new(dir: &Path, existed: bool) {
-    for (f, _) in [
-        ("topology.yaml", ""),
-        (".gitignore", ""),
-        ("dagon.toml", ""),
-    ]
-    .into_iter()
-    .chain(CLAUDE_FILES)
-    {
+/// its files `files` and dagon.toml and the folders they made, and `dir`
+/// itself when it was new.
+fn undo_new<'a>(dir: &Path, existed: bool, files: impl Iterator<Item = &'a str>) {
+    for f in files.chain(["dagon.toml"]) {
         if let Ok(r) = genfs::Rel::new(f) {
             let _ = genfs::remove(dir, &r);
         }

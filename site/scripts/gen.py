@@ -233,6 +233,7 @@ TYPES = {
     "u32": ("整数", "integer"),
     "Vec<String>": ("文字列の配列", "array of strings"),
     "Vec<WayDef>": ("`[[ways]]`テーブル", "`[[ways]]` tables"),
+    "Vec<ProjectFile>": ("`[[project_files]]`テーブル", "`[[project_files]]` tables"),
     "Transport": ("`[ways.transport]`テーブル", "`[ways.transport]` table"),
     "SystemVia": ("文字列", "string"),
     "bool": ("真偽値", "boolean"),
@@ -286,6 +287,7 @@ def agent_definition(lang="en"):
     way = field_table(rust_struct(mod, "WayDef"), lang)
     command = field_table(rust_struct(AGENTS / "command.rs", "Command"), lang)
     http = field_table(rust_struct(AGENTS / "http.rs", "MessagesHttp"), lang)
+    files = field_table(rust_struct(mod, "ProjectFile"), lang)
     rows = "\n".join(builtin)
     if lang == "ja":
         body = f"""
@@ -316,6 +318,12 @@ DAGONにない種類、使用済のidがあるファイルは読込しません�
 ### `kind = "messages-http"`
 
 {http}
+
+## `[[project_files]]`
+
+`dagon new`は、選択したエージェント（`--agent`、既定は最初のエージェント）のファイルだけをプロジェクトに出力します。`--no-agent`の場合は出力しません。
+
+{files}
 
 ## 組込のエージェント
 
@@ -353,6 +361,13 @@ number refuses the file and says why.
 ### `kind = "messages-http"`
 
 {http}
+
+## `[[project_files]]`
+
+`dagon new` writes the files of the chosen agent only (`--agent`, by default
+the first agent) into the project, and none with `--no-agent`.
+
+{files}
 
 ## Builtin agents
 

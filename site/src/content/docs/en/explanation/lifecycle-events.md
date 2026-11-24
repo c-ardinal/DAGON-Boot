@@ -1227,8 +1227,8 @@ listed, and a test asserts each pair.
 | Limit | Value | Source of truth | Must fit it |
 |---|---|---|---|
 | Link payload per kind | USB 1088, UART 1024, I2C 256 bytes | `dagon_proto::max_payload` | every request and reply; VERSION response; display text; conformance detail |
-| Smallest link payload | `max_payload::MIN` = the minimum over the kinds above (derived, not written) | `dagon-proto` | VERSION response as a whole (every TLV set the device may answer) |
-| VERSION value | ≤ 255 bytes | VERSION encoding (`dagon-proto` command table) | every number in 5.4 |
+| Smallest link payload | `max_payload::MIN` = the minimum over the kinds above (derived, not written) | `dagon-proto` | VERSION response as a whole (every field set the device may answer) |
+| VERSION field value | ≤ 255 bytes | VERSION encoding (`dagon-proto` command table) | every number in 5.4 |
 | Extension time budget | `max_run_us ≤ APP_EXT_MAX_US` | `dagon-events` `const fn` from the MCU definition's `[watchdog]` | `dagon gen` validator; the serving task's measurement; the manifest |
 | Boot action program | `ops ≤ 32` per event, `delay total ≤ 50 ms`, `bytes ≤ 8` per `bus_write`, `delay ≤ 20 ms` | `dagon_format::bootprogram` constants | `dagon gen` validator; the boot loader interpreter; the `boot_wiring.rs` table type |
 | Live event payload | ≤ 16 bytes for boot events (by value); larger app/host payloads by reference | `dagon-events` size assertions | `Published` snapshot; the compact form |

@@ -398,10 +398,51 @@ fn the_page_holds_no_command_status_or_field_number() {
     );
 }
 
+/// The lines (from 1) of Rust `text` that are an arm, directly inside a
+/// `match` over a command or status, whose pattern starts with a number
+/// (`0x01 => ...`, `1 | 2 => ...`), each with the line of its `match`.
+/// Comment lines are left out.
+fn rust_match_arms(text: &str) -> Vec<(usize, usize)> {
+    let mut hits = Vec::new();
+    // Brace depth inside a match over a wire name; 0 outside one.
+    let mut depth = 0usize;
+    let mut head_at = 0usize;
+    let word = |c: char| c.is_ascii_alphanumeric() || c == '_';
+    for (i, l) in text.lines().enumerate() {
+        let code = l.trim_start();
+        if code.starts_with("//") {
+            continue;
+        }
+        if depth > 0 {
+            if depth == 1 && starts_with_number(code) && code.contains("=>") {
+                hits.push((i + 1, head_at));
+            }
+            depth += l.matches('{').count();
+            depth = depth.saturating_sub(l.matches('}').count());
+            continue;
+        }
+        let at = l.match_indices("match").find(|(at, _)| {
+            let before = l[..*at].chars().next_back();
+            let after = l[at + "match".len()..].chars().next();
+            !before.is_some_and(word) && after.is_some_and(char::is_whitespace)
+        });
+        if let Some((at, _)) = at {
+            let rest = &l[at..];
+            let head = rest.split('{').next().unwrap_or("");
+            if rest.contains('{') && is_wire_name(head, &RUST_WIRE_WORDS) {
+                head_at = i + 1;
+                depth = rest.matches('{').count();
+                depth = depth.saturating_sub(rest.matches('}').count());
+            }
+        }
+    }
+    hits
+}
+
 /// Shipped Rust outside dagon-proto compares no command or status with a
-/// literal on either side and gives no command or status name a number of
-/// its own: every crate, target and sample is read, whether it names
-/// dagon_proto or not.
+/// literal on either side, matches none against a literal, and gives no
+/// command or status name a number of its own: every crate, target and
+/// sample is read, whether it names dagon_proto or not.
 #[test]
 fn shipped_rust_writes_no_command_or_status_number() {
     let rust = |l: &str| line_names_a_wire_number(l, false, &RUST_WIRE_WORDS);
@@ -423,6 +464,21 @@ fn shipped_rust_writes_no_command_or_status_number() {
     ] {
         assert!(!rust(fine), "caught: {fine}");
     }
+    for planted in [
+        "match frame.cmd {\n    0x01 => hello(),\n    _ => {}\n}",
+        "let r = match status {\n    Cmd::Hello => 0,\n    3 | 4 => 1,\n    _ => 2,\n};",
+        "match req.cmd {\n    x if x == 2 => {}\n    0x10 => {\n        go();\n    }\n    _ => {}\n}",
+    ] {
+        assert!(!rust_match_arms(planted).is_empty(), "not caught: {planted}");
+    }
+    for fine in [
+        "match Cmd::from(frame.cmd) {\n    Some(Cmd::Hello) => {}\n    _ => {}\n}",
+        "match frame.cmd {\n    c => match n {\n        1 => {}\n        _ => {}\n    },\n}",
+        "match kind {\n    1 => {}\n    _ => {}\n}\nlet cmd = 1u8;",
+        "// match frame.cmd {\n// 0x01 => {}",
+    ] {
+        assert!(rust_match_arms(fine).is_empty(), "caught: {fine}");
+    }
     // (file, the exact code, why its number is not the wire's)
     const NOT_WIRE: [(&str, &str, &str); 3] = [
         (
@@ -441,9 +497,31 @@ fn shipped_rust_writes_no_command_or_status_number() {
             "the CO5300 display's SPI opcode",
         ),
     ];
-    let hits = offenders(|name, l| {
+    let mut hits = offenders(|name, l| {
         let allowed = NOT_WIRE.iter().any(|(f, c, _)| *f == name && l.contains(c));
         !name.starts_with(PROTO) && !allowed && rust(l)
     });
+    // (file, the exact `match`, why its arms' numbers are not the wire's)
+    const NOT_WIRE_MATCH: [(&str, &str, &str); 1] = [(
+        "crates/dagon-cli/src/serve/http.rs",
+        "match status {",
+        "dagon serve's HTTP response status",
+    )];
+    for (name, code) in shipped() {
+        if name.starts_with(PROTO) {
+            continue;
+        }
+        let lines: Vec<&str> = code.lines().collect();
+        for (n, head) in rust_match_arms(&code) {
+            let head = lines[head - 1].trim();
+            if NOT_WIRE_MATCH
+                .iter()
+                .any(|(f, m, _)| *f == name && head == *m)
+            {
+                continue;
+            }
+            hits.push(format!("{name}:{n}: {}", lines[n - 1].trim()));
+        }
+    }
     assert!(hits.is_empty(), "{hits:?}");
 }

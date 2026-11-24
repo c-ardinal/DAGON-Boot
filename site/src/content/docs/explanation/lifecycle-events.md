@@ -673,8 +673,8 @@ impl Extension for Bench {
 | 上限 | 値 | 唯一の出所 | 収容されるべき対象 |
 |---|---|---|---|
 | 種類ごとのリンクのペイロード | USB 1088、UART 1024、I2C 256バイト | `dagon_proto::max_payload` | 全リクエストと返答、VERSIONのレスポンス、表示の文字列、適合試験の詳細 |
-| 最小のリンクのペイロード | `max_payload::MIN` = 前述の種類の最小値（導出値で、記述値ではありません） | `dagon-proto` | VERSIONのレスポンス全体（デバイスが応答する全TLVの集合） |
-| VERSIONの値 | ≤ 255バイト | VERSIONの符号化（`dagon-proto`のコマンドの表） | 5.4の全番号 |
+| 最小のリンクのペイロード | `max_payload::MIN` = 前述の種類の最小値（導出値で、記述値ではありません） | `dagon-proto` | VERSIONのレスポンス全体（デバイスが応答する全フィールドの集合） |
+| VERSIONのフィールドの値 | ≤ 255バイト | VERSIONの符号化（`dagon-proto`のコマンドの表） | 5.4の全番号 |
 | 拡張の割当時間 | `max_run_us ≤ APP_EXT_MAX_US` | マイコン定義の`[watchdog]`に由来する`dagon-events`の`const fn` | `dagon gen`の検証、応答のタスクの計測、マニフェスト |
 | ブートのアクションプログラム | イベントごとに`ops ≤ 32`、`delay total ≤ 50 ms`、`bus_write`ごとに`bytes ≤ 8`、`delay ≤ 20 ms` | `dagon_format::bootprogram`の定数 | `dagon gen`の検証、ブートローダのインタプリタ、`boot_wiring.rs`の表の型 |
 | liveのイベントのペイロード | ブートのイベントは ≤ 16バイト（値で）。それ以上のアプリやホストのペイロードは参照で | `dagon-events`のサイズのアサーション | `Published`のスナップショット、短縮形 |

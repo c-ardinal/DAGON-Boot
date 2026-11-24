@@ -160,6 +160,7 @@ States: `Ready` (initial).
 | `app.store_opened` | 0x30 | `store_opened`: Ready → Ready | `active: u8` (1 B), `trial: bool` (1 B), `version: Version` (4 B), `attempts: u8` (1 B), `last_reason: u8` (1 B) | live |  | The slot store was read at start. |
 | `app.hello` | 0x31 | `hello`: Ready → Ready | – | live, host |  | Identity answered. |
 | `app.status_asked` | 0x32 | `status_asked`: Ready → Ready | – | live, host |  | Status answered. |
+| `app.version_asked` | 0x3e | `version_asked`: Ready → Ready | – | live, host |  | VERSION answered. |
 | `app.update_refused` | 0x33 | `update_refused`: Ready → Ready | `status: u8` (1 B), `by_extension: bool` (1 B) | live, host |  | A write was refused, by a DAGON guard or by an extension's `accept_update`. |
 | `app.header_verified` | 0x34 | `header_verified`: Ready → Ready | `slot: u8` (1 B), `version: Version` (4 B) | live, host |  | The header's signature, key and compatibility checked out. |
 | `app.header_rejected` | 0x35 | `header_rejected`: Ready → Ready | `status: u8` (1 B) | live, host |  | The header was refused (signature, key, compatibility, size). |
@@ -171,3 +172,19 @@ States: `Ready` (initial).
 | `app.reboot_requested` | 0x3b | `reboot_requested`: Ready → Ready | `mode: u8` (1 B), `delay_ms: u32` (4 B) | live, host |  | A reboot was accepted, after `allow_reboot_now`. |
 | `app.before_reboot` | 0x3c | `before_reboot`: Ready → Ready | – | live |  | The reply has left; the reset follows. |
 | `app.percent_told` | 0x3d | `percent_told`: Ready → Ready | `percent: u8` (1 B) | live |  | The host told the node its write's one progress number, the one the host's caller shows for this node. |
+
+## Layer `relay`
+
+### Machine `relay`
+
+A relay's own work (a node whose MCU package runs `dagon-relay`): its PC link, the requests it relays and the child lines and raw bus it drives for a ROM recovery. Its own agent's `app.*` events are emitted as on any node.
+
+States: `Down` (initial), `Up`.
+
+| Kind | Code | Transition | Payload | Observed | Notes | Description |
+|---|---|---|---|---|---|---|
+| `relay.pc_up` | 0x01 | `pc_up`: * → Up | `link: u8` (1 B), `addr: u8` (1 B) | live |  | The PC link carries frames: the first one arrived, at start or after the link went down. `link`: its kind's code; `addr`: the relay's own address on it. |
+| `relay.pc_down` | 0x02 | `pc_down`: * → Down | `link: u8` (1 B), `addr: u8` (1 B) | live |  | A reply to the PC could not be sent: the PC is gone. |
+| `relay.relay_request` | 0x03 | `relay_request`: Up → Up | `link: u8` (1 B), `addr: u8` (1 B), `cmd: u8` (1 B) | live |  | A RELAY request was admitted and goes to the node at `addr` over the link `link` (its id); `cmd`: the inner frame's command. |
+| `relay.child_control` | 0x04 | `child_control`: Up → Up | `link: u8` (1 B), `nrst: u8` (1 B), `boot0: u8` (1 B) | live |  | SUBCTL drove the reset and boot-mode lines of the recovery target on link `link` (its id): `nrst` and `boot0` as the request named them (`payload::nrst`, `payload::boot0`). |
+| `relay.child_raw` | 0x05 | `child_raw`: Up → Up | `addr: u8` (1 B), `len: u16` (2 B), `read_len: u16` (2 B) | live |  | I2C_RAW reached the ROM loader at `addr`: `len` bytes written and `read_len` asked back. |

@@ -270,15 +270,15 @@ Generated order at start: `app.starting` → `app.store_opened` (or
 
 ### 1.4 Relay
 
-The relay is also an app (its own agent emits `app.*`). Its own machine:
-PC link up/down and a quiet window after a relayed request. Child links are ports (a child protocol
+The relay is also an app (its own agent emits `app.*`). Its own machine (`dagon_agent`'s `relay`):
+PC link up/down and its relaying and ROM recovery work. Child links are ports (a child protocol
 extension may relay UDS as well as DAGON frames).
 
 | Event | When | Payload |
 |---|---|---|
-| `relay.pc_up` / `relay.pc_down` / `relay.pc_quiet` | PC link opened / closed / quiet window ended | |
-| `relay.relay_request` | a request to relay received | `link`, `addr`, `cmd` |
-| `relay.child_control` | a child's control lines driven / raw bus access | `line`, `level` / `addr`, `len` |
+| `relay.pc_up` / `relay.pc_down` | first frame on the PC link / a reply to the PC could not be sent | `link`, `addr` |
+| `relay.relay_request` | a request to relay admitted | `link`, `addr`, `cmd` |
+| `relay.child_control` / `relay.child_raw` | a child's control lines driven / raw bus access to its ROM loader | `link`, `nrst`, `boot0` / `addr`, `len`, `read_len` |
 
 ### 1.5 Host operations
 

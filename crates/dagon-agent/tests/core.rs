@@ -782,6 +782,15 @@ fn version_names_stage0_the_boot_core_slots_and_the_app() {
     assert_eq!(core.active, 0);
 }
 
+/// A VERSION answered is published, as HELLO and STATUS are.
+#[test]
+fn version_answered_is_an_event() {
+    let mut n = Node::new(installed(true));
+    n.events();
+    version(&mut n);
+    assert!(n.events().iter().any(|e| e == "version_asked"));
+}
+
 #[test]
 fn version_leaves_out_what_the_node_cannot_read() {
     // No stage0 mark and no boot core slots: neither is sent.

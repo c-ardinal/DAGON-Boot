@@ -658,7 +658,7 @@ pub struct McuDef {
     /// `max_payload` (`RELAY_LINK_BUFFERS`) and no more; the build stops when that buffer cannot
     /// hold the largest frame of the link's kind. Data longer than the buffer (a RELAY's inner
     /// frame, the data I2C_RAW writes and the length it reads) is refused with `E_ARG`, never
-    /// cut. The I2C_RAW limit is the buffer of the link used for recovery.
+    /// cut. The I2C_RAW limit is the buffer of the link the recovered node is on.
     #[serde(default, rename = "relay_link")]
     pub relay_links: Vec<RelayLinkSpec>,
     /// The budget of the relaying app firmware: `ram_bytes` (static RAM, `.bss` plus `.data`, in

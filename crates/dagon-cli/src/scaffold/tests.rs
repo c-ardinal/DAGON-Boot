@@ -539,7 +539,8 @@ fn new_makes_the_project_and_a_key_outside_it() {
 
 #[test]
 fn claude_md_takes_its_words_from_the_words_page() {
-    let template = CLAUDE_FILES[0].1;
+    let files = default_agent_files();
+    let template = &files.iter().find(|(p, _)| p == "CLAUDE.md").unwrap().1;
     assert_eq!(template.matches(WORDS_AT).count(), 1);
     let d = tmp("claude-words");
     let proj = d.join("fleet");
@@ -594,6 +595,34 @@ fn new_writes_claude_files_with_no_paths_or_secrets() {
     for rel in &rels[1..] {
         let name = rel.split('/').nth(2).unwrap();
         assert!(read(&proj, rel).starts_with(&format!("---\nname: {name}\n")));
+    }
+}
+
+/// `dagon new` writes the chosen agent's project files only: none with
+/// no agent, and no file names an MCU of DAGON's definitions.
+#[test]
+fn new_writes_only_the_chosen_agents_files_and_no_mcu_list() {
+    let d = tmp("agent-files");
+    let none = d.join("none");
+    let made = new_project_with(&none, "none", SAMPLE, &d.join("keys"), &dev(), &[]).unwrap();
+    assert!(!none.join("CLAUDE.md").exists() && !none.join(".claude").exists());
+    assert!(made.iter().all(|l| !l.contains("CLAUDE")), "{made:?}");
+    let other = d.join("other");
+    let files = [("AGENTS.md".to_string(), "x <!-- words --> y".to_string())];
+    new_project_with(&other, "other", SAMPLE, &d.join("keys"), &dev(), &files).unwrap();
+    let text = read(&other, "AGENTS.md");
+    assert!(!text.contains(WORDS_AT) && text.starts_with("x ") && text.ends_with(" y"));
+    assert!(!other.join("CLAUDE.md").exists());
+    let mcus: Vec<String> = dagon_topology::defs::Registry::builtin()
+        .mcus()
+        .iter()
+        .map(|m| m.id.clone())
+        .collect();
+    assert!(!mcus.is_empty());
+    for (path, text) in default_agent_files() {
+        for id in &mcus {
+            assert!(!text.contains(id.as_str()), "{path} names the MCU {id}");
+        }
     }
 }
 

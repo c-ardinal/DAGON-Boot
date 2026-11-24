@@ -396,6 +396,104 @@ fn the_builtin_list_is_the_agents_folder() {
     assert_eq!(files, listed);
 }
 
+/// Every file under `agents/` other than the definitions is one a
+/// builtin agent's `[[project_files]]` names, and every one it names is
+/// built in.
+#[test]
+fn the_builtin_project_files_are_the_agents_folder() {
+    fn walk(dir: &Path, rel: &str, out: &mut Vec<String>) {
+        for e in std::fs::read_dir(dir).unwrap().flatten() {
+            let name = e.file_name().to_string_lossy().into_owned();
+            let r = if rel.is_empty() {
+                name.clone()
+            } else {
+                format!("{rel}/{name}")
+            };
+            if e.file_type().unwrap().is_dir() {
+                walk(&e.path(), &r, out);
+            } else if !(rel.is_empty() && name.ends_with(".toml")) {
+                out.push(r);
+            }
+        }
+    }
+    let mut files = Vec::new();
+    walk(
+        &Path::new(env!("CARGO_MANIFEST_DIR")).join("agents"),
+        "",
+        &mut files,
+    );
+    files.sort();
+    let mut embedded: Vec<String> = BUILTIN_FILES.iter().map(|(n, _)| n.to_string()).collect();
+    embedded.sort();
+    assert_eq!(files, embedded);
+    let agents = Agents::load(None);
+    let mut named: Vec<String> = agents.list[..BUILTIN.len()]
+        .iter()
+        .flat_map(|a| a.project_files.iter().map(|f| f.from.clone()))
+        .collect();
+    named.sort();
+    assert_eq!(named, embedded);
+    for a in &agents.list {
+        assert_eq!(
+            agents.project_files(Some(&a.id), None).unwrap().len(),
+            a.project_files.len()
+        );
+    }
+}
+
+#[test]
+fn a_user_agents_project_files_come_from_its_folder_and_are_checked() {
+    let home = tmp_home("project-files");
+    let dir = home.join(".dagon").join(USER_DIR);
+    let def = |files: &str| {
+        format!(
+            "dagon_agent = 1\nid = \"other\"\nname = \"Other\"\nprovider = \"Someone\"\n\
+             [[ways]]\nid = \"cli\"\nname = \"CLI\"\n\
+             [ways.transport]\nkind = \"command\"\nprogram = \"other\"\n{files}"
+        )
+    };
+    std::fs::create_dir_all(dir.join("other")).unwrap();
+    std::fs::write(dir.join("other/AGENTS.md"), "be careful").unwrap();
+    std::fs::write(
+        dir.join("other.toml"),
+        def("[[project_files]]\npath = \"AGENTS.md\"\nfrom = \"other/AGENTS.md\"\n"),
+    )
+    .unwrap();
+    let agents = Agents::load(Some(&home));
+    assert!(agents.errors.is_empty(), "{:?}", agents.errors);
+    assert_eq!(
+        agents.project_files(Some("other"), Some(&home)).unwrap(),
+        [("AGENTS.md".to_string(), "be careful".to_string())]
+    );
+    // The first agent stays the default.
+    let first = agents.project_files(None, Some(&home)).unwrap();
+    assert!(first.iter().any(|(p, _)| p == "CLAUDE.md"));
+    assert!(agents
+        .project_files(Some("none-such"), Some(&home))
+        .unwrap_err()
+        .contains("claude, other"));
+    std::fs::remove_file(dir.join("other/AGENTS.md")).unwrap();
+    assert!(agents
+        .project_files(Some("other"), Some(&home))
+        .unwrap_err()
+        .contains("cannot be read"));
+
+    for (files, why) in [
+        ("[[project_files]]\npath = \"../x\"\nfrom = \"a\"\n", "plain relative"),
+        ("[[project_files]]\npath = \"x\"\nfrom = \"/etc/passwd\"\n", "plain relative"),
+        ("[[project_files]]\npath = \"dagon.toml\"\nfrom = \"a\"\n", "writes it itself"),
+        (
+            "[[project_files]]\npath = \"a\"\nfrom = \"a\"\n[[project_files]]\npath = \"a\"\nfrom = \"b\"\n",
+            "named twice",
+        ),
+    ] {
+        std::fs::write(dir.join("other.toml"), def(files)).unwrap();
+        let errors = Agents::load(Some(&home)).errors;
+        assert!(errors.len() == 1 && errors[0].contains(why), "{files}: {errors:?}");
+    }
+    let _ = std::fs::remove_dir_all(&home);
+}
+
 /// The top-level bullets of the section under `heading` (up to the next
 /// heading of the same or a higher level).
 fn bullets(doc: &str, heading: &str) -> Vec<String> {

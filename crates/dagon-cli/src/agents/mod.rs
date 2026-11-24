@@ -18,6 +18,27 @@ use serde_json::Value;
 use crate::keystore::Keys;
 
 const BUILTIN: [(&str, &str); 1] = [("claude.toml", include_str!("../../agents/claude.toml"))];
+/// The files the builtin agents' `[[project_files]]` name, by their `from`.
+const BUILTIN_FILES: [(&str, &str); 4] = [
+    (
+        "claude/CLAUDE.md",
+        include_str!("../../agents/claude/CLAUDE.md"),
+    ),
+    (
+        "claude/fix-a-failing-build.md",
+        include_str!("../../agents/claude/fix-a-failing-build.md"),
+    ),
+    (
+        "claude/add-a-board-by-mcu.md",
+        include_str!("../../agents/claude/add-a-board-by-mcu.md"),
+    ),
+    (
+        "claude/explain-a-topology-problem.md",
+        include_str!("../../agents/claude/explain-a-topology-problem.md"),
+    ),
+];
+/// The files `dagon new` writes itself; no agent's file takes their place.
+const PROJECT_OWN: [&str; 3] = ["dagon.toml", "topology.yaml", ".gitignore"];
 /// ~/.dagon/agents/*.toml: the user's own agents and ways.
 const USER_DIR: &str = "agents";
 const MAX_DEF_FILE: usize = 64 * 1024;
@@ -73,6 +94,18 @@ pub struct AgentDef {
     pub provider: String,
     /// The ways to reach the agent, in order; the first is the default.
     pub ways: Vec<WayDef>,
+    /// The files `dagon new` writes into a new project for this agent (its instructions and skills), in order; none when left out.
+    #[serde(default)]
+    pub project_files: Vec<ProjectFile>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProjectFile {
+    /// Where the file goes in the project: a plain relative path, unique within the agent, not one of the files `dagon new` writes itself (`dagon.toml`, `topology.yaml`, `.gitignore`).
+    pub path: String,
+    /// The file's text: a plain relative path from the folder of the definition (`~/.dagon/agents/` for the user's own agents), up to 64 KiB of UTF-8.
+    pub from: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -176,6 +209,24 @@ fn check(def: &AgentDef) -> Result<(), String> {
             .check()
             .map_err(|e| format!("way {}: {e}", w.id))?;
     }
+    for (i, f) in def.project_files.iter().enumerate() {
+        let path = crate::genfs::Rel::new(&f.path)
+            .map_err(|e| format!("project file {}: path: {e}", i + 1))?;
+        crate::genfs::Rel::new(&f.from)
+            .map_err(|e| format!("project file {}: from: {e}", i + 1))?;
+        if PROJECT_OWN.contains(&path.as_str()) {
+            return Err(format!(
+                "project file {}: dagon new writes it itself",
+                f.path
+            ));
+        }
+        if def.project_files[..i]
+            .iter()
+            .any(|o| crate::genfs::Rel::new(&o.path).is_ok_and(|r| r == path))
+        {
+            return Err(format!("project file {}: named twice", f.path));
+        }
+    }
     Ok(())
 }
 
@@ -237,6 +288,52 @@ impl Agents {
     pub fn default_way(&self) -> (&AgentDef, &WayDef) {
         let a = &self.list[0];
         (a, &a.ways[0])
+    }
+
+    /// The `[[project_files]]` of agent `id` (the first agent when `None`)
+    /// as (path in the project, text): a builtin agent's from dagon itself,
+    /// a user agent's read from `~/.dagon/agents/` under `home`.
+    pub fn project_files(
+        &self,
+        id: Option<&str>,
+        home: Option<&Path>,
+    ) -> Result<Vec<(String, String)>, String> {
+        let at = match id {
+            None => 0,
+            Some(id) => self.list.iter().position(|a| a.id == id).ok_or_else(|| {
+                let known: Vec<&str> = self.list.iter().map(|a| a.id.as_str()).collect();
+                format!("no agent {id} (agents: {})", known.join(", "))
+            })?,
+        };
+        let a = &self.list[at];
+        a.project_files
+            .iter()
+            .map(|f| {
+                let text = if at < BUILTIN.len() {
+                    BUILTIN_FILES
+                        .iter()
+                        .find(|(from, _)| *from == f.from)
+                        .map(|(_, t)| t.to_string())
+                        .ok_or_else(|| format!("builtin {}: no file {}", a.id, f.from))
+                } else {
+                    read_project_file(home, &f.from)
+                };
+                text.map(|t| (f.path.clone(), t))
+                    .map_err(|e| format!("agent {}: {e}", a.id))
+            })
+            .collect()
+    }
+}
+
+/// The text of `from` in ~/.dagon/agents/ under `home`, capped like a definition.
+fn read_project_file(home: Option<&Path>, from: &str) -> Result<String, String> {
+    let home = home.ok_or_else(|| format!("{from}: no home folder"))?;
+    let rel = crate::genfs::Rel::new(from)?;
+    let path = home.join(".dagon").join(USER_DIR).join(rel.as_str());
+    match crate::paths::read_capped(&path, MAX_DEF_FILE) {
+        Ok(Some(b)) => String::from_utf8(b).map_err(|_| format!("{from} is not UTF-8")),
+        Ok(None) => Err(format!("{from} is larger than 64 KiB")),
+        Err(_) => Err(format!("{from} cannot be read")),
     }
 }
 

@@ -3,7 +3,7 @@ title: "プロジェクトでのClaudeの支援"
 description: "新規プロジェクトに付属するClaude Codeの指示とスキル、DAGONの移植に使用するClaude Codeのプラグインです。"
 ---
 
-`dagon new`はプロジェクトにClaude Codeのファイルも出力します。プロジェクトのフォルダで起動したClaude Codeは、構成のファイル、コマンド、遵守事項を把握した状態で開始します。
+`dagon new`は、1つのエージェントの[定義](/reference/agent-definition/)にあるファイルもプロジェクトに出力します。既定は組込のClaudeで、出力するのは以下のClaude Codeのファイルです。`--agent <id>`の場合は指定したエージェントのファイルを出力し、`--no-agent`の場合は出力しません。プロジェクトのフォルダで起動したClaude Codeは、構成のファイル、コマンド、遵守事項を把握した状態で開始します。
 
 | ファイル | 役割 |
 |---|---|

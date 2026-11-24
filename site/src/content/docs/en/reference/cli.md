@@ -95,6 +95,12 @@ Options:
       --dagon-tag <TAG>
           Git tag of DAGON [default: cli-v<this CLI's version>]
 
+      --agent <ID>
+          Agent whose project files (instructions, skills) to write, from its definition [default: the first agent]
+
+      --no-agent
+          Write no agent's project files
+
   -h, --help
           Print help (see a summary with '-h')
 ```

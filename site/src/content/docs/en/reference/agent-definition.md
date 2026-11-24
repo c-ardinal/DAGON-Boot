@@ -24,6 +24,7 @@ number refuses the file and says why.
 | `name` | string | yes | The name the linking texts show. |
 | `provider` | string | yes | Who makes the agent, shown after its name. |
 | `ways` | `[[ways]]` tables | yes | The ways to reach the agent, in order; the first is the default. |
+| `project_files` | `[[project_files]]` tables | no | The files `dagon new` writes into a new project for this agent (its instructions and skills), in order; none when left out. |
 
 ## `[[ways]]`
 
@@ -56,6 +57,16 @@ number refuses the file and says why.
 | `version` | string | yes | The `anthropic-version` header. |
 | `model` | string | yes | The model named in each request. |
 | `model_env` | string | no | An environment variable that overrides `model`, if set. |
+
+## `[[project_files]]`
+
+`dagon new` writes the files of the chosen agent only (`--agent`, by default
+the first agent) into the project, and none with `--no-agent`.
+
+| Key | Type | Required | Meaning |
+|---|---|---|---|
+| `path` | string | yes | Where the file goes in the project: a plain relative path, unique within the agent, not one of the files `dagon new` writes itself (`dagon.toml`, `topology.yaml`, `.gitignore`). |
+| `from` | string | yes | The file's text: a plain relative path from the folder of the definition (`~/.dagon/agents/` for the user's own agents), up to 64 KiB of UTF-8. |
 
 ## Builtin agents
 

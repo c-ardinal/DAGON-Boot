@@ -81,7 +81,9 @@ pub struct SimRom {
     /// Commands listed by Get and accepted; others are NACKed (drop the
     /// No-Stretch codes to model a V1.0 loader).
     pub commands: Vec<u8>,
-    pub erase_ms_per_kib: u64,
+    /// Time each flash sector's erase takes, by sector index: the MCU
+    /// definition's `unit_max_ms` (the datasheet maximum) of its unit.
+    pub sector_erase_ms: Vec<u64>,
     /// Time to program one Write Memory frame.
     pub write_ms: u64,
     /// Self-resets caused by the frame timeout.
@@ -103,7 +105,7 @@ impl Default for SimRom {
             version: 0x11,
             product_id: 0x0433,
             commands: COMMANDS.to_vec(),
-            erase_ms_per_kib: 16,
+            sector_erase_ms: sector_erase_ms("stm32f401re"),
             write_ms: 4,
             timeouts: 0,
             over_reads: 0,
@@ -317,19 +319,39 @@ impl SimRom {
         stretch: bool,
         now_ms: &mut u64,
     ) -> bool {
-        let mut kib = 0u64;
+        let mut ms = 0u64;
         for &s in sectors {
-            let Some((a, len)) = flash.sector_addr(s) else {
+            let (Some((a, len)), Some(&t)) =
+                (flash.sector_addr(s), self.sector_erase_ms.get(s as usize))
+            else {
                 return false;
             };
             if flash.erase(a, len).is_err() {
                 return false;
             }
-            kib += len as u64 / 1024;
+            ms += t;
         }
-        self.finish(stretch, kib * self.erase_ms_per_kib, now_ms);
+        self.finish(stretch, ms, now_ms);
         true
     }
+}
+
+/// `unit_max_ms` of each erase unit of MCU definition `mcu`, in order.
+fn sector_erase_ms(mcu: &str) -> Vec<u64> {
+    let e = crate::mcu::simulated_mcu(mcu)
+        .execution
+        .as_ref()
+        .unwrap_or_else(|| panic!("MCU definition {mcu} has no [execution]"));
+    e.erase_regions
+        .iter()
+        .flat_map(|r| {
+            let ms = r
+                .unit_max_ms
+                .value()
+                .unwrap_or_else(|| panic!("MCU definition {mcu} has an unmeasured unit_max_ms"));
+            core::iter::repeat_n(u64::from(ms), (r.len / r.unit) as usize)
+        })
+        .collect()
 }
 
 fn parse_addr(flash: &SimFlash, d: &[u8]) -> Option<u32> {
@@ -400,7 +422,8 @@ mod tests {
         );
         assert_eq!(got, [ACK, ACK, BUSY]);
         let mut b = [0u8];
-        rom.read(&mut b, now + 2048 + 900).unwrap();
+        // Sector 5 takes its unit_max_ms, 4 s.
+        rom.read(&mut b, now + 4_000 + 900).unwrap();
         assert_eq!(b, [ACK], "timeout counts from the end of the erase");
     }
 

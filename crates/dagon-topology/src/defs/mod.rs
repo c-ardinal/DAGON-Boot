@@ -626,7 +626,9 @@ pub struct McuDef {
     /// bus driven by a node whose MCU states no `[link_i2c.controller]`.
     pub link_i2c: Option<LinkI2c>,
     /// ROM I2C bootloader (`stm32-i2c-rom`): `name` (as check messages call it), `addr`, `max_hz`,
-    /// `erase_sectors`, `pairs = [{ controller, sda, scl }]` it listens on.
+    /// `erase_sectors` (erase units of `execution.erase_regions`, counted from the first region;
+    /// the host waits each one's `unit_max_ms` and a margin), `pairs = [{ controller, sda, scl }]`
+    /// it listens on.
     pub rom_i2c: Option<RomI2c>,
     /// Link kinds the MCU package's firmware implements, `up` and `down`: the one source of its
     /// `LINK_KINDS`, which the package builds from them.

@@ -143,6 +143,23 @@ impl SlotLayoutDef {
 }
 
 impl McuDef {
+    /// The `[execution] erase_regions` row erase unit `index` of this MCU
+    /// lies in, counting units from the first region's start (how the
+    /// STM32 ROM loader numbers sectors); `None` past the last unit, with
+    /// no `[execution]`, or past a region of unit 0 (which the execution
+    /// requirement refuses).
+    pub fn erase_unit(&self, index: u32) -> Option<&EraseRegionDef> {
+        let mut left = index;
+        for r in &self.execution.as_ref()?.erase_regions {
+            let n = r.len.checked_div(r.unit)?;
+            if left < n {
+                return Some(r);
+            }
+            left -= n;
+        }
+        None
+    }
+
     /// The erase regions of a node of this MCU on `board`: the board's
     /// `[flash] erase_regions` when it states them, replacing the MCU's
     /// whole, else the MCU's `[execution] erase_regions`; `None` with

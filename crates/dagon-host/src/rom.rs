@@ -46,8 +46,10 @@ pub struct RomMap {
     pub stage0: Option<(u32, u32)>,
     /// The boot core records share the APP log (face A gets both).
     pub shared_log: bool,
-    /// Flash sectors erased first.
-    pub erase: Vec<u16>,
+    /// Flash sectors erased first, each with its wait: the sector's
+    /// `unit_max_ms` and [`ERASE_MARGIN_MS`](dagon_port::timeout::ERASE_MARGIN_MS),
+    /// the margin a node's own erase gets.
+    pub erase: Vec<dagon_romlink::Erase>,
 }
 
 /// The ROM maps of every MCU in `reg` a first install can go through
@@ -79,7 +81,17 @@ pub fn rom_maps(reg: &dagon_topology::defs::Registry) -> Vec<RomMap> {
                 stage0: m.layout.stage0.map(|r| (r.at, r.size)),
                 shared_log: m.layout.bootcore_log.is_some()
                     && m.layout.bootcore_log == m.layout.app_log,
-                erase: rom.erase_sectors.clone(),
+                erase: rom
+                    .erase_sectors
+                    .iter()
+                    .map(|&sector| {
+                        let max = m.erase_unit(u32::from(sector))?.unit_max_ms.value()?;
+                        Some(dagon_romlink::Erase {
+                            sector,
+                            limit_ms: max.saturating_add(dagon_port::timeout::ERASE_MARGIN_MS),
+                        })
+                    })
+                    .collect::<Option<_>>()?,
             })
         })
         .collect()

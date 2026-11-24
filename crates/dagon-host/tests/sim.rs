@@ -1259,11 +1259,11 @@ fn rom_session_gives_up_after_three_attempts() {
     let s = sim();
     {
         let mut hub = s.relay.borrow_mut();
-        // 128 KiB sector 5 then stays BUSY for 12.8 s.
+        // Sector 5 then stays BUSY for 12.8 s, past its wait.
         hub.i2c_node(NODE_I2C_PORT, NODE_I2C_ADDR)
             .unwrap()
             .rom
-            .erase_ms_per_kib = 100;
+            .sector_erase_ms[5] = 12_800;
     }
     wipe_seg(&s);
     let (rel, topo, boot) = (release(), topology(&yaml()), bootcore());

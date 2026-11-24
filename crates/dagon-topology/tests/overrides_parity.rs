@@ -102,7 +102,10 @@ fn the_host_times_and_maps_each_node_by_its_overridden_definition() {
         assert_eq!(b.capacity, APP_B_CAPACITY, "{node}");
         let map = roms.iter().find(|m| m.wire_id == wire).unwrap();
         assert_eq!(
-            (map.addr, &map.erase[..]),
+            (
+                map.addr,
+                &map.erase.iter().map(|e| e.sector).collect::<Vec<_>>()[..]
+            ),
             (ROM_ADDR, &ROM_ERASE[..]),
             "{node}"
         );

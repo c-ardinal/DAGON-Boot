@@ -389,8 +389,8 @@ fn todays_invocations() -> Vec<(&'static str, Command)> {
                 scenario: None,
                 topology: s("t.yaml"),
                 fault: vec![
-                    crate::simworld::Injection::parse("seg=power-cut").unwrap(),
-                    crate::simworld::Injection::parse("hub=tamper").unwrap(),
+                    crate::simfault::Injection::parse("seg=power-cut").unwrap(),
+                    crate::simfault::Injection::parse("hub=tamper").unwrap(),
                 ],
                 config: s("c"),
             }),

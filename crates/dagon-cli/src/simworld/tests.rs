@@ -4,6 +4,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use dagon_topology::defs::{Registry, Source};
 
 use super::*;
+use crate::simfault::{FAULTS, FAULT_HELP};
 
 const SAMPLE: &str = include_str!("../../../../topology/sample.yaml");
 const PAIR: &str = include_str!("../../../../topology/sim-pair.yaml");

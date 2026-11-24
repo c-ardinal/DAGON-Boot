@@ -574,10 +574,10 @@ pub struct SimArgs {
     #[arg(
         long,
         value_name = "NODE=KIND",
-        value_parser = crate::simworld::Injection::parse,
-        help = crate::simworld::FAULT_HELP
+        value_parser = crate::simfault::Injection::parse,
+        help = crate::simfault::FAULT_HELP
     )]
-    pub fault: Vec<crate::simworld::Injection>,
+    pub fault: Vec<crate::simfault::Injection>,
     #[arg(long, value_name = "FILE", help = CONFIG)]
     pub config: Option<String>,
 }

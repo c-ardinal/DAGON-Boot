@@ -104,7 +104,7 @@ $env:DAGON_UNINSTALL = "1"; irm https://raw.githubusercontent.com/c-ardinal/DAGO
 
 ```sh
 dagon sim # シミュレータ上で一連のシナリオを実行します
-dagon sim --topology topology.yaml --fault seg=power-cut # 独自の構成で、指定ノードへ故障を注入します
+dagon sim --topology topology.yaml --fault seg=power-cut # 独自の構成で、指定のマイコンへ故障を注入します
 ```
 
 ## 独自プロジェクトの開始

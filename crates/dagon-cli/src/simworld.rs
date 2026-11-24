@@ -19,6 +19,7 @@ use ed25519_compact::{KeyPair, Seed};
 
 use crate::cli::SimArgs;
 use crate::config::Config;
+use crate::simfault::{Fault, Injection};
 use crate::simrun::{Sim, SEED};
 
 const OLD: Version = Version::new(1, 0, 0);
@@ -27,73 +28,6 @@ const NEW: Version = Version::new(1, 1, 0);
 const BODY_BYTES: u32 = 6000;
 /// A stand-in stage0 for the ROM write: the simulator runs none of it.
 const STAGE0: [u8; 0x100] = [0x5A; 0x100];
-
-/// What `--fault` does to its node.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Fault {
-    /// Power lost at the node's fourth flash operation of the write.
-    PowerCut,
-    /// The node's new app starts and never confirms.
-    NoConfirm,
-    /// One bit of the node's image flipped: header, payload, signature.
-    Tamper,
-    /// The node's flash fully erased, to rewrite through its ROM loader.
-    Erased,
-}
-
-const FAULTS: [(&str, Fault); 4] = [
-    ("power-cut", Fault::PowerCut),
-    ("no-confirm", Fault::NoConfirm),
-    ("tamper", Fault::Tamper),
-    ("erased", Fault::Erased),
-];
-
-pub const FAULT_HELP: &str =
-    "Fault to inject into a node, by its id; each runs on a fresh simulation \
-     (repeatable). KIND: power-cut (power lost during the write), no-confirm (the new app never \
-     confirms), tamper (one bit of its image flipped), erased (flash erased; rewritten through \
-     its ROM loader)";
-
-impl Fault {
-    fn name(self) -> &'static str {
-        FAULTS
-            .iter()
-            .find(|(_, f)| *f == self)
-            .map_or("", |(n, _)| n)
-    }
-}
-
-/// One `--fault NODE=KIND`.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Injection {
-    pub node: String,
-    pub fault: Fault,
-}
-
-impl Injection {
-    pub fn parse(s: &str) -> Result<Injection, String> {
-        let known = || {
-            FAULTS
-                .iter()
-                .map(|(n, _)| *n)
-                .collect::<Vec<_>>()
-                .join(", ")
-        };
-        let (node, kind) = s
-            .split_once('=')
-            .filter(|(n, _)| !n.is_empty())
-            .ok_or_else(|| format!("expected NODE=KIND (KIND: {})", known()))?;
-        let fault = FAULTS
-            .iter()
-            .find(|(n, _)| *n == kind)
-            .map(|(_, f)| *f)
-            .ok_or_else(|| format!("no fault `{kind}` (there is {})", known()))?;
-        Ok(Injection {
-            node: node.to_string(),
-            fault,
-        })
-    }
-}
 
 /// `dagon sim`: the built-in scenarios, or with `--topology`, `--fault` or
 /// `--config` the update of a topology of one's own.

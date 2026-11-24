@@ -32,6 +32,7 @@ mod paths;
 mod scaffold;
 mod serial;
 mod serve;
+mod simfault;
 mod simrun;
 mod simworld;
 mod srcver;

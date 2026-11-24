@@ -19,8 +19,7 @@ pub const TP_VERSION: u16 = 2;
 pub const HEAD_SIZE: usize = 0x20;
 pub const NODE_SIZE: usize = 32;
 pub const LINK_SIZE: usize = 20;
-/// The one node limit: the topology check, the Console and every write use it.
-pub const MAX_NODES: usize = 32;
+pub use crate::MAX_NODES;
 /// One link per node but one: a set of links that joins every node.
 pub const MAX_LINKS: usize = MAX_NODES - 1;
 // A count is one stored byte, and a constraint's node mask has 32 bits.

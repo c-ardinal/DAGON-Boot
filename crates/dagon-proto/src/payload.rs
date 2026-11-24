@@ -5,16 +5,19 @@
 //! `Status::Field`) and `Status::Arg` for a value outside its range;
 //! `encode` returns the byte count written.
 
+use crate::ceiling::Ceiling;
 use crate::field::{
     read, shortest, shortest_value, FieldSpec, FieldWriter, MsgSpec, Parsed, Refusal,
 };
-use crate::handler::{Ceiling, Decode};
 use crate::table::{
     caps, conf_run, confirm, error, hello, i2c_raw, reboot, relay, set_pending, show, status,
     subctl, version, xfer_begin, xfer_end, ERROR,
 };
 use crate::{Cmd, FrameError, Status};
 use dagon_format::Version;
+
+/// The typed request of a message the reader accepted.
+pub type Decode = for<'a> fn(&Parsed<'a>) -> Result<Req<'a>, Status>;
 
 /// HELLO / RELAY etc. field values.
 pub mod role {

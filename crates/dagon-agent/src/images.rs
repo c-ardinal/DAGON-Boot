@@ -7,7 +7,7 @@ use dagon_format::Version;
 use dagon_proto::payload::{target, SlotState, StatusResp};
 use dagon_proto::Status;
 
-use crate::agent::AppChain;
+use crate::chain::AppChain;
 use crate::{core_image, image, SlotStore, StoreError};
 
 /// The recovery agent's slot (STATUS slot 2).

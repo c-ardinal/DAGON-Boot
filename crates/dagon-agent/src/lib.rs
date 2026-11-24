@@ -35,11 +35,13 @@
 #![forbid(unsafe_code)]
 
 mod agent;
+mod chain;
 mod images;
 pub mod snapshot;
 pub mod update_mode;
 
-pub use agent::{reply_status, Agent, AppChain, Reply, IDLE_TIMEOUT_MS};
+pub use agent::{reply_status, Agent, Reply, IDLE_TIMEOUT_MS};
+pub use chain::AppChain;
 pub use images::{ImageView, Transition};
 
 use dagon_events::Compact;

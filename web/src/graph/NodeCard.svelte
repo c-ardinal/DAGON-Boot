@@ -48,7 +48,7 @@
   import type { Live } from '../app/writeProgress.ts';
   import { imageRows } from '../app/slots.ts';
   import Icon from '../screens/Icon.svelte';
-  import { versionText } from '../wasm/dagon.ts';
+  import { SLOT_STATE, versionText } from '../wasm/dagon.ts';
   import type { Chip } from './Graph.svelte';
   import type { Pt } from './geometry.ts';
 
@@ -114,7 +114,7 @@
     if (!st) return null;
     return imageRows(n.mcuId).map((i) => {
       const s = st.slots[i];
-      return { row: SLOT.rows[i], text: s.state === 0 ? SLOT.states[0] : versionText(s.version), on: st.active === i };
+      return { row: SLOT.rows[i], text: s.state === SLOT_STATE.empty ? SLOT.states[SLOT_STATE.empty] : versionText(s.version), on: st.active === i };
     });
   });
 

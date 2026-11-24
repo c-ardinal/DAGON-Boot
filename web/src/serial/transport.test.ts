@@ -1,8 +1,9 @@
 import { describe, expect, test } from 'vitest';
 import { CMD, encodeFrame, parseFrame, STATUS, WIRE } from './frame.ts';
-import { ROLE_NODE, encodeHelloResp, versionRaw, type HelloResp } from './hello.ts';
+import { encodeHelloResp, versionRaw, type HelloResp } from './hello.ts';
 import { SAMPLE_HUB_HELLO } from './mock.ts';
 import { WebSerialTransport } from './transport.ts';
+import { HELLO_ROLE } from '../wasm/dagon.ts';
 
 interface FakeReadable {
   used: boolean;
@@ -227,7 +228,7 @@ describe('WebSerialTransport read loop', () => {
     });
 
     test('a candidate that does not answer, and none at all, are noted for the diagnostic log', async () => {
-      const t = await rebooted([answering(null), answering({ ...hub(V110, true), role: ROLE_NODE })], V110);
+      const t = await rebooted([answering(null), answering({ ...hub(V110, true), role: HELLO_ROLE.node })], V110);
       await expect(t.open()).rejects.toThrow('lost');
       expect(t.notes()).toEqual([{ kind: 'away' }, { kind: 'silent' }, { kind: 'notHub' }]);
 

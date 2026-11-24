@@ -3,7 +3,7 @@
   import type { Live } from '../app/writeProgress.ts';
   import type { Config, Link, Node } from '../app/sample.ts';
   import { appRows, coreRows, imageRows, previousVersion } from '../app/slots.ts';
-  import { versionText, type RecoverResult, type StatusResp } from '../wasm/dagon.ts';
+  import { HELLO_MODE, PORT_KIND, SLOT_STATE, factorySlot, versionText, type RecoverResult, type StatusResp } from '../wasm/dagon.ts';
   import type { HelloResp } from '../serial/hello.ts';
 
   interface Props {
@@ -38,33 +38,27 @@
   const node = $derived(selected?.startsWith('node:') ? config?.nodes.find((n) => `node:${n.id}` === selected) : undefined);
   const link = $derived(selected?.startsWith('link:') ? config?.links.find((l) => `link:${l.to}` === selected) : undefined);
 
-  const SLOT_EMPTY = 0;
-  const SLOT_TRYING = 3;
-  const SLOT_CONFIRMED = 4;
-  const FACTORY = 2;
-  const MODE_FACTORY = 3;
   const SHORT_HEX = 4;
-  /** HELLO port_kind of an MCU booted by its vendor's 2nd stage (dagon_format::header::port_kind). */
-  const PORT_VENDOR_STAGE2 = 2;
 
   const clock = new Intl.DateTimeFormat('ja-JP', { hour: '2-digit', minute: '2-digit' });
   const hex = (b: Uint8Array) => Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('');
 
   function slotWord(i: number, s: StatusResp, h: HelloResp | null): string {
     const slot = s.slots[i];
-    const running = i === FACTORY ? h?.mode === MODE_FACTORY : i === s.active;
+    const factory = i === factorySlot();
+    const running = factory ? h?.mode === HELLO_MODE.agent : i === s.active;
     if (running) {
-      const settled = slot.state === SLOT_CONFIRMED || slot.state === SLOT_TRYING;
+      const settled = slot.state === SLOT_STATE.confirmed || slot.state === SLOT_STATE.trying;
       return settled ? `${SLOT.inUse}・${SLOT.states[slot.state]}` : SLOT.inUse;
     }
-    if (i === FACTORY) return slot.state === SLOT_EMPTY ? SLOT.states[SLOT_EMPTY] : SLOT.present;
-    if (slot.state === SLOT_CONFIRMED) return SLOT.previous;
+    if (factory) return slot.state === SLOT_STATE.empty ? SLOT.states[SLOT_STATE.empty] : SLOT.present;
+    if (slot.state === SLOT_STATE.confirmed) return SLOT.previous;
     return SLOT.states[slot.state] ?? '';
   }
 
   function slotVersion(i: number, s: StatusResp): string {
     const slot = s.slots[i];
-    return slot.state === SLOT_EMPTY || i === FACTORY ? '' : versionText(slot.version);
+    return slot.state === SLOT_STATE.empty || i === factorySlot() ? '' : versionText(slot.version);
   }
 
   function reason(code: number): string {
@@ -126,7 +120,7 @@
     const v = l.version;
     // A value not told (left out, or an agent that predates VERSION) is 不明; on an MCU booted by its vendor's
     // 2nd stage there is no stage0 and no boot core: なし.
-    const absent = l.hello?.portKind === PORT_VENDOR_STAGE2 ? DETAIL.none : DETAIL.unknown;
+    const absent = l.hello?.portKind === PORT_KIND.vendorStage2 ? DETAIL.none : DETAIL.unknown;
     const rows: [string, string][] = [['stage0', v?.stage0 != null ? versionText(v.stage0) : absent]];
     const cs = v?.coreSlots;
     for (const i of coreRows(node?.mcuId)) {
@@ -214,7 +208,7 @@
               {@const slot = core.slots[i]}
               <tr>
                 <th scope="row">{SLOT.coreRows[i]}</th>
-                <td class="v" translate="no">{slot && slot.state !== SLOT_EMPTY ? versionText(slot.version) : ''}</td>
+                <td class="v" translate="no">{slot && slot.state !== SLOT_STATE.empty ? versionText(slot.version) : ''}</td>
                 <td>{slot ? (i === core.active ? SLOT.inUse : (SLOT.states[slot.state] ?? '')) : ''}</td>
               </tr>
             {/each}

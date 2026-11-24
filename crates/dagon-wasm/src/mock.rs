@@ -4,17 +4,20 @@
 //! reader before the hub acts on it, and a response is written by its
 //! writer.
 
+use dagon_format::header::port_kind;
+use dagon_format::statelog::slot;
 use dagon_format::Version;
 use dagon_proto::handler::{self, Ceiling, Handler};
 use dagon_proto::payload::{
-    encode_bulk_resp, encode_digest, encode_next_offset, put_refusal, CmdSet, HelloResp, SlotInfo,
-    SlotState, StatusResp, XferChunk, REFUSAL_MAX,
+    encode_bulk_resp, encode_digest, encode_next_offset, mode, phase, put_refusal, role, CmdSet,
+    HelloResp, SlotInfo, SlotState, StatusResp, XferChunk, REFUSAL_MAX,
 };
 use dagon_proto::{flags, max_payload, Cmd, FrameError, Status, CRC_LEN, HEADER_LEN};
 use wasm_bindgen::prelude::*;
 
-/// The numbers of the wire the page names: commands, statuses and the
-/// frame's sizes, read from dagon-proto.
+/// The numbers of the wire the page names: commands, statuses, the frame's
+/// sizes, HELLO's roles, modes and port kinds, STATUS's slot states and SHOW's phases,
+/// read from dagon-proto.
 #[wasm_bindgen]
 #[derive(Clone, Copy)]
 pub struct Wire {
@@ -41,6 +44,29 @@ pub struct Wire {
     pub max_payload_usb: u32,
     pub max_payload_uart: u32,
     pub max_payload_i2c: u32,
+    pub role_hub: u8,
+    pub role_node: u8,
+    pub mode_app: u8,
+    pub mode_update: u8,
+    pub mode_recovery: u8,
+    pub mode_agent: u8,
+    pub slot_empty: u8,
+    pub slot_written: u8,
+    pub slot_pending: u8,
+    pub slot_trying: u8,
+    pub slot_confirmed: u8,
+    pub slot_reverted: u8,
+    /// STATUS's entry of the recovery agent's slot.
+    pub slot_factory: u8,
+    pub phase_transfer: u8,
+    pub phase_verify: u8,
+    pub phase_reboot: u8,
+    pub phase_confirm: u8,
+    pub phase_rejected: u8,
+    pub phase_failed: u8,
+    pub phase_rom: u8,
+    pub port_self_boot: u8,
+    pub port_vendor_stage2: u8,
 }
 
 #[wasm_bindgen]
@@ -69,6 +95,28 @@ pub fn wire() -> Wire {
         max_payload_usb: max_payload::USB as u32,
         max_payload_uart: max_payload::UART as u32,
         max_payload_i2c: max_payload::I2C as u32,
+        role_hub: role::HUB,
+        role_node: role::NODE,
+        mode_app: mode::APP,
+        mode_update: mode::UPDATE,
+        mode_recovery: mode::RECOVERY,
+        mode_agent: mode::AGENT,
+        slot_empty: SlotState::Empty as u8,
+        slot_written: SlotState::Written as u8,
+        slot_pending: SlotState::Pending as u8,
+        slot_trying: SlotState::Trying as u8,
+        slot_confirmed: SlotState::Confirmed as u8,
+        slot_reverted: SlotState::Reverted as u8,
+        slot_factory: slot::FACTORY,
+        phase_transfer: phase::TRANSFER,
+        phase_verify: phase::VERIFY,
+        phase_reboot: phase::REBOOT,
+        phase_confirm: phase::CONFIRM,
+        phase_rejected: phase::REJECTED,
+        phase_failed: phase::FAILED,
+        phase_rom: phase::ROM,
+        port_self_boot: port_kind::SELF_BOOT,
+        port_vendor_stage2: port_kind::VENDOR_STAGE2,
     }
 }
 

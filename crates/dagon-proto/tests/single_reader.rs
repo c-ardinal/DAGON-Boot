@@ -140,8 +140,18 @@ fn web_sources(dir: &Path, out: &mut Vec<PathBuf>) {
 }
 
 /// Words that make a name one of the wire's: a command, a status, a field,
-/// a key, or the wire or protocol version, in any case and spelling.
-const WIRE_WORDS: [&str; 9] = [
+/// a key, the wire or protocol version, or a value of one of its fields
+/// (HELLO's role, mode and port kind, a STATUS slot's state and the
+/// factory slot, SHOW's phase), in any case and spelling.
+const WIRE_WORDS: [&str; 17] = [
+    "slot_",
+    "port_",
+    "state",
+    "mode",
+    "role",
+    "phase",
+    "portkind",
+    "factory",
     "cmd",
     "command",
     "status",
@@ -230,6 +240,13 @@ fn line_names_a_wire_number(line: &str, entries: bool, words: &[&str]) -> bool {
         if value.is_some_and(starts_with_number) {
             return true;
         }
+        // A table of them: `name = { first: N, ... }`.
+        let first = value
+            .and_then(|v| v.trim_start().strip_prefix('{'))
+            .and_then(|v| v.split_once(':'));
+        if first.is_some_and(|(_, n)| starts_with_number(n)) {
+            return true;
+        }
         // The literal first: `0x01 === frame.cmd`.
         let before = line[..start].trim_end().trim_end_matches('.');
         let before = before.trim_end_matches(|c: char| c.is_ascii_alphanumeric() || c == '_');
@@ -309,6 +326,26 @@ fn without_http_status(line: &str) -> String {
     out + rest
 }
 
+/// `text` with the lines of each `<style>` block of a component left
+/// empty, so that line numbers stay.
+fn without_style(text: &str) -> String {
+    let mut inside = false;
+    let mut out = String::new();
+    for l in text.lines() {
+        if l.trim_start().starts_with("<style") {
+            inside = true;
+        }
+        if !inside {
+            out.push_str(l);
+        }
+        if l.trim_start().starts_with("</style>") {
+            inside = false;
+        }
+        out.push('\n');
+    }
+    out
+}
+
 /// The page takes every command, status and field number from dagon-proto
 /// through dagon-wasm: its source writes none, in any spelling, and names
 /// no field at all.
@@ -335,6 +372,14 @@ fn the_page_holds_no_command_status_or_field_number() {
         "  {#if node.status === 4}",
         "switch (frame.cmd) {\n  case 0x02:\n    break;\n}",
         "switch (status) {\n  default:\n    return;\n  case 5: {\n  }\n}",
+        "const SLOT_CONFIRMED = 4;",
+        "  if (s.state === 0) return;",
+        "const FACTORY = 2;",
+        "export const PHASE = { transfer: 1 };",
+        "if (h.mode === 3) {",
+        "  role: 0,",
+        "if (l.hello?.portKind === 2) {",
+        "const PORT_VENDOR_STAGE2 = 2;",
     ] {
         assert!(
             !wire_numbers(planted, true).is_empty(),
@@ -355,9 +400,14 @@ fn the_page_holds_no_command_status_or_field_number() {
         "  status: (status: number): Uint8Array => response_status(status),",
         "switch (kind) {\n  case 2:\n    break;\n}",
         "switch (frame.cmd) {\n  case CMD.SHOW:\n    break;\n}\nswitch (n) {\n  case 1:\n}",
+        "if (s.state === SLOT_STATE.empty) return;",
+        "if (ws.mode === 'define') {",
     ] {
         assert!(wire_numbers(fine, true).is_empty(), "caught: {fine}");
     }
+    // A component's stylesheet is not read: `--i-state: 16px` is CSS.
+    let svelte = "<script>\n  const ok = 1;\n</script>\n<style>\n  .a { --i-state: 16px; }\n</style>\n{#if s.state === 4}{/if}";
+    assert_eq!(wire_numbers(&without_style(svelte), true), [7]);
     let mut files = Vec::new();
     web_sources(&root().join("web/src"), &mut files);
     assert!(files.len() > 20, "the page's source was not found");
@@ -366,7 +416,7 @@ fn the_page_holds_no_command_status_or_field_number() {
         let path = p.strip_prefix(root()).unwrap().to_string_lossy();
         let name = path.replace(std::path::MAIN_SEPARATOR, "/");
         let speaks_wire = name.contains("/serial/") || name.contains("/wasm/");
-        let text = std::fs::read_to_string(&p).unwrap();
+        let text = without_style(&std::fs::read_to_string(&p).unwrap());
         let lines: Vec<&str> = text.lines().collect();
         let field_code = lines.iter().enumerate().filter_map(|(i, l)| {
             [

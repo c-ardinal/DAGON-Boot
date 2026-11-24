@@ -1,6 +1,6 @@
-import { decodeHelloResp, encodeHelloReq, wireVersion } from '../wasm/dagon.ts';
+import { HELLO_ROLE, decodeHelloResp, encodeHelloReq, wireVersion } from '../wasm/dagon.ts';
 import { CMD, encodeFrame, newFrameStream, parseFrame, STATUS, WIRE } from './frame.ts';
-import { ROLE_HUB, type HelloResp } from './hello.ts';
+import type { HelloResp } from './hello.ts';
 
 /**
  * Why reopening the rebooted PC-connected node did not get it back (the diagnostic log
@@ -58,7 +58,7 @@ export type HubIdentity = Pick<HelloResp, 'mcuId' | 'keyId'>;
  */
 export function notThisHub(h: HelloResp | null, first: HubIdentity | null, version: number | null): ReconnectNote | null {
   if (h === null) return { kind: 'silent' };
-  if (h.role !== ROLE_HUB) return { kind: 'notHub' };
+  if (h.role !== HELLO_ROLE.hub) return { kind: 'notHub' };
   if (first && (h.mcuId !== first.mcuId || h.keyId.join() !== first.keyId.join())) return { kind: 'otherHub' };
   if (version !== null && !(h.trial && h.activeVersion === version)) return { kind: 'version', version: h.activeVersion, trial: h.trial };
   return null;

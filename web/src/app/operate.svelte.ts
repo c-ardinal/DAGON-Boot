@@ -4,14 +4,14 @@
 // The link to the node connected to the PC and the watch are OperateLink's; here are the update,
 // the reconnect after the node connected to the PC reboots, and recovery.
 import { isNote, type Transport } from '../serial/transport.ts';
-import { LOCAL, PHASE, check_release_for, releaseAgentDigest, releaseCoreVersions, releaseVersions, topo_compile, versionText, type Host, type NodeResult, type ConfirmResult, type RecoverResult, type Refusal, type UpdateEvent } from '../wasm/dagon.ts';
+import { LOCAL, PHASE, check_release_for, factorySlot, releaseAgentDigest, releaseCoreVersions, releaseVersions, topo_compile, versionText, type Host, type NodeResult, type ConfirmResult, type RecoverResult, type Refusal, type UpdateEvent } from '../wasm/dagon.ts';
 import type { RollbackRecord } from './agent.svelte.ts';
 import { ANNOUNCE, FILE } from './copy.ts';
 import { NODE_WRITE, type L } from './machine.ts';
 import { OperateLink } from './operateLink.svelte.ts';
 import type { Node } from './sample.ts';
 import { imageRows } from './slots.ts';
-import { FACTORY_SLOT, LATEST_NAME, NO_TRACK, REFUSALS, UNKNOWN, appUnchanged, failureStage, fileTopologyOf, hubBack, refusalAnnounce, refusalOf, sameBytes, type Progress, type ReleaseFile } from './writeProgress.ts';
+import { LATEST_NAME, NO_TRACK, REFUSALS, UNKNOWN, appUnchanged, failureStage, fileTopologyOf, hubBack, refusalAnnounce, refusalOf, sameBytes, type Progress, type ReleaseFile } from './writeProgress.ts';
 
 /** While a write or a recovery runs, the card checks stay as they are. */
 const UPDATE_LOCKED: ReadonlySet<L> = new Set(['writing', 'hubRestarting', 'reconnectNeeded', 'stopped', 'recovering']);
@@ -37,7 +37,7 @@ export class Operate extends OperateLink {
       const st = await this.statusOf(id);
       if (!st || !appUnchanged(bytes, at(id), st)) return null;
       const agent = releaseAgentDigest(bytes, at(id));
-      if (agent && !sameBytes(st.status.slots[FACTORY_SLOT]?.digest16 ?? null, agent)) return null;
+      if (agent && !sameBytes(st.status.slots[factorySlot()]?.digest16 ?? null, agent)) return null;
       const held = cores.get(at(id));
       if (!held) continue;
       if (!held.includes((await this.runningCore(id)) ?? NaN)) return null;

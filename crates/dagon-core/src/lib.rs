@@ -10,5 +10,7 @@ pub mod bootcore;
 pub mod key;
 pub mod log;
 
+pub use boot::DecisionPolicy;
+
 #[cfg(kani)]
 mod proofs;

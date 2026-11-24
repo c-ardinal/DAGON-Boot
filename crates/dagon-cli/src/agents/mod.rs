@@ -378,17 +378,23 @@ pub fn secret_env(_home: Option<&Path>) -> Vec<String> {
         .collect()
 }
 
-/// What every AI feature sends: the same two texts whatever the way.
-#[derive(Debug, Clone)]
-pub struct Prompt {
-    pub system: String,
-    pub user: String,
-    /// A model for ways that pick one (`dagon ai topology --model`).
-    pub model: Option<String>,
-}
+pub use dagon_host::ports::{Agent, Prompt};
 
 /// One call of an agent: a prompt in, its text out.
-pub(crate) type Api<'a> = dyn FnMut(&Prompt) -> Result<String, String> + 'a;
+pub(crate) type Api<'a> = dyn Agent + 'a;
+
+/// DAGON's agent: the linked agent, reached the linked way ([`call`]).
+pub(crate) struct Linked {
+    pub home: PathBuf,
+    pub keys: Keys,
+    pub timeout: Duration,
+}
+
+impl Agent for Linked {
+    fn call(&mut self, prompt: &Prompt) -> Result<String, String> {
+        call(&self.home, &self.keys, prompt, self.timeout)
+    }
+}
 
 /// The consent held for one call, from the check until the call ends
 /// (unlink waits for it), and which agent and way it is for. Only

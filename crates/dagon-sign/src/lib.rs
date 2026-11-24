@@ -174,6 +174,53 @@ pub fn load_key_pair(secret_path: &Path) -> Result<KeyPair, KeyError> {
     Ok(KeyPair::from_seed(Seed::new(seed)))
 }
 
+/// The Signer port: signs DAGON's signed structures (image headers,
+/// release manifests). DAGON's default is an Ed25519 key pair in memory.
+pub trait Signer {
+    /// The public key a signature verifies under.
+    fn public_key(&self) -> [u8; 32];
+    /// The signature of `domain` followed by `message`.
+    fn sign(&self, domain: &[u8], message: &[u8]) -> [u8; 64];
+}
+
+impl Signer for KeyPair {
+    fn public_key(&self) -> [u8; 32] {
+        *self.pk
+    }
+
+    /// Ed25519, deterministic.
+    fn sign(&self, domain: &[u8], message: &[u8]) -> [u8; 64] {
+        *self.sk.sign([domain, message].concat(), None)
+    }
+}
+
+/// The KeyStore port: hands over the signing key from where the user
+/// keeps it. DAGON's default is a key file ([`KeyFile`]).
+pub trait KeyStore {
+    /// The key, or why it cannot be had (with no secret in the text).
+    fn key(&self) -> Result<KeyPair, String>;
+}
+
+/// A secret key file written by [`generate_to_dir`]. Refused when it lies
+/// inside a git work tree.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct KeyFile(pub PathBuf);
+
+impl KeyStore for KeyFile {
+    fn key(&self) -> Result<KeyPair, String> {
+        let path = &self.0;
+        let inside = inside_git_work_tree(path)
+            .map_err(|e| format!("cannot check key path {}: {e}", path.display()))?;
+        if inside {
+            return Err(format!(
+                "refusing to use a secret key stored inside a git work tree: {}",
+                path.display()
+            ));
+        }
+        load_key_pair(path).map_err(|e| e.to_string())
+    }
+}
+
 /// Load a public key file written by `generate_to_dir`: 64 hex digits that
 /// decode to an Ed25519 point of large order (not just any 32 bytes).
 pub fn load_public_key(public_path: &Path) -> Result<[u8; 32], KeyError> {

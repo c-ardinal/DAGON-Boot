@@ -428,7 +428,7 @@ pub(crate) fn ask(q: &Question, facts: &Facts, api: &mut Api) -> Result<Reply, S
             user: crate::agents::conversation(&turns),
             model: None,
         };
-        let (reply, answer, proposed) = answer_of(&api(&p)?)?;
+        let (reply, answer, proposed) = answer_of(&api.call(&p)?)?;
         let Some(yaml) = proposed else {
             return Ok(Reply {
                 answer,
@@ -514,7 +514,11 @@ pub fn command(words: &[String]) -> Result<(), String> {
         Ok(p) => read_topology(&p)?,
         Err(_) => None,
     };
-    let mut api = |p: &Prompt| crate::agents::call(&home, &keys, p, ASK_TIMEOUT);
+    let mut api = crate::agents::Linked {
+        home: home.clone(),
+        keys,
+        timeout: ASK_TIMEOUT,
+    };
     let facts = Facts {
         reg: &reg,
         topology: yaml.as_deref(),

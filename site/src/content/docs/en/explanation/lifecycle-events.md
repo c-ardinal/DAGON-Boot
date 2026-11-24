@@ -459,7 +459,7 @@ a reason, so one source answers "can this be replaced".
 | `BoardBringUp` (the board's power, pins and buses at app start) | app, relay | the board definition's | untrusted | return, pins, buses, time, memory |
 | `NodeLink` (how a node reaches another node over a link, through `dagon_port::NodeLink`) | relay | I2C controller, PIO UART | untrusted | return, buses, transport, dma, time, memory |
 | `Signer` (signing images and releases) | host | file key pair | untrusted (the host is trusted by definition; the device verifies) | – |
-| `KeyStore` (receives the signing key from where the user chose to keep it (an environment variable, the OS key store, 1Password and so on)) | host | file key pair | untrusted (the host is trusted by definition; the device verifies) | – |
+| `KeyStore` (receives the signing key from where the user chose to keep it (an environment variable, the OS key store, 1Password and so on)) | host | a key file, whose path `--key` or `DAGON_SIGNING_KEY` names | untrusted (the host is trusted by definition; the device verifies) | – |
 | `BuildRunner` (building node images) | host | cargo | untrusted | – |
 | `Agent` (an external agent the CLI and the page hand requests to) | host | data-defined (agent definitions) | untrusted | – |
 | `Action` (a program or request run after a host event) | host | data-defined (action definitions) | untrusted | – |

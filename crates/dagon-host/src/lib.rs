@@ -5,7 +5,7 @@
 //! [`Transport`] carrying the byte stream to the hub (serial port, Web
 //! Serial, simulator) and a [`HostClock`]. No std I/O and no async runtime,
 //! so the crate builds for WASM unchanged.
-#![no_std]
+#![cfg_attr(not(feature = "std"), no_std)]
 #![forbid(unsafe_code)]
 
 extern crate alloc;
@@ -13,6 +13,7 @@ extern crate alloc;
 pub mod jobs;
 mod ops;
 mod percent;
+pub mod ports;
 pub mod rom;
 mod routes;
 mod timings;
@@ -24,6 +25,9 @@ pub use ops::{
     REASONS,
 };
 pub use percent::{transfer_percent, trial_percent};
+pub use ports::{Agent, Prompt};
+#[cfg(feature = "std")]
+pub use ports::{BuildJob, BuildRunner};
 #[cfg(feature = "defs")]
 pub use routes::{local_node, node_targets};
 pub use routes::{LocalNode, NodeTargets, RouteError, Target};

@@ -3,13 +3,13 @@
 
 use std::fmt;
 
+use crate::Signer;
 use dagon_ed25519::Ed25519Compact;
 use dagon_format::header::{
     self, build_flags, capabilities, image_kind, slot_binding, ImageHeader, HEADER_SIZE, SIGNED_LEN,
 };
 use dagon_format::{sha256, Version};
 use dagon_topology::defs::Registry;
-use ed25519_compact::KeyPair;
 
 pub use dagon_topology::{mcu_id_of, parse_version, port_kind_of};
 
@@ -176,13 +176,12 @@ impl fmt::Display for ImageError {
 
 impl std::error::Error for ImageError {}
 
-/// Ed25519(`domain` || `message`) with `key`. Deterministic.
-pub fn sign(key: &KeyPair, domain: &[u8], message: &[u8]) -> [u8; 64] {
-    *key.sk.sign([domain, message].concat(), None)
-}
-
 /// Header + payload, header signed with `key`.
-pub fn sign_image(spec: &ImageSpec, payload: &[u8], key: &KeyPair) -> Result<Vec<u8>, ImageError> {
+pub fn sign_image(
+    spec: &ImageSpec,
+    payload: &[u8],
+    key: &dyn Signer,
+) -> Result<Vec<u8>, ImageError> {
     if payload.is_empty() {
         return Err(ImageError::EmptyPayload);
     }
@@ -195,7 +194,7 @@ pub fn sign_image(spec: &ImageSpec, payload: &[u8], key: &KeyPair) -> Result<Vec
     if !capabilities_ok(spec.image_kind, spec.build_flags, spec.capabilities) {
         return Err(ImageError::Capability);
     }
-    let pk: [u8; 32] = *key.pk;
+    let pk: [u8; 32] = key.public_key();
     let test_key = if pk == TEST_PUBLIC_KEY {
         build_flags::TEST_KEY
     } else {
@@ -220,7 +219,7 @@ pub fn sign_image(spec: &ImageSpec, payload: &[u8], key: &KeyPair) -> Result<Vec
         capabilities: spec.capabilities,
         signature: [0; 64],
     };
-    h.signature = sign(key, header::SIGN_DOMAIN, &h.to_bytes()[..SIGNED_LEN]);
+    h.signature = key.sign(header::SIGN_DOMAIN, &h.to_bytes()[..SIGNED_LEN]);
     Ok([&h.to_bytes()[..], payload].concat())
 }
 

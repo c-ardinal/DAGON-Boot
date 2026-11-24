@@ -27,8 +27,9 @@
 //!
 //! # The two verifiers
 //!
-//! - [`Ed25519Small`]: this crate's own arithmetic with SHA-512 from
-//!   `sha2`, small enough for a stage0.
+//! - [`Ed25519Small`]: this crate's own arithmetic with SHA-512 from a
+//!   [`CryptoProvider`] (DAGON's software one by default), small enough
+//!   for a stage0.
 //! - [`Ed25519Compact`] (feature `compact`): `ed25519-compact`'s check,
 //!   then the cofactorless equation, which `ed25519-compact` does not
 //!   check on its own (it also accepts when the two sides differ by a point
@@ -36,7 +37,7 @@
 #![no_std]
 #![forbid(unsafe_code)]
 
-use dagon_format::SigVerifier;
+use dagon_format::{CryptoProvider, SigVerifier, Software};
 
 mod small;
 
@@ -51,43 +52,73 @@ pub struct NoTick;
 /// Cortex-M0+ cycles apart), so a caller keeps a watchdog fed through a
 /// check that takes seconds on a slow clock.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Ed25519Small<T = NoTick> {
+///
+/// Its SHA-512 comes from a [`CryptoProvider`]: DAGON's [`Software`] by
+/// default, another through [`Ed25519Small::with_crypto`].
+pub struct Ed25519Small<T = NoTick, C = Software> {
     key: [u8; 32],
     tick: T,
+    crypto: C,
 }
 
 impl Ed25519Small {
     /// Checks under the 32-byte public key `key`. `const`, so the key can
     /// sit in a program's flash as a constant.
     pub const fn new(key: [u8; 32]) -> Self {
-        Self { key, tick: NoTick }
+        Self {
+            key,
+            tick: NoTick,
+            crypto: Software,
+        }
     }
 }
 
 impl<F: Fn() + Copy> Ed25519Small<F> {
     /// Checks under `key`, calling `tick` at every step of a check.
     pub const fn with_tick(key: [u8; 32], tick: F) -> Self {
-        Self { key, tick }
+        Self {
+            key,
+            tick,
+            crypto: Software,
+        }
     }
 }
 
-impl SigVerifier for Ed25519Small {
+impl<T, C> Ed25519Small<T, C> {
+    /// The same check with its primitives from `crypto`.
+    pub fn with_crypto<D: CryptoProvider>(self, crypto: D) -> Ed25519Small<T, D> {
+        Ed25519Small {
+            key: self.key,
+            tick: self.tick,
+            crypto,
+        }
+    }
+}
+
+impl<C: CryptoProvider> SigVerifier for Ed25519Small<NoTick, C> {
     fn key_id(&self) -> [u8; 8] {
         dagon_format::key_id(&self.key)
     }
 
     fn verify(&self, domain: &[u8], msg: &[&[u8]], sig: &[u8; 64]) -> bool {
-        small::verify(&self.key, domain, msg, sig, &|| {})
+        small::verify(self.crypto.sha512(), &self.key, domain, msg, sig, &|| {})
     }
 }
 
-impl<F: Fn() + Copy> SigVerifier for Ed25519Small<F> {
+impl<F: Fn() + Copy, C: CryptoProvider> SigVerifier for Ed25519Small<F, C> {
     fn key_id(&self) -> [u8; 8] {
         dagon_format::key_id(&self.key)
     }
 
     fn verify(&self, domain: &[u8], msg: &[&[u8]], sig: &[u8; 64]) -> bool {
-        small::verify(&self.key, domain, msg, sig, &self.tick)
+        small::verify(
+            self.crypto.sha512(),
+            &self.key,
+            domain,
+            msg,
+            sig,
+            &self.tick,
+        )
     }
 }
 
@@ -122,6 +153,6 @@ impl SigVerifier for Ed25519Compact {
         for part in msg {
             st.absorb(part);
         }
-        st.verify().is_ok() && small::verify(&self.key, domain, msg, sig, &|| {})
+        st.verify().is_ok() && small::verify(Software.sha512(), &self.key, domain, msg, sig, &|| {})
     }
 }

@@ -33,7 +33,7 @@ dagon-topology = { path = "../dagon-topology" }
 dagon-sign = { path = "../dagon-sign" }
 dagon-proto = { path = "../dagon-proto" }
 dagon-sim = { path = "../dagon-sim" }
-dagon-host = { path = "../dagon-host", features = ["defs"] }
+dagon-host = { path = "../dagon-host", features = ["defs", "std"] }
 dagon-port = { path = "../dagon-port" }
 dagon-conform = { path = "../dagon-conform" }
 dagon-catalog = { path = "../dagon-catalog" }

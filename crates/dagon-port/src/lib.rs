@@ -24,6 +24,7 @@ pub mod timeout;
 
 pub use relay_link::{Addressing, RelayLinkDef};
 
+use dagon_format::{CryptoProvider as _, Digest as _};
 use dagon_proto::payload::{HelloReq, HelloResp};
 use dagon_proto::{split_status, Cmd, Frame, Status, PROTO_VERSION};
 
@@ -68,7 +69,7 @@ pub trait Flash {
     /// default reads them through [`Flash::read`] into the software
     /// SHA-256; a port with a hash peripheral overrides it.
     fn sha256(&mut self, addr: u32, len: u32) -> Result<[u8; 32], FlashError> {
-        let mut sha = dagon_format::Sha256::new();
+        let mut sha = dagon_format::Software.sha256();
         let mut buf = [0u8; 256];
         let mut done = 0u32;
         while done < len {

@@ -242,13 +242,19 @@ mod tests {
             })
             .unwrap();
         let state = |s: &str| server.job_json(id).unwrap()["state"] == s;
-        let wait = |busy: &dyn Fn() -> bool| {
+        // One read of the state per step: two reads could straddle a
+        // change (queued, then running) and stop the wait early.
+        let wait = |busy: &[&str]| {
             let t = std::time::Instant::now();
-            while busy() && t.elapsed() < std::time::Duration::from_secs(10) {
+            while t.elapsed() < std::time::Duration::from_secs(10) {
+                let now = server.job_json(id).unwrap()["state"].clone();
+                if !busy.iter().any(|b| now == *b) {
+                    break;
+                }
                 std::thread::sleep(std::time::Duration::from_millis(10));
             }
         };
-        wait(&|| state("running") || state("queued"));
+        wait(&["running", "queued"]);
         if state("question") {
             assert!(
                 writes.lock().unwrap().is_empty(),
@@ -258,7 +264,7 @@ mod tests {
                 Some(a) => assert!(server.answer(id, a.into())),
                 None => assert!(server.cancel(id)),
             }
-            wait(&|| state("question") || state("running"));
+            wait(&["question", "running"]);
         }
         let _ = std::fs::remove_dir_all(&dir);
         let written = writes.lock().unwrap().clone();

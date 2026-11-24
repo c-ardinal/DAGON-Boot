@@ -1,6 +1,7 @@
 //! Byte layouts shared by every DAGON component: image header, manifest,
 //! release bundle (`.dgb`), state log, topology canonical binary, plus
-//! CRC-32, SHA-256 and the signature verifier interface ([`SigVerifier`]).
+//! CRC-32, the digest and crypto primitive ports ([`Digest`],
+//! [`CryptoProvider`]) and the signature verifier interface ([`SigVerifier`]).
 //! All multi-byte fields are little-endian.
 #![no_std]
 #![forbid(unsafe_code)]
@@ -76,26 +77,70 @@ const CRC_TABLE: [u32; 16] = {
     table
 };
 
-/// Incremental SHA-256.
+/// The Digest port: a hash taken in one pass over parts, giving `N` bytes.
+/// The image body's digest is SHA-256 (`N` = 32); the Ed25519 check
+/// hashes with SHA-512 (`N` = 64).
+pub trait Digest<const N: usize = 32> {
+    fn update(&mut self, data: &[u8]);
+    fn finalize(self) -> [u8; N];
+}
+
+/// The CryptoProvider port: the primitives DAGON's digest and signature
+/// verifier use. A replacement brings hardware hashing or an HSM; DAGON's
+/// default is [`Software`].
+pub trait CryptoProvider {
+    type Sha256: Digest<32>;
+    type Sha512: Digest<64>;
+    fn sha256(&self) -> Self::Sha256;
+    fn sha512(&self) -> Self::Sha512;
+}
+
+/// DAGON's software primitives (the `sha2` crate).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Software;
+
+impl CryptoProvider for Software {
+    type Sha256 = Sha256;
+    type Sha512 = Sha512;
+    fn sha256(&self) -> Sha256 {
+        Sha256::default()
+    }
+    fn sha512(&self) -> Sha512 {
+        Sha512::default()
+    }
+}
+
+/// Incremental SHA-256 in software.
 #[derive(Clone, Default)]
 pub struct Sha256(sha2::Sha256);
 
-impl Sha256 {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn update(&mut self, data: &[u8]) {
+impl Digest<32> for Sha256 {
+    fn update(&mut self, data: &[u8]) {
         sha2::Digest::update(&mut self.0, data);
     }
 
-    pub fn finalize(self) -> [u8; 32] {
+    fn finalize(self) -> [u8; 32] {
         sha2::Digest::finalize(self.0).into()
     }
 }
 
+/// Incremental SHA-512 in software.
+#[derive(Clone, Default)]
+pub struct Sha512(sha2::Sha512);
+
+impl Digest<64> for Sha512 {
+    fn update(&mut self, data: &[u8]) {
+        sha2::Digest::update(&mut self.0, data);
+    }
+
+    fn finalize(self) -> [u8; 64] {
+        sha2::Digest::finalize(self.0).into()
+    }
+}
+
+/// SHA-256 of `data` with DAGON's software primitives.
 pub fn sha256(data: &[u8]) -> [u8; 32] {
-    let mut h = Sha256::new();
+    let mut h = Software.sha256();
     h.update(data);
     h.finalize()
 }

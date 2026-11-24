@@ -6,7 +6,9 @@
 # region on its own. It is updated in the field, so it keeps no margin.
 # The parts come from the symbol table (`nm`, Rust paths) as for the
 # ESP32-S3 stage0; each is the build's plus a quarter, in 256-byte steps;
-# measured 49,032 bytes when set.
+# measured 49,032 bytes when set, then 52,624 after C-489 (state log
+# rebuilt from the slots), which raised dagon-core, dagon-format and
+# mcu-package by the same rule.
 
 [image]
 max_bytes = 196608
@@ -44,17 +46,17 @@ max_bytes = 4096
 [[part]]
 name = "dagon-core"
 match = ["dagon_core"]
-max_bytes = 4864
+max_bytes = 5632
 
 [[part]]
 name = "dagon-format"
 match = ["dagon_format"]
-max_bytes = 3328
+max_bytes = 7424
 
 [[part]]
 name = "mcu-package"
 match = ["dagon_esp32s3_bootcore", "dagon_mcu_esp32s3", "dagon_mcu_common", "dagon_port", "dagon_events", "core_start"]
-max_bytes = 13568
+max_bytes = 17408
 
 [[part]]
 name = "rust-core"

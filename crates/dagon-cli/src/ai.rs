@@ -294,11 +294,7 @@ fn board_facts(b: &BoardDef) -> Value {
                 ControlKind::Full => "full",
                 ControlKind::Cooperative => "cooperative",
             },
-            "rom_entry": l.rom_entry.map(|r| match r {
-                RomEntry::ForceDownloadBoot => "force-download-boot",
-                RomEntry::M5pm1 => "m5pm1",
-                RomEntry::Stm32I2cRom => "stm32-i2c-rom",
-            }),
+            "rom_entry": l.rom_entry.map(RomEntry::name),
         })
     });
     json!({

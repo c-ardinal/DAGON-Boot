@@ -69,6 +69,40 @@ class Generated(unittest.TestCase):
                 ident = tomllib.loads(f.read_text(encoding="utf-8"))["id"]
                 self.assertIn(f"| `{ident}` |", page)
 
+    def test_every_slot_and_log_face_of_every_mcu_is_in_the_flash_layout(self):
+        page = gen.boards()
+        for f in (ROOT / "targets" / "mcu").glob("*/dagon-mcu.toml"):
+            m = tomllib.loads(f.read_text(encoding="utf-8"))
+            starts = [s["start"] for s in m.get("slot_layout", [])]
+            starts += [face for log in ("app_log", "bootcore_log") for face in m.get("layout", {}).get(log, {}).get("faces", [])]
+            self.assertTrue(starts, m["id"])
+            for at in starts:
+                self.assertIn(f"| `{gen.hexa(at, 8)}` |", page, m["id"])
+
+    def test_the_flash_layout_writes_addresses_as_the_definitions_do(self):
+        self.assertEqual(gen.hexa(0x0800_0000, 8), "0x0800_0000")
+        self.assertEqual(gen.hexa(0x1_FE00), "0x1_FE00")
+        self.assertEqual(gen.kib(0xFE00), "63.5 KiB")
+        self.assertEqual(gen.kib(0x30_0000), "3 MiB")
+
+    def test_every_flag_and_payload_limit_of_a_frame_is_listed(self):
+        page = gen.contracts()
+        src = gen.PROTO.read_text(encoding="utf-8")
+        for mod in ("flags", "max_payload"):
+            block = src.split(f"pub mod {mod} {{", 1)[1].split("\n}", 1)[0]
+            names = re.findall(r"pub const (\w+):", block)
+            self.assertTrue(names, mod)
+            for name in names:
+                self.assertRegex(page, rf"\| `{name}` \| [^|]+ \| \S", name)
+
+    def test_the_esp32s3_first_write_follows_its_definition(self):
+        text = gen.esp_first_write("en")
+        m = tomllib.loads((gen.ESP / "dagon-mcu.toml").read_text(encoding="utf-8"))
+        app = next(s for s in m["slot_layout"] if (s["target"], s["slot"]) == ("app", "a"))
+        self.assertIn(f"(ota_0, 0x{app['start']:X})", text)
+        self.assertIn(f"partition, 0x{app['header']['detached']:X})", text)
+        self.assertIn(f"`, 0x{m['writer']['table_at']:X})", text)
+
     def test_every_key_of_the_agent_types_is_listed(self):
         page = gen.agent_definition()
         for path, name in ((gen.AGENTS / "mod.rs", "AgentDef"), (gen.AGENTS / "mod.rs", "WayDef"),

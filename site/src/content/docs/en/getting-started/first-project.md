@@ -176,12 +176,14 @@ The provision folder is `out/provision/<id>/` beside `dagon.toml`, or under `pro
 
 `dagon flash` builds the board's factory agent and the app. It turns the app into an ESP image (`espflash save-image --chip esp32s3 --flash-size 16mb`), signs it, and writes these with `espflash`:
 
+<!-- generated from the ESP32-S3 MCU definition and its partitions.csv: python site/scripts/gen.py -->
 - The bundled unmodified ESP-IDF 2nd stage (0x0): refused unless its SHA-256 matches `targets/mcu/esp32s3/vendor/SHA256SUMS`.
 - The partition table (`targets/mcu/esp32s3/partitions.csv`, 0x8000)
-- The factory agent
+- The factory agent (factory, 0x10000)
 - The app (ota_0, 0x110000)
 - The app's signed header (the `dagon` partition, 0x710000)
 - The otadata entry that starts it as confirmed (0xD000)
+<!-- end of generated table -->
 
 `--dry-run` lists the files with their offsets and the `espflash` commands (`commands.txt` in the same provision folder).
 

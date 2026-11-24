@@ -483,7 +483,7 @@ mod tests {
         std::fs::write(
             &toml,
             "format = 1\nmcu_files = [\"m/dagon-mcu.toml\"]\n\
-             [board.my-pico]\nformat = 3\nproduct = \"My Pico\"\nmcu = \"my-m0\"\n\
+             [board.my-pico]\nformat = 3\nproduct = \"My Pico\"\nmcu = \"my-m0\"\ndefault = true\n\
              flash_bytes = 0x40_0000\ndrawing = \"pico\"\n\
              header = [{ pin = \"GPIO4\", label = \"D4\" }]\n\
              default_link = { kind = \"i2c\", addr = 0x44, control = \"full\" }\n\
@@ -496,6 +496,11 @@ mod tests {
         let reg = Registry::load(&[dagon_topology::defs::Source::Project(&toml)]).unwrap();
         std::fs::remove_dir_all(&dir).unwrap();
         assert!(!reg.mcu("my-m0").unwrap().doctor.is_empty());
+        // Two boards of one MCU: one of them is the default (V-06 rejects a node otherwise).
+        assert_eq!(
+            reg.default_board("my-m0").map(|b| b.id.as_str()),
+            Some("my-pico")
+        );
 
         let system = system_text(&reg);
         let table: Value = serde_json::from_str(&board_table(&reg)).unwrap();

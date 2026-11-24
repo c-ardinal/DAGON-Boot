@@ -1,5 +1,6 @@
 """Builds each MCU package's boot core and checks it fits the boot core slot
-its MCU definition gives.
+its MCU definition gives, part by part and in static RAM against the
+package's budget (CT-16, with stage0_size.py for the stage0s).
 
     python scripts/bootcore_size.py                 # build every boot core, check, print sizes
     python scripts/bootcore_size.py <elf> <mcu id>  # check one built image
@@ -21,6 +22,21 @@ stage0 size check builds from (`stage0_size.size_folder`): the board puts
 its boot LED, halt pattern and clock into the boot core. The image is what
 the signer takes from the ELF (`dagon_sign::image::payload_from_file`):
 from the lowest to the highest address its loadable segments fill.
+
+Each build also writes its linker map, and the package's
+`bootcore/budget.toml` splits the image into parts as a stage0's does
+(`stage0_size.read_budget`: ordered `[[part]]` entries, the last
+`other`), attributed from the map over the image's span; a part over its
+`max_bytes`, or parts that do not add up to the image, fail. Its `[ram]
+max_bytes` bounds the static RAM (`stage0_size.ram_bytes`: the allocated,
+writable sections). A boot core is updated in the field, so it keeps no
+margin of its slot: the parts are where a change shows.
+
+A boot core that stage0 copies into RAM and runs from there (ESP32-S3:
+its `budget.toml` has `[image]`, and the definition gives it no boot core
+slot) is built once with the budget's `features` and checked against
+`[image] max_bytes` (the RAM it is linked into), its parts from the symbol
+table (`stage0_size.check_loaded`), as a ROM-loaded stage0 is.
 
 A boot core package may check its own images further: its
 `image_check.py`, run with the built ELF and the boot folder, prints what
@@ -49,6 +65,7 @@ EVENTS_PAGE = stage0_size.ROOT / "site" / "src" / "content" / "docs" / "en" / "r
 NAME_MIN = 6
 # A boot core package's own check of its built image (package_check).
 PACKAGE_CHECK = "image_check.py"
+BUDGET = "budget.toml"
 
 
 def budget(mcu_id: str) -> int | None:
@@ -116,8 +133,27 @@ def verdict(used: int, size: int) -> str | None:
     return f"{used} bytes, over its {size}-byte slot" if used > size else None
 
 
-def check(elf_path: pathlib.Path, mcu_id: str, label: str = "") -> list[str]:
-    """Checks one built image; why it does not pass."""
+def budget_file(mcu_id: str) -> pathlib.Path:
+    """The boot core package's parts and RAM budget."""
+    return package(mcu_id) / BUDGET
+
+
+def image_start(elf: bytes) -> int:
+    """The lowest address the ELF32 image's loadable segments fill."""
+    phoff, = struct.unpack_from("<I", elf, 0x1C)
+    phentsize, phnum = struct.unpack_from("<HH", elf, 0x2A)
+    starts = []
+    for i in range(phnum):
+        p_type, _, _, p_paddr, p_filesz = struct.unpack_from("<IIIII", elf, phoff + i * phentsize)
+        if p_type == PT_LOAD and p_filesz:
+            starts.append(p_paddr)
+    return min(starts)
+
+
+def check(elf_path: pathlib.Path, mcu_id: str, label: str = "",
+          map_path: pathlib.Path | None = None) -> list[str]:
+    """Checks one built image (and its parts, given its map); why it does
+    not pass."""
     size = budget(mcu_id)
     name = f"{mcu_id} boot core{label}"
     if size is None:
@@ -127,10 +163,40 @@ def check(elf_path: pathlib.Path, mcu_id: str, label: str = "") -> list[str]:
     print(f"{name}: {used} of {size} bytes ({size - used} free)", flush=True)
     why = verdict(used, size)
     out = [f"{name}: {why}"] if why else []
-    linked = linked_names(image_data(elf), catalog_names())
-    if linked:
-        out.append(f"{name}: links event catalog names {', '.join(linked)}")
+    out += catalog_check(elf, name)
+    path = budget_file(mcu_id)
+    if not path.is_file():
+        return out + [f"{name}: no {path.relative_to(stage0_size.ROOT)}"]
+    out += stage0_size.check_ram(elf, path, name)
+    if map_path is not None:
+        parts = stage0_size.read_budget(path)
+        items = stage0_size.map_items(map_path.read_text(encoding="utf-8", errors="replace"),
+                                      image_start(elf), used)
+        text, bad = stage0_size.parts_report(stage0_size.attribute(items, parts), parts, used)
+        print(text, end="")
+        elf_path.with_name(elf_path.name + ".parts.txt").write_text(text, encoding="utf-8")
+        out += [f"{name}: {b}" for b in bad]
     return out
+
+
+def catalog_check(elf: bytes, name: str) -> list[str]:
+    linked = linked_names(image_data(elf), catalog_names())
+    return [f"{name}: links event catalog names {', '.join(linked)}"] if linked else []
+
+
+def ram_loaded() -> list[str]:
+    """MCUs whose boot core stage0 copies into RAM (its `budget.toml` has
+    `[image]`)."""
+    return [m for m in mcus()
+            if budget_file(m).is_file()
+            and "image" in tomllib.loads(budget_file(m).read_text(encoding="utf-8"))]
+
+
+def check_ram_loaded(elf_path: pathlib.Path, mcu_id: str) -> list[str]:
+    """Checks one built RAM-loaded boot core; why it does not pass."""
+    name = f"{mcu_id} boot core"
+    return (stage0_size.check_loaded(elf_path, budget_file(mcu_id), name, keep_margin=False)
+            + catalog_check(elf_path.read_bytes(), name))
 
 
 def package_check(pkg: pathlib.Path, elf: pathlib.Path, folder: pathlib.Path,
@@ -173,11 +239,26 @@ def folder_of(mcu_id: str, board: str | None) -> pathlib.Path:
     return stage0_size.size_folder(mcu_id, board)
 
 
+def build_ram_loaded(mcu: str) -> list[str]:
+    pkg = package(mcu)
+    name = tomllib.loads((pkg / "Cargo.toml").read_text(encoding="utf-8"))["package"]["name"]
+    features = tomllib.loads(budget_file(mcu).read_text(encoding="utf-8"))["image"]["features"]
+    env = dict(os.environ, DAGON_TARGET_TAG="size")
+    env.setdefault("DAGON_ALLOW_TEST_KEY", "1")
+    build = ["cargo", "build", "--release", "--bin", name, "--features", ",".join(features)]
+    if subprocess.run(build, cwd=pkg, env=env).returncode:
+        return [f"{mcu} boot core: does not build"]
+    return check_ram_loaded(pkg / "target" / target_of(mcu) / "release" / name, mcu)
+
+
 def build_all() -> None:
     failed = []
+    for mcu in ram_loaded():
+        failed += build_ram_loaded(mcu)
     for mcu in mcus():
         if budget(mcu) is None:
-            print(f"{mcu}: no boot core slot in its definition, no boot core to build")
+            if mcu not in ram_loaded():
+                print(f"{mcu}: no boot core slot in its definition, no boot core to build")
             continue
         pkg = package(mcu)
         if not (pkg / "examples" / f"{EXAMPLE}.rs").is_file():
@@ -194,13 +275,15 @@ def build_all() -> None:
             env = dict(os.environ, DAGON_BOOT_CRATE=str(folder), CARGO_TARGET_DIR=str(out),
                        DAGON_TARGET_TAG="size")
             env.setdefault("DAGON_ALLOW_TEST_KEY", "1")
-            build = ["cargo", "build", "--release", "--example", EXAMPLE]
+            elf = out / target_of(mcu) / "release" / "examples" / EXAMPLE
+            link_map = elf.with_name(EXAMPLE + ".map")
+            build = ["cargo", "rustc", "--release", "--example", EXAMPLE, "--",
+                     "-C", f"link-arg=-Map={link_map}"]
             if subprocess.run(build, cwd=pkg, env=env).returncode:
                 # The boot core links into its slot: an image over it fails there.
                 failed.append(f"{mcu} boot core{label}: does not build (over its slot?)")
                 continue
-            elf = out / target_of(mcu) / "release" / "examples" / EXAMPLE
-            failed += check(elf, mcu, label)
+            failed += check(elf, mcu, label, link_map)
             failed += package_check(pkg, elf, folder, f"{mcu} boot core{label}")
     if failed:
         sys.exit("\n".join(failed))

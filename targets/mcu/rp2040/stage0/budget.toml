@@ -6,6 +6,12 @@
 # bytes between parts; the image's total against its region less 1/16 is
 # the hard limit (the linker script's assertion).
 
+[ram]
+# Static RAM (allocated, writable sections: .data, .bss, .uninit); the
+# stack is not counted. Stage0 keeps its state on the stack: measured 0 to
+# 4 bytes.
+max_bytes = 256
+
 [[part]]
 name = "boot2"
 match = [".boot2"]

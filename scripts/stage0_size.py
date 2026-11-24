@@ -198,6 +198,7 @@ def check(elf_path: pathlib.Path, mcu_id: str, label: str = "",
     print(f"{name}: {used} of {size} bytes ({size - used} free, margin {margin(size)})")
     why = verdict(used, size)
     failed = [f"{name}: {why}"] if why else []
+    failed += check_ram(elf_path.read_bytes(), MCU / mcu_id / "stage0" / "budget.toml", name)
     if map_path is not None:
         parts = read_budget(MCU / mcu_id / "stage0" / "budget.toml")
         items = map_items(map_path.read_text(encoding="utf-8", errors="replace"), at, size)
@@ -286,17 +287,62 @@ def symbol_parts(nm_text: str, parts: list[dict], image: int) -> dict[str, int]:
     return used
 
 
+SHF_WRITE, SHF_ALLOC = 0x1, 0x2
+
+
+def ram_bytes(elf: bytes) -> int:
+    """Static RAM of the ELF32 little-endian image: the sizes of its
+    sections that are allocated and writable (`.data`, `.bss`, `.uninit`
+    and the like), added."""
+    if elf[:4] != b"\x7fELF" or elf[4] != 1 or elf[5] != 1:
+        raise ValueError("not a 32-bit little-endian ELF")
+    shoff, = struct.unpack_from("<I", elf, 0x20)
+    shentsize, shnum = struct.unpack_from("<HH", elf, 0x2E)
+    total = 0
+    for i in range(shnum):
+        _, _, flags, _, _, size = struct.unpack_from("<IIIIII", elf, shoff + i * shentsize)
+        if flags & (SHF_WRITE | SHF_ALLOC) == SHF_WRITE | SHF_ALLOC:
+            total += size
+    return total
+
+
+def check_ram(elf: bytes, budget_path: pathlib.Path, name: str) -> list[str]:
+    """The image's static RAM against the budget's `[ram] max_bytes`; why it
+    does not pass (a budget without `[ram]` fails: every boot image has
+    one)."""
+    ram = tomllib.loads(budget_path.read_text(encoding="utf-8")).get("ram")
+    if ram is None:
+        shown = budget_path.relative_to(ROOT) if budget_path.is_relative_to(ROOT) else budget_path
+        return [f"{name}: {shown} has no [ram] max_bytes"]
+    size, used = ram["max_bytes"], ram_bytes(elf)
+    print(f"{name}: {used} of {size} bytes of static RAM ({size - used} free)")
+    return [f"{name}: {used} bytes of static RAM, over its {size}"] if used > size else []
+
+
 def check_rom_loaded(elf_path: pathlib.Path, mcu_id: str) -> list[str]:
     """Checks one built ROM-loaded stage0 against its budget; why it does
     not pass."""
-    budget_path = MCU / mcu_id / "stage0" / "budget.toml"
+    return check_loaded(elf_path, MCU / mcu_id / "stage0" / "budget.toml",
+                        f"{mcu_id} stage0", keep_margin=True)
+
+
+def check_loaded(elf_path: pathlib.Path, budget_path: pathlib.Path, name: str,
+                 keep_margin: bool) -> list[str]:
+    """Checks one built image loaded into RAM whole against the budget at
+    `budget_path` (`[image] max_bytes`, less 1/16 when `keep_margin`, its
+    parts from the symbol table, its `[ram]`); why it does not pass."""
     image = tomllib.loads(budget_path.read_text(encoding="utf-8"))["image"]
     size = image["max_bytes"]
-    used = loaded_bytes(elf_path.read_bytes())
-    name = f"{mcu_id} stage0"
-    print(f"{name}: {used} of {size} bytes ({size - used} free, margin {margin(size)})")
-    why = verdict(used, size)
+    elf = elf_path.read_bytes()
+    used = loaded_bytes(elf)
+    if keep_margin:
+        print(f"{name}: {used} of {size} bytes ({size - used} free, margin {margin(size)})")
+        why = verdict(used, size)
+    else:
+        print(f"{name}: {used} of {size} bytes ({size - used} free)")
+        why = f"{used} bytes, over its {size}" if used > size else None
     failed = [f"{name}: {why}"] if why else []
+    failed += check_ram(elf, budget_path, name)
     nm = next((n for n in image["nm"] if shutil.which(n)), None)
     if nm is None:
         return failed + [f"{name}: none of {image['nm']} is on PATH"]

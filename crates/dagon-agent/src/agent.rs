@@ -1,8 +1,10 @@
 //! The DAGON wire protocol mapped onto the agent's machines.
 
+use crate::Transition;
 use dagon_events::{Accept, Delay, Health, RebootRequest, Refused, TrialInfo, UpdateOffer};
 use dagon_format::header::{self, image_kind, slot_binding, ImageHeader, HEADER_SIZE};
 use dagon_format::{CryptoProvider, Digest, FormatError, SigVerifier, Software};
+use dagon_port::SlotStore;
 use dagon_proto::handler::{self, Ceiling, Handler};
 use dagon_proto::payload::{
     self, mode, phase, reboot_mode, target, CapsReq, CapsResp, CmdSet, HelloReq, HelloResp,
@@ -16,8 +18,8 @@ use dagon_proto::{
 use crate::chain::AppChain;
 use crate::images::{ImageStore, ImageView};
 use crate::{
-    node, protocol, relay, requests, session, writer, AbortCause, Config, NameDigest, SlotStore,
-    TrialPolicy, Writer,
+    node, protocol, relay, requests, session, writer, AbortCause, Config, NameDigest, TrialPolicy,
+    Writer,
 };
 use core::marker::PhantomData;
 
@@ -123,14 +125,18 @@ fn noted(r: Result<(), Refused>) {
     debug_assert!(r.is_ok(), "{r:?}");
 }
 
-impl<S: SlotStore, X: AppChain, V: SigVerifier> Agent<S, X, V, writer::App> {
+impl<S: SlotStore<Transition = Transition>, X: AppChain, V: SigVerifier>
+    Agent<S, X, V, writer::App>
+{
     /// The app's session ([`Agent::for_writer`] with the app's writer).
     pub fn new(cfg: Config, verifier: V, store: S, chain: X) -> Self {
         Self::for_writer(cfg, verifier, store, chain)
     }
 }
 
-impl<S: SlotStore, X: AppChain, V: SigVerifier, W: Writer> Agent<S, X, V, W> {
+impl<S: SlotStore<Transition = Transition>, X: AppChain, V: SigVerifier, W: Writer>
+    Agent<S, X, V, W>
+{
     /// The session of writer `W` for a node served over one link
     /// ([`Agent::with_links`]).
     pub fn for_writer(cfg: Config, verifier: V, store: S, chain: X) -> Self {
@@ -138,7 +144,14 @@ impl<S: SlotStore, X: AppChain, V: SigVerifier, W: Writer> Agent<S, X, V, W> {
     }
 }
 
-impl<S: SlotStore, X: AppChain, V: SigVerifier, W: Writer, const L: usize> Agent<S, X, V, W, L> {
+impl<
+        S: SlotStore<Transition = Transition>,
+        X: AppChain,
+        V: SigVerifier,
+        W: Writer,
+        const L: usize,
+    > Agent<S, X, V, W, L>
+{
     /// The session of writer `W` for a node served over `L` links, with
     /// DAGON's [`Software`] digest ([`Agent::with_crypto`]).
     pub fn with_links(cfg: Config, verifier: V, store: S, chain: X) -> Self {
@@ -146,8 +159,14 @@ impl<S: SlotStore, X: AppChain, V: SigVerifier, W: Writer, const L: usize> Agent
     }
 }
 
-impl<S: SlotStore, X: AppChain, V: SigVerifier, W: Writer, const L: usize, C: CryptoProvider>
-    Agent<S, X, V, W, L, C>
+impl<
+        S: SlotStore<Transition = Transition>,
+        X: AppChain,
+        V: SigVerifier,
+        W: Writer,
+        const L: usize,
+        C: CryptoProvider,
+    > Agent<S, X, V, W, L, C>
 {
     /// The session of writer `W` for a node served over `L` links, named
     /// by the type it is made for. DAGON's start: `app.starting`, then the slot store is opened

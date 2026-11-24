@@ -2,9 +2,10 @@
 //! in-memory slot store and flash, and a simulated boot core (trial,
 //! watchdog, rollback after 3 attempts).
 
+use dagon_port::{SlotStore, StoreError};
 use std::cell::RefCell;
 
-use dagon_agent::{Agent, Config, SlotStore, StoreError, Transition};
+use dagon_agent::{Agent, Config, Transition};
 use dagon_conform::node::{self, NodeSetup, RESPONSE_MAX};
 use dagon_conform::pc::{Channel, Images, NoAnswer, Runner, SetupError};
 use dagon_conform::report::{Progress, Report, Verdict};
@@ -201,6 +202,8 @@ impl Mem {
 }
 
 impl SlotStore for Mem {
+    type Transition = Transition;
+
     fn status(&mut self) -> StatusResp {
         self.status
     }

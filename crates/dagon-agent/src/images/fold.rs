@@ -13,6 +13,7 @@
 
 extern crate std;
 
+use dagon_port::{SlotStore, StoreError};
 use std::collections::BTreeSet;
 use std::vec::Vec;
 
@@ -24,7 +25,6 @@ use dagon_format::Version;
 use dagon_proto::payload::{target, SlotState, StatusResp};
 
 use super::{image, ImageStore, Transition, ROOM};
-use crate::{SlotStore, StoreError};
 
 /// The boot core's attempt limit in this model.
 const MAX: u8 = 3;
@@ -131,6 +131,8 @@ fn digest_of(hdr: &[u8; HEADER_SIZE]) -> u8 {
 }
 
 impl SlotStore for FoldStore {
+    type Transition = Transition;
+
     fn status(&mut self) -> StatusResp {
         let heads: [_; ROOM] = core::array::from_fn(|i| {
             let s = i as u8;

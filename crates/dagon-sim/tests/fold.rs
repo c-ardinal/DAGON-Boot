@@ -6,11 +6,12 @@
 //! this checks the simulator against the same contract as the boards.
 
 use dagon_agent::image::State as Image;
-use dagon_agent::{Agent, Config, SlotStore};
+use dagon_agent::{Agent, Config};
 use dagon_ed25519::Ed25519Compact;
 use dagon_events::{compose, Bounds, Composed, Layer, Nop, Published, Watchdog};
 use dagon_format::header::*;
 use dagon_format::{key_id, sha256, Version};
+use dagon_port::SlotStore;
 use dagon_proto::payload::*;
 use dagon_proto::{flags, max_payload, split_status, Cmd, Frame, Status};
 use dagon_sim::store::Boot;

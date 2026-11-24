@@ -67,7 +67,7 @@ fn session(f: &Cut) -> Option<Agent<KindSStore<Cut>, Chain, Ed25519Small, BootCo
 
 fn call<S, X, V, W>(a: &mut Agent<S, X, V, W>, seq: u8, cmd: Cmd, payload: &[u8]) -> Status
 where
-    S: dagon_agent::SlotStore,
+    S: dagon_port::SlotStore<Transition = dagon_agent::Transition>,
     X: dagon_agent::AppChain,
     V: dagon_format::SigVerifier,
     W: dagon_agent::Writer,

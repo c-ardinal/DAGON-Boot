@@ -7,13 +7,14 @@ use crate::image;
 use crate::layout::{APP_LOG_LAYOUT, BL_LOG_LAYOUT, STAGE0, STAGE0_SIZE};
 use crate::watchdog::Watch;
 use crate::TRIAL_ATTEMPTS;
-use dagon_agent::{erase_plan, SlotStore, StoreError, Transition};
+use dagon_agent::{erase_plan, Transition};
 use dagon_core::log::{trial_room, Log, SlotRef};
 use dagon_format::header::HEADER_SIZE;
 use dagon_format::statelog::{kind, slot};
 use dagon_format::{stage0, Version};
 use dagon_port::timeout::{EraseLayout, EraseRegion, Plan};
 use dagon_port::Flash;
+use dagon_port::{SlotStore, StoreError};
 use dagon_proto::payload::{target, SlotInfo, StatusResp};
 
 /// Slot this build is linked for (`slot-b`).
@@ -105,6 +106,8 @@ impl AppStore {
 }
 
 impl SlotStore for AppStore {
+    type Transition = Transition;
+
     fn status(&mut self) -> StatusResp {
         let (state, generation) = Log::load(&mut self.flash, &APP_LOG_LAYOUT)
             .map_or((Default::default(), 0), |l| (l.state, l.generation));

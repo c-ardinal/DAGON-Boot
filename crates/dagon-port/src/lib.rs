@@ -20,9 +20,11 @@
 #![allow(async_fn_in_trait)]
 
 mod relay_link;
+mod slot_store;
 pub mod timeout;
 
 pub use relay_link::{Addressing, RelayLinkDef};
+pub use slot_store::{SlotStore, StoreError};
 
 use dagon_format::{CryptoProvider as _, Digest as _};
 use dagon_proto::payload::{HelloReq, HelloResp};

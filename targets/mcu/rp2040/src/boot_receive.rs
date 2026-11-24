@@ -14,10 +14,12 @@ use core::cell::{Cell, RefCell};
 use core::future::Future;
 use core::pin::Pin;
 use core::task::{Context, Poll, Waker};
+use dagon_agent::Transition;
+use dagon_port::SlotStore;
 
 use dagon_agent::update_mode::{self, Exit, Port, Stay};
 use dagon_agent::writer::BootCore;
-use dagon_agent::{Agent, AppChain, SlotStore};
+use dagon_agent::{Agent, AppChain};
 use dagon_events::Clock;
 use dagon_format::SigVerifier;
 use dagon_mcu_common::link::{Kind, Link, LinkError, Reconnect};
@@ -393,7 +395,7 @@ pub fn serve<P, S, X, V, C>(
 ) -> Exit
 where
     P: Port,
-    S: SlotStore,
+    S: SlotStore<Transition = Transition>,
     X: AppChain,
     V: SigVerifier,
     C: Clock,

@@ -4,11 +4,12 @@
 use dagon_events::{compose_unpublished, EventRecord, Layer, Nop, Payload, Refused, Replay, Sink};
 use dagon_format::header::HEADER_SIZE;
 use dagon_format::Version;
+use dagon_port::{SlotStore, StoreError};
 use dagon_proto::payload::{target, SlotState, StatusResp};
 use dagon_proto::Status;
 
 use crate::chain::AppChain;
-use crate::{core_image, image, SlotStore, StoreError};
+use crate::{core_image, image};
 
 /// The recovery agent's slot (STATUS slot 2).
 const FACTORY: u8 = 2;
@@ -112,7 +113,7 @@ pub(crate) fn store_status(e: StoreError) -> Status {
     }
 }
 
-impl<S: SlotStore> ImageStore<S> {
+impl<S: SlotStore<Transition = Transition>> ImageStore<S> {
     /// Takes the store and brings each slot's machine to the state the
     /// store reports; `max` is the boot core's trial attempt limit, `room`
     /// whether each start makes the store's log room.

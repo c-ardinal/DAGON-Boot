@@ -6,12 +6,13 @@
 //! A clone is another handle on the same flash: the agent holds one, the
 //! simulated board (its boot core, ROM loader, power) another.
 
+use dagon_port::{SlotStore, StoreError};
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use crate::flash::SimFlash;
 use crate::mcu::simulated_mcu;
-use dagon_agent::{SlotStore, StoreError, Transition};
+use dagon_agent::Transition;
 use dagon_core::boot::Place;
 use dagon_core::bootcore::{
     check_inline, choose, confirmed_app, read_state, settle_log, Apps, Cell, CoreFail, MustReset,
@@ -832,6 +833,8 @@ impl SimStore {
 }
 
 impl SlotStore for SimStore {
+    type Transition = Transition;
+
     /// The log's fold mapped by dagon-core (a record counts only while
     /// its slot holds the header it names); the factory slot, which no
     /// record names, is reported as written.

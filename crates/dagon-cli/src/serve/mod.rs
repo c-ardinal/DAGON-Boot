@@ -62,7 +62,7 @@ fn passphrase() -> Result<String, String> {
 /// The key the page verifies with at start, through the same checks as an
 /// opened project: --pubkey, pubkey in dagon.toml (also only from the
 /// project or a key folder), else the public half of the signing key
-/// (--key or DAGON_SIGNING_KEY). None when none of them is given: serve
+/// (--key or one of the DAGON_SIGNING_KEY variables). None when none of them is given: serve
 /// starts on the start screen and the key comes with the project.
 fn start_key(
     a: &ServeArgs,
@@ -70,7 +70,9 @@ fn start_key(
     config: Option<&Path>,
 ) -> Result<Option<[u8; 32]>, String> {
     let c = api::config_at(server, config)?;
-    let explicit_key = a.key.is_some() || std::env::var_os(crate::config::KEY_ENV).is_some();
+    let explicit_key = a.key.is_some()
+        || std::env::var_os(crate::config::KEY_ENV).is_some()
+        || crate::config::key_outside_a_file();
     match (a.pubkey.as_deref(), &c.pubkey) {
         (Some(p), _) => crate::config::checked_pubkey(&c, Path::new(p)).map(Some),
         (None, Some(_)) => api::release_key_of(&c).map(Some),

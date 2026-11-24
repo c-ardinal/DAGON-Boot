@@ -34,6 +34,15 @@ cd my-fleet
 export DAGON_SIGNING_KEY=~/.dagon/keys/my-fleet/dagon-signing.key
 ```
 
+キーをファイル以外に保管する場合は、`DAGON_SIGNING_KEY`の代替として`DAGON_SIGNING_KEY_COMMAND`を設定し、キーの16進数64桁（キーのファイルの内容）を出力するコマンドを指定します。macOSのキーチェーンと1Passwordの例です。
+
+```sh
+export DAGON_SIGNING_KEY_COMMAND='security find-generic-password -s dagon-signing -w'
+export DAGON_SIGNING_KEY_COMMAND='op read op://Private/dagon-signing/seed'
+```
+
+`dagon`は署名のたびにこのコマンドをシェル経由で実行します。出力内容はメッセージに表示しません。環境変数でキーを指定する場合は、16進数64桁を`DAGON_SIGNING_KEY_SEED`に設定します。`dagon`が起動するビルドとエージェントからはこれらの環境変数を除去しますが、キーのコマンドが参照する他の環境変数は対象外です。3つの環境変数のうち設定可能なのは1つだけです。
+
 ## 2. 構成の作成
 
 ### DAGON Consoleでの作成

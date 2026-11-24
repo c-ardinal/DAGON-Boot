@@ -9,6 +9,12 @@ use serde::{Deserialize, Serialize};
 pub const CONFIG_FILE: &str = "dagon.toml";
 /// Environment variable holding the secret key file path.
 pub const KEY_ENV: &str = "DAGON_SIGNING_KEY";
+/// A command that prints the signing key (`dagon_sign::KeyCommand`): the
+/// KeyStore port for a key kept outside a file.
+pub const KEY_COMMAND_ENV: &str = "DAGON_SIGNING_KEY_COMMAND";
+/// The signing key itself, as 64 hex digits (`dagon_sign::KeySeed`). Kept
+/// from every child process, as the other two are.
+pub const KEY_SEED_ENV: &str = "DAGON_SIGNING_KEY_SEED";
 const DEFAULT_PROVISION_DIR: &str = "out/provision";
 
 /// Inputs for `provision <node>`: ELF/raw binaries (signed here) or signed
@@ -284,16 +290,71 @@ pub fn skipped_lines(cut: &dagon_topology::Cut) -> Vec<String> {
         .collect()
 }
 
-/// Loads the signing key from `--key` or `DAGON_SIGNING_KEY`. Refuses key
-/// files inside a git work tree. Error messages carry the path only.
+/// Loads the signing key from `--key`, else from the one variable set of
+/// `DAGON_SIGNING_KEY_COMMAND` (a command that prints it),
+/// `DAGON_SIGNING_KEY_SEED` (the key) and `DAGON_SIGNING_KEY` (its file);
+/// more than one set is refused as ambiguous. Refuses key files inside a git work tree.
+/// Error messages carry the path only, never the key.
 pub fn load_key(arg: Option<&str>) -> Result<KeyPair, String> {
-    let path = arg
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os(KEY_ENV).map(PathBuf::from))
-        .ok_or_else(|| format!("no signing key: pass --key <file> or set {KEY_ENV}"))?;
-    let key = dagon_sign::KeyStore::key(&dagon_sign::KeyFile(path))?;
+    let key = dagon_sign::KeyStore::key(key_store(arg)?.as_ref())?;
     allow_key(&key.pk, test_key_allowed())?;
     Ok(key)
+}
+
+/// Where [`load_key`] takes the key from.
+fn key_store(arg: Option<&str>) -> Result<Box<dyn dagon_sign::KeyStore>, String> {
+    pick_key_store(arg, key_command(), key_seed(), std::env::var_os(KEY_ENV))
+}
+
+/// [`key_store`] for the option and the three variables' values.
+fn pick_key_store(
+    arg: Option<&str>,
+    command: Option<String>,
+    seed: Option<String>,
+    file: Option<std::ffi::OsString>,
+) -> Result<Box<dyn dagon_sign::KeyStore>, String> {
+    if let Some(p) = arg {
+        return Ok(Box::new(dagon_sign::KeyFile(PathBuf::from(p))));
+    }
+    let mut set: Vec<(&str, Box<dyn dagon_sign::KeyStore>)> = Vec::new();
+    if let Some(c) = command {
+        set.push((KEY_COMMAND_ENV, Box::new(dagon_sign::KeyCommand(c))));
+    }
+    if let Some(h) = seed {
+        set.push((KEY_SEED_ENV, Box::new(dagon_sign::KeySeed(h))));
+    }
+    if let Some(p) = file {
+        set.push((KEY_ENV, Box::new(dagon_sign::KeyFile(PathBuf::from(p)))));
+    }
+    match set.len() {
+        0 => Err(format!(
+            "no signing key: pass --key <file>, or set {KEY_COMMAND_ENV}, {KEY_SEED_ENV} or {KEY_ENV}"
+        )),
+        1 => Ok(set.pop().expect("one").1),
+        _ => Err(format!(
+            "set only one of {}",
+            set.iter().map(|(n, _)| *n).collect::<Vec<_>>().join(", ")
+        )),
+    }
+}
+
+/// The command `DAGON_SIGNING_KEY_COMMAND` names, if set and not blank.
+pub fn key_command() -> Option<String> {
+    std::env::var(KEY_COMMAND_ENV)
+        .ok()
+        .filter(|c| !c.trim().is_empty())
+}
+
+/// The key `DAGON_SIGNING_KEY_SEED` holds, if set and not blank.
+fn key_seed() -> Option<String> {
+    std::env::var(KEY_SEED_ENV)
+        .ok()
+        .filter(|c| !c.trim().is_empty())
+}
+
+/// A key source other than a file is set in the environment.
+pub fn key_outside_a_file() -> bool {
+    key_command().is_some() || key_seed().is_some()
 }
 
 /// The project's signing key file: `signing_key` in dagon.toml, else the
@@ -353,12 +414,26 @@ pub fn check_pubkey_bytes(cfg: &Config, k: [u8; 32]) -> Result<[u8; 32], String>
         .map_err(|_| "the pubkey is not a valid public key")?;
     if let Some(s) = signing_key_path(cfg) {
         let kp = dagon_sign::load_key_pair(&s).map_err(|_| "the signing key cannot be read")?;
-        if *kp.pk != k {
-            return Err("pubkey is not the public half of the project's signing key".into());
-        }
+        public_half_of(&kp, k)?;
+    } else if key_outside_a_file() {
+        // The key from DAGON_SIGNING_KEY_COMMAND or _SEED: the same checks
+        // as for a file, the secret-copy one included.
+        let kp = load_key(None).map_err(|_| "the signing key cannot be had")?;
+        public_half_of(&kp, k)?;
     }
     allow_key(&k, test_key_allowed())?;
     Ok(k)
+}
+
+/// `k` is `kp`'s public half, and not its secret seed.
+fn public_half_of(kp: &KeyPair, k: [u8; 32]) -> Result<(), String> {
+    if kp.sk.seed().as_ref() == k.as_slice() {
+        return Err("the pubkey file holds a secret key".into());
+    }
+    if *kp.pk != k {
+        return Err("pubkey is not the public half of the project's signing key".into());
+    }
+    Ok(())
 }
 
 /// The key a firmware build embeds, checked: pubkey in dagon.toml, else
@@ -440,6 +515,52 @@ pub fn read_file(path: &Path) -> Result<Vec<u8>, String> {
 #[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
+
+    /// A pubkey that is the signing key's seed, or another key's half, is
+    /// refused, whatever store the signing key came from.
+    #[test]
+    fn a_pubkey_is_the_signing_keys_public_half_only() {
+        let kp = KeyPair::from_seed([0x6e; 32].into());
+        assert!(public_half_of(&kp, *kp.pk).is_ok());
+        let e = public_half_of(&kp, [0x6e; 32]).unwrap_err();
+        assert!(e.contains("secret"), "{e}");
+        let other = KeyPair::from_seed([0x6f; 32].into());
+        assert!(public_half_of(&kp, *other.pk).is_err());
+    }
+
+    /// `--key` wins; else exactly one of the three variables; the key
+    /// itself never in an error.
+    #[test]
+    fn the_key_comes_from_the_option_or_one_variable() {
+        let seed = "5d".repeat(32);
+        let want = *KeyPair::from_seed([0x5d; 32].into()).pk;
+        let cmd = Some(format!("echo {seed}"));
+        let missing = std::env::temp_dir().join("dagon-no-such-key-file");
+        let file = Some(missing.clone().into_os_string());
+        let key = |r: Result<Box<dyn dagon_sign::KeyStore>, String>| r.and_then(|s| s.key());
+
+        let by_cmd = key(pick_key_store(None, cmd.clone(), None, None)).unwrap();
+        assert_eq!(*by_cmd.pk, want);
+        let by_seed = key(pick_key_store(None, None, Some(seed.clone()), None)).unwrap();
+        assert_eq!(*by_seed.pk, want);
+        let bad_seed = key(pick_key_store(None, None, Some(seed[2..].into()), None)).unwrap_err();
+        assert!(!bad_seed.contains(&seed[..8]), "{bad_seed}");
+        let missing_s = missing.to_string_lossy();
+        assert!(key(pick_key_store(Some(&missing_s), cmd.clone(), None, None)).is_err());
+        assert!(key(pick_key_store(None, None, None, file.clone())).is_err());
+        for (c, h, f) in [
+            (cmd.clone(), None, file.clone()),
+            (cmd.clone(), Some(seed.clone()), None),
+            (None, Some(seed.clone()), file.clone()),
+        ] {
+            let e = key(pick_key_store(None, c, h, f)).unwrap_err();
+            assert!(e.contains("only one") && !e.contains(&seed[..8]), "{e}");
+        }
+        let none = key(pick_key_store(None, None, None, None)).unwrap_err();
+        for n in [KEY_COMMAND_ENV, KEY_SEED_ENV, KEY_ENV] {
+            assert!(none.contains(n), "{none}");
+        }
+    }
 
     #[test]
     fn output_folders_outside_the_work_area_read_as_outside() {

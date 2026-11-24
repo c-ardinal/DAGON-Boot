@@ -99,17 +99,25 @@ fn public_key(cfg: &Config, p: &Path) -> Result<[u8; 32], String> {
 
 /// The project's signing key; refused when it does not match its pubkey.
 fn project_key(cfg: &Config) -> Result<ed25519_compact::KeyPair, String> {
-    let path = crate::config::signing_key_path(cfg).ok_or_else(|| {
-        format!(
-            "no signing key: set signing_key in dagon.toml or {}",
-            crate::config::KEY_ENV
-        )
-    })?;
-    let path = key_file(cfg, &path, "signing key")?;
-    let key = load_key(Some(&path.to_string_lossy())).map_err(|_| {
-        "the signing key file cannot be used (malformed, inside a git work tree, or the test key)"
-            .to_string()
-    })?;
+    let key = match crate::config::signing_key_path(cfg) {
+        Some(path) => {
+            let path = key_file(cfg, &path, "signing key")?;
+            load_key(Some(&path.to_string_lossy())).map_err(|_| {
+                "the signing key file cannot be used (malformed, inside a git work tree, or the test key)"
+                    .to_string()
+            })?
+        }
+        // No file named anywhere: the key command or seed, if one is set.
+        None if crate::config::key_outside_a_file() => load_key(None)?,
+        None => {
+            return Err(format!(
+                "no signing key: set signing_key in dagon.toml, {}, {} or {}",
+                crate::config::KEY_COMMAND_ENV,
+                crate::config::KEY_SEED_ENV,
+                crate::config::KEY_ENV
+            ))
+        }
+    };
     if let Some(p) = &cfg.pubkey {
         if public_key(cfg, p)? != *key.pk {
             return Err(format!(

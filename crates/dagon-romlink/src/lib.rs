@@ -124,8 +124,55 @@ pub struct Stats {
     pub last_error: Option<RomError>,
 }
 
-/// Writes `plan` through the ROM loader and restarts the node into its
-/// application (BOOT0 low). On failure BOOT0 is left low as well.
+/// A client of an MCU's ROM boot loader: writes a [`Plan`] through it over
+/// a [`RomLink`] and restarts the node into its application. Which one a
+/// node takes is its MCU definition's ([`Loader::of`]).
+#[allow(async_fn_in_trait)]
+pub trait RomLoader {
+    async fn flash<L: RomLink>(&self, l: &mut L, plan: &Plan<'_>) -> Result<Stats, RomError>;
+}
+
+/// The STM32 system-memory boot loader on I2C (ST AN4221): [`flash`].
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Stm32I2c;
+
+impl RomLoader for Stm32I2c {
+    async fn flash<L: RomLink>(&self, l: &mut L, plan: &Plan<'_>) -> Result<Stats, RomError> {
+        flash(l, plan).await
+    }
+}
+
+/// The ROM loaders this crate has a client for, as an MCU definition names
+/// one: its `[rom_i2c]` table is the STM32 I2C loader. A loader on another
+/// medium (an ESP32's UART loader, say) is a variant of its own, with its
+/// own table in the definition.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Loader {
+    Stm32I2c,
+}
+
+impl Loader {
+    /// The loader of an MCU definition that has a `[rom_i2c]` table
+    /// (`rom_i2c`), or none.
+    pub const fn of(rom_i2c: bool) -> Option<Loader> {
+        if rom_i2c {
+            Some(Loader::Stm32I2c)
+        } else {
+            None
+        }
+    }
+}
+
+impl RomLoader for Loader {
+    async fn flash<L: RomLink>(&self, l: &mut L, plan: &Plan<'_>) -> Result<Stats, RomError> {
+        match self {
+            Loader::Stm32I2c => Stm32I2c.flash(l, plan).await,
+        }
+    }
+}
+
+/// Writes `plan` through the STM32 I2C ROM loader and restarts the node
+/// into its application (BOOT0 low). On failure BOOT0 is left low as well.
 pub async fn flash<L: RomLink>(l: &mut L, plan: &Plan<'_>) -> Result<Stats, RomError> {
     let t0 = l.now_ms();
     let mut stats = Stats::default();

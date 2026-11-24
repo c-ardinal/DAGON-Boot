@@ -172,11 +172,12 @@ NOT_IN_TREE = {
     "Boot Action Interpreter": ABSENT,
     "Retained Codecs": ("ファームウェアに保持形式のコーデックは存在しません。"
                         "構成本体の形式は`dagon-format`の形式（先頭32バイト、ノード32バイト）で、[保持と永続の形式](/explanation/retained-formats/)"
-                        "の形式ではありません。コーディネータの保存先は単一の領域で、2バンクの置換は存在しません。",
+                        "の形式ではありません。ノードは構成の複写を保存しません。構成はホストのパッケージにだけ存在し、ターゲット3（旧来の構成の複写）は予約番号として残存し、どのノードも受理しません。",
                         "The firmware has none of the retained codecs: "
                         "the topology body is `dagon-format`'s (a 32-byte head, 32-byte nodes), not the one in "
-                        "[Retained and persistent formats](/en/explanation/retained-formats/). The hub stores it in one region, "
-                        "with no two-bank replacement."),
+                        "[Retained and persistent formats](/en/explanation/retained-formats/). No node stores a copy of the topology: "
+                        "it stays in the host's package, and target 3 (the former topology copy) stays a reserved number "
+                        "no node takes."),
 }
 
 

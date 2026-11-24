@@ -203,7 +203,7 @@ pub const PORTS: &[Port] = &[
         TrustedOnly,
         "",
         &[],
-        Lacks(""),
+        Has(&["dagon_core::DecisionPolicy"]),
     ),
     port(
         "WatchdogDriver",
@@ -327,7 +327,7 @@ pub const PORTS: &[Port] = &[
         Untrusted,
         "",
         &[],
-        Lacks(""),
+        Has(&["dagon_host::BuildRunner"]),
     ),
     port(
         "Agent",
@@ -336,7 +336,7 @@ pub const PORTS: &[Port] = &[
         Untrusted,
         "",
         &[],
-        Lacks(""),
+        Has(&["dagon_host::Agent"]),
     ),
     port(
         "Action",

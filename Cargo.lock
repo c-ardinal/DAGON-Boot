@@ -518,6 +518,7 @@ version = "0.0.0"
 dependencies = [
  "dagon-agent",
  "dagon-boot",
+ "dagon-core",
  "dagon-events",
  "dagon-format",
  "dagon-host",

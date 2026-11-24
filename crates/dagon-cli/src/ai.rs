@@ -60,7 +60,11 @@ pub fn topology(a: &crate::cli::AiTopologyArgs) -> Result<(), String> {
         return Err("the board description is empty".into());
     }
     let interactive = a.input.is_some();
-    let mut api = |p: &Prompt| crate::agents::call(&home, &keys, p, DRAFT_TIMEOUT);
+    let mut api = crate::agents::Linked {
+        home,
+        keys,
+        timeout: DRAFT_TIMEOUT,
+    };
     let mut ask = |qs: &[String]| {
         if interactive {
             prompt(qs)
@@ -116,7 +120,7 @@ fn unless_cancelled(
     if cancel.load(std::sync::atomic::Ordering::Relaxed) {
         return Err("cancelled".into());
     }
-    api(p)
+    api.call(p)
 }
 
 #[derive(Debug)]
@@ -189,7 +193,7 @@ fn generate(
             user: crate::agents::conversation(&turns),
             model: model.clone(),
         };
-        let (reply, yaml, questions) = draft_of(&api(&p)?)?;
+        let (reply, yaml, questions) = draft_of(&api.call(&p)?)?;
         turns.push(reply.to_string());
         let feedback = if !questions.is_empty() {
             let got = ask(&questions)?;

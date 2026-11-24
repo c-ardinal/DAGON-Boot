@@ -93,6 +93,22 @@ pub struct BootConfig {
     pub max_attempts: u8,
 }
 
+/// The DecisionPolicy port: whether the pending slot gets another trial,
+/// and so which slot wins, the pending or the confirmed one. DAGON's
+/// default ([`BootConfig`]) tries the pending slot before the confirmed
+/// one, at most `max_attempts` times.
+pub trait DecisionPolicy {
+    /// Whether the pending slot starts again after `attempts` started
+    /// trials; `false` rolls back to the confirmed slot.
+    fn trial(&self, attempts: u8) -> bool;
+}
+
+impl DecisionPolicy for BootConfig {
+    fn trial(&self, attempts: u8) -> bool {
+        attempts < self.max_attempts
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Decision {
     /// Start the body at `entry`; `trial` selects the trial watchdog.
@@ -104,6 +120,7 @@ pub enum Decision {
 /// Decides what to start, appending BOOT_ATTEMPT or ROLLBACK to `log`.
 /// `verifier` checks the signature of every image before it starts, once
 /// per slot considered; a [`Decision::Boot`] is an image it accepted.
+/// `cfg` is the [`DecisionPolicy`] ([`decide_with`] takes another).
 pub fn decide<F: Flash, V: SigVerifier + ?Sized>(
     flash: &mut F,
     log: &mut Log,
@@ -111,8 +128,20 @@ pub fn decide<F: Flash, V: SigVerifier + ?Sized>(
     cfg: &BootConfig,
     verifier: &V,
 ) -> Decision {
+    decide_with(flash, log, slots, cfg, verifier, cfg)
+}
+
+/// [`decide`] with the trials `policy` allows.
+pub fn decide_with<F: Flash, V: SigVerifier + ?Sized, P: DecisionPolicy + ?Sized>(
+    flash: &mut F,
+    log: &mut Log,
+    slots: &SlotLayout,
+    cfg: &BootConfig,
+    verifier: &V,
+    policy: &P,
+) -> Decision {
     if let Some(p) = log.state.pending {
-        if let Some(d) = try_pending(flash, log, slots, cfg, verifier, p) {
+        if let Some(d) = try_pending(flash, log, slots, cfg, verifier, policy, p) {
             return d;
         }
     }
@@ -130,15 +159,16 @@ pub fn decide<F: Flash, V: SigVerifier + ?Sized>(
 }
 
 /// `None` falls back to the confirmed slot.
-fn try_pending<F: Flash, V: SigVerifier + ?Sized>(
+fn try_pending<F: Flash, V: SigVerifier + ?Sized, P: DecisionPolicy + ?Sized>(
     flash: &mut F,
     log: &mut Log,
     slots: &SlotLayout,
     cfg: &BootConfig,
     verifier: &V,
+    policy: &P,
     p: SlotRef,
 ) -> Option<Decision> {
-    let why = if log.state.attempts >= cfg.max_attempts {
+    let why = if !policy.trial(log.state.attempts) {
         reason::TRIAL_EXHAUSTED
     } else {
         match check(flash, slots, cfg, verifier, p) {

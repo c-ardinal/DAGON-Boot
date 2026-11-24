@@ -73,7 +73,7 @@ description: "DAGONの設計上の範囲外、利用者の責任範囲、設計�
 設計の構成要素のうち、コードとの差異があるもの:
 
 <!-- generated from dagon_events::PORTS: DAGON_BLESS=1 cargo test -p dagon-catalog --test docs -->
-- 置換用のトレイトがコードに存在しないポート: `UpdateProtocol`、`DecisionPolicy`、`LogStorage`、`Recovery`、`Diagnostics`、`Display`、`LogSink`、`BuildRunner`、`Agent`、`Action`
+- 置換用のトレイトがコードに存在しないポート: `UpdateProtocol`、`LogStorage`、`Recovery`、`Diagnostics`、`Display`、`LogSink`、`Action`
 - `BootRecord`: ファームウェアはブート記録を保存しません。その形式の存在箇所は実行可能モデル（`dagon-retained-model`）のみです。
 - `Sandbox`: 実行時のサンドボックスは存在しません（Service ABI、Entry Gate、Operation Cancellation、Fault Unwind、Lockup Fuse、Reset Cleanup、SandboxArch）。定義の検査と保護マップの生成は実装済みです。
 <!-- end of generated list -->

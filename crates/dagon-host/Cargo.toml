@@ -16,6 +16,8 @@ dagon-topology = { path = "../dagon-topology", optional = true }
 
 [features]
 defs = ["dep:dagon-topology"]
+# The ports that run programs on the host (ports::BuildRunner).
+std = []
 
 [dev-dependencies]
 dagon-agent = { path = "../dagon-agent" }

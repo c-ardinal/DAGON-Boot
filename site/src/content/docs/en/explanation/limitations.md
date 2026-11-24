@@ -73,7 +73,7 @@ Values:
 Parts of the design the code lacks, in whole or in part:
 
 <!-- generated from dagon_events::PORTS: DAGON_BLESS=1 cargo test -p dagon-catalog --test docs -->
-- Ports with no trait in the code: `UpdateProtocol`, `DecisionPolicy`, `LogStorage`, `Recovery`, `Diagnostics`, `Display`, `LogSink`, `BuildRunner`, `Agent`, `Action`
+- Ports with no trait in the code: `UpdateProtocol`, `LogStorage`, `Recovery`, `Diagnostics`, `Display`, `LogSink`, `Action`
 - `BootRecord`: The firmware writes no boot record: its format exists only in the executable model (`dagon-retained-model`).
 - `Sandbox`: There is no sandbox at run time (Service ABI, Entry Gate, Operation Cancellation, Fault Unwind, Lockup Fuse, Reset Cleanup, SandboxArch). Definitions are checked and protection maps are generated.
 <!-- end of generated list -->

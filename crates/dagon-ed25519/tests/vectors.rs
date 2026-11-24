@@ -111,6 +111,49 @@ fn rfc8032_section_7_1() {
     assert_all(&cases);
 }
 
+/// The small verifier hashes with the provider it is given: one SHA-512
+/// per check, and a provider whose hash is wrong refuses a good signature.
+#[test]
+fn the_small_verifier_hashes_with_its_crypto_provider() {
+    use dagon_ed25519::Ed25519Small;
+    use dagon_format::{CryptoProvider, SigVerifier, Software};
+    use std::cell::Cell;
+
+    struct Counted<'a>(dagon_format::Sha512, &'a Cell<u32>, bool);
+    impl dagon_format::Digest<64> for Counted<'_> {
+        fn update(&mut self, data: &[u8]) {
+            self.0.update(data);
+        }
+        fn finalize(self) -> [u8; 64] {
+            self.1.set(self.1.get() + 1);
+            let mut h = self.0.finalize();
+            h[0] ^= u8::from(self.2);
+            h
+        }
+    }
+    struct Provider<'a>(&'a Cell<u32>, bool);
+    impl<'a> CryptoProvider for Provider<'a> {
+        type Sha256 = dagon_format::Sha256;
+        type Sha512 = Counted<'a>;
+        fn sha256(&self) -> dagon_format::Sha256 {
+            Software.sha256()
+        }
+        fn sha512(&self) -> Counted<'a> {
+            Counted(Software.sha512(), self.0, self.1)
+        }
+    }
+
+    let line = RFC8032.lines().nth(3).unwrap();
+    let f: Vec<&str> = line.split(' ').collect();
+    let (pk, sig, msg) = (arr::<32>(&hex(f[2])), arr::<64>(&hex(f[3])), hex(f[4]));
+    let calls = Cell::new(0);
+    let good = Ed25519Small::new(pk).with_crypto(Provider(&calls, false));
+    assert!(good.verify(&[], &[&msg], &sig));
+    assert_eq!(calls.get(), 1);
+    let wrong = Ed25519Small::new(pk).with_crypto(Provider(&calls, true));
+    assert!(!wrong.verify(&[], &[&msg], &sig));
+}
+
 /// The domain and the message parts are one message: split anywhere, the
 /// outcome is the same.
 #[test]

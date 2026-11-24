@@ -11,9 +11,9 @@ use dagon_format::manifest::{self, entry_flags, ManifestEntry, ManifestFields};
 use dagon_format::{crc32, header, key_id, sha256};
 use dagon_topology::defs::{OpenFact, Registry};
 use dagon_topology::schema::{Constraint, Role, Topology};
-use ed25519_compact::KeyPair;
 
-use crate::image::{self, capabilities_ok, parse_version, port_kind_of, sign};
+use crate::image::{self, capabilities_ok, parse_version, port_kind_of};
+use crate::Signer;
 
 /// An image placed in the bundle, in manifest entry order.
 #[derive(Debug, Clone, Copy)]
@@ -111,7 +111,7 @@ pub fn assemble(
     release_seq: u32,
     items: &[ReleaseItem<'_>],
     topology: &[u8],
-    key: &KeyPair,
+    key: &dyn Signer,
 ) -> Result<Release, ReleaseError> {
     let entries = items
         .iter()
@@ -135,13 +135,13 @@ pub fn assemble(
         release_seq,
         topology_sha256: sha256(topology),
         release_name: target_tag(name),
-        key_id: key_id(&key.pk),
+        key_id: key_id(&key.public_key()),
     };
     let mut man = vec![0u8; manifest::total_size(entries.len(), 0)];
     manifest::encode(&fields, &entries, &[], &mut man)
         .map_err(|e| fail("RB-02", "R-NODE", format!("manifest: {e:?}")))?;
     let body = man.len() - manifest::SIG_SIZE;
-    let sig = sign(key, manifest::SIGN_DOMAIN, &man[..body]);
+    let sig = key.sign(manifest::SIGN_DOMAIN, &man[..body]);
     man[body..].copy_from_slice(&sig);
 
     let parts: Vec<(&[u8], u8, u8)> = items
@@ -193,7 +193,7 @@ pub fn build(
     topology_bin: &[u8],
     images: &[Vec<u8>],
     name: &str,
-    key: &KeyPair,
+    key: &dyn Signer,
 ) -> Result<Release, ReleaseError> {
     if !dagon_topology::check_with(reg, t).is_pushable() {
         return Err(fail(
@@ -205,7 +205,7 @@ pub fn build(
     let placed = images
         .iter()
         .enumerate()
-        .map(|(i, img)| place(reg, t, i, img, &key.pk))
+        .map(|(i, img)| place(reg, t, i, img, &key.public_key()))
         .collect::<Result<Vec<_>, _>>()?;
     let release_seq = check_set(reg, t, &placed)?;
     check_constraints(t, &placed)?;

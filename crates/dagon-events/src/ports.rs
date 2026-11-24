@@ -132,7 +132,7 @@ const FLASH: &str = "the MCU definition's flash layout";
 const RECOVERY: &str = "BOOTSEL/UF2, factory, ROM entry as the MCU and board define";
 const BOARD: &str = "the board definition's";
 const KEY: &str = "file key pair";
-const KEY_FILE_ONLY: &str = "The CLI reads the signing key only from a file: `--key` and `DAGON_SIGNING_KEY` each name a file's path.";
+const KEY_FILE: &str = "a key file, whose path `--key` or `DAGON_SIGNING_KEY` names";
 const NO_BOOT_RECORD: &str = "The firmware writes no boot record: its format exists only in the executable model (`dagon-retained-model`).";
 const NO_SANDBOX: &str = "There is no sandbox at run time (Service ABI, Entry Gate, Operation Cancellation, Fault Unwind, Lockup Fuse, Reset Cleanup, SandboxArch). Definitions are checked and protection maps are generated.";
 
@@ -182,7 +182,7 @@ pub const PORTS: &[Port] = &[
         TrustedOnly,
         "",
         &[],
-        Lacks(""),
+        Has(&["dagon_format::Digest"]),
     ),
     port(
         "CryptoProvider",
@@ -191,7 +191,7 @@ pub const PORTS: &[Port] = &[
         TrustedOnly,
         "",
         &[],
-        Lacks(""),
+        Has(&["dagon_format::CryptoProvider"]),
     ),
     port(
         "DecisionPolicy",
@@ -309,16 +309,16 @@ pub const PORTS: &[Port] = &[
         Untrusted,
         "the host is trusted by definition; the device verifies",
         &[],
-        Lacks(""),
+        Has(&["dagon_sign::Signer"]),
     ),
     port(
         "KeyStore",
         "receives the signing key from where the user chose to keep it (an environment variable, the OS key store, 1Password and so on)",
-        &[on(Host, KEY)],
+        &[on(Host, KEY_FILE)],
         Untrusted,
         "the host is trusted by definition; the device verifies",
         &[],
-        Lacks(KEY_FILE_ONLY),
+        Has(&["dagon_sign::KeyStore"]),
     ),
     port(
         "BuildRunner",

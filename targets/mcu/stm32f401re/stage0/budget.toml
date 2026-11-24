@@ -14,7 +14,7 @@ max_bytes = 1280
 [[part]]
 name = "sha2"
 match = ["sha2", "digest", "hybrid_array", "block_buffer"]
-max_bytes = 2048
+max_bytes = 1920
 
 [[part]]
 name = "dagon-core"
@@ -24,7 +24,9 @@ max_bytes = 3648
 [[part]]
 name = "dagon-format"
 match = ["dagon_format"]
-max_bytes = 768
+# The SHA-256 and SHA-512 wrappers of dagon_format::Software take the
+# hash rounds LTO inlines into them.
+max_bytes = 896
 
 [[part]]
 name = "mcu-package"

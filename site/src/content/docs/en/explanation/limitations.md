@@ -73,8 +73,7 @@ Values:
 Parts of the design the code lacks, in whole or in part:
 
 <!-- generated from dagon_events::PORTS: DAGON_BLESS=1 cargo test -p dagon-catalog --test docs -->
-- Ports with no trait in the code: `UpdateProtocol`, `Digest`, `CryptoProvider`, `DecisionPolicy`, `LogStorage`, `Recovery`, `Diagnostics`, `Display`, `LogSink`, `Signer`, `KeyStore`, `BuildRunner`, `Agent`, `Action`
-- `KeyStore`: The CLI reads the signing key only from a file: `--key` and `DAGON_SIGNING_KEY` each name a file's path.
+- Ports with no trait in the code: `UpdateProtocol`, `DecisionPolicy`, `LogStorage`, `Recovery`, `Diagnostics`, `Display`, `LogSink`, `BuildRunner`, `Agent`, `Action`
 - `BootRecord`: The firmware writes no boot record: its format exists only in the executable model (`dagon-retained-model`).
 - `Sandbox`: There is no sandbox at run time (Service ABI, Entry Gate, Operation Cancellation, Fault Unwind, Lockup Fuse, Reset Cleanup, SandboxArch). Definitions are checked and protection maps are generated.
 <!-- end of generated list -->

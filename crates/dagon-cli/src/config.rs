@@ -291,15 +291,7 @@ pub fn load_key(arg: Option<&str>) -> Result<KeyPair, String> {
         .map(PathBuf::from)
         .or_else(|| std::env::var_os(KEY_ENV).map(PathBuf::from))
         .ok_or_else(|| format!("no signing key: pass --key <file> or set {KEY_ENV}"))?;
-    let inside = dagon_sign::inside_git_work_tree(&path)
-        .map_err(|e| format!("cannot check key path {}: {e}", path.display()))?;
-    if inside {
-        return Err(format!(
-            "refusing to use a secret key stored inside a git work tree: {}",
-            path.display()
-        ));
-    }
-    let key = dagon_sign::load_key_pair(&path).map_err(|e| e.to_string())?;
+    let key = dagon_sign::KeyStore::key(&dagon_sign::KeyFile(path))?;
     allow_key(&key.pk, test_key_allowed())?;
     Ok(key)
 }

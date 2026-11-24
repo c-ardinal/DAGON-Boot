@@ -5,7 +5,7 @@ use dagon_events::{
     Refused, Replay, Sink, Snapshot, TrialInfo, Unreadable, UpdateOffer,
 };
 use dagon_format::header::{self, image_kind, slot_binding, ImageHeader, HEADER_SIZE};
-use dagon_format::{FormatError, Sha256, SigVerifier};
+use dagon_format::{CryptoProvider, Digest, FormatError, SigVerifier, Software};
 use dagon_proto::handler::{self, Ceiling, Handler};
 use dagon_proto::payload::{
     self, mode, phase, reboot_mode, target, CapsReq, CapsResp, CmdSet, HelloReq, HelloResp,
@@ -104,8 +104,11 @@ impl Requester {
 /// The update session of writer `W` (the app's by default), for a node
 /// whose requests come over `L` links (one by default). The links are
 /// numbered from 0 by the node that serves them ([`Agent::handle_on`]).
-pub struct Agent<S, X, V, W = writer::App, const L: usize = 1> {
+/// The body digest comes from `C` (DAGON's [`Software`] by default,
+/// another through [`Agent::with_crypto`]).
+pub struct Agent<S, X, V, W = writer::App, const L: usize = 1, C = Software> {
     cfg: Config,
+    crypto: C,
     writer: PhantomData<W>,
     verifier: V,
     images: ImageStore<S>,
@@ -170,6 +173,7 @@ impl<S: SlotStore, X: AppChain, V: SigVerifier, W: Writer, const L: usize> Agent
         noted(node.starting(&mut chain, tag, cfg.role, cfg.mode));
         let mut agent = Agent {
             verifier,
+            crypto: Software,
             writer: PhantomData,
             images: ImageStore::open(store, cfg.trial_attempts, W::APP),
             cfg,
@@ -188,6 +192,52 @@ impl<S: SlotStore, X: AppChain, V: SigVerifier, W: Writer, const L: usize> Agent
         };
         agent.opened();
         agent
+    }
+}
+
+impl<S: SlotStore, X: AppChain, V: SigVerifier, W: Writer, const L: usize, C: CryptoProvider>
+    Agent<S, X, V, W, L, C>
+{
+    /// The same session with its body digest from `crypto`.
+    pub fn with_crypto<D: CryptoProvider>(self, crypto: D) -> Agent<S, X, V, W, L, D> {
+        let Agent {
+            cfg,
+            crypto: _,
+            writer,
+            verifier,
+            images,
+            chain,
+            session,
+            requests,
+            node,
+            hdr,
+            links,
+            on,
+            xfer_link,
+            now_us,
+            xfer_heard_us,
+            refusal,
+            front,
+        } = self;
+        Agent {
+            cfg,
+            crypto,
+            writer,
+            verifier,
+            images,
+            chain,
+            session,
+            requests,
+            node,
+            hdr,
+            links,
+            on,
+            xfer_link,
+            now_us,
+            xfer_heard_us,
+            refusal,
+            front,
+        }
     }
 
     /// The app started again over the same store and chain, as after a
@@ -846,7 +896,7 @@ impl<S: SlotStore, X: AppChain, V: SigVerifier, W: Writer, const L: usize> Agent
     }
 
     fn hash_body(&mut self, target: u8, slot: u8, len: u32) -> Result<[u8; 32], Status> {
-        let mut h = Sha256::new();
+        let mut h = self.crypto.sha256();
         let mut buf = [0u8; READ_CHUNK];
         let mut off = 0u32;
         while off < len {

@@ -11,6 +11,7 @@ use dagon_ed25519::Ed25519Compact;
 use dagon_events::{compose, Bounds, Composed, Layer, Nop, Published, Watchdog};
 use dagon_format::header::*;
 use dagon_format::{key_id, sha256, SigVerifier, Version};
+use dagon_format::{CryptoProvider as _, Digest as _};
 use dagon_proto::handler::Ceiling;
 use dagon_proto::payload::*;
 use dagon_proto::{flags, max_payload, plant, split_status, Cmd, Frame, Status};
@@ -1071,7 +1072,7 @@ struct FakeSig([u8; 32]);
 
 impl FakeSig {
     fn digest(&self, domain: &[u8], msg: &[&[u8]]) -> [u8; 64] {
-        let mut h = dagon_format::Sha256::new();
+        let mut h = dagon_format::Software.sha256();
         h.update(&self.0);
         h.update(domain);
         for m in msg {

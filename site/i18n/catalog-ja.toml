@@ -92,6 +92,7 @@
 "every protocol's triggers pass the same guards; replacing them would let a transport write what DAGON refuses" = "全プロトコルのトリガーが同一のガードを経由します。置換すると、DAGONが拒否するものを転送が書込可能になります"
 "extra VERSION TLVs, extra status, a UDS DID table" = "追加のVERSIONのTLV、追加のステータス、UDSのDIDの表"
 "file key pair" = "ファイルのキーの組"
+"a key file, whose path `--key` or `DAGON_SIGNING_KEY` names" = "`--key`または`DAGON_SIGNING_KEY`でパスを指定するキーファイル"
 "header signature, key lookup" = "ヘッダの署名、キーの検索"
 "healthy" = "健全"
 "how a node reaches another node over a link, through `dagon_port::NodeLink`" = "`dagon_port::NodeLink`による、リンク経由での別ノードへの到達方法"
@@ -133,4 +134,3 @@
 "where the state log lives" = "状態ログの格納先"
 "There is no sandbox at run time (Service ABI, Entry Gate, Operation Cancellation, Fault Unwind, Lockup Fuse, Reset Cleanup, SandboxArch). Definitions are checked and protection maps are generated." = "実行時のサンドボックスは存在しません（Service ABI、Entry Gate、Operation Cancellation、Fault Unwind、Lockup Fuse、Reset Cleanup、SandboxArch）。定義の検査と保護マップの生成は実装済みです。"
 "The firmware writes no boot record: its format exists only in the executable model (`dagon-retained-model`)." = "ファームウェアはブート記録を保存しません。その形式の存在箇所は実行可能モデル（`dagon-retained-model`）のみです。"
-"The CLI reads the signing key only from a file: `--key` and `DAGON_SIGNING_KEY` each name a file's path." = "CLIの署名キーの取得元はファイルのみです。`--key`と`DAGON_SIGNING_KEY`はいずれもファイルのパスの指定です。"

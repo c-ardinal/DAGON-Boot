@@ -222,6 +222,7 @@ impl<S: SlotStore, X: AppChain, V: SigVerifier, W: Writer, const L: usize, C: Cr
             xfer_heard_us,
             refusal,
             front,
+            reset_cause,
         } = self;
         Agent {
             cfg,
@@ -241,6 +242,7 @@ impl<S: SlotStore, X: AppChain, V: SigVerifier, W: Writer, const L: usize, C: Cr
             xfer_heard_us,
             refusal,
             front,
+            reset_cause,
         }
     }
 

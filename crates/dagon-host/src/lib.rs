@@ -14,20 +14,21 @@ pub mod jobs;
 mod ops;
 mod percent;
 pub mod ports;
+mod progress;
 pub mod rom;
 mod routes;
 mod timings;
 
 pub use dagon_romlink::{RomError, Stats as RomStats};
 pub use ops::{
-    agent_digest, app_digest, check_release, reason, ConfirmOutcome, Discovery, Event, NodeOutcome,
-    NodeState, Outcome, RecoverAssets, RecoverPath, WritePath, XferTimes, HUB_RECONNECT_MS,
-    REASONS,
+    agent_digest, app_digest, check_release, reason, ConfirmOutcome, Discovery, NodeOutcome,
+    NodeState, Outcome, RecoverAssets, RecoverPath, WritePath, HUB_RECONNECT_MS, REASONS,
 };
 pub use percent::{transfer_percent, trial_percent};
 pub use ports::{Agent, Prompt};
 #[cfg(feature = "std")]
 pub use ports::{BuildJob, BuildRunner};
+pub use progress::{Event, XferTimes};
 #[cfg(feature = "defs")]
 pub use routes::{local_node, node_targets};
 pub use routes::{LocalNode, NodeTargets, RouteError, Target};

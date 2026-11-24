@@ -1,46 +1,6 @@
 //! The catalog types every machine's generated `CATALOG` is made of.
 
-/// The layer an event, a port or a decision point belongs to.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[non_exhaustive]
-pub enum Layer {
-    /// The boot stages (stage0 and the boot core).
-    Boot,
-    /// The app's agent.
-    App,
-    /// The hub's PC link and sub-node links.
-    Relay,
-    /// `dagon-host`, driven by the CLI and `dagon serve`.
-    Host,
-}
-
-impl Layer {
-    pub const ALL: [Layer; 4] = [Layer::Boot, Layer::App, Layer::Relay, Layer::Host];
-
-    /// The prefix of the layer's event kinds (`app` in `app.confirmed`).
-    pub const fn name(self) -> &'static str {
-        match self {
-            Layer::Boot => "boot",
-            Layer::App => "app",
-            Layer::Relay => "relay",
-            Layer::Host => "host",
-        }
-    }
-
-    /// The layer's number in [`crate::EventRecord::layer`].
-    pub const fn code(self) -> u8 {
-        match self {
-            Layer::Boot => 0,
-            Layer::App => 1,
-            Layer::Relay => 2,
-            Layer::Host => 3,
-        }
-    }
-
-    pub fn from_code(code: u8) -> Option<Layer> {
-        Layer::ALL.into_iter().find(|l| l.code() == code)
-    }
-}
+use crate::event::Layer;
 
 /// How an event is observed. Every kind has at least one path.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]

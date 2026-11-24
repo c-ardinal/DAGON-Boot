@@ -2,9 +2,9 @@
 //! the boot core slots with the boot core log, behind dagon-agent's
 //! `SlotStore`.
 
+use crate::flash::SharedFlash;
 use crate::image;
 use crate::layout::{APP_LOG_LAYOUT, BL_LOG_LAYOUT, STAGE0, STAGE0_SIZE};
-use crate::node::SharedFlash;
 use crate::watchdog::Watch;
 use crate::TRIAL_ATTEMPTS;
 use dagon_agent::{erase_plan, SlotStore, StoreError, Transition};

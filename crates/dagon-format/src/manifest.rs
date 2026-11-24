@@ -13,7 +13,7 @@ pub const CONSTRAINT_SIZE: usize = 16;
 pub const SIG_SIZE: usize = 64;
 /// Images a node can have in a release: app A and B, boot core A and B, agent.
 pub const IMAGES_PER_NODE: usize = 5;
-pub const MAX_ENTRIES: usize = crate::topology::MAX_NODES * IMAGES_PER_NODE;
+pub const MAX_ENTRIES: usize = crate::MAX_NODES * IMAGES_PER_NODE;
 pub const MAX_CONSTRAINTS: usize = 16;
 
 pub mod entry_flags {

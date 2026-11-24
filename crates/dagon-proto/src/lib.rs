@@ -4,6 +4,7 @@
 #![no_std]
 #![forbid(unsafe_code)]
 
+pub mod ceiling;
 pub mod field;
 pub mod handler;
 pub mod payload;

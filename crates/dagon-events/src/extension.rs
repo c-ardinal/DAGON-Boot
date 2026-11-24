@@ -4,9 +4,9 @@ use core::marker::PhantomData;
 
 use dagon_format::version::Version;
 
-use crate::catalog::Layer;
 use crate::compact::Compact;
 use crate::event::Event;
+use crate::event::Layer;
 use crate::sealed::Token;
 
 /// What DAGON hands an extension's handler: the layer it runs in and the

@@ -52,6 +52,11 @@ dagon_mcu_common::link_requirements!("stm32f401re", LINK_KINDS);
 pub use target::I2c;
 
 /// Up `i2c`: the I2C target with the DAGON mailbox.
+/// The DAGON link: an I2C target (listening at the node's address).
+#[cfg(feature = "node")]
+pub type I2cTarget =
+    embassy_stm32::i2c::I2c<'static, embassy_stm32::mode::Async, embassy_stm32::i2c::MultiMaster>;
+
 #[cfg(feature = "node")]
 mod target {
     use dagon_proto::{frame_len, max_payload};
@@ -60,9 +65,9 @@ mod target {
     use embassy_stm32::pac;
     use embassy_time::{Duration, Timer};
 
+    use super::I2cTarget;
     use super::{Kind, Link, LinkError, Reconnect};
     use crate::mailbox::Mailbox;
-    use crate::node::I2cTarget;
 
     /// How often a read wakes with nothing (the serving loop then drops an
     /// abandoned transfer).

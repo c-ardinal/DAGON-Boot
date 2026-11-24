@@ -791,8 +791,8 @@ HWT = ROOT / "samples" / "hardware-test"
 
 
 def max_nodes():
-    """`MAX_NODES` of dagon-format's topology."""
-    src = (ROOT / "crates" / "dagon-format" / "src" / "topology.rs").read_text(encoding="utf-8")
+    """`MAX_NODES` of dagon-format (its root, which `topology` re-exports)."""
+    src = (ROOT / "crates" / "dagon-format" / "src" / "lib.rs").read_text(encoding="utf-8")
     return int(re.search(r"(?m)^pub const MAX_NODES: usize = (\d+);", src)[1])
 
 

@@ -75,3 +75,10 @@ impl Flash for RpFlash {
         self.0.blocking_write(off(addr)?, data).map_err(hw)
     }
 }
+
+/// A handle on the one flash driver, held by the slot store and used by the
+/// serving task only. Flash operations run from RAM with XIP
+/// off and interrupts masked by the driver, one 4 KiB sector (or page) per
+/// operation (`ERASE_REGIONS`, worst case `ERASE_UNIT_MAX_MS`); DAGON masks
+/// nothing around them.
+pub type SharedFlash = dagon_mcu_common::shared::SharedFlash<RpFlash>;

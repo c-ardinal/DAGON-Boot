@@ -727,6 +727,24 @@ impl<'a> Ctx<'a> {
                     ),
                     Some(_) => {}
                 }
+            } else if self.reg.mcu(&n.mcu).is_some() && self.reg.default_board(&n.mcu).is_none() {
+                let ids: Vec<_> = self
+                    .reg
+                    .boards()
+                    .iter()
+                    .filter(|b| b.mcu == n.mcu)
+                    .map(|b| b.id.as_str())
+                    .collect();
+                if ids.len() > 1 {
+                    self.err(
+                        "V-06",
+                        format!("nodes[{i}].board"),
+                        format!(
+                            "mcu '{}' has boards {ids:?} and none is marked default = true: name the node's board",
+                            n.mcu
+                        ),
+                    );
+                }
             }
         }
     }

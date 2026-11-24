@@ -1419,5 +1419,23 @@ fn a_board_added_in_an_earlier_folder_changes_no_default_and_no_check() {
     // Several boards and none marked: no default, never the first folder.
     let none = Registry::load(&[Source::Tree(&root)]).unwrap();
     assert!(none.default_board("stm32f401re").is_none());
+    // A node naming only that MCU is rejected, never checked against no board.
+    let r = crate::check_str_with(&none, &sample);
+    let v06: Vec<_> = r
+        .errors()
+        .filter(|d| d.rule == "V-06")
+        .map(|d| (d.path.as_str(), d.message.as_str()))
+        .collect();
+    assert_eq!(v06.len(), 1, "{v06:?}");
+    assert!(v06[0].0.ends_with("].board"), "{v06:?}");
+    assert!(
+        v06[0].1.contains("none is marked default = true"),
+        "{v06:?}"
+    );
+    // Naming the board passes V-06.
+    let named = sample.replacen("mcu: stm32f401re", "mcu: stm32f401re\n    board: zz-new", 1);
+    assert!(rules(&crate::check_str_with(&none, &named))
+        .iter()
+        .all(|r| *r != "V-06"));
     let _ = std::fs::remove_dir_all(&root);
 }

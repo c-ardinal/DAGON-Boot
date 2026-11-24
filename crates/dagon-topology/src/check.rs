@@ -147,8 +147,8 @@ pub fn uart0_choices(reg: &Registry, mcu: &str, board: Option<&str>) -> (Vec<u8>
 
 /// The `[[link_port]]` a new end of a `kind` link on a node of `mcu` (and
 /// `board`, else the MCU's default board) starts at, from its definitions: the
-/// port of the board's own DAGON bus of that kind, else of the coordinator's I2C pins
-/// the board names, else the port named like the link's UART `iface` (`hw-`
+/// port of the board's own DAGON bus of that kind (a coordinator's pins are those buses),
+/// else the port named like the link's UART `iface` (`hw-`
 /// and the port, or the port itself), else the MCU's first port of the kind.
 /// The Console offers this one; the check (V-27) judges whatever is written.
 pub fn default_port<'r>(
@@ -179,10 +179,6 @@ pub fn default_port<'r>(
             .then(|| of_kind(&x.controller))
             .flatten()
     });
-    let hub_i2c = b
-        .and_then(|b| b.coordinator.as_ref())
-        .filter(|_| kind == LinkKind::I2c)
-        .and_then(|c| of_kind(&c.i2c.controller));
     let iface = iface.and_then(|i| {
         let name = match i {
             UartIface::HwUart0 => "hw-uart0",
@@ -190,7 +186,7 @@ pub fn default_port<'r>(
         };
         of_kind(name).or_else(|| name.strip_prefix("hw-").and_then(of_kind))
     });
-    own_bus.or(hub_i2c).or(iface).or_else(|| {
+    own_bus.or(iface).or_else(|| {
         m.ports
             .iter()
             .find(|p| p.kind == kind)

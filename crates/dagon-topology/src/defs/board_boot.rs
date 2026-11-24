@@ -288,6 +288,37 @@ fn unique<'a>(what: &str, ids: impl Iterator<Item = &'a str>) -> Result<(), Stri
 }
 
 impl BoardDef {
+    /// The pins the page wires new links to when this board is the coordinator: its `dagon = true`
+    /// I2C bus (a new I2C bus) and its `dagon = true` PIO UART bus (controller `pio*`, a new PIO
+    /// UART link). `None` unless `m` (its MCU) has `[coordinator]` and both buses name numbered
+    /// pins (`GPIO<n>`).
+    pub fn coordinator_pins(&self, m: &McuDef) -> Option<super::HubPins> {
+        m.coordinator.as_ref()?;
+        let gpio = |p: &Option<String>| p.as_deref()?.strip_prefix("GPIO")?.parse::<u8>().ok();
+        let i2c = self
+            .buses
+            .iter()
+            .filter(|x| x.dagon && x.kind == BusKind::I2c)
+            .find_map(|x| {
+                Some(super::HubI2c {
+                    controller: x.controller.clone(),
+                    sda: gpio(&x.sda)?,
+                    scl: gpio(&x.scl)?,
+                })
+            })?;
+        let pio_uart = self
+            .buses
+            .iter()
+            .filter(|x| x.dagon && x.kind == BusKind::Uart && x.controller.starts_with("pio"))
+            .find_map(|x| {
+                Some(super::HubUart {
+                    tx: gpio(&x.tx)?,
+                    rx: gpio(&x.rx)?,
+                })
+            })?;
+        Some(super::HubPins { i2c, pio_uart })
+    }
+
     pub fn pin(&self, name: &str) -> Option<&BoardPin> {
         self.pins.iter().find(|p| p.pin == name)
     }
@@ -446,8 +477,7 @@ fn code_name(s: &str, extra: u8) -> bool {
 }
 
 /// What board package code is generated from: pin names, each bus's pins
-/// and speed by its kind, no pin used twice, and the coordinator pins of
-/// `[coordinator]` the ones of DAGON's links.
+/// and speed by its kind, and no pin used twice.
 pub(super) fn wiring(b: &BoardDef, _: &McuDef) -> Result<(), String> {
     let mut used = std::collections::BTreeMap::new();
     let mut take = |pin: &str, by: String| match used.insert(pin.to_string(), by.clone()) {
@@ -526,38 +556,7 @@ pub(super) fn wiring(b: &BoardDef, _: &McuDef) -> Result<(), String> {
             .iter()
             .map(String::as_str),
     )?;
-    coordinator_links(b)
-}
-
-/// A board with buses names the coordinator pins of `[coordinator]` (numbers the
-/// page wires new links to) as DAGON's links on those pins.
-fn coordinator_links(b: &BoardDef) -> Result<(), String> {
-    let Some(h) = &b.coordinator else {
-        return Ok(());
-    };
-    if b.buses.is_empty() {
-        return Ok(());
-    }
-    let gpio = |n: u8| format!("GPIO{n}");
-    let i2c = b.buses.iter().any(|x| {
-        x.dagon
-            && x.kind == BusKind::I2c
-            && x.controller == h.i2c.controller
-            && x.sda.as_deref() == Some(&gpio(h.i2c.sda))
-            && x.scl.as_deref() == Some(&gpio(h.i2c.scl))
-    });
-    fail(!i2c, || {
-        "coordinator.i2c is no dagon = true i2c [[bus]] on the same controller and pins".into()
-    })?;
-    let uart = b.buses.iter().any(|x| {
-        x.dagon
-            && x.kind == BusKind::Uart
-            && x.tx.as_deref() == Some(&gpio(h.pio_uart.tx))
-            && x.rx.as_deref() == Some(&gpio(h.pio_uart.rx))
-    });
-    fail(!uart, || {
-        "coordinator.pio_uart is no dagon = true uart [[bus]] on the same pins".into()
-    })
+    Ok(())
 }
 
 /// `[boot]`: pins it names are declared, the program within its limits

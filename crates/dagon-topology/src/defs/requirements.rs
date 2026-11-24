@@ -436,13 +436,8 @@ pub const BOARD: &[Requirement<BoardCheck>] = &[
     },
     Requirement {
         engine: "page link defaults, topology check V-07/V-17",
-        fields: &[
-            "coordinator.i2c.sda",
-            "coordinator.i2c.scl",
-            "coordinator.pio_uart.tx",
-            "coordinator.pio_uart.rx",
-        ],
-        rule: "the MCU has [coordinator]; four distinct pins below its gpio_count (numbered pins only); i2c.controller one of the board's i2c controllers",
+        fields: &[],
+        rule: "coordinator pins (the dagon = true I2C and PIO UART buses' GPIOs, on an MCU with [coordinator]): below its gpio_count",
         check: hub_pins,
     },
     Requirement {
@@ -459,7 +454,7 @@ pub const BOARD: &[Requirement<BoardCheck>] = &[
     Requirement {
         engine: "board package code generation (defs::codegen)",
         fields: &["bus[].hz", "bus[].baud"],
-        rule: "pin names and bus ids usable as code names, each generated name once after - becomes _ (device ids too); each bus names its kind's pins; hz on i2c/spi, baud on uart/can, above 0; no pin used twice; [coordinator] pins are DAGON's link buses where buses are declared",
+        rule: "pin names and bus ids usable as code names, each generated name once after - becomes _ (device ids too); each bus names its kind's pins; hz on i2c/spi, baud on uart/can, above 0; no pin used twice",
         check: board_boot::wiring,
     },
     Requirement {
@@ -1028,41 +1023,17 @@ fn codec_budgets(m: &McuDef) -> Result<(), String> {
 }
 
 fn hub_pins(b: &BoardDef, m: &McuDef) -> Result<(), String> {
-    let Some(h) = &b.coordinator else {
+    let Some(h) = b.coordinator_pins(m) else {
         return Ok(());
     };
-    fail(m.coordinator.is_none(), || {
-        format!(
-            "coordinator pins on a board whose MCU {} cannot be the coordinator",
-            m.id
-        )
-    })?;
-    fail(m.gpio_count == 0, || {
-        format!(
-            "coordinator pins are numbered but {} names its pins by port",
-            m.id
-        )
-    })?;
     let pins = [h.i2c.sda, h.i2c.scl, h.pio_uart.tx, h.pio_uart.rx];
-    if let Some(p) = pins.iter().find(|&&p| p >= m.gpio_count) {
-        return Err(format!(
+    match pins.iter().find(|&&p| p >= m.gpio_count) {
+        Some(p) => Err(format!(
             "coordinator pin GPIO{p} is not below gpio_count {}",
             m.gpio_count
-        ));
+        )),
+        None => Ok(()),
     }
-    let distinct = pins.iter().collect::<std::collections::BTreeSet<_>>().len() == pins.len();
-    fail(!distinct, || {
-        "coordinator pins must be four different GPIOs".into()
-    })?;
-    fail(
-        !b.i2c_pairs.iter().any(|p| p.controller == h.i2c.controller),
-        || {
-            format!(
-                "coordinator I2C controller {} is none of the board's i2c",
-                h.i2c.controller
-            )
-        },
-    )
 }
 
 fn rom_i2c(m: &McuDef) -> Result<(), String> {

@@ -44,15 +44,6 @@ tx = "GPIO26"
 [clock.source]
 crystal_hz = 12000000
 
-[coordinator.i2c]
-controller = "i2c0"
-scl = 17
-sda = 16
-
-[coordinator.pio_uart]
-rx = 27
-tx = 26
-
 [[header]]
 pin = "GPIO16"
 

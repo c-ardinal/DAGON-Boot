@@ -251,33 +251,35 @@ fn board_numbers_are_usable() {
 }
 
 #[test]
-fn coordinator_pins_are_usable() {
+fn coordinator_pins_come_from_the_dagon_buses() {
     let rp = Registry::builtin().mcu("rp2040").unwrap();
     let lcd =
         include_str!("../../../../targets/boards/waveshare-rp2040-touch-lcd-1.28/dagon-board.toml");
     let board = |t: &str| toml::from_str::<BoardDef>(t).unwrap();
     // The pins the page used before it read them from the definition.
-    let h = board(lcd).coordinator.unwrap();
+    let h = board(lcd).coordinator_pins(rp).unwrap();
     assert_eq!(
         (h.i2c.controller.as_str(), h.i2c.sda, h.i2c.scl),
         ("i2c0", 16, 17)
     );
     assert_eq!((h.pio_uart.tx, h.pio_uart.rx), (26, 27));
-    for (from, to, what) in [
-        ("tx = 26", "tx = 30", "below gpio_count"),
-        ("tx = 26", "tx = 16", "four different"),
-        (
-            "{ controller = \"i2c0\", sda = 16, scl = 17 }",
-            "{ controller = \"i2c1\", sda = 16, scl = 17 }",
-            "none of the board's i2c",
-        ),
-    ] {
-        let e = requirements::check_board(&board(&lcd.replace(from, to)), rp).unwrap_err();
-        assert!(e.contains(what), "{to}: {e}");
-    }
+    // Moving a DAGON bus moves the coordinator pins with it.
+    let moved = board(&lcd.replace("tx = \"GPIO26\"", "tx = \"GPIO29\""));
+    assert_eq!(moved.coordinator_pins(rp).unwrap().pio_uart.tx, 29);
+    let e = requirements::check_board(
+        &board(&lcd.replace("tx = \"GPIO26\"", "tx = \"GPIO30\"")),
+        rp,
+    )
+    .unwrap_err();
+    assert!(e.contains("below gpio_count"), "{e}");
+    // No PIO UART bus of DAGON's, or an MCU that cannot be the coordinator: no pins.
+    let hw = board(&lcd.replace("controller = \"pio0\"", "controller = \"uart1\""));
+    assert_eq!(hw.coordinator_pins(rp), None);
     let f4 = Registry::builtin().mcu("stm32f401re").unwrap();
-    let e = requirements::check_board(&board(lcd), f4).unwrap_err();
-    assert!(e.contains("cannot be the coordinator"), "{e}");
+    assert_eq!(board(lcd).coordinator_pins(f4), None);
+    // The pins are not written a second time.
+    let twice = format!("{lcd}\n[coordinator]\npio_uart = {{ tx = 26, rx = 27 }}\n");
+    assert!(toml::from_str::<BoardDef>(&twice).is_err());
 }
 
 #[test]

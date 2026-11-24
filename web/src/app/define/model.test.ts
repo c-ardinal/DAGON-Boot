@@ -64,7 +64,7 @@ describe('define document', () => {
     expect(check(toYaml(two.doc.topo)).errors).toBe(0);
   });
 
-  test("the coordinator's new I2C bus and PIO UART link take its board's [coordinator] pins", () => {
+  test("the coordinator's new I2C bus and PIO UART link take its board's DAGON bus pins", () => {
     let doc = emptyDoc();
     for (const b of ['waveshare-rp2040-touch-lcd-1.28', 'nucleo-f401re', 'm5stopwatch']) doc = place(doc, b).doc;
     doc = connect(connect(doc, 'nucleo'), 'm5stopwatch');

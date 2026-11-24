@@ -260,7 +260,7 @@ export interface BoardTemplate {
   header: string[];
   i2cPairs: { sda: string; scl: string }[];
   link: { kind: LinkKind; iface: string | null; addr: number | null; baud: number | null; control: 'full' | 'cooperative'; romEntry: string | null } | null;
-  /** Pins of a new I2C bus / PIO UART link when the board is the coordinator (its [coordinator]). */
+  /** Pins of a new I2C bus / PIO UART link when the board is the coordinator (its dagon = true I2C and PIO UART buses). */
   coordinator: { i2c: { controller: string; sda: number; scl: number }; pioUart: { tx: number; rx: number } } | null;
 }
 
@@ -276,7 +276,7 @@ export function template(board: string): BoardTemplate | null {
   return board_template(board) as BoardTemplate | null;
 }
 
-/** Coordinator `h`'s board's [coordinator] pins (a node placed by MCU: its MCU's default board, if any). */
+/** Coordinator `h`'s board's coordinator pins, from its DAGON buses (a node placed by MCU: its MCU's default board, if any). */
 function hubPins(h: TNode): BoardTemplate['coordinator'] {
   const board = h.board ?? defaultBoard(h.mcu);
   return (board ? template(board)?.coordinator : null) ?? null;

@@ -189,7 +189,7 @@ pub extern "C" fn core_start() -> ! {
         Logs {
             core: &layout::CORE_LOG,
             app: &layout::APP_LOG,
-            running: RUNNING,
+            running: (RUNNING, layout::CORE_PLACES[RUNNING as usize].header),
             max: TRIAL_ATTEMPTS,
         },
         CellIo {

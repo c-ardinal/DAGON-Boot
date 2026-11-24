@@ -716,6 +716,7 @@ mod tests {
             .collect();
         assert!(removed.iter().any(|k| k == "DAGON_SIGNING_KEY"));
         assert!(removed.iter().any(|k| k == "DAGON_SIGNING_KEY_COMMAND"));
+        assert!(removed.iter().any(|k| k == "DAGON_SIGNING_KEY_SEED"));
         assert!(removed.iter().any(|k| k == "ANTHROPIC_API_KEY"));
         assert!(
             removed.iter().any(|k| k == "RUSTUP_TOOLCHAIN"),

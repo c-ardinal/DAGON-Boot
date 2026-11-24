@@ -107,12 +107,13 @@ fn project_key(cfg: &Config) -> Result<ed25519_compact::KeyPair, String> {
                     .to_string()
             })?
         }
-        // No file named anywhere: the key command, if one is set.
-        None if crate::config::key_command().is_some() => load_key(None)?,
+        // No file named anywhere: the key command or seed, if one is set.
+        None if crate::config::key_outside_a_file() => load_key(None)?,
         None => {
             return Err(format!(
-                "no signing key: set signing_key in dagon.toml, {} or {}",
+                "no signing key: set signing_key in dagon.toml, {}, {} or {}",
                 crate::config::KEY_COMMAND_ENV,
+                crate::config::KEY_SEED_ENV,
                 crate::config::KEY_ENV
             ))
         }

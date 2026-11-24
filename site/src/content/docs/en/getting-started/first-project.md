@@ -41,7 +41,7 @@ export DAGON_SIGNING_KEY_COMMAND='security find-generic-password -s dagon-signin
 export DAGON_SIGNING_KEY_COMMAND='op read op://Private/dagon-signing/seed'
 ```
 
-`dagon` runs it through the shell each time it signs. Its output never appears in messages. Set only one of the two variables.
+`dagon` runs it through the shell each time it signs. Its output never appears in messages. To pass the key in an environment variable, put the 64 hex digits in `DAGON_SIGNING_KEY_SEED`; `dagon` keeps these variables from the builds and agents it starts, but not other variables a key command reads. Set only one of the three variables.
 
 ## 2. Make the topology
 

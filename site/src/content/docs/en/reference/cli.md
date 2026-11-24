@@ -61,8 +61,9 @@ Options:
 Most commands take their defaults from ./dagon.toml (or --config <file>).
 The hub is found by USB ID c0de:cafe or product "DAGON hub" unless --port is given.
 The secret key file is --key <file> or $DAGON_SIGNING_KEY and must lie outside any git
-work tree. To keep the key elsewhere (the OS key store, a password manager), set
-$DAGON_SIGNING_KEY_COMMAND to a command that prints it as 64 hex digits instead.
+work tree. To keep the key elsewhere, set instead $DAGON_SIGNING_KEY_COMMAND to a
+command that prints it as 64 hex digits (the OS key store, a password manager), or
+$DAGON_SIGNING_KEY_SEED to the 64 hex digits. Set only one of the three.
 
 `dagon <command> --help` describes a command and each of its options.
 ```
@@ -171,7 +172,7 @@ Usage: dagon key pub [OPTIONS]
 
 Options:
       --key <FILE>
-          Secret signing key file, outside any git work tree [default: what $DAGON_SIGNING_KEY_COMMAND prints, else $DAGON_SIGNING_KEY]
+          Secret signing key file, outside any git work tree [default: the one set of $DAGON_SIGNING_KEY_COMMAND, $DAGON_SIGNING_KEY_SEED, $DAGON_SIGNING_KEY]
 
   -h, --help
           Print help
@@ -338,7 +339,7 @@ Options:
           Topology YAML [default: topology in dagon.toml]
 
       --key <FILE>
-          Secret signing key file, outside any git work tree [default: what $DAGON_SIGNING_KEY_COMMAND prints, else $DAGON_SIGNING_KEY]
+          Secret signing key file, outside any git work tree [default: the one set of $DAGON_SIGNING_KEY_COMMAND, $DAGON_SIGNING_KEY_SEED, $DAGON_SIGNING_KEY]
 
       --config <FILE>
           Project file the defaults come from [default: ./dagon.toml]
@@ -375,7 +376,7 @@ Options:
           Refuse the release while a node is built with a definition fact not checked against its source ({ unverified = N } or "unmeasured") [default: list them as warnings]
 
       --key <FILE>
-          Secret signing key file, outside any git work tree [default: what $DAGON_SIGNING_KEY_COMMAND prints, else $DAGON_SIGNING_KEY]
+          Secret signing key file, outside any git work tree [default: the one set of $DAGON_SIGNING_KEY_COMMAND, $DAGON_SIGNING_KEY_SEED, $DAGON_SIGNING_KEY]
 
       --config <FILE>
           Project file the defaults come from [default: ./dagon.toml]
@@ -403,7 +404,7 @@ Options:
           Topology YAML [default: topology in dagon.toml]
 
       --key <FILE>
-          Secret signing key file, outside any git work tree [default: what $DAGON_SIGNING_KEY_COMMAND prints, else $DAGON_SIGNING_KEY]
+          Secret signing key file, outside any git work tree [default: the one set of $DAGON_SIGNING_KEY_COMMAND, $DAGON_SIGNING_KEY_SEED, $DAGON_SIGNING_KEY]
 
       --config <FILE>
           Project file the defaults come from [default: ./dagon.toml]
@@ -448,7 +449,7 @@ Options:
           Topology YAML [default: topology in dagon.toml]
 
       --key <FILE>
-          Secret signing key file, outside any git work tree [default: what $DAGON_SIGNING_KEY_COMMAND prints, else $DAGON_SIGNING_KEY]
+          Secret signing key file, outside any git work tree [default: the one set of $DAGON_SIGNING_KEY_COMMAND, $DAGON_SIGNING_KEY_SEED, $DAGON_SIGNING_KEY]
 
       --config <FILE>
           Project file the defaults come from [default: ./dagon.toml]
@@ -487,7 +488,7 @@ Options:
           Topology YAML [default: topology in dagon.toml]
 
       --key <FILE>
-          Secret signing key file, outside any git work tree [default: what $DAGON_SIGNING_KEY_COMMAND prints, else $DAGON_SIGNING_KEY]
+          Secret signing key file, outside any git work tree [default: the one set of $DAGON_SIGNING_KEY_COMMAND, $DAGON_SIGNING_KEY_SEED, $DAGON_SIGNING_KEY]
 
       --config <FILE>
           Project file the defaults come from [default: ./dagon.toml]
@@ -523,7 +524,7 @@ Options:
           Public key file the release is verified with [default: pubkey in dagon.toml, else the public half of the signing key]
 
       --key <FILE>
-          Secret signing key file, outside any git work tree [default: what $DAGON_SIGNING_KEY_COMMAND prints, else $DAGON_SIGNING_KEY]
+          Secret signing key file, outside any git work tree [default: the one set of $DAGON_SIGNING_KEY_COMMAND, $DAGON_SIGNING_KEY_SEED, $DAGON_SIGNING_KEY]
 
       --no-host-verify
           Leave signature and digest checks to the nodes (for demonstration only)
@@ -613,7 +614,7 @@ Options:
           Topology YAML [default: topology in dagon.toml]
 
       --key <FILE>
-          Secret signing key file, outside any git work tree [default: what $DAGON_SIGNING_KEY_COMMAND prints, else $DAGON_SIGNING_KEY]
+          Secret signing key file, outside any git work tree [default: the one set of $DAGON_SIGNING_KEY_COMMAND, $DAGON_SIGNING_KEY_SEED, $DAGON_SIGNING_KEY]
 
       --config <FILE>
           Project file the defaults come from [default: ./dagon.toml]
@@ -642,7 +643,7 @@ Options:
           Public key file the release is verified with [default: pubkey in dagon.toml, else the public half of the signing key]
 
       --key <FILE>
-          Secret signing key file, outside any git work tree [default: what $DAGON_SIGNING_KEY_COMMAND prints, else $DAGON_SIGNING_KEY]
+          Secret signing key file, outside any git work tree [default: the one set of $DAGON_SIGNING_KEY_COMMAND, $DAGON_SIGNING_KEY_SEED, $DAGON_SIGNING_KEY]
 
       --no-open
           Do not open the browser; the address and passphrase are printed

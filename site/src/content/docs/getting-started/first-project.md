@@ -41,7 +41,7 @@ export DAGON_SIGNING_KEY_COMMAND='security find-generic-password -s dagon-signin
 export DAGON_SIGNING_KEY_COMMAND='op read op://Private/dagon-signing/seed'
 ```
 
-`dagon`は署名のたびにこのコマンドをシェル経由で実行します。出力内容はメッセージに表示しません。2つの環境変数の同時設定は不可です。
+`dagon`は署名のたびにこのコマンドをシェル経由で実行します。出力内容はメッセージに表示しません。環境変数でキーを指定する場合は、16進数64桁を`DAGON_SIGNING_KEY_SEED`に設定します。`dagon`が起動するビルドとエージェントからはこれらの環境変数を除去しますが、キーのコマンドが参照する他の環境変数は対象外です。3つの環境変数のうち設定可能なのは1つだけです。
 
 ## 2. 構成の作成
 

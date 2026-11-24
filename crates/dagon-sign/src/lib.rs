@@ -196,7 +196,8 @@ impl Signer for KeyPair {
 
 /// The KeyStore port: hands over the signing key from where the user
 /// keeps it. DAGON's default is a key file ([`KeyFile`]); a command that
-/// prints the key ([`KeyCommand`]) reaches any other store.
+/// prints the key ([`KeyCommand`]) reaches any other store, and
+/// [`KeySeed`] takes the key as text (from an environment variable).
 pub trait KeyStore {
     /// The key, or why it cannot be had (with no secret in the text).
     fn key(&self) -> Result<KeyPair, String>;
@@ -224,9 +225,8 @@ impl KeyStore for KeyFile {
 
 /// A command that prints the secret seed on its standard output, as a key
 /// file holds it (64 hex digits): how a key kept in the OS key store, a
-/// password manager or an environment variable is handed over without a
-/// change to DAGON (`security find-generic-password -w ...`,
-/// `op read op://...`, `printenv MY_KEY`). It runs through the platform
+/// password manager is handed over without a change to DAGON
+/// (`security find-generic-password -w ...`, `op read op://...`). It runs through the platform
 /// shell (`sh -c`, `cmd /C`) with the caller's terminal for its prompts;
 /// what it prints never appears in an error.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -259,6 +259,24 @@ impl KeyStore for KeyCommand {
             return Err(format!("the key command failed ({})", out.status));
         }
         let seed = seed.ok_or("the key command printed no key (64 hex digits expected)")?;
+        Ok(KeyPair::from_seed(Seed::new(seed)))
+    }
+}
+
+/// The secret seed itself, as 64 hex digits (what a key file holds): a key
+/// an environment variable carries. The text never appears in an error.
+#[derive(Clone, PartialEq, Eq)]
+pub struct KeySeed(pub String);
+
+impl fmt::Debug for KeySeed {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("KeySeed(..)")
+    }
+}
+
+impl KeyStore for KeySeed {
+    fn key(&self) -> Result<KeyPair, String> {
+        let seed = from_hex::<32>(&self.0).ok_or("the key is not 64 hex digits")?;
         Ok(KeyPair::from_seed(Seed::new(seed)))
     }
 }

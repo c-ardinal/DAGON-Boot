@@ -154,7 +154,7 @@ pub fn signed(kind_: u8, slot: u8, base: u32, minor: u8, len: usize) -> Vec<u8> 
         min_bootcore_version: Version::default(),
         payload_sha256: sha256(&body),
         key_id: key_id(&kp.pk),
-        target_tag: target_tag("seg-f401-7seg"),
+        target_tag: target_tag("node-f401"),
         proto_version: 1,
         capabilities: caps,
         signature: [0; 64],

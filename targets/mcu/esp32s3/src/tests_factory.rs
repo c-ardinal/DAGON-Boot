@@ -16,7 +16,7 @@ use dagon_proto::{flags, split_status, Cmd, Frame, Status};
 use ed25519_compact::{KeyPair, Seed};
 
 const MAX: usize = 1024;
-const TAG: &str = "watch-s3";
+const TAG: &str = "node-s3x";
 
 fn keypair() -> KeyPair {
     KeyPair::from_seed(Seed::new([0x42; 32]))

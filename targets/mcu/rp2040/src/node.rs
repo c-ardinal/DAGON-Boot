@@ -207,7 +207,7 @@ pub(crate) fn spawn_masked_readout<B: BoardDef>(spawner: embassy_executor::Spawn
 }
 
 /// `dagon_mcu_common::masked_time::READOUT_AFTER_S` after the start, takes
-/// the diagnostic LED (the Waveshare hub's display backlight) and blinks
+/// the diagnostic LED (the one the board definition names) and blinks
 /// the longest masking seen until then, in microseconds, as decimal digit
 /// groups the way a measuring boot core blinks its value: a long dark
 /// pause, then one group per digit (ten blinks for a 0), short dark gaps

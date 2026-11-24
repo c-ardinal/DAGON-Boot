@@ -195,7 +195,7 @@ fn session(f: &Cut) -> Agent<KindSStore<Cut>, Chain, Verifier, BootCore> {
     let cfg = Config {
         mcu_id: MCU_ID,
         port_kind: port_kind::SELF_BOOT,
-        target_tag: target_tag("seg-f401-7seg"),
+        target_tag: target_tag("node-f401"),
         role: role::NODE,
         mode: mode::UPDATE,
         max_payload: max_payload::I2C as u16,
@@ -445,7 +445,7 @@ fn a_write_through_update_mode_is_tried_at_the_next_start() {
         let mut log = Log::load(&mut f, &LOG).unwrap();
         let cfg = BootConfig {
             mcu_id: MCU_ID,
-            target_tag: target_tag("seg-f401-7seg"),
+            target_tag: target_tag("node-f401"),
             max_attempts: TRIAL_ATTEMPTS,
         };
         assert_eq!(

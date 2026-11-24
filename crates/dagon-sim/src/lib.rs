@@ -54,12 +54,27 @@ pub const NODE_I2C_ADDR: u8 = 0x42;
 pub const NODE_I2C_PORT: &str = "i2c0";
 pub const WATCH_UART_PORT: &str = "pio-uart";
 
+/// The sample topology the simulated wiring follows. The nodes' tags come
+/// from it, so the simulator names no node of its own.
+pub const SAMPLE_TOPOLOGY: &str = include_str!("../../../topology/sample.yaml");
+
+/// The `target_tag` the sample topology gives node `id`.
+fn sample_tag(id: &str) -> [u8; 16] {
+    let t = dagon_topology::parse_str(SAMPLE_TOPOLOGY).expect("the sample topology parses");
+    let node = t
+        .nodes
+        .iter()
+        .find(|n| n.id == id)
+        .expect("the sample has the node");
+    target_tag(&node.tag)
+}
+
 /// Hub on RP2040, answering on USB.
 pub fn hub_config() -> Config {
     Config {
         mcu_id: mcu_id::RP2040,
         port_kind: port_kind::SELF_BOOT,
-        target_tag: target_tag("hub-rp2040-lcd"),
+        target_tag: sample_tag("hub"),
         role: role::HUB,
         mode: mode::APP,
         max_payload: max_payload::USB as u16,
@@ -72,7 +87,7 @@ pub fn f401_config() -> Config {
     Config {
         mcu_id: mcu_id::STM32F401XE,
         port_kind: port_kind::SELF_BOOT,
-        target_tag: target_tag("seg-f401-7seg"),
+        target_tag: sample_tag("seg"),
         role: role::NODE,
         mode: mode::APP,
         max_payload: max_payload::I2C as u16,
@@ -110,7 +125,7 @@ pub fn watch_config() -> Config {
     Config {
         mcu_id: mcu_id::ESP32S3,
         port_kind: port_kind::VENDOR_STAGE2,
-        target_tag: target_tag("watch-s3"),
+        target_tag: sample_tag("watch"),
         role: role::NODE,
         mode: mode::APP,
         max_payload: max_payload::UART as u16,

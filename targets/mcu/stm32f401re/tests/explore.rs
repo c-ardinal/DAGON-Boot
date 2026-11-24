@@ -55,7 +55,7 @@ const BROKEN: u8 = 9;
 const BODY: usize = 600;
 /// XFER chunk bytes.
 const CHUNK: usize = 250;
-const TAG: &str = "seg-f401-7seg";
+const TAG: &str = "node-f401";
 /// Boots with no fault after which a node has settled.
 const SETTLE_BOOTS: usize = 3 * (TRIAL_ATTEMPTS as usize + 2);
 /// Resets one boot may take (a core that must reset, stage0 counting).

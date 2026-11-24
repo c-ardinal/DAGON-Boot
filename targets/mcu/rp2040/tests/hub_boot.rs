@@ -15,7 +15,7 @@ use dagon_proto::payload::SlotState;
 use ed25519_compact::{KeyPair, Seed};
 
 /// The demo hub's tag (the images here carry it).
-const HUB_TAG: &str = "hub-rp2040-lcd";
+const HUB_TAG: &str = "hub-rp2040";
 
 /// RFC 8032 section 7.1 TEST 1 key (public test data).
 const SEED: [u8; 32] = [

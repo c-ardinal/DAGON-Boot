@@ -65,7 +65,7 @@ the first agent) into the project, and none with `--no-agent`.
 
 | Key | Type | Required | Meaning |
 |---|---|---|---|
-| `path` | string | yes | Where the file goes in the project: a plain relative path, unique within the agent, not one of the files `dagon new` writes itself (`dagon.toml`, `topology.yaml`, `.gitignore`). |
+| `path` | string | yes | Where the file goes in the project: a plain relative path, unique within the agent, not one of the files `dagon new` writes itself (`dagon.toml`, `topology.yaml`, `.gitignore`); both compared without case. |
 | `from` | string | yes | The file's text: a plain relative path from the folder of the definition (`~/.dagon/agents/` for the user's own agents), up to 64 KiB of UTF-8. |
 
 ## Builtin agents

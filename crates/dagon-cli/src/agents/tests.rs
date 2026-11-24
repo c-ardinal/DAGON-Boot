@@ -482,6 +482,11 @@ fn a_user_agents_project_files_come_from_its_folder_and_are_checked() {
         ("[[project_files]]\npath = \"../x\"\nfrom = \"a\"\n", "plain relative"),
         ("[[project_files]]\npath = \"x\"\nfrom = \"/etc/passwd\"\n", "plain relative"),
         ("[[project_files]]\npath = \"dagon.toml\"\nfrom = \"a\"\n", "writes it itself"),
+        ("[[project_files]]\npath = \"Topology.yaml\"\nfrom = \"a\"\n", "writes it itself"),
+        (
+            "[[project_files]]\npath = \"A.md\"\nfrom = \"a\"\n[[project_files]]\npath = \"a.md\"\nfrom = \"b\"\n",
+            "named twice",
+        ),
         (
             "[[project_files]]\npath = \"a\"\nfrom = \"a\"\n[[project_files]]\npath = \"a\"\nfrom = \"b\"\n",
             "named twice",

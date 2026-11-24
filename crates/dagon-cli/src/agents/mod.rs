@@ -102,7 +102,7 @@ pub struct AgentDef {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ProjectFile {
-    /// Where the file goes in the project: a plain relative path, unique within the agent, not one of the files `dagon new` writes itself (`dagon.toml`, `topology.yaml`, `.gitignore`).
+    /// Where the file goes in the project: a plain relative path, unique within the agent, not one of the files `dagon new` writes itself (`dagon.toml`, `topology.yaml`, `.gitignore`); both compared without case.
     pub path: String,
     /// The file's text: a plain relative path from the folder of the definition (`~/.dagon/agents/` for the user's own agents), up to 64 KiB of UTF-8.
     pub from: String,
@@ -214,16 +214,18 @@ fn check(def: &AgentDef) -> Result<(), String> {
             .map_err(|e| format!("project file {}: path: {e}", i + 1))?;
         crate::genfs::Rel::new(&f.from)
             .map_err(|e| format!("project file {}: from: {e}", i + 1))?;
-        if PROJECT_OWN.contains(&path.as_str()) {
+        // Compared without case: on a case-insensitive file system
+        // "Topology.yaml" is topology.yaml.
+        let folded = path.as_str().to_lowercase();
+        if PROJECT_OWN.contains(&folded.as_str()) {
             return Err(format!(
                 "project file {}: dagon new writes it itself",
                 f.path
             ));
         }
-        if def.project_files[..i]
-            .iter()
-            .any(|o| crate::genfs::Rel::new(&o.path).is_ok_and(|r| r == path))
-        {
+        if def.project_files[..i].iter().any(|o| {
+            crate::genfs::Rel::new(&o.path).is_ok_and(|r| r.as_str().to_lowercase() == folded)
+        }) {
             return Err(format!("project file {}: named twice", f.path));
         }
     }

@@ -23,6 +23,16 @@ impl Severity {
     }
 }
 
+/// Every rule id an [`Issue`] may carry, rising. V-19 was removed and is
+/// not given to another rule. Tools that tell a rule in their own words
+/// (the page) read this list, so a rule added here fails their checks
+/// until it has its words.
+pub const RULES: &[&str] = &[
+    "V-01", "V-02", "V-03", "V-04", "V-05", "V-06", "V-07", "V-08", "V-09", "V-10", "V-11", "V-12",
+    "V-13", "V-14", "V-15", "V-16", "V-17", "V-18", "V-20", "V-21", "V-22", "V-23", "V-24", "V-25",
+    "V-26", "V-27",
+];
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Issue {
     pub rule: &'static str,

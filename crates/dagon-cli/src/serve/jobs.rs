@@ -471,6 +471,52 @@ impl Job {
 mod tests {
     use super::*;
 
+    /// The text of `src` before its test module: what the server runs.
+    fn shipped(src: &str) -> &str {
+        src.split("#[cfg(test)]\nmod tests").next().unwrap()
+    }
+
+    /// The string literal starting right after each `pat` in `src`.
+    fn literals_after<'a>(src: &'a str, pat: &str) -> Vec<&'a str> {
+        src.match_indices(pat)
+            .filter_map(|(i, _)| src[i + pat.len()..].split('"').next())
+            .collect()
+    }
+
+    /// Every job kind and state the server gives is one dagon-host lists
+    /// (and the page has words for), and each one listed is given.
+    #[test]
+    fn kinds_and_states_are_dagon_hosts() {
+        let api = shipped(include_str!("api.rs"));
+        let devjobs = shipped(include_str!("devjobs.rs"));
+        let jobs = shipped(include_str!("jobs.rs"));
+        let mut kinds: Vec<&str> = [api, devjobs]
+            .iter()
+            .flat_map(|s| {
+                let mut k = literals_after(s, "start(server, req, \"");
+                k.extend(literals_after(s, "spawn(\""));
+                k
+            })
+            .collect();
+        kinds.sort();
+        kinds.dedup();
+        let mut listed = dagon_host::jobs::KINDS.to_vec();
+        listed.sort();
+        assert_eq!(kinds, listed);
+        let mut states = literals_after(jobs, "set_state(id, \"");
+        states.extend(literals_after(jobs, "set_state(self.id, \""));
+        states.extend(literals_after(jobs, "state: \""));
+        for s in ["succeeded", "failed", "cancelled"] {
+            assert!(jobs.contains(&format!("(\"{s}\"")), "{s}");
+            states.push(s);
+        }
+        states.sort();
+        states.dedup();
+        let mut listed = dagon_host::jobs::STATES.to_vec();
+        listed.sort();
+        assert_eq!(states, listed);
+    }
+
     fn server() -> Arc<Server> {
         Server::new("p".into(), 1, None, PathBuf::new())
     }

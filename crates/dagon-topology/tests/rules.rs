@@ -809,3 +809,24 @@ fn v07_judges_a_pin_by_the_named_board_only_and_the_uart0_choices_follow() {
     let (tx, rx) = uart0_choices(reg, "rp2040", None);
     assert_eq!((tx, rx), (vec![0, 12, 16, 28], vec![1, 13, 17, 29]));
 }
+
+/// `RULES` is every rule id the checker's source gives an issue, and
+/// nothing else: a rule added to the checker fails here until it is listed
+/// (and so until the page has its words).
+#[test]
+fn rules_lists_every_rule_the_checker_gives() {
+    let src = concat!(
+        include_str!("../src/check.rs"),
+        include_str!("../src/reach.rs"),
+    );
+    let mut given = BTreeSet::new();
+    for (i, _) in src.match_indices("\"V-") {
+        let id = &src[i + 1..i + 5];
+        if id[2..].bytes().all(|b| b.is_ascii_digit()) {
+            given.insert(id);
+        }
+    }
+    let listed: BTreeSet<&str> = dagon_topology::RULES.iter().copied().collect();
+    assert_eq!(listed, given);
+    assert!(dagon_topology::RULES.windows(2).all(|w| w[0] < w[1]));
+}

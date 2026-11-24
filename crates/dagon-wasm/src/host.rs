@@ -416,6 +416,9 @@ const fn hex32(s: &str) -> [u8; 32] {
     out
 }
 
+/// Every kind [`refusal`] gives besides a [`reason`].
+pub const REFUSALS: &[&str] = &["topology", "key", "source", "format"];
+
 /// Why dagon-host refuses a release before sending anything: `source`
 /// (signature, digest or CRC), `key` (signed with another key), `topology`
 /// (built for another configuration), `format` (not a release).

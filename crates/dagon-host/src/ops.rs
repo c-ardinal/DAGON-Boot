@@ -1164,6 +1164,30 @@ pub enum RecoverPath {
     Rom(dagon_romlink::Stats),
 }
 
+/// Every text [`reason`] gives. Tools that tell a reason in their own
+/// words (the page) read this list, so a reason added to [`reason`] fails
+/// their checks until it has its words.
+pub const REASONS: &[&str] = &[
+    "E_SIGNATURE",
+    "E_KEY",
+    "E_COMPAT",
+    "E_DIGEST",
+    "E_FLASH",
+    "E_STATE",
+    "E_RANGE",
+    "REJECTED",
+    "NO ANSWER",
+    "WIRE VERSION",
+    "ROLLED BACK",
+    "BOOT CORE ROLLED BACK",
+    "NO BOOT CORE TRIAL",
+    "APP ON TRIAL",
+    "NOT HANDED OVER",
+    "NO IMAGE",
+    "ROM NOT CONFIRMED",
+    "FAILED",
+];
+
 /// Short text naming why an update failed (ASCII, at most 32 bytes).
 pub fn reason<E>(e: &Error<E>) -> &'static str {
     match e {

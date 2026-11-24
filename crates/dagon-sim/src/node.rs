@@ -186,10 +186,7 @@ impl SimNode {
             busy_reads: 1,
             predates: Vec::new(),
             rom: SimRom::default(),
-            rom_addr: crate::mcu::simulated_mcu(layout.mcu)
-                .rom_i2c
-                .as_ref()
-                .map(|r| r.addr),
+            rom_addr: layout.definition().rom_i2c.as_ref().map(|r| r.addr),
             run: Run::Dead,
             on_trial: false,
             nrst_low: false,
@@ -223,7 +220,7 @@ impl SimNode {
     /// `unit_max_ms` (the wait a host allows, less its margin); 0 for a
     /// transfer the definition plans none for (the node refuses it).
     pub fn erase_ms(&self, begin: &dagon_proto::payload::XferBegin) -> u32 {
-        let Some(layout) = crate::mcu::simulated_mcu(self.store.layout.mcu).erase_layout() else {
+        let Some(layout) = self.store.layout.definition().erase_layout() else {
             return 0;
         };
         let body = begin.body_len().unwrap_or(0);

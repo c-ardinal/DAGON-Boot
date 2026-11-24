@@ -37,8 +37,12 @@ pub const STAGE0_MARK_AT: u32 = 4;
 /// Where things live in a node's flash.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Layout {
-    /// The MCU definition this layout models (its boot attempt limit).
+    /// The id of the MCU definition this layout models.
     pub mcu: &'static str,
+    /// That definition, when the layout was made from one given
+    /// ([`Layout::of_definition`]: a project's own, its overrides included);
+    /// `None`: the built-in definition of `mcu`.
+    pub def: Option<&'static dagon_topology::defs::McuDef>,
     /// Boot core region; all-erased means the chip has nothing to run.
     pub bootcore: (u32, u32),
     /// State log face (one erase unit).
@@ -97,6 +101,7 @@ impl Layout {
         let cores = slots_of(ImageKind::Bootcore);
         Some(Layout {
             mcu: m.id.as_str(),
+            def: None,
             bootcore: (stage0.at, stage0.size),
             log: (app_log.faces[0], app_log.face_size),
             slots: slots_of(ImageKind::App),
@@ -114,10 +119,29 @@ impl Layout {
         })
     }
 
+    /// The kind S layout the given definition `def` gives (a project's
+    /// own, its overrides included), as [`Layout::of`] reads a built-in
+    /// one; `None` without a stage0 or an app log. The simulated node reads
+    /// its boot attempts, ROM loader address and erase plan from `def`,
+    /// which is kept for the rest of the program.
+    pub fn of_definition(def: &dagon_topology::defs::McuDef) -> Option<Layout> {
+        let def: &'static dagon_topology::defs::McuDef = Box::leak(Box::new(def.clone()));
+        Layout::of_def(def).map(|l| Layout {
+            def: Some(def),
+            ..l
+        })
+    }
+
+    /// The definition the layout models.
+    pub fn definition(&self) -> &'static dagon_topology::defs::McuDef {
+        self.def.unwrap_or_else(|| simulated_mcu(self.mcu))
+    }
+
     /// ESP32-S3 watch (4 MiB modelled): loader, selection data, two OTA
     /// slots and a factory slot. Simplified to kind S semantics.
     pub const ESP32S3_WATCH: Layout = Layout {
         mcu: "esp32s3",
+        def: None,
         bootcore: (0x0000_0000, 0x1_0000),
         log: (0x0001_0000, 0x1000),
         slots: &[(0x0011_0000, 0x10_0000), (0x0021_0000, 0x10_0000)],
@@ -130,7 +154,12 @@ impl Layout {
     /// Boots the modelled boot stage gives a pending image: the MCU
     /// definition's `[watchdog] trial_attempts`.
     pub fn trial_attempts(&self) -> u8 {
-        trial_attempts(self.mcu)
+        match self.def {
+            Some(d) => d.watchdog.map(|w| w.trial_attempts).unwrap_or_else(|| {
+                panic!("MCU definition {} has no [watchdog] trial_attempts", d.id)
+            }),
+            None => trial_attempts(self.mcu),
+        }
     }
 }
 
@@ -522,8 +551,7 @@ impl SimStore {
     fn stage0_mcu_id(&self) -> u16 {
         self.stage0_node
             .map(|(id, _)| id)
-            .or_else(|| dagon_topology::mcu_id_of(self.layout.mcu))
-            .unwrap_or_else(|| panic!("MCU definition {} has no MCU id", self.layout.mcu))
+            .unwrap_or_else(|| self.layout.definition().wire_id)
     }
 
     /// Stage0 and the boot core over the boot core slots
@@ -757,7 +785,8 @@ impl SimStore {
     /// Whether the MCU's boot core receives on some link (its
     /// definition's `[boot_receive]`), so the app may hand over to it.
     pub fn boot_core_receives(&self) -> bool {
-        simulated_mcu(self.layout.mcu)
+        self.layout
+            .definition()
             .boot_receive
             .as_ref()
             .is_some_and(|r| r.kinds.values().any(|&on| on))

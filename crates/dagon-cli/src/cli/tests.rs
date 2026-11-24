@@ -380,6 +380,19 @@ fn todays_invocations() -> Vec<(&'static str, Command)> {
             "sim S3",
             C::Sim(SimArgs {
                 scenario: s("S3"),
+                ..Default::default()
+            }),
+        ),
+        (
+            "sim --topology t.yaml --fault seg=power-cut --fault hub=tamper --config c",
+            C::Sim(SimArgs {
+                scenario: None,
+                topology: s("t.yaml"),
+                fault: vec![
+                    crate::simworld::Injection::parse("seg=power-cut").unwrap(),
+                    crate::simworld::Injection::parse("hub=tamper").unwrap(),
+                ],
+                config: s("c"),
             }),
         ),
         ("ai link", C::Ai(AiCmd::Link(AgentWay::default()))),

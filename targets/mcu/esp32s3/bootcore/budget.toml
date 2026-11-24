@@ -6,8 +6,8 @@
 # region on its own. It is updated in the field, so it keeps no margin.
 # The parts come from the symbol table (`nm`, Rust paths) as for the
 # ESP32-S3 stage0; each is the build's plus a quarter, in 256-byte steps;
-# measured 49,032 bytes when set, then 52,624 after C-489 (state log
-# rebuilt from the slots), which raised dagon-core, dagon-format and
+# measured 49,032 bytes when set, then 52,624 once the boot core rebuilt
+# the state log from the slots, which raised dagon-core, dagon-format and
 # mcu-package by the same rule.
 
 [image]

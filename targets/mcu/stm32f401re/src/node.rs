@@ -29,7 +29,7 @@ use dagon_mcu_common::link::LinkError;
 pub use dagon_node::hooks::{always, App, AppEvents, BoardCore, Confirm, NodeChain, SelfCheck};
 use dagon_node::hooks::{finish_start, node_chain, BoardExtension, Events, UserExtensions};
 use dagon_node::serve::{serve as dagon_serve, Exit, ServeHost};
-use dagon_port::SlotStore;
+use dagon_port::{SlotStore, Watchdog};
 use dagon_proto::max_payload;
 use dagon_proto::payload::{mode, role};
 use defmt::{info, warn};
@@ -163,13 +163,9 @@ pub fn install_watchdog<const N: usize>(
     period_ms: u32,
     store: &Store,
 ) {
-    let mut iwdg = iwdg;
-    crate::watchdog::start(&mut iwdg, period_ms);
-    let dog = PeriodDog::new(
-        Iwdg::new(iwdg),
-        watchdog_period_ms(true),
-        watchdog_period_ms(false),
-    );
+    let mut iwdg = Iwdg::new(iwdg);
+    Watchdog::start(&mut iwdg, period_ms);
+    let dog = PeriodDog::new(iwdg, watchdog_period_ms(true), watchdog_period_ms(false));
     guard.install(dog, on_trial(store));
 }
 
@@ -296,7 +292,7 @@ async fn serve(
     };
     loop {
         if dagon_serve(&mut link, &mut agent, &mut host).await == Exit::Reboot {
-            cortex_m::peripheral::SCB::sys_reset();
+            host.watch.reboot();
         }
     }
 }

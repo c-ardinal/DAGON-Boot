@@ -10,26 +10,41 @@ use embassy_rp::watchdog::Watchdog;
 use embassy_rp::Peri;
 use embassy_time::{Duration, Instant, Timer};
 
+use dagon_port::{Reset, ResetCause};
+
 pub use dagon_mcu_common::liveness::Level;
 pub use dagon_node::guard::{
-    levels, Dog, Lease, PeriodDog, Rearm, Trial, Watch, BUSY_LIMIT_MS, BUSY_MARGIN_MS,
+    levels, Dog, Lease, PeriodDog, Trial, Watch, BUSY_LIMIT_MS, BUSY_MARGIN_MS,
 };
 
 /// The RP2040 watchdog and the period it runs (embassy-rp's feed loads
-/// the period it is given).
+/// the period it is given). The boot core started it before the jump.
 pub struct RpWatchdog(Watchdog, Duration);
 
-impl Rearm for RpWatchdog {
-    fn set_period(&mut self, period_ms: u32) {
-        self.1 = Duration::from_millis(period_ms.into());
+impl dagon_port::Watchdog for RpWatchdog {
+    /// Runs `timeout_ms` from now on: the running watchdog's countdown
+    /// restarts with it.
+    fn start(&mut self, timeout_ms: u32) {
+        self.1 = Duration::from_millis(timeout_ms.into());
+        self.0.feed(self.1);
     }
 
     fn feed(&mut self) {
         self.0.feed(self.1);
     }
+}
 
-    fn reset(&mut self) {
+impl Reset for RpWatchdog {
+    /// Resets through the watchdog (WATCHDOG REASON then reads FORCE).
+    fn reset(&mut self) -> ! {
         self.0.trigger_reset();
+        loop {
+            core::hint::spin_loop();
+        }
+    }
+
+    fn reset_cause(&self) -> ResetCause {
+        crate::reset::read()
     }
 }
 

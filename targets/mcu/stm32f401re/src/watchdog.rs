@@ -11,9 +11,11 @@ use embassy_stm32::peripherals::IWDG;
 use embassy_stm32::Peri;
 use embassy_time::Instant;
 
+use dagon_port::{Reset, ResetCause, Watchdog};
+
 pub use dagon_mcu_common::liveness::Level;
 pub use dagon_node::guard::{
-    levels, Dog, Lease, PeriodDog, Rearm, Trial, Watch, BUSY_LIMIT_MS, BUSY_MARGIN_MS,
+    levels, Dog, Lease, PeriodDog, Trial, Watch, BUSY_LIMIT_MS, BUSY_MARGIN_MS,
 };
 
 /// The running IWDG (owning its peripheral), programmed by [`crate::iwdg`].
@@ -26,23 +28,28 @@ impl Iwdg {
     }
 }
 
-impl Rearm for Iwdg {
-    fn set_period(&mut self, period_ms: u32) {
-        crate::iwdg::set(period_ms);
+impl Watchdog for Iwdg {
+    /// Starts the IWDG with `timeout_ms` (on a running IWDG: sets the
+    /// period and reloads it).
+    fn start(&mut self, timeout_ms: u32) {
+        crate::iwdg::start(timeout_ms);
     }
 
     fn feed(&mut self) {
         crate::iwdg::feed();
     }
-
-    fn reset(&mut self) {
-        cortex_m::peripheral::SCB::sys_reset();
-    }
 }
 
-/// Starts the IWDG with `period_ms` (on a running IWDG: sets the period).
-pub fn start(_p: &mut Peri<'static, IWDG>, period_ms: u32) {
-    crate::iwdg::start(period_ms);
+impl Reset for Iwdg {
+    fn reset(&mut self) -> ! {
+        cortex_m::peripheral::SCB::sys_reset()
+    }
+
+    /// The cause the reset flags name, left as they are (the app's start
+    /// reads and clears them with [`crate::reset::take`]).
+    fn reset_cause(&self) -> ResetCause {
+        crate::reset::peek()
+    }
 }
 
 /// The app's guard over `N` tasks.

@@ -81,5 +81,5 @@ description: "DAGONの設計上の範囲外、利用者の責任範囲、設計�
 <!-- generated from site/scripts/architecture.py: python site/scripts/gen.py -->
 - AI Agent Link: `dagon serve`にボード移植の作業は存在しません。`POST /v1/ai/port`の応答は501です。
 - Boot Action Interpreter: コードに存在しません。
-- Retained Codecs: ファームウェアに保持形式のコーデックは存在しません。構成本体の形式は`dagon-format`の形式（先頭32バイト、ノード32バイト）で、[保持と永続の形式](/explanation/retained-formats/)の形式ではありません。コーディネータの保存先は単一の領域で、2バンクの置換は存在しません。
+- Retained Codecs: ファームウェアに保持形式のコーデックは存在しません。構成本体の形式は`dagon-format`の形式（先頭32バイト、ノード32バイト）で、[保持と永続の形式](/explanation/retained-formats/)の形式ではありません。ノードは構成の複写を保存しません。構成はホストのパッケージにだけ存在し、ターゲット3（旧来の構成の複写）は予約番号として残存し、どのノードも受理しません。
 <!-- end of generated table -->

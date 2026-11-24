@@ -10,6 +10,7 @@
 
 extern crate alloc;
 
+pub mod jobs;
 mod ops;
 mod percent;
 pub mod rom;
@@ -20,6 +21,7 @@ pub use dagon_romlink::{RomError, Stats as RomStats};
 pub use ops::{
     agent_digest, app_digest, check_release, reason, ConfirmOutcome, Discovery, Event, NodeOutcome,
     NodeState, Outcome, RecoverAssets, RecoverPath, WritePath, XferTimes, HUB_RECONNECT_MS,
+    REASONS,
 };
 pub use percent::{transfer_percent, trial_percent};
 #[cfg(feature = "defs")]

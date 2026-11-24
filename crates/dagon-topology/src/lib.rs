@@ -21,5 +21,5 @@ pub use compile::{
     compile, compile_str, compile_with, mcu_id_of, parse_str, parse_version, port_kind_of,
     recovery_peer_mcu, CompileError,
 };
-pub use report::{Issue, Report, Severity};
+pub use report::{Issue, Report, Severity, RULES};
 pub use schema::Topology;

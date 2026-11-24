@@ -1091,7 +1091,7 @@ export const CLI_LINK = {
 export const JOBS = {
   heading: '作業',
   cols: ['種類', '対象', '状態', '経過', '結果'],
-  kinds: { build: 'ビルド', sign: '署名', release: 'リリース', gen: 'テンプレート', flash: '書込', conform: '適合試験', ai_topology: '構成の案' } as Record<string, string>,
+  kinds: { build: 'ビルド', sign: '署名', release: 'リリース', gen: 'テンプレート', flash: '書込', conform: '適合試験', doctor: '環境診断', ai_topology: '構成の案' } as Record<string, string>,
   states: { queued: '待機', running: '実行中', question: '質問あり', succeeded: '成功', failed: '失敗', cancelled: '中止', unknown: '不明' } as Record<string, string>,
   none: '作業 なし',
   started: '開始時刻',
@@ -1392,6 +1392,7 @@ export const WRITE = {
     E_DIGEST: { reason: '受信した内容が途中で破損していました。', fix: 'PC側のノードとの配線とケーブルを確認後に再度書込を実行してください。' },
     E_COMPAT: { reason: 'パッケージがこのノードの機種に不適合です。', fix: '構成のマイコンとボードを確認し、再ビルド後に書込を実行してください。' },
     E_FLASH: { reason: 'ノードが自身のメモリへの書込に失敗しました。', fix: 'ノードの電源の再投入後に再度書込を実行してください。' },
+    'WIRE VERSION': { reason: 'ノードの通信形式のバージョンがこの画面と不一致です。', fix: 'ノードとこの画面の通信形式のバージョンを一致させてください。' },
     refused: { reason: 'ノードがこのパッケージの受信を拒否しました。', fix: '下部の「記録」で理由を確認し、再ビルド後に書込を実行してください。' },
     cannotFix: { reason: '再送信も予備からの起動も失敗しました。', fix: 'このノードをUSBで直接接続し、カードの「書込」で書込を実行してください。' },
   } as Record<string, { reason: string; fix: string }>,

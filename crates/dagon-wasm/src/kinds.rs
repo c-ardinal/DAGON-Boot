@@ -56,6 +56,46 @@ pub fn link_kind_table() -> JsValue {
         .into()
 }
 
+/// Every rule id the topology check gives (`dagon_topology::RULES`): the
+/// page shows its own words for each.
+#[wasm_bindgen]
+pub fn rule_ids() -> Vec<String> {
+    dagon_topology::RULES
+        .iter()
+        .map(|r| r.to_string())
+        .collect()
+}
+
+/// Every reason dagon-host gives a node that did not get through
+/// (`dagon_host::REASONS`), then every kind of refused release
+/// ([`crate::host::REFUSALS`]): the page shows its own words for each.
+#[wasm_bindgen]
+pub fn failure_reasons() -> Vec<String> {
+    dagon_host::REASONS
+        .iter()
+        .chain(crate::host::REFUSALS)
+        .map(|r| r.to_string())
+        .collect()
+}
+
+/// Every job kind `dagon serve` runs (`dagon_host::jobs::KINDS`).
+#[wasm_bindgen]
+pub fn job_kinds() -> Vec<String> {
+    dagon_host::jobs::KINDS
+        .iter()
+        .map(|k| k.to_string())
+        .collect()
+}
+
+/// Every job state `dagon serve` gives (`dagon_host::jobs::STATES`).
+#[wasm_bindgen]
+pub fn job_states() -> Vec<String> {
+    dagon_host::jobs::STATES
+        .iter()
+        .map(|k| k.to_string())
+        .collect()
+}
+
 /// How long dagon-host waits for a rebooted hub's new HELLO: the Console's
 /// reconnect countdown reads it here instead of keeping a copy.
 #[wasm_bindgen]
@@ -66,6 +106,22 @@ pub fn host_reconnect_ms() -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_refusals_are_every_kind_refusal_gives() {
+        let src = include_str!("host.rs");
+        let start = src.find("pub fn refusal<E>").unwrap();
+        let body = &src[start..];
+        let body = &body[..body.find("\n}\n").unwrap()];
+        let mut given: Vec<&str> = body.split('"').skip(1).step_by(2).collect();
+        given.sort();
+        let mut listed = crate::host::REFUSALS.to_vec();
+        listed.sort();
+        assert_eq!(listed, given);
+        let reasons = failure_reasons();
+        assert_eq!(reasons.len(), dagon_host::REASONS.len() + listed.len());
+        assert_eq!(rule_ids().len(), dagon_topology::RULES.len());
+    }
 
     #[test]
     fn the_reconnect_wait_is_the_hosts() {

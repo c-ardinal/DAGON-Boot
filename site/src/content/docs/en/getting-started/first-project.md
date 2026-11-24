@@ -194,6 +194,8 @@ Each node's `versions:` line names:
 
 `unknown` is a node that cannot tell (an agent or stage0 built before it reported them). With the hub connected, `dagon doctor` prints the same lines after its tool checks.
 
+On each node's state line, `reset` is the cause of the reset before this start: `power-on` (power-on or brown-out), `watchdog`, `software` (a reset the firmware asked for), `pin` (the reset pin) or `unknown` (anything else). The app reads the MCU's reset flags at its start; on the STM32F401 it then clears the RCC_CSR flags, so the next start shows only the resets since. A node that reports no cause shows no `reset`.
+
 ### Without `dagon flash`
 
 For boot images you built yourself, `dagon provision <id>` makes the files. They read `[provision.<id>]` in `dagon.toml` (`stage0` for the hub, `bootcore`, `app`, `version`). The MCU definition READMEs show how to build the boot images.

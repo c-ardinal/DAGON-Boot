@@ -54,6 +54,7 @@ pub mod image;
 pub mod kinds;
 pub mod layout;
 pub mod regions;
+pub mod reset;
 
 #[cfg(target_os = "none")]
 pub mod arm;

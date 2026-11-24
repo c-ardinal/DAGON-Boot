@@ -1166,3 +1166,23 @@ fn bulk_of(cmd: u8, status: dagon_proto::Status, body: &[u8]) -> &[u8] {
         _ => body,
     }
 }
+
+/// STATUS reports the reset cause the node noted at its start, for every
+/// target; a start that notes none (a restart over the same agent)
+/// reports none.
+#[test]
+fn status_reports_the_reset_the_node_noted() {
+    use dagon_proto::payload::{encode_status_req, reset_cause, target};
+    let mut n = Node::new(Probe::default());
+    let cause = |n: &mut Node, t| {
+        let mut req = [0u8; 4];
+        let len = encode_status_req(t, &mut req).unwrap();
+        let (_, body, _) = n.call(Cmd::Status, &req[..len]);
+        StatusResp::parse(&body).unwrap().reset_cause
+    };
+    assert_eq!(cause(&mut n, target::APP), reset_cause::NONE);
+    n.agent.note_reset(dagon_port::ResetCause::Watchdog);
+    assert_eq!(cause(&mut n, target::APP), reset_cause::WATCHDOG);
+    n.agent.restart();
+    assert_eq!(cause(&mut n, target::APP), reset_cause::NONE);
+}

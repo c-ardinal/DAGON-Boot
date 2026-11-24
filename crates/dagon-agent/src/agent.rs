@@ -133,6 +133,9 @@ pub struct Agent<S, X, V, W = writer::App, const L: usize = 1, C = Software> {
     refusal: [u8; REFUSAL_BUF],
     /// The commands the node serves in front of this session.
     front: CmdSet,
+    /// STATUS `reset_cause`: what reset the node before this start
+    /// ([`Agent::note_reset`]; `payload::reset_cause::NONE` until then).
+    reset_cause: u8,
 }
 
 /// A handled request: the length of the reply's body, and the delay of
@@ -189,6 +192,7 @@ impl<S: SlotStore, X: AppChain, V: SigVerifier, W: Writer, const L: usize> Agent
             xfer_heard_us: 0,
             refusal: [0; REFUSAL_BUF],
             front: CmdSet::EMPTY,
+            reset_cause: payload::reset_cause::NONE,
         };
         agent.opened();
         agent
@@ -253,7 +257,14 @@ impl<S: SlotStore, X: AppChain, V: SigVerifier, W: Writer, const L: usize, C: Cr
         self.session = session::Machine::new();
         self.requests = requests::Machine::new();
         self.links = [Requester::NEW; L];
+        self.reset_cause = payload::reset_cause::NONE;
         self.opened();
+    }
+
+    /// What reset the node before this start, as the node read (and
+    /// cleared) its reset flags: STATUS reports it from now on.
+    pub fn note_reset(&mut self, cause: dagon_port::ResetCause) {
+        self.reset_cause = cause.code();
     }
 
     fn opened(&mut self) {
@@ -581,7 +592,10 @@ impl<S: SlotStore, X: AppChain, V: SigVerifier, W: Writer, const L: usize, C: Cr
     }
 
     fn status(&mut self, t: u8) -> Handled {
-        let st = self.images.target_status(t).ok_or(Status::Unsupported)?;
+        let st = StatusResp {
+            reset_cause: self.reset_cause,
+            ..self.images.target_status(t).ok_or(Status::Unsupported)?
+        };
         noted(self.requests.status_asked(&mut self.chain));
         Ok((st.encode(self.body()).expect("fits"), None))
     }

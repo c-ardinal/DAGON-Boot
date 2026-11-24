@@ -421,11 +421,43 @@ pub struct StatusResp {
     /// State log reason code of the last rollback/rejection (0 none).
     pub last_reason: u8,
     pub log_generation: u32,
+    /// The cause of the node's last reset ([`reset_cause`]; 0 not
+    /// reported, left out on the wire).
+    pub reset_cause: u8,
+}
+
+/// STATUS `reset_cause` codes: what reset the node last, as its MCU
+/// reports it. A reader shows a code it does not know as a number.
+pub mod reset_cause {
+    /// Not reported (the field left out).
+    pub const NONE: u8 = 0;
+    /// Power-on or brown-out.
+    pub const POWER_ON: u8 = 1;
+    /// A watchdog.
+    pub const WATCHDOG: u8 = 2;
+    /// The software (a reset request of the firmware).
+    pub const SOFTWARE: u8 = 3;
+    /// The reset pin.
+    pub const PIN: u8 = 4;
+    /// Reported, but none of the others.
+    pub const UNKNOWN: u8 = 5;
+
+    /// The code's name in `dagon status`.
+    pub fn name(code: u8) -> Option<&'static str> {
+        Some(match code {
+            POWER_ON => "power-on",
+            WATCHDOG => "watchdog",
+            SOFTWARE => "software",
+            PIN => "pin",
+            UNKNOWN => "unknown",
+            _ => return None,
+        })
+    }
 }
 
 impl StatusResp {
     /// The longest body this crate writes.
-    pub const MAX_LEN: usize = 2 + 3 * SLOT_LEN + 4 * 3 + 6;
+    pub const MAX_LEN: usize = 2 + 3 * SLOT_LEN + 4 * 3 + 6 + 3;
     /// The image slot entries (A, B) before the factory entry: the most
     /// slots an image kind can have on the wire. A kind with fewer sends the
     /// others as empty.
@@ -453,6 +485,7 @@ impl StatusResp {
             attempts: byte(&p, &status::ATTEMPTS, 0)?,
             last_reason: byte(&p, &status::LAST_REASON, 0)?,
             log_generation: generation.map_or(0, u32::from_le_bytes),
+            reset_cause: byte(&p, &status::RESET_CAUSE, reset_cause::NONE)?,
         })
     }
     pub fn encode(&self, out: &mut [u8]) -> Result<usize, FrameError> {
@@ -469,7 +502,12 @@ impl StatusResp {
             .field(&status::CONFIRMED, &[self.confirmed])?
             .field(&status::ATTEMPTS, &[self.attempts])?
             .field(&status::LAST_REASON, &[self.last_reason])?
-            .field(&status::LOG_GENERATION, &self.log_generation.to_le_bytes())?;
+            .field(&status::LOG_GENERATION, &self.log_generation.to_le_bytes())?
+            .field_unless(
+                &status::RESET_CAUSE,
+                &[self.reset_cause],
+                &[reset_cause::NONE],
+            )?;
         Ok(w.len())
     }
 }
@@ -1495,6 +1533,7 @@ mod tests {
         let s = StatusResp {
             active: 0,
             confirmed: 0xFF,
+            reset_cause: reset_cause::PIN,
             ..Default::default()
         };
         assert_eq!(s.encode(&mut b).unwrap(), StatusResp::MAX_LEN);

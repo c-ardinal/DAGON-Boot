@@ -637,7 +637,7 @@ impl SimRelay {
         };
         match self.bus.set_lines(line, s.boot0 == boot0::HIGH) {
             Ok(()) => (Status::Ok, Vec::new()),
-            Err(_) => (Status::Unsupported, Vec::new()),
+            Err(_) => (dagon_proto::table::subctl::LINES_FAILED, Vec::new()),
         }
     }
 
@@ -677,5 +677,29 @@ impl SimRelay {
             return (Status::Timeout, Vec::new());
         }
         (Status::Ok, buf)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Lines that cannot be set get the status the protocol gives that
+    /// failure, as the relay on a node answers it.
+    #[test]
+    fn lines_that_cannot_be_set_answer_the_protocols_status() {
+        let mut relay = crate::sample_hub(7);
+        relay.bus.sub = None;
+        let asked = SubCtl {
+            nrst: nrst::PULSE,
+            boot0: boot0::HIGH,
+            target: None,
+        };
+        assert_eq!(relay.subctl(asked).0, Status::Timeout);
+        assert_eq!(
+            dagon_proto::table::subctl::LINES_FAILED,
+            Status::Timeout,
+            "the hub's SUBCTL port reads this status as a timeout"
+        );
     }
 }

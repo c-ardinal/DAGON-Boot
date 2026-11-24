@@ -788,6 +788,7 @@ fn constants_rs(t: &toml::Table) -> String {
 
     out += &erase_layout_rs(t);
     out += &relay_links_rs(t);
+    out += &links_rs(t);
 
     let scratch = t
         .get("conformance")
@@ -800,6 +801,31 @@ fn constants_rs(t: &toml::Table) -> String {
         }
         None => "pub const CONFORM_SCRATCH: Option<(u32, u32)> = None;\n".into(),
     };
+    out
+}
+
+/// `[links]` as `LINKS_UP` and `LINKS_DOWN`, the link kinds the firmware
+/// implements in each direction, by the 構成's names: the one source of the
+/// package's `LINK_KINDS` (`dagon_mcu_common::link::kinds_of_definition`).
+fn links_rs(t: &toml::Table) -> String {
+    let links = t.get("links").and_then(|v| v.as_table());
+    let mut out = String::new();
+    for (key, name) in [("up", "LINKS_UP"), ("down", "LINKS_DOWN")] {
+        let kinds: Vec<String> = links
+            .and_then(|l| l.get(key))
+            .and_then(|v| v.as_array())
+            .map_or(&[][..], |v| v.as_slice())
+            .iter()
+            .map(|k| {
+                let k = k
+                    .as_str()
+                    .unwrap_or_else(|| panic!("dagon-mcu.toml: [links] {key} holds names"));
+                format!("{k:?}")
+            })
+            .collect();
+        out += &format!("/// The link kinds the firmware implements, `[links] {key}`.\n");
+        out += &format!("pub const {name}: &[&str] = &[{}];\n", kinds.join(", "));
+    }
     out
 }
 

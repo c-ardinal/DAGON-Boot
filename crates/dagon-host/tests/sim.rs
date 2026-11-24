@@ -1483,7 +1483,14 @@ fn subctl_and_i2c_raw_are_never_resent() {
     let r = block_on(h.call(
         Target::Local,
         Cmd::SubCtl,
-        &wire(|b| dagon_proto::payload::SubCtl { nrst: 0, boot0: 0 }.encode(b)),
+        &wire(|b| {
+            dagon_proto::payload::SubCtl {
+                nrst: 0,
+                boot0: 0,
+                target: None,
+            }
+            .encode(b)
+        }),
         REQUEST_MS,
     ));
     assert!(matches!(r, Err(Error::Timeout)), "{r:?}");

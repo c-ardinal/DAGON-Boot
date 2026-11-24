@@ -36,3 +36,5 @@ data; images carry the `TEST_KEY` build flag). Public key:
 | `frame_caps_resp.bin` | CAPS response: OK, request fields 1 and 2, no response fields, a tunnel of 268 bytes over the link asked about. One link is asked about at a time, so that the answer fits the smallest payload a link offers (64 bytes) |
 | `frame_version_req.bin` | VERSION (0x03) request, empty (the summary set), seq 0x15. Additive: the files above are unchanged |
 | `frame_version_resp.bin` | VERSION response: OK, 6 TLVs: wire 1, mcu_id F401, stage0 0.1.0, running boot core 1.0.0, boot core slots (A confirmed 1.0.0 running, B empty), app slots (A written 1.0.0, B trying 1.1.0 running, factory empty) |
+| `frame_subctl_target.bin` | SUBCTL nrst = pulse, boot0 = high, naming its recovery target: field 3 `link` 1 (I2C0) and field 4 `rom_addr` 0x39, seq 0x17. Additive: `frame_subctl.bin`, which names none (the relay's first target), is unchanged |
+| `frame_i2c_raw_target.bin` | I2C_RAW writing `00 FF`, reading 1 byte, naming its recovery target: field 2 `link` 1 (I2C0) and field 3 `rom_addr` 0x39, seq 0x18. Additive: `frame_i2c_raw_get.bin` is unchanged |

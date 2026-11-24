@@ -1060,6 +1060,8 @@ pub fn parse_bulk_resp(cmd: Cmd, b: &[u8]) -> Result<&[u8], Status> {
 pub struct SubCtl {
     pub nrst: u8,
     pub boot0: u8,
+    /// Whose lines: `None` for the relay's first recovery target.
+    pub target: Option<RomTarget>,
 }
 
 impl SubCtl {
@@ -1073,13 +1075,47 @@ impl SubCtl {
         if n > nrst::PULSE || b0 > boot0::HIGH {
             return Err(Status::Arg);
         }
-        Ok(SubCtl { nrst: n, boot0: b0 })
+        Ok(SubCtl {
+            nrst: n,
+            boot0: b0,
+            target: RomTarget::of(p, &subctl::LINK, &subctl::ROM_ADDR)?,
+        })
     }
     pub fn encode(&self, out: &mut [u8]) -> Result<usize, FrameError> {
         let mut w = FieldWriter::new(out);
         w.field(&subctl::NRST, &[self.nrst])?
             .field(&subctl::BOOT0, &[self.boot0])?;
+        if let Some(t) = self.target {
+            w.field(&subctl::LINK, &[t.link])?
+                .field(&subctl::ROM_ADDR, &[t.rom_addr])?;
+        }
         Ok(w.len())
+    }
+}
+
+/// A node a relay recovers through its ROM loader, as SUBCTL and I2C_RAW
+/// name it: the link it is on and its loader's address. A relay with
+/// recovery targets on two I2C buses tells them apart by the link.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RomTarget {
+    /// A `[[relay_link]]` id of the relay.
+    pub link: u8,
+    /// The ROM loader's 7-bit I2C address.
+    pub rom_addr: u8,
+}
+
+impl RomTarget {
+    /// Both fields, or neither (`None`); one alone is `Status::Arg`. One
+    /// copy for both commands (it costs the relay's flash twice inlined).
+    #[inline(never)]
+    fn of(p: &Parsed<'_>, link: &FieldSpec, addr: &FieldSpec) -> Result<Option<Self>, Status> {
+        // The reader has held both to their one byte.
+        let one = |f| p.field(f).and_then(|v: &[u8]| v.first().copied());
+        match (one(link), one(addr)) {
+            (Some(link), Some(rom_addr)) => Ok(Some(RomTarget { link, rom_addr })),
+            (None, None) => Ok(None),
+            _ => Err(Status::Arg),
+        }
     }
 }
 
@@ -1109,20 +1145,22 @@ impl EnterRom {
     }
 }
 
-/// I2C_RAW request (to the ROM loader on the recovery lines, at the address
+/// I2C_RAW request (to the ROM loader of a recovery target, at the address
 /// its MCU definition gives). Response: the bytes read, as bulk
 /// ([`parse_bulk_resp`]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct I2cRaw<'a> {
     /// 0 (left out on the wire): nothing is read.
     pub read_len: u16,
+    /// Which loader: `None` for the relay's first recovery target.
+    pub target: Option<RomTarget>,
     /// Bytes to write.
     pub data: &'a [u8],
 }
 
 impl<'a> I2cRaw<'a> {
     /// The most bytes of a request around its data.
-    pub const OVERHEAD_MAX: usize = 4 + 1;
+    pub const OVERHEAD_MAX: usize = 4 + 3 + 3 + 1;
 
     pub fn parse(b: &'a [u8]) -> Result<Self, Status> {
         Self::of(&rd(b, &Cmd::I2cRaw.spec().req)?)
@@ -1131,13 +1169,18 @@ impl<'a> I2cRaw<'a> {
     pub fn of(p: &Parsed<'a>) -> Result<Self, Status> {
         Ok(I2cRaw {
             read_len: val(p, &i2c_raw::READ_LEN)?.map_or(0, u16::from_le_bytes),
+            target: RomTarget::of(p, &i2c_raw::LINK, &i2c_raw::ROM_ADDR)?,
             data: p.bulk,
         })
     }
     pub fn encode(&self, out: &mut [u8]) -> Result<usize, FrameError> {
         let mut w = FieldWriter::new(out);
-        w.field_unless(&i2c_raw::READ_LEN, &self.read_len.to_le_bytes(), &[0, 0])?
-            .bulk(self.data)?;
+        w.field_unless(&i2c_raw::READ_LEN, &self.read_len.to_le_bytes(), &[0, 0])?;
+        if let Some(t) = self.target {
+            w.field(&i2c_raw::LINK, &[t.link])?
+                .field(&i2c_raw::ROM_ADDR, &[t.rom_addr])?;
+        }
+        w.bulk(self.data)?;
         Ok(w.len())
     }
 }
@@ -1427,6 +1470,7 @@ mod tests {
         let raw = |read_len| {
             Req::I2cRaw(I2cRaw {
                 read_len,
+                target: None,
                 data: &[],
             })
         };
@@ -1522,8 +1566,46 @@ mod tests {
     #[test]
     fn values_outside_their_range_are_refused() {
         let mut b = [0u8; 16];
-        let n = SubCtl { nrst: 3, boot0: 0 }.encode(&mut b).unwrap();
+        let n = SubCtl {
+            nrst: 3,
+            boot0: 0,
+            target: None,
+        }
+        .encode(&mut b)
+        .unwrap();
         assert_eq!(SubCtl::parse(&b[..n]), Err(Status::Arg));
+        // A recovery target is its link and its loader's address together:
+        // either one alone is refused.
+        let target = Some(RomTarget {
+            link: 1,
+            rom_addr: 0x39,
+        });
+        let sub = SubCtl {
+            nrst: 2,
+            boot0: 1,
+            target,
+        };
+        let n = sub.encode(&mut b).unwrap();
+        assert_eq!(SubCtl::parse(&b[..n]), Ok(sub));
+        // Without its last field (rom_addr), then without link (3) too.
+        assert_eq!(SubCtl::parse(&b[..n - 3]), Err(Status::Arg));
+        assert_eq!(SubCtl::parse(&b[..n - 6]).map(|s| s.target), Ok(None));
+        let raw = I2cRaw {
+            read_len: 1,
+            target,
+            data: &[0x00],
+        };
+        let n = raw.encode(&mut b).unwrap();
+        assert_eq!(I2cRaw::parse(&b[..n]), Ok(raw));
+        assert!(n <= I2cRaw::OVERHEAD_MAX + raw.data.len());
+        let mut lone = [0u8; 16];
+        let m = FieldWriter::new(&mut lone)
+            .field(&i2c_raw::ROM_ADDR, &[0x39])
+            .unwrap()
+            .bulk(&[])
+            .unwrap()
+            .len();
+        assert_eq!(I2cRaw::parse(&lone[..m]), Err(Status::Arg));
         assert_eq!(
             EnterRom::parse(&[2]),
             Ok(EnterRom {

@@ -9,7 +9,7 @@ use dagon_mcu_rp2040::{
 };
 use dagon_port::timeout::link_limits;
 use dagon_proto::payload::link::UART_ADDR;
-use dagon_proto::payload::{boot0, nrst, I2cRaw, Relay, Show, SubCtl};
+use dagon_proto::payload::{boot0, nrst, I2cRaw, Relay, RomTarget, Show, SubCtl};
 use dagon_proto::{finish, frame_len, max_payload, split_status, Cmd, Frame, Status};
 use dagon_relay::cmd;
 use dagon_sim::{demo_hub, SimRelay};
@@ -120,6 +120,7 @@ fn i2c_raw_and_subctl_rules_match_the_sim() {
     let mut h = demo_hub([0; 32], 2);
     let raw = |read_len: u16| {
         let r = I2cRaw {
+            target: None,
             read_len,
             data: &[0x00, 0xFF],
         };
@@ -127,7 +128,16 @@ fn i2c_raw_and_subctl_rules_match_the_sim() {
         let n = r.encode(&mut p).unwrap();
         p[..n].to_vec()
     };
-    let subctl = |nrst: u8, boot0: u8| wire(|b| SubCtl { nrst, boot0 }.encode(b));
+    let subctl = |nrst: u8, boot0: u8| {
+        wire(|b| {
+            SubCtl {
+                nrst,
+                boot0,
+                target: None,
+            }
+            .encode(b)
+        })
+    };
     // The ROM loader answers on the I2C link: its buffer is the limit.
     let i2c = RELAY_LINKS.iter().position(|l| l.id == I2C).unwrap();
     let (link, limit) = (RELAY_LINKS[i2c], RELAY_LINK_BUFFERS[i2c]);
@@ -153,6 +163,7 @@ fn i2c_raw_and_subctl_rules_match_the_sim() {
     assert_eq!(ask(&mut h, Cmd::I2cRaw, &long), Status::Arg);
     let mut long_write = vec![0u8; 16 + limit + 1];
     let n = I2cRaw {
+        target: None,
         read_len: 0,
         data: &vec![0xFF; limit + 1],
     }
@@ -167,13 +178,61 @@ fn i2c_raw_and_subctl_rules_match_the_sim() {
     assert_eq!(ask(&mut h, Cmd::I2cRaw, &[1, 0]), Status::Arg);
     // Accepted by the rules: the sim's ROM loader answers.
     assert_eq!(rule(&raw(1), true), None);
+    // Naming the one recovery target, by its link and its loader's
+    // address, is naming none; another link or address is E_ARG in both.
+    let rom = h
+        .rom_addr
+        .expect("the demo hub's wired node has a ROM loader");
+    let ours = [(I2C, rom)];
+    for (t, want) in [
+        ((I2C, rom), None),
+        ((UART, rom), Some(Status::Arg)),
+        ((I2C, rom ^ 1), Some(Status::Arg)),
+    ] {
+        let target = Some(RomTarget {
+            link: t.0,
+            rom_addr: t.1,
+        });
+        assert_eq!(cmd::recovery_target(ours.into_iter(), target).err(), want);
+        let named = wire(|b| {
+            I2cRaw {
+                read_len: 1,
+                target,
+                data: &[0x00, 0xFF],
+            }
+            .encode(b)
+        });
+        let lines = wire(|b| {
+            SubCtl {
+                nrst: nrst::RELEASE,
+                boot0: boot0::HIGH,
+                target,
+            }
+            .encode(b)
+        });
+        match want {
+            Some(refused) => {
+                assert_eq!(ask(&mut h, Cmd::I2cRaw, &named), refused);
+                assert_eq!(ask(&mut h, Cmd::SubCtl, &lines), refused);
+            }
+            None => {
+                assert_eq!(ask(&mut h, Cmd::SubCtl, &lines), Status::Ok);
+                assert_eq!(ask(&mut h, Cmd::I2cRaw, &named), Status::Ok);
+            }
+        }
+    }
     // Out-of-range SUBCTL values are refused by the shared parser.
     assert_eq!(SubCtl::parse(&[3, 0]), Err(Status::Arg));
     assert_eq!(
         ask(
             &mut h,
             Cmd::SubCtl,
-            &wire(|b| dagon_proto::payload::SubCtl { nrst: 3, boot0: 0 }.encode(b))
+            &wire(|b| dagon_proto::payload::SubCtl {
+                nrst: 3,
+                boot0: 0,
+                target: None
+            }
+            .encode(b))
         ),
         Status::Arg
     );

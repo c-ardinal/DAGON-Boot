@@ -10,7 +10,7 @@ use dagon_format::statelog::{self, kind, reason, slot, FaceHeader, Record};
 use dagon_format::{sha256, FormatError, ImageHeader};
 use dagon_port::timeout::REQUEST_MS;
 use dagon_port::{BusError, I2cBus, Nrst, SubControl};
-use dagon_proto::payload::{self, phase, I2cRaw, SubCtl};
+use dagon_proto::payload::{self, phase, I2cRaw, RomTarget, SubCtl};
 use dagon_proto::{Cmd, Status};
 use dagon_romlink::{Region, RomLink, FRAME_TIMEOUT_MS};
 
@@ -200,8 +200,11 @@ pub(crate) struct HubRom<'h, T: Transport, C: HostClock> {
     pub on_event: &'h mut dyn FnMut(Event),
     pub node: u8,
     /// The loader's address ([`RomMap::addr`]): the only one I2C_RAW
-    /// reaches (the relay's recovery is built for it).
+    /// reaches.
     pub addr: u8,
+    /// The relay's recovery target for the node: the link to it and
+    /// [`HubRom::addr`]. `None` asks the relay's first target.
+    pub target: Option<RomTarget>,
     pub version: dagon_format::Version,
     pub timeout: u32,
     pub shown: u8,
@@ -226,6 +229,7 @@ impl<T: Transport, C: HostClock> HubRom<'_, T, C> {
         }
         let req = I2cRaw {
             read_len: buf.len() as u16,
+            target: self.target,
             data,
         };
         let p = crate::request(|b| req.encode(b));
@@ -260,6 +264,7 @@ impl<T: Transport, C: HostClock> SubControl for HubRom<'_, T, C> {
         let lines = SubCtl {
             nrst: nrst as u8,
             boot0: boot0_high as u8,
+            target: self.target,
         };
         let p = crate::request(|b| lines.encode(b));
         self.host
@@ -302,6 +307,7 @@ impl<'h, T: Transport, C: HostClock> HubRom<'h, T, C> {
         on_event: &'h mut dyn FnMut(Event),
         node: u8,
         addr: u8,
+        link: Option<u8>,
         version: dagon_format::Version,
     ) -> Self {
         HubRom {
@@ -309,6 +315,10 @@ impl<'h, T: Transport, C: HostClock> HubRom<'h, T, C> {
             on_event,
             node,
             addr,
+            target: link.map(|link| RomTarget {
+                link,
+                rom_addr: addr,
+            }),
             version,
             timeout: FRAME_TIMEOUT_MS,
             shown: 0,

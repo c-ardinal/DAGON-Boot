@@ -259,7 +259,13 @@ pub mod subctl {
     use super::FieldSpec;
     pub const NRST: FieldSpec = FieldSpec::must(1, 1, 1);
     pub const BOOT0: FieldSpec = FieldSpec::must(2, 1, 1);
-    pub const REQ: [FieldSpec; 2] = [NRST, BOOT0];
+    /// The recovery target whose lines are set: the link its node is on
+    /// (a `[[relay_link]]` id), with [`ROM_ADDR`]. Both left out: the
+    /// relay's first target.
+    pub const LINK: FieldSpec = FieldSpec::must(3, 1, 1);
+    /// That target's ROM loader address (7-bit), with [`LINK`].
+    pub const ROM_ADDR: FieldSpec = FieldSpec::must(4, 1, 1);
+    pub const REQ: [FieldSpec; 4] = [NRST, BOOT0, LINK, ROM_ADDR];
 }
 
 /// I2C_RAW request. No core; bulk: the bytes to write. The response's
@@ -268,7 +274,13 @@ pub mod i2c_raw {
     use super::FieldSpec;
     /// Left out: nothing is read.
     pub const READ_LEN: FieldSpec = FieldSpec::must(1, 2, 2);
-    pub const REQ: [FieldSpec; 1] = [READ_LEN];
+    /// The recovery target written to: the link its node is on (a
+    /// `[[relay_link]]` id), with [`ROM_ADDR`]. Both left out: the relay's
+    /// first target.
+    pub const LINK: FieldSpec = FieldSpec::must(2, 1, 1);
+    /// That target's ROM loader address (7-bit), with [`LINK`].
+    pub const ROM_ADDR: FieldSpec = FieldSpec::must(3, 1, 1);
+    pub const REQ: [FieldSpec; 3] = [READ_LEN, LINK, ROM_ADDR];
 }
 
 /// CONF_RUN. Request core: `test_id u8`; response core: `verdict u8`.

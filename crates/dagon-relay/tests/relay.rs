@@ -749,6 +749,73 @@ fn a_relay_without_a_recovery_answers_i2c_raw_unsupported() {
     run(&clock, &bus, workers, scenario.as_mut());
 }
 
+/// Recovery lines that cannot be set.
+struct DeadLines;
+
+impl SubControl for DeadLines {
+    async fn set_lines(&mut self, _: Nrst, _: bool) -> Result<(), BusError> {
+        Err(BusError::Io)
+    }
+}
+
+/// SUBCTL whose lines cannot be set answers the protocol's status for that
+/// failure (the simulator's relay answers the same one), reports no line
+/// as set, and leaves BOOT0 as it was: I2C_RAW is still refused.
+#[test]
+fn lines_that_cannot_be_set_answer_the_protocols_status() {
+    let (bus, _) = sample_bus();
+    let clock = VirtualClock::default();
+    let bus_port: Port<[u8; frame_len(max_payload::I2C)]> = Port::new(&LINKS[0]);
+    let links = [LinkRoute {
+        link: LINKS[0],
+        port: Some(&bus_port),
+    }];
+    let (requests, replies) = (Frames::new(), Frames::new());
+    let (own, _app) = agent();
+    let relay = Relay {
+        agent: own,
+        links: &links,
+        recovery: &mut [Recovery {
+            lines: DeadLines,
+            link: BUS,
+            rom_addr: 0x39,
+        }],
+        watch: NoWatchdog,
+        clock: clock.clone(),
+        config: Config::default(),
+    };
+    let up = ScriptedPc {
+        requests: &requests,
+        replies: &replies,
+        frame: Vec::new(),
+        max: max_payload::USB,
+    };
+    let pc = Pc {
+        requests: &requests,
+        replies: &replies,
+        seq: Cell::new(0),
+    };
+    RELAY_EVENTS.with(|e| e.borrow_mut().clear());
+    let scenario = async {
+        let failed = dagon_proto::table::subctl::LINES_FAILED;
+        assert_eq!(failed, Status::Timeout);
+        assert_eq!(pc.lines(true, nrst::PULSE).await, failed);
+        assert_eq!(
+            pc.rom_get().await.0,
+            Status::State,
+            "BOOT0 not taken as high"
+        );
+        let seen = RELAY_EVENTS.with(|e| e.borrow().clone());
+        assert!(!seen.contains(&"child_control"), "{seen:?}");
+    };
+    let serving = async move {
+        serve(relay, up).await;
+    };
+    let (mut serving, mut scenario) = (std::pin::pin!(serving), std::pin::pin!(scenario));
+    let workers: Vec<Pin<&mut dyn Future<Output = ()>>> = vec![serving.as_mut()];
+    run(&clock, &bus, workers, scenario.as_mut());
+}
+
 /// A node link and recovery lines that count what reaches them.
 struct Counted<'a>(&'a Cell<usize>);
 

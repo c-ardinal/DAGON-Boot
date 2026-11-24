@@ -43,7 +43,7 @@ pub use timing::{Medium, TimedRelay};
 dagon_events::state_machine! {}
 
 use dagon_agent::Config;
-use dagon_format::header::{mcu_id, port_kind, target_tag};
+use dagon_format::header::target_tag;
 use dagon_proto::max_payload;
 use dagon_proto::payload::{mode, role};
 
@@ -69,29 +69,40 @@ fn sample_tag(id: &str) -> [u8; 16] {
     target_tag(&node.tag)
 }
 
+/// What built-in MCU definition `mcu` gives a node's configuration: its
+/// wire id, port kind and boot attempts; the rest is a node on the sample.
+fn of_mcu(mcu: &str) -> Config {
+    let m = store::simulated_mcu(mcu);
+    Config {
+        mcu_id: m.wire_id,
+        port_kind: m.port.wire(),
+        target_tag: [0; 16],
+        role: role::NODE,
+        mode: mode::APP,
+        max_payload: max_payload::I2C as u16,
+        trial_attempts: store::trial_attempts(mcu),
+    }
+}
+
 /// Hub on RP2040, answering on USB.
 pub fn hub_config() -> Config {
     Config {
-        mcu_id: mcu_id::RP2040,
-        port_kind: port_kind::SELF_BOOT,
         target_tag: sample_tag("hub"),
         role: role::HUB,
         mode: mode::APP,
         max_payload: max_payload::USB as u16,
-        trial_attempts: store::trial_attempts("rp2040"),
+        ..of_mcu("rp2040")
     }
 }
 
 /// STM32F401 node on I2C.
 pub fn f401_config() -> Config {
     Config {
-        mcu_id: mcu_id::STM32F401XE,
-        port_kind: port_kind::SELF_BOOT,
         target_tag: sample_tag("seg"),
         role: role::NODE,
         mode: mode::APP,
         max_payload: max_payload::I2C as u16,
-        trial_attempts: store::trial_attempts("stm32f401re"),
+        ..of_mcu("stm32f401re")
     }
 }
 
@@ -105,13 +116,13 @@ pub fn demo_hub(pubkey: [u8; 32], seed: u64) -> SimRelay {
         hub_config(),
         pubkey,
         SimFlash::rp2040_4m(seed),
-        Layout::RP2040_HUB,
+        Layout::of("rp2040"),
     );
     let mut f401 = SimNode::new(
         f401_config(),
         pubkey,
         SimFlash::stm32f401xe(seed ^ 1),
-        Layout::STM32F401XE,
+        Layout::of("stm32f401re"),
     );
     f401.i2c_addr = Some(NODE_I2C_ADDR);
     let mut h = SimRelay::new(hub);
@@ -123,13 +134,11 @@ pub fn demo_hub(pubkey: [u8; 32], seed: u64) -> SimRelay {
 /// handling is simulated like kind S).
 pub fn watch_config() -> Config {
     Config {
-        mcu_id: mcu_id::ESP32S3,
-        port_kind: port_kind::VENDOR_STAGE2,
         target_tag: sample_tag("watch"),
         role: role::NODE,
         mode: mode::APP,
         max_payload: max_payload::UART as u16,
-        trial_attempts: store::trial_attempts("esp32s3"),
+        ..of_mcu("esp32s3")
     }
 }
 

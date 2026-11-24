@@ -97,7 +97,7 @@ fn the_rp2040_boot_core_writes_the_app() {
         hub_config(),
         sample::PUBKEY,
         SimFlash::rp2040_4m(7),
-        Layout::RP2040_HUB,
+        Layout::of("rp2040"),
     );
     node.store().provision_core(sample::HUB_CORE_1_0_0).unwrap();
     node.provision(sample::HUB_1_0_0, 0).unwrap();
@@ -186,7 +186,7 @@ fn hub() -> SimNode {
         hub_config(),
         sample::PUBKEY,
         SimFlash::rp2040_4m(7),
-        Layout::RP2040_HUB,
+        Layout::of("rp2040"),
     );
     node.store().provision_core(sample::HUB_CORE_1_0_0).unwrap();
     node.provision(sample::HUB_1_0_0, 0).unwrap();
@@ -226,7 +226,7 @@ fn the_app_hands_over_and_the_boot_core_leaves_update_mode_when_idle() {
 fn nothing_to_start_keeps_the_boot_core_in_recovery_mode() {
     use dagon_port::Flash;
     let mut node = hub();
-    for &(at, len) in Layout::RP2040_HUB.slots {
+    for &(at, len) in Layout::of("rp2040").slots {
         node.flash().erase(at, len).unwrap();
     }
     node.reset(0);
@@ -242,7 +242,7 @@ fn nothing_to_start_keeps_the_boot_core_in_recovery_mode() {
 fn no_boot_core_to_start_serves_no_recovery_mode() {
     use dagon_port::Flash;
     let mut node = hub();
-    let layout = Layout::RP2040_HUB;
+    let layout = Layout::of("rp2040");
     for &(at, len) in layout.slots.iter().chain(layout.cores.unwrap().slots) {
         node.flash().erase(at, len).unwrap();
     }
@@ -257,7 +257,7 @@ fn no_boot_core_to_start_serves_no_recovery_mode() {
 fn the_boot_core_drops_a_transfer_left_idle() {
     use dagon_port::Flash;
     let mut node = hub();
-    for &(at, len) in Layout::RP2040_HUB.slots {
+    for &(at, len) in Layout::of("rp2040").slots {
         node.flash().erase(at, len).unwrap();
     }
     node.reset(0);

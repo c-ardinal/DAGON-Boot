@@ -66,7 +66,7 @@ fn relaying_node() -> SimNode {
         hub_config(),
         sample::PUBKEY,
         SimFlash::rp2040_4m(1),
-        Layout::RP2040_HUB,
+        Layout::of("rp2040"),
     )
 }
 
@@ -79,7 +79,7 @@ fn f401(seed: u64, max: u16) -> SimNode {
         cfg,
         sample::PUBKEY,
         SimFlash::stm32f401xe(seed),
-        Layout::STM32F401XE,
+        Layout::of("stm32f401re"),
     );
     n.i2c_addr = Some(ADDR);
     n.store().provision_core(sample::SEG_CORE_1_0_0).unwrap();

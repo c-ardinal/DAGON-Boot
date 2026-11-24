@@ -633,13 +633,13 @@ mod tests {
             "rp2040" => (
                 dagon_sim::hub_config(),
                 SimFlash::rp2040_4m(1),
-                Layout::RP2040_HUB,
+                Layout::of("rp2040"),
                 sample::HUB_1_0_0,
             ),
             "stm32f401re" => (
                 dagon_sim::f401_config(),
                 SimFlash::stm32f401xe(1),
-                Layout::STM32F401XE,
+                Layout::of("stm32f401re"),
                 sample::SEG_1_0_0,
             ),
             _ => (
@@ -656,7 +656,7 @@ mod tests {
             dagon_sim::f401_config(),
             pk,
             SimFlash::stm32f401xe(2),
-            Layout::STM32F401XE,
+            Layout::of("stm32f401re"),
         );
         f401.i2c_addr = Some(NODE_I2C_ADDR);
         let mut relay = SimRelay::with_definition(node, &def);

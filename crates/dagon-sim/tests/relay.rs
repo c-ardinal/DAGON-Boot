@@ -14,7 +14,7 @@ use payload::link;
 
 /// The relay link id the relaying node's MCU definition gives its port `port`.
 fn link_on(port: &str) -> u8 {
-    store::relay_link_id(store::Layout::RP2040_HUB.mcu, port)
+    store::relay_link_id(store::Layout::of("rp2040").mcu, port)
 }
 
 /// RFC 8032 section 7.1 TEST 1 key (public test data).
@@ -35,7 +35,7 @@ fn image(slot: u8, version: Version, body: &[u8]) -> Vec<u8> {
         mcu_id: mcu_id::STM32F401XE,
         slot_binding: slot,
         placement: placement::INLINE,
-        load_addr: Layout::STM32F401XE.slots[slot as usize].0 + 0x200,
+        load_addr: Layout::of("stm32f401re").slots[slot as usize].0 + 0x200,
         payload_size: body.len() as u32,
         version,
         build_flags: build_flags::TEST_KEY,
@@ -359,7 +359,7 @@ fn the_relaying_node_says_what_it_serves_and_reads_before_it_acts() {
         hub_config(),
         *kp().pk,
         SimFlash::rp2040_4m(1),
-        Layout::RP2040_HUB,
+        Layout::of("rp2040"),
     ));
     let (_, body) = pc.ask(&mut bare, Cmd::Hello, &hello());
     let cmds = HelloResp::parse(&body).unwrap().cmds;
@@ -759,7 +759,12 @@ fn uart_node_behind_a_lossy_link() {
     let mut relay = relay_with_f401();
     let mut cfg = f401_config();
     cfg.max_payload = max_payload::UART as u16;
-    let mut node = SimNode::new(cfg, *kp().pk, SimFlash::stm32f401xe(9), Layout::STM32F401XE);
+    let mut node = SimNode::new(
+        cfg,
+        *kp().pk,
+        SimFlash::stm32f401xe(9),
+        Layout::of("stm32f401re"),
+    );
     node.provision_core(|m| *kp().sk.sign(m, None)).unwrap();
     node.provision(&image(0, Version::new(2, 0, 0), &[1; 100]), 0)
         .unwrap();

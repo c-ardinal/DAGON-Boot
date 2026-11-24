@@ -24,17 +24,17 @@ const SEED: [u8; 32] = [
 ];
 
 /// The F401 layout with app slot A and boot core slot A only.
-const ONE: Layout = Layout {
-    slots: &[(0x0802_0000, 0x2_0000)],
-    cores: match Layout::STM32F401XE.cores {
-        Some(c) => Some(Cores {
+fn one() -> Layout {
+    let f401 = Layout::of("stm32f401re");
+    Layout {
+        slots: &[(0x0802_0000, 0x2_0000)],
+        cores: f401.cores.map(|c| Cores {
             slots: &[(0x0801_0000, 0x1_0000)],
             ..c
         }),
-        None => None,
-    },
-    ..Layout::STM32F401XE
-};
+        ..f401
+    }
+}
 
 fn kp() -> KeyPair {
     KeyPair::from_seed(Seed::new(SEED))
@@ -49,7 +49,7 @@ fn image(slot: u8, minor: u16) -> Vec<u8> {
         mcu_id: mcu_id::STM32F401XE,
         slot_binding: slot,
         placement: placement::INLINE,
-        load_addr: ONE.slots[usize::from(slot)].0 + 0x200,
+        load_addr: one().slots[usize::from(slot)].0 + 0x200,
         payload_size: body.len() as u32,
         version: Version::new(1, 0, minor),
         build_flags: build_flags::TEST_KEY,
@@ -83,7 +83,7 @@ fn chain() -> Chain {
 
 /// A provisioned one-slot node, booted.
 fn node() -> SimStore {
-    let mut store = SimStore::new(SimFlash::stm32f401xe(3), ONE, *kp().pk);
+    let mut store = SimStore::new(SimFlash::stm32f401xe(3), one(), *kp().pk);
     let core = store.first_core(|m| *kp().sk.sign(m, None)).unwrap();
     store.provision_core(&core).unwrap();
     store.provision(0, &image(0, 0)).unwrap();
@@ -151,7 +151,7 @@ fn the_agent_over_a_one_slot_store_knows_no_slot_b() {
 fn a_confirmed_app_with_a_bad_signature_is_not_started() {
     let mut forged = image(0, 0);
     forged[0x1C0] ^= 1;
-    let mut store = SimStore::new(SimFlash::stm32f401xe(3), ONE, *kp().pk);
+    let mut store = SimStore::new(SimFlash::stm32f401xe(3), one(), *kp().pk);
     let core = store.first_core(|m| *kp().sk.sign(m, None)).unwrap();
     store.provision_core(&core).unwrap();
     store.provision(0, &forged).unwrap();
@@ -163,7 +163,7 @@ fn a_confirmed_app_with_a_bad_signature_is_not_started() {
 /// can write the core again; with an app on trial it starts nothing.
 #[test]
 fn with_no_core_to_start_stage0_starts_the_confirmed_app() {
-    let (base, len) = ONE.cores.unwrap().slots[0];
+    let (base, len) = one().cores.unwrap().slots[0];
     let tag = f401_config().target_tag;
     let mut store = node();
     store.flash().erase(base, len).unwrap();

@@ -241,7 +241,7 @@ mod tests {
     #[test]
     fn links_take_their_real_time() {
         let data = frame(Cmd::XferData as u8, &[0; 1000]);
-        let mcu = crate::store::Layout::RP2040_HUB.mcu;
+        let mcu = crate::store::Layout::of("rp2040").mcu;
         let links = crate::store::relay_links(mcu);
         let own = exchange_ms(&data, Medium::UsbCdc, &links);
         let i2c_link = crate::store::relay_link_id(mcu, "i2c0");

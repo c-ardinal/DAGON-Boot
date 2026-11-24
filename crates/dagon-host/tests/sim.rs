@@ -428,7 +428,7 @@ fn version_of_a_stage0_without_its_mark_is_unknown() {
     let s = sim();
     let mut h = host(&s);
     // A stage0 built before the mark existed: its region holds code, no mark.
-    let (at, len) = dagon_sim::Layout::STM32F401XE.bootcore;
+    let (at, len) = dagon_sim::Layout::of("stm32f401re").bootcore;
     let mut hub = s.relay.borrow_mut();
     let seg = hub.i2c_node(NODE_I2C_PORT, NODE_I2C_ADDR).unwrap();
     let mut f = seg.flash();
@@ -1205,7 +1205,7 @@ fn one_write_reaches_every_node_of_a_topology_at_the_limit() {
                 cfg,
                 *key().pk,
                 dagon_sim::SimFlash::stm32f401xe(i as u64),
-                dagon_sim::Layout::STM32F401XE,
+                dagon_sim::Layout::of("stm32f401re"),
             );
             n.i2c_addr = Some(0x10 + i as u8);
             n.provision_core(|m| *key().sk.sign(m, None)).unwrap();
@@ -1912,7 +1912,7 @@ fn a_core_that_fails_its_own_check_is_rolled_back_and_the_run_stops() {
 /// them (stage0 checks that an image is linked for its slot), the log and
 /// the boot core log after them, in 4 MiB of flash.
 fn one_core_layout() -> dagon_sim::Layout {
-    let hub = dagon_sim::Layout::RP2040_HUB;
+    let hub = dagon_sim::Layout::of("rp2040");
     let mut cores = hub.cores.unwrap();
     cores.slots = &[(0x1000_8000, 0x2_0000)];
     cores.log.faces = [0x1032_0000, 0x1032_1000];

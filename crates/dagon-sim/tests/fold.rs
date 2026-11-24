@@ -49,7 +49,7 @@ fn image(slot: u8, minor: u16) -> Vec<u8> {
         mcu_id: mcu_id::STM32F401XE,
         slot_binding: slot,
         placement: placement::INLINE,
-        load_addr: Layout::STM32F401XE.slots[slot as usize].0 + 0x200,
+        load_addr: Layout::of("stm32f401re").slots[slot as usize].0 + 0x200,
         payload_size: body.len() as u32,
         version: Version::new(1, 0, minor),
         build_flags: build_flags::TEST_KEY,
@@ -123,7 +123,11 @@ fn as_machine(s: SlotState) -> Image {
 
 impl Model {
     fn new() -> Self {
-        let mut store = SimStore::new(SimFlash::stm32f401xe(1), Layout::STM32F401XE, *kp().pk);
+        let mut store = SimStore::new(
+            SimFlash::stm32f401xe(1),
+            Layout::of("stm32f401re"),
+            *kp().pk,
+        );
         let core = store.first_core(|m| *kp().sk.sign(m, None)).unwrap();
         store.provision_core(&core).unwrap();
         store.provision(0, &image(0, 0)).unwrap();

@@ -181,12 +181,12 @@ fn config(c: &Connected) -> (Config, SimFlash, Layout) {
         "rp2040" => (
             dagon_sim::hub_config(),
             SimFlash::rp2040_4m(1),
-            Layout::RP2040_HUB,
+            Layout::of("rp2040"),
         ),
         "stm32f401re" => (
             dagon_sim::f401_config(),
             SimFlash::stm32f401xe(1),
-            Layout::STM32F401XE,
+            Layout::of("stm32f401re"),
         ),
         _ => (
             dagon_sim::watch_config(),
@@ -213,7 +213,7 @@ fn relay(c: &Connected, def: &McuDef) -> SimRelay {
         f401,
         *key().pk,
         SimFlash::stm32f401xe(2),
-        Layout::STM32F401XE,
+        Layout::of("stm32f401re"),
     );
     linked.i2c_addr = Some(ADDR);
     linked.provision_core(|m| *key().sk.sign(m, None)).unwrap();

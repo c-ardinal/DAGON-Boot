@@ -10,6 +10,8 @@
         return RECONNECT.notes.several(n.count);
       case 'version':
         return RECONNECT.notes.version(versionText(n.version), n.trial);
+      case 'wire':
+        return RECONNECT.notes.wire(n.peer);
       default:
         return RECONNECT.notes[n.kind];
     }

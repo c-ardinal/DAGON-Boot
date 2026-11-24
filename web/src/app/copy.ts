@@ -71,6 +71,8 @@ export const BAND = {
   portBusy: { chip: '× 使用中', sentence: 'PC接続ノードを使用中のタブやアプリ（dagon CLIも対象）を終了後に再度クリックしてください。' },
   denied: { chip: '× 許可なし', sentence: 'ターミナルに表示されたアドレスへ再アクセスしてください。' },
   noResponse: { chip: '× 応答なし', sentence: '一覧で「DAGON hub」を再選択してください。' },
+  /** The node connected to the PC answered HELLO in another wire version. */
+  wireVersion: { chip: '× 通信形式のバージョン不一致', sentence: 'PC接続ノードとこの画面の通信形式のバージョンを一致させてください。' },
   ready: { sentence: 'パッケージファイルをこの画面へドロップするか選択してください。' },
   /** ready with a build to write: the main action writes it. */
   readyBuilt: { sentence: '書込対象のノードをチェックし、『書込』をクリックしてください。' },
@@ -695,6 +697,7 @@ export const RECONNECT = {
     silent: '出現した機器 応答なし',
     notHub: '出現した機器 コーディネータ以外',
     otherHub: '出現した機器 別のコーディネータ',
+    wire: (v: number) => `出現した機器 通信形式のバージョン${v}（非対応）`,
     version: (v: string, trial: boolean) => `出現したPC接続ノード${v}${trial ? '' : '（前のバージョン）'}`,
   },
 } as const;

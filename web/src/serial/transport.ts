@@ -1,4 +1,4 @@
-import { HELLO_ROLE, decodeHelloResp, encodeHelloReq, wireVersion } from '../wasm/dagon.ts';
+import { HELLO_ROLE, decodeHelloResp, encodeHelloReq, refusingVersion, wireVersion } from '../wasm/dagon.ts';
 import { CMD, encodeFrame, newFrameStream, parseFrame, STATUS, WIRE } from './frame.ts';
 import type { HelloResp } from './hello.ts';
 
@@ -14,7 +14,9 @@ import type { HelloResp } from './hello.ts';
 export type ReconnectNote =
   | { kind: 'away' | 'none' | 'silent' | 'notHub' | 'otherHub' }
   | { kind: 'several'; count: number }
-  | { kind: 'version'; version: number; trial: boolean };
+  | { kind: 'version'; version: number; trial: boolean }
+  /** A DAGON device of another wire version: it refused HELLO in its own. */
+  | { kind: 'wire'; peer: number };
 
 /**
  * Frame-level link to the node connected to the PC, the shape dagon-host drives (and what
@@ -64,7 +66,7 @@ export function notThisHub(h: HelloResp | null, first: HubIdentity | null, versi
   return null;
 }
 
-const NOTE_KINDS: readonly string[] = ['away', 'none', 'silent', 'notHub', 'otherHub', 'several', 'version'];
+const NOTE_KINDS: readonly string[] = ['away', 'none', 'silent', 'notHub', 'otherHub', 'several', 'version', 'wire'];
 
 /** A ReconnectNote (thrown where a candidate is turned down). */
 export function isNote(e: unknown): e is ReconnectNote {
@@ -76,8 +78,13 @@ const PROBE_MS = 500;
 /** Distinct reasons kept for the diagnostic log. */
 const MAX_NOTES = 8;
 
-/** HELLO on a port the page is not using yet; null when it does not open or answer as a DAGON device. */
-export async function probeHello(port: SerialPort, waitMs = PROBE_MS): Promise<HelloResp | null> {
+/** A device that refused HELLO in another wire version, the one it names. */
+export interface OtherWire {
+  peer: number;
+}
+
+/** HELLO on a port the page is not using yet; OtherWire for a DAGON device of another wire version, null when it does not open or answer as a DAGON device. */
+export async function probeHello(port: SerialPort, waitMs = PROBE_MS): Promise<HelloResp | OtherWire | null> {
   const t = new WebSerialTransport(port, null);
   try {
     await t.open();
@@ -88,6 +95,8 @@ export async function probeHello(port: SerialPort, waitMs = PROBE_MS): Promise<H
     const req = encodeHelloReq({ protoVer: wireVersion(), maxPayload: WIRE.MAX_PAYLOAD_USB });
     await t.write(encodeFrame({ flags: 0, seq: 0, cmd: CMD.HELLO, payload: req }));
     const raw = await t.read(waitMs);
+    const peer = raw && refusingVersion(raw, 0, CMD.HELLO);
+    if (peer !== null) return { peer };
     const f = raw && parseFrame(raw);
     if (!f || f.cmd !== CMD.HELLO || f.payload[0] !== STATUS.OK) return null;
     return decodeHelloResp(f.payload.subarray(1));
@@ -246,7 +255,7 @@ export class WebSerialTransport implements Transport {
     const mine: SerialPort[] = [];
     for (const p of same) {
       const h = await probeHello(p);
-      const why = notThisHub(h, this.identity, this.expected);
+      const why = h && 'peer' in h ? ({ kind: 'wire', peer: h.peer } as const) : notThisHub(h, this.identity, this.expected);
       if (why) this.note(why);
       else mine.push(p);
     }

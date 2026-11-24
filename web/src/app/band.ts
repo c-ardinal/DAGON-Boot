@@ -49,6 +49,7 @@ export const FAILURE_BAND = {
   busy: BAND.portBusy,
   denied: BAND.denied,
   'no-response': BAND.noResponse,
+  wire: BAND.wireVersion,
   unavailable: BAND.pageLoadFailed,
 } as const;
 

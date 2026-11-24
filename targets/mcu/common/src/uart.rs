@@ -6,7 +6,7 @@
 //! - garbage (boot logs, broken frames) is skipped by SOF search and CRC;
 //! - only a response (RESP flag) with the request's seq is taken.
 
-use dagon_port::{NodeLink, StreamPort, NO_ADDR};
+use dagon_port::{NoHello, NodeLink, StreamPort, NO_ADDR};
 use dagon_proto::payload::HelloResp;
 use dagon_proto::{flags, frame_len, max_payload, Status};
 
@@ -19,7 +19,7 @@ pub const HELLO_TIMEOUT_MS: u16 = 200;
 
 /// The HELLO frame helpers keep their path here: they are public API of
 /// this package (and of the MCU packages re-exporting `uart`).
-pub use dagon_port::{hello_answer, hello_request};
+pub use dagon_port::{hello_answer, hello_reply, hello_request};
 
 /// UART link to another node (the requesting end); `now` gives
 /// milliseconds on a monotonic clock. As a [`Link`], `write_frame` sends a
@@ -82,6 +82,12 @@ impl<S: StreamPort, C: Fn() -> u64> UartLink<S, C> {
 
     pub async fn hello(&mut self, seq: u8) -> Option<HelloResp> {
         NodeLink::hello(self, NO_ADDR, seq).await
+    }
+
+    /// [`UartLink::hello`], telling a node of another wire version apart
+    /// from one that does not answer.
+    pub async fn ask_hello(&mut self, seq: u8) -> Result<HelloResp, NoHello> {
+        NodeLink::ask_hello(self, NO_ADDR, seq).await
     }
 }
 
@@ -271,6 +277,25 @@ mod tests {
         let (mut l, _) = link(stream);
         let h = block_on(l.hello(0x81)).expect("answer");
         assert_eq!(h.active_version, dagon_format::Version::new(1, 2, 0));
+    }
+
+    #[test]
+    fn a_node_of_another_wire_version_is_not_silence() {
+        // The watch speaks the next wire version: it refuses the request
+        // in its own version, a frame this side cannot decode.
+        let mut req = [0u8; 32];
+        let n = hello_request(max_payload::UART, 0x85, &mut req).unwrap();
+        req[2] = dagon_proto::PROTO_VERSION + 1;
+        let mut refusal = [0u8; 32];
+        let m = dagon_proto::version_refusal(&req[..n], &mut refusal).unwrap();
+        refusal[2] = dagon_proto::PROTO_VERSION + 1;
+        let (mut l, _) = link(steady(&refusal[..m]));
+        assert_eq!(
+            block_on(l.ask_hello(0x85)),
+            Err(NoHello::WireVersion(dagon_proto::PROTO_VERSION + 1))
+        );
+        let (mut l, _) = link(Vec::new());
+        assert_eq!(block_on(l.ask_hello(0x86)), Err(NoHello::NoAnswer));
     }
 
     #[test]

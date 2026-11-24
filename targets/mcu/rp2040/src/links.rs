@@ -16,7 +16,7 @@ pub type I2c<'d, T> = I2cLink<RpI2c<'d, T>>;
 pub type Uart<'d, P, const TX: usize, const RX: usize> =
     crate::uart::UartLink<PioStream<'d, P, TX, RX>, fn() -> u64>;
 
-use dagon_port::{BusError, I2cBus, NodeLink, StreamPort};
+use dagon_port::{BusError, I2cBus, NoHello, NodeLink, StreamPort};
 use dagon_proto::mailbox::{self, STATE_LEN};
 use dagon_proto::payload::HelloResp;
 use dagon_proto::{frame_len, max_payload, Frame, Status};
@@ -175,6 +175,12 @@ impl<I: I2cBus> I2cLink<I> {
 
     pub async fn hello(&mut self, addr: u8, seq: u8) -> Option<HelloResp> {
         NodeLink::hello(self, addr, seq).await
+    }
+
+    /// [`I2cLink::hello`], telling a node of another wire version apart
+    /// from one that does not answer.
+    pub async fn ask_hello(&mut self, addr: u8, seq: u8) -> Result<HelloResp, NoHello> {
+        NodeLink::ask_hello(self, addr, seq).await
     }
 }
 

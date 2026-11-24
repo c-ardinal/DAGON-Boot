@@ -25,6 +25,7 @@ import init, {
   release_app_digest,
   release_core_versions,
   release_versions,
+  refusing_version,
   use_builtin_definitions,
   supported_boards as boards,
   version_older,
@@ -479,6 +480,11 @@ export function supportedBoards(): Board[] {
 /** The board a node naming only `mcu` stands for; undefined when the MCU has none (several boards, none marked). */
 export function defaultBoard(mcu: string): string | undefined {
   return supportedBoards().find((b) => b.mcu === mcu && b.isDefault)?.id;
+}
+
+/** The peer's wire version when `frame` is its refusal, in another wire version, of the request (`seq`, `cmd`); null otherwise (dagon_proto::refusing_version). */
+export function refusingVersion(frame: Uint8Array, seq: number, cmd: number): number | null {
+  return refusing_version(frame, seq, cmd) ?? null;
 }
 
 /** The wire version this page speaks (dagon_proto::PROTO_VERSION). */

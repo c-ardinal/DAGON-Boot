@@ -112,6 +112,8 @@ export interface MockOptions {
   hello?: HelloResp;
   /** Never answer (a device that is not a node connected to the PC). */
   silent?: boolean;
+  /** Speak the next wire version: refuse every request in it, as dagon-proto's version_refusal does. */
+  nextWire?: boolean;
   /** Delay of the PC-connected node's HELLO reply, to make the checking state visible. */
   delayMs?: number;
   /** Nodes behind the node connected to the PC that do not answer RELAY. */
@@ -128,6 +130,13 @@ export interface MockOptions {
    * browser cannot reopen it without the user choosing it again.
    */
   hubAway?: number;
+}
+
+/** The refusal of `request` by a device of the next wire version, as the page's stream cutter hands it over: its first header bytes. */
+export function nextWireRefusal(request: Uint8Array): Uint8Array {
+  const head = encodeFrame({ flags: WIRE.FLAG_RESP, seq: request[4], cmd: request[5], payload: new Uint8Array(0) }).slice(0, WIRE.HEADER_LEN);
+  head[2] = wireVersion() + 1;
+  return head;
 }
 
 export class MockTransport implements Transport {
@@ -202,6 +211,7 @@ export class MockTransport implements Transport {
     if (!this.isOpen) throw new Error('port not open');
     if (this.opts.silent) return;
     const frame = parseFrame(raw);
+    if (this.opts.nextWire) return this.queue.put(nextWireRefusal(raw));
     const req = readRequest(frame.cmd, frame.payload, true);
     const hub = this.devices.get('hub')!;
     const body = req.refusal ?? (frame.cmd === CMD.RELAY ? await this.relay(req) : await answer(hub, frame.cmd, req, this.fellBack('hub'), this.refuse.hub));

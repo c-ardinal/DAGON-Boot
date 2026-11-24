@@ -1178,6 +1178,8 @@ pub fn reason<E>(e: &Error<E>) -> &'static str {
             _ => "REJECTED",
         },
         Error::Timeout | Error::Relay(_) | Error::Transport(_) => "NO ANSWER",
+        // It answered, in another wire version: not silence.
+        Error::WireVersion { .. } => "WIRE VERSION",
         Error::WrongVersion { .. } => "ROLLED BACK",
         Error::BootCoreRolledBack { .. } => "BOOT CORE ROLLED BACK",
         Error::BootCoreRefused => "NO BOOT CORE TRIAL",

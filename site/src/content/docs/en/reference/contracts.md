@@ -5,7 +5,7 @@ editUrl: false
 ---
 
 :::note
-Generated from `compat.toml`; do not edit. Regenerate with `python site/scripts/gen.py`.
+Generated from `compat.toml`, `crates/dagon-proto/src/lib.rs`; do not edit. Regenerate with `python site/scripts/gen.py`.
 :::
 
 Every contract between DAGON's components and the number it is at, and
@@ -72,3 +72,22 @@ format numbers are this tree's. Changes since the tag
 | `sim` | 0.1.0 | `dagon-sim` | `wire` 2, `image-header` 1, `state-log` 1 |
 | `conform` | 0.1.0 | `dagon-conform` | `wire` 2, `image-header` 1, `state-log` 1, `conform-result` 1 |
 | `romlink` | 0.1.0 | `dagon-romlink` |  |
+
+## Frames (`wire`)
+
+The bits of a frame's `flags` byte, as `dagon-proto`'s `flags` holds them.
+
+| Flag | Value | Meaning |
+|---|---|---|
+| `RESP` | `0x01` | The frame answers the request with the same `seq` and `cmd`. |
+| `EVENT` | `0x02` | Reserved for an event a node would send unasked; nothing sends it, and every receiver ignores a frame that carries it. |
+| `RETRY` | `0x04` | The request is sent again after an answer did not arrive in time. |
+
+The payload limit per link (`max_payload`):
+
+| Link | Bytes | Meaning |
+|---|---|---|
+| `USB` | 1088 | USB CDC, between the PC and the hub. |
+| `UART` | 1024 | A UART link. |
+| `I2C` | 256 | An I2C link. |
+| `SMALLEST` | 64 | The least a link offers, whatever its medium: a link that carries less in one piece puts frames together below the frame, up to at least this. Every node's HELLO and CAPS answers fit it, so a requester learns over any link what the node serves. |

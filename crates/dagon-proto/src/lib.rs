@@ -21,16 +21,25 @@ pub const PROTO_VERSION: u8 = 0x02;
 pub const HEADER_LEN: usize = 8;
 pub const CRC_LEN: usize = 4;
 
+/// Bits of a frame's `flags` byte. A frame with neither `RESP` nor `EVENT`
+/// is a request.
 pub mod flags {
+    /// The frame answers the request with the same `seq` and `cmd`.
     pub const RESP: u8 = 1 << 0;
+    /// Reserved for an event a node would send unasked; nothing sends it,
+    /// and every receiver ignores a frame that carries it.
     pub const EVENT: u8 = 1 << 1;
+    /// The request is sent again after an answer did not arrive in time.
     pub const RETRY: u8 = 1 << 2;
 }
 
 /// Payload limit per link; frames above it are dropped.
 pub mod max_payload {
+    /// USB CDC, between the PC and the hub.
     pub const USB: usize = 1088;
+    /// A UART link.
     pub const UART: usize = 1024;
+    /// An I2C link.
     pub const I2C: usize = 256;
     /// The least a link offers, whatever its medium: a link that carries
     /// less in one piece puts frames together below the frame, up to at

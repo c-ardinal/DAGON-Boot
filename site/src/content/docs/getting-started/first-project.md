@@ -176,12 +176,14 @@ provisionのフォルダは`dagon.toml`と同一の階層の`out/provision/<id>/
 
 `dagon flash`はボードのfactoryエージェントとアプリをビルドします。アプリをESPのイメージに変換して（`espflash save-image --chip esp32s3 --flash-size 16mb`）署名し、`espflash`で以下のものを書込します。
 
+<!-- generated from the ESP32-S3 MCU definition and its partitions.csv: python site/scripts/gen.py -->
 - 同梱の無改変のESP-IDF 2nd stage（0x0）: SHA-256が`targets/mcu/esp32s3/vendor/SHA256SUMS`と不一致の場合は書込しません。
 - パーティション表（`targets/mcu/esp32s3/partitions.csv`、0x8000）
-- factoryエージェント
+- factoryエージェント（factory、0x10000）
 - アプリ（ota_0、0x110000）
 - アプリの署名済ヘッダ（`dagon`パーティション、0x710000）
 - 確定済として起動させるotadataの項目（0xD000）
+<!-- end of generated table -->
 
 `--dry-run`はファイルとそのオフセット、`espflash`のコマンドを表示します（同一のprovisionフォルダにある`commands.txt`）。
 

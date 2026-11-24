@@ -186,7 +186,7 @@ impl SimNode {
             busy_reads: 1,
             predates: Vec::new(),
             rom: SimRom::default(),
-            rom_addr: crate::store::simulated_mcu(layout.mcu)
+            rom_addr: crate::mcu::simulated_mcu(layout.mcu)
                 .rom_i2c
                 .as_ref()
                 .map(|r| r.addr),

@@ -22,6 +22,7 @@
 pub mod flash;
 pub mod link;
 pub mod listen;
+mod mcu;
 pub mod node;
 mod ports;
 pub mod relay;
@@ -72,7 +73,7 @@ fn sample_tag(id: &str) -> [u8; 16] {
 /// What built-in MCU definition `mcu` gives a node's configuration: its
 /// wire id, port kind and boot attempts; the rest is a node on the sample.
 fn of_mcu(mcu: &str) -> Config {
-    let m = store::simulated_mcu(mcu);
+    let m = mcu::simulated_mcu(mcu);
     Config {
         mcu_id: m.wire_id,
         port_kind: m.port.wire(),

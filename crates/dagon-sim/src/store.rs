@@ -7,9 +7,10 @@
 //! simulated board (its boot core, ROM loader, power) another.
 
 use std::sync::atomic::{AtomicU8, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use crate::flash::SimFlash;
+use crate::mcu::simulated_mcu;
 use dagon_agent::{SlotStore, StoreError, Transition};
 use dagon_core::boot::Place;
 use dagon_core::bootcore::{
@@ -71,18 +72,15 @@ impl Layout {
     /// with `bootcore_log` as `cores`. Panics for an MCU the built-in
     /// definitions lack or give no kind S layout (no stage0 or app log).
     pub fn of(mcu: &str) -> Layout {
-        static ALL: OnceLock<Vec<Layout>> = OnceLock::new();
-        ALL.get_or_init(|| {
-            dagon_topology::defs::Registry::builtin()
-                .mcus()
-                .iter()
-                .filter_map(Layout::of_def)
-                .collect()
-        })
-        .iter()
-        .find(|l| l.mcu == mcu)
-        .copied()
-        .unwrap_or_else(|| panic!("no kind S layout in MCU definition {mcu}"))
+        static MADE: Mutex<Vec<Layout>> = Mutex::new(Vec::new());
+        let mut made = MADE.lock().unwrap_or_else(PoisonError::into_inner);
+        if let Some(l) = made.iter().find(|l| l.mcu == mcu) {
+            return *l;
+        }
+        let l = Layout::of_def(simulated_mcu(mcu))
+            .unwrap_or_else(|| panic!("no kind S layout in MCU definition {mcu}"));
+        made.push(l);
+        l
     }
 
     /// [`Layout::of`] for one definition; `None` without a stage0 or an
@@ -143,14 +141,6 @@ pub fn trial_attempts(mcu: &str) -> u8 {
         .and_then(|m| m.watchdog)
         .map(|w| w.trial_attempts)
         .unwrap_or_else(|| panic!("MCU definition {mcu} has no [watchdog] trial_attempts"))
-}
-
-/// The built-in definition of a simulated MCU (for a simulation given no
-/// definitions).
-pub(crate) fn simulated_mcu(mcu: &str) -> &'static dagon_topology::defs::McuDef {
-    dagon_topology::defs::Registry::builtin()
-        .mcu(mcu)
-        .unwrap_or_else(|| panic!("no MCU definition {mcu}"))
 }
 
 /// `[[relay_link]]` of MCU definition `mcu`: the links its relay reaches

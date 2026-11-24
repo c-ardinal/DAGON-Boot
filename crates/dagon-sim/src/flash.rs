@@ -58,7 +58,7 @@ impl SimFlash {
     /// at a time. That is the chip's own unit, which a ROM loader writes
     /// in, finer than the definition's `write_unit` (DAGON's firmware's).
     pub fn of(mcu: &str, write_size: u32, seed: u64) -> Self {
-        let e = crate::store::simulated_mcu(mcu)
+        let e = crate::mcu::simulated_mcu(mcu)
             .execution
             .as_ref()
             .unwrap_or_else(|| panic!("MCU definition {mcu} has no [execution]"));

@@ -488,7 +488,6 @@ name = "dagon-agent"
 version = "0.1.0"
 dependencies = [
  "critical-section",
- "dagon-agent",
  "dagon-core",
  "dagon-ed25519",
  "dagon-events",

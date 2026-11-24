@@ -16,16 +16,18 @@ const SEG_ONE: Layout = Layout {
     ..Layout::STM32F401XE
 };
 const HUB_ONE: Layout = Layout {
-    slots: &[(0x1002_0000, 0x8_0000)],
+    slots: &[(0x1004_8000, 0x10_0000)],
     ..Layout::RP2040_HUB
 };
 
 /// Hub and seg, each with one app slot, running 1.0.0 from it.
 fn one_slot_sim() -> Sim {
-    let mut hub = SimNode::new(hub_config(), *key().pk, SimFlash::rp2040_2m(7), HUB_ONE);
+    let mut hub = SimNode::new(hub_config(), *key().pk, SimFlash::rp2040_4m(7), HUB_ONE);
+    hub.provision_core(|m| *key().sk.sign(m, None)).unwrap();
     hub.provision(&hub_img(0, V1), 0).unwrap();
     let mut seg = SimNode::new(f401_config(), *key().pk, SimFlash::stm32f401xe(6), SEG_ONE);
     seg.i2c_addr = Some(NODE_I2C_ADDR);
+    seg.provision_core(|m| *key().sk.sign(m, None)).unwrap();
     seg.provision(&seg_img(0, V1), 0).unwrap();
     let mut relay = SimRelay::new(hub);
     relay.add_i2c(NODE_I2C_PORT, seg, true);

@@ -180,7 +180,7 @@ fn config(c: &Connected) -> (Config, SimFlash, Layout) {
     let (mut cfg, flash, layout) = match c.mcu {
         "rp2040" => (
             dagon_sim::hub_config(),
-            SimFlash::rp2040_2m(1),
+            SimFlash::rp2040_4m(1),
             Layout::RP2040_HUB,
         ),
         "stm32f401re" => (
@@ -204,6 +204,7 @@ fn config(c: &Connected) -> (Config, SimFlash, Layout) {
 fn relay(c: &Connected, def: &McuDef) -> SimRelay {
     let (cfg, flash, layout) = config(c);
     let mut node = SimNode::new(cfg, *key().pk, flash, layout);
+    node.provision_core(|m| *key().sk.sign(m, None)).unwrap();
     node.provision(&app(c.mcu, c.port_kind, &connected_tag(c), 0, OLD), 0)
         .unwrap();
     let mut f401 = dagon_sim::f401_config();
@@ -215,6 +216,7 @@ fn relay(c: &Connected, def: &McuDef) -> SimRelay {
         Layout::STM32F401XE,
     );
     linked.i2c_addr = Some(ADDR);
+    linked.provision_core(|m| *key().sk.sign(m, None)).unwrap();
     linked
         .provision(&app("stm32f401re", "self-boot", LINKED_TAG, 0, OLD), 0)
         .unwrap();

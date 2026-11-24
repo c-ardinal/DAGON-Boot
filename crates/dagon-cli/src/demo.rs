@@ -103,11 +103,16 @@ pub fn demo_sim(key: &KeyPair, fail: Option<&str>, seed: u64) -> Result<SimRelay
     let pk = *key.pk;
     let mut h = demo_hub(pk, seed);
     h.node
+        .provision_core(|m| *key.sk.sign(m, None))
+        .map_err(|e| format!("hub: {e:?}"))?;
+    h.node
         .provision(&img(key, &HUB, 0, OLD, HUB_LEN)?, 0)
         .map_err(|e| format!("hub: {e:?}"))?;
     let seg = h
         .i2c_node(NODE_I2C_PORT, NODE_I2C_ADDR)
         .ok_or("the sample has no seg")?;
+    seg.provision_core(|m| *key.sk.sign(m, None))
+        .map_err(|e| format!("seg: {e:?}"))?;
     seg.provision(&img(key, &SEG, 0, OLD, SEG_LEN)?, 0)
         .map_err(|e| format!("seg: {e:?}"))?;
     if fail == Some("seg") {

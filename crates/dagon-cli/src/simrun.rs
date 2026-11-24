@@ -178,7 +178,13 @@ fn world() -> Result<World, String> {
     .bundle;
     let mut hub = demo_hub(*key.pk, 1);
     hub.node
+        .provision_core(|m| *key.sk.sign(m, None))
+        .map_err(|e| format!("{e:?}"))?;
+    hub.node
         .provision(&hub_img(&key, 0, OLD), 0)
+        .map_err(|e| format!("{e:?}"))?;
+    seg(&mut hub)
+        .provision_core(|m| *key.sk.sign(m, None))
         .map_err(|e| format!("{e:?}"))?;
     seg(&mut hub)
         .provision(&seg_img(&key, 0, OLD), 0)
@@ -626,7 +632,7 @@ mod tests {
         let (cfg, flash, layout, app) = match mcu {
             "rp2040" => (
                 dagon_sim::hub_config(),
-                SimFlash::rp2040_2m(1),
+                SimFlash::rp2040_4m(1),
                 Layout::RP2040_HUB,
                 sample::HUB_1_0_0,
             ),
@@ -644,6 +650,7 @@ mod tests {
             ),
         };
         let mut node = SimNode::new(cfg, pk, flash, layout);
+        node.provision_core(|m| *key.sk.sign(m, None)).unwrap();
         node.provision(app, 0).unwrap();
         let mut f401 = SimNode::new(
             dagon_sim::f401_config(),

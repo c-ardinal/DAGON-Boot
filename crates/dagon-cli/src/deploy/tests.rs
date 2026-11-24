@@ -85,11 +85,11 @@ fn sample_sim(t: &Topology, key: &KeyPair) -> Sim {
         .unwrap()
     };
     let mut hub = demo_hub(*key.pk, 3);
+    hub.node.provision_core(|m| *key.sk.sign(m, None)).unwrap();
     hub.node.provision(&img("hub"), 0).unwrap();
-    hub.i2c_node(NODE_I2C_PORT, NODE_I2C_ADDR)
-        .unwrap()
-        .provision(&img("seg"), 0)
-        .unwrap();
+    let seg = hub.i2c_node(NODE_I2C_PORT, NODE_I2C_ADDR).unwrap();
+    seg.provision_core(|m| *key.sk.sign(m, None)).unwrap();
+    seg.provision(&img("seg"), 0).unwrap();
     Sim::new(hub)
 }
 

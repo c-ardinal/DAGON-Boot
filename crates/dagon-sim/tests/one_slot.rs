@@ -84,6 +84,8 @@ fn chain() -> Chain {
 /// A provisioned one-slot node, booted.
 fn node() -> SimStore {
     let mut store = SimStore::new(SimFlash::stm32f401xe(3), ONE, *kp().pk);
+    let core = store.first_core(|m| *kp().sk.sign(m, None)).unwrap();
+    store.provision_core(&core).unwrap();
     store.provision(0, &image(0, 0)).unwrap();
     assert_eq!(store.boot(), Boot::Run(0));
     store
@@ -150,6 +152,8 @@ fn a_confirmed_app_with_a_bad_signature_is_not_started() {
     let mut forged = image(0, 0);
     forged[0x1C0] ^= 1;
     let mut store = SimStore::new(SimFlash::stm32f401xe(3), ONE, *kp().pk);
+    let core = store.first_core(|m| *kp().sk.sign(m, None)).unwrap();
+    store.provision_core(&core).unwrap();
     store.provision(0, &forged).unwrap();
     assert_eq!(store.boot(), Boot::Nothing);
 }

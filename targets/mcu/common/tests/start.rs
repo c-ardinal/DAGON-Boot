@@ -228,6 +228,7 @@ fn provisioned() -> SimStore {
         Layout::STM32F401XE,
         sample::PUBKEY,
     );
+    store.provision_core(sample::SEG_CORE_1_0_0).unwrap();
     store.provision(0, sample::SEG_1_0_0).unwrap();
     assert_eq!(store.boot(), Boot::Run(0));
     store

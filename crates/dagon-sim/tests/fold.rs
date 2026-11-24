@@ -124,6 +124,8 @@ fn as_machine(s: SlotState) -> Image {
 impl Model {
     fn new() -> Self {
         let mut store = SimStore::new(SimFlash::stm32f401xe(1), Layout::STM32F401XE, *kp().pk);
+        let core = store.first_core(|m| *kp().sk.sign(m, None)).unwrap();
+        store.provision_core(&core).unwrap();
         store.provision(0, &image(0, 0)).unwrap();
         assert_eq!(store.boot(), Boot::Run(0));
         Model {

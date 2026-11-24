@@ -286,6 +286,7 @@ fn twelve_of_twelve_through_the_hub() {
     let node = hub
         .i2c_node(dagon_sim::NODE_I2C_PORT, dagon_sim::NODE_I2C_ADDR)
         .unwrap();
+    node.provision_core(|m| *key().sk.sign(m, None)).unwrap();
     node.provision(&old_image(), 0).unwrap();
     node.trial_wdt_ms = TRIAL_WDT_MS;
     let sim = RelaySim {
@@ -322,6 +323,7 @@ fn twelve_of_twelve_on_usb_as_uart() {
         SimFlash::stm32f401xe(5),
         Layout::STM32F401XE,
     );
+    node.provision_core(|m| *key().sk.sign(m, None)).unwrap();
     node.provision(&old_image(), 0).unwrap();
     node.trial_wdt_ms = TRIAL_WDT_MS;
     let sim = DirectSim {

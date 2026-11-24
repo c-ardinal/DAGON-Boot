@@ -96,9 +96,10 @@ fn the_rp2040_boot_core_writes_the_app() {
     let mut node = SimNode::new(
         hub_config(),
         sample::PUBKEY,
-        SimFlash::rp2040_2m(7),
+        SimFlash::rp2040_4m(7),
         Layout::RP2040_HUB,
     );
+    node.store().provision_core(sample::HUB_CORE_1_0_0).unwrap();
     node.provision(sample::HUB_1_0_0, 0).unwrap();
     assert_eq!(node.run(), Run::App(0));
     let cfg = dagon_agent::Config {
@@ -184,9 +185,10 @@ fn hub() -> SimNode {
     let mut node = SimNode::new(
         hub_config(),
         sample::PUBKEY,
-        SimFlash::rp2040_2m(7),
+        SimFlash::rp2040_4m(7),
         Layout::RP2040_HUB,
     );
+    node.store().provision_core(sample::HUB_CORE_1_0_0).unwrap();
     node.provision(sample::HUB_1_0_0, 0).unwrap();
     node
 }

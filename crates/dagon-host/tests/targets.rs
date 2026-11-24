@@ -255,6 +255,7 @@ fn f401(seed: u64, max: u16) -> SimNode {
         Layout::STM32F401XE,
     );
     n.i2c_addr = Some(NODE_I2C_ADDR);
+    n.store().provision_core(sample::SEG_CORE_1_0_0).unwrap();
     n.provision(sample::SEG_1_0_0, 0).unwrap();
     n
 }
@@ -278,7 +279,7 @@ fn relay(def: &McuDef) -> SimRelay {
     let node = SimNode::new(
         hub_config(),
         sample::PUBKEY,
-        SimFlash::rp2040_2m(1),
+        SimFlash::rp2040_4m(1),
         Layout::RP2040_HUB,
     );
     let mut r = SimRelay::with_definition(node, def);

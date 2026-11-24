@@ -82,13 +82,14 @@ pub fn f401_config() -> Config {
 
 /// The sample's hub with an empty flash, plus an empty F401 at
 /// [`NODE_I2C_ADDR`] on [`NODE_I2C_PORT`], wired to NRST/BOOT0. Provision
-/// images with [`SimNode::provision`]; a node with nothing to run stays
-/// silent (NACK).
+/// each node's boot core with [`SimNode::provision_core`] (stage0 checks
+/// its signature under `pubkey`), then its app with [`SimNode::provision`];
+/// a node with nothing to run stays silent (NACK).
 pub fn demo_hub(pubkey: [u8; 32], seed: u64) -> SimRelay {
     let hub = SimNode::new(
         hub_config(),
         pubkey,
-        SimFlash::rp2040_2m(seed),
+        SimFlash::rp2040_4m(seed),
         Layout::RP2040_HUB,
     );
     let mut f401 = SimNode::new(
@@ -136,6 +137,11 @@ pub mod sample {
     /// Release 1.1.0 (.dgb) for the sample topology: seg A/B, watch,
     /// hub A/B, plus the topology.
     pub const RELEASE_1_1_0: &[u8] = include_bytes!("../fixtures/sample-1.1.0.dgb");
+    /// Hub (RP2040) boot core 1.0.0 for boot core slot A, the first
+    /// install's ([`crate::SimStore::first_core`]).
+    pub const HUB_CORE_1_0_0: &[u8] = include_bytes!("../fixtures/sample-hub-core-1.0.0.img");
+    /// Seg (F401) boot core 1.0.0 for boot core slot A, likewise.
+    pub const SEG_CORE_1_0_0: &[u8] = include_bytes!("../fixtures/sample-seg-core-1.0.0.img");
     /// App sizes about what the sample apps weigh, so a simulated transfer
     /// takes its real time: the images of `dagon demo`, and the full-size
     /// sample release (`fixtures/sample-full-1.1.0.dgb`) the browser demo writes.
@@ -152,11 +158,17 @@ pub fn sample_hub(seed: u64) -> SimRelay {
     let pk = sample::PUBKEY;
     let mut h = demo_hub(pk, seed);
     h.node
+        .store()
+        .provision_core(sample::HUB_CORE_1_0_0)
+        .expect("hub core fixture fits");
+    h.node
         .provision(sample::HUB_1_0_0, 0)
         .expect("hub fixture fits");
-    h.i2c_node(NODE_I2C_PORT, NODE_I2C_ADDR)
-        .expect("seg")
-        .provision(sample::SEG_1_0_0, 0)
+    let seg = h.i2c_node(NODE_I2C_PORT, NODE_I2C_ADDR).expect("seg");
+    seg.store()
+        .provision_core(sample::SEG_CORE_1_0_0)
+        .expect("seg core fixture fits");
+    seg.provision(sample::SEG_1_0_0, 0)
         .expect("seg fixture fits");
     let mut watch = SimNode::new(
         watch_config(),

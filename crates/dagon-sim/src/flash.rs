@@ -73,13 +73,13 @@ impl SimFlash {
         )
     }
 
-    /// RP2040 with 2 MiB external QSPI flash at 0x1000_0000 (4 KiB sectors,
-    /// 256-byte pages).
-    pub fn rp2040_2m(seed: u64) -> Self {
+    /// RP2040 with 4 MiB external QSPI flash at 0x1000_0000 (4 KiB sectors,
+    /// 256-byte pages), as its MCU definition's flash map.
+    pub fn rp2040_4m(seed: u64) -> Self {
         SimFlash::new(
             &[FlashRegion {
                 start: 0x1000_0000,
-                len: 0x20_0000,
+                len: 0x40_0000,
                 erase_size: 0x1000,
                 write_size: 256,
                 erased_value: 0xFF,
@@ -297,7 +297,7 @@ mod tests {
 
     #[test]
     fn power_cut_during_write_keeps_whole_units() {
-        let mut f = SimFlash::rp2040_2m(3);
+        let mut f = SimFlash::rp2040_4m(3);
         f.arm_cut(CutPoint::During(0));
         let data = vec![0u8; 1024];
         assert_eq!(f.write(0x1000_0000, &data), Err(FlashError::Hw));

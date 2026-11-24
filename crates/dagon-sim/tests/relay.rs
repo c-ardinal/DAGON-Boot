@@ -56,11 +56,9 @@ fn image(slot: u8, version: Version, body: &[u8]) -> Vec<u8> {
 fn relay_with_f401() -> SimRelay {
     let mut relay = demo_hub(*kp().pk, 42);
     let img = image(0, Version::new(1, 0, 0), &[0x5A; 3000]);
-    relay
-        .i2c_node(NODE_I2C_PORT, NODE_I2C_ADDR)
-        .unwrap()
-        .provision(&img, 0)
-        .unwrap();
+    let f401 = relay.i2c_node(NODE_I2C_PORT, NODE_I2C_ADDR).unwrap();
+    f401.provision_core(|m| *kp().sk.sign(m, None)).unwrap();
+    f401.provision(&img, 0).unwrap();
     relay
 }
 
@@ -351,7 +349,7 @@ fn the_relaying_node_says_what_it_serves_and_reads_before_it_acts() {
     let mut bare = SimRelay::new(SimNode::new(
         hub_config(),
         *kp().pk,
-        SimFlash::rp2040_2m(1),
+        SimFlash::rp2040_4m(1),
         Layout::RP2040_HUB,
     ));
     let (_, body) = pc.ask(&mut bare, Cmd::Hello, &hello());
@@ -387,6 +385,10 @@ fn usb_byte_stream_carries_split_frames() {
 #[test]
 fn own_store_on_page_programmed_flash() {
     let mut relay = relay_with_f401();
+    relay
+        .node
+        .provision_core(|m| *kp().sk.sign(m, None))
+        .unwrap();
     relay
         .node
         .provision(&image(0, Version::new(3, 0, 1), &[9; 1000]), 0)
@@ -742,6 +744,7 @@ fn uart_node_behind_a_lossy_link() {
     let mut cfg = f401_config();
     cfg.max_payload = max_payload::UART as u16;
     let mut node = SimNode::new(cfg, *kp().pk, SimFlash::stm32f401xe(9), Layout::STM32F401XE);
+    node.provision_core(|m| *kp().sk.sign(m, None)).unwrap();
     node.provision(&image(0, Version::new(2, 0, 0), &[1; 100]), 0)
         .unwrap();
     let mut link = SimLink::new(3);

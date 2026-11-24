@@ -236,6 +236,19 @@ impl SimNode {
         self.store.status()
     }
 
+    /// Writes the first install's boot core ([`SimStore::first_core`],
+    /// signed by `sign`) into boot core slot A, as the factory does before
+    /// [`SimNode::provision`]; nothing on a layout with no boot core slots.
+    pub fn provision_core(
+        &mut self,
+        sign: impl FnOnce(&[u8]) -> [u8; 64],
+    ) -> Result<(), StoreError> {
+        match self.store.first_core(sign) {
+            Some(core) => self.store.provision_core(&core),
+            None => Ok(()),
+        }
+    }
+
     /// Writes a factory image into slot A as provisioned and confirmed, then
     /// resets.
     pub fn provision(&mut self, image: &[u8], now_ms: u64) -> Result<(), StoreError> {

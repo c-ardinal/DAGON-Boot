@@ -807,6 +807,8 @@ fn inventory(cores: Cores, compaction: bool) -> Vec<Site> {
         (target::APP, SLOT_PENDING),
         (target::APP, ROLLBACK),
         (target::APP, SNAPSHOT),
+        // An open APP trial carries its attempts one record each.
+        (target::APP, BOOT_ATTEMPT),
         (target::BOOTCORE, SLOT_PENDING),
         (target::BOOTCORE, SNAPSHOT),
     ];

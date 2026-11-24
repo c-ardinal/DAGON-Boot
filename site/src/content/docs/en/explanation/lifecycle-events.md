@@ -169,7 +169,13 @@ and only in update mode or recovery mode, answering HELLO with `mode` 1
 (update) or 2 (recovery); an app answers 0 and a recovery agent 3. It
 enters update mode by a STAY (0x05) that arrives within its listen window,
 or by an UPDATE_STAY record no UPDATE_DONE has consumed; it enters
-recovery mode when no log face is valid or no app may start. The listen
+recovery mode when no app may start. A log with no valid face is first
+rebuilt from the slots (`dagon_core::boot::rebuild`): with two apps that
+pass the boot checks, PROVISION for the older one and SLOT_PENDING for the
+newer one, which starts on trial; with one, SLOT_PENDING alone, and a
+failed trial ends in recovery mode; two of the same version give
+PROVISION for slot A alone; with none nothing is written, and recovery
+mode creates an empty log as it receives. The listen
 window counts from the boot loader's start and is the MCU definition's
 `[boot_receive] listen_window_ms` (0 to 200 ms, 50 when left out, 0 for
 none; a project changes it with `[mcu_override]`). It opens on each link
@@ -190,7 +196,10 @@ never erases the log before a REBOOT. STAY and REBOOT mode 1 keep it in
 update mode; REBOOT mode 0 leaves it, and so do 60 s without a request
 when STAY or UPDATE_STAY brought it there. Recovery mode has no app to
 start, so the boot loader stays in it. While the app runs it refuses STAY
-(`E_STATE`). Outside update mode the boot stages never erase. The boot
+(`E_STATE`). Outside update mode the boot stages never erase, except to
+rebuild a log with no valid face: no valid record is there to lose, so
+face 0 is erased, the records go in and the face header goes last (a cut
+leaves no valid face, and the next start rebuilds it again). The boot
 loader's session writes only the image kinds the MCU definition's
 `[writers]` lists for it (the app); a transfer of any other kind is
 refused with `E_UNSUPPORTED` before anything is erased. Readers

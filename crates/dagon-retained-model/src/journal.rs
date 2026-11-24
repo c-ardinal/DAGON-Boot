@@ -428,14 +428,7 @@ impl Journal {
         self.update_stay = false;
         self.keyed.clear();
         for (t, s) in carried {
-            let carry = [
-                s.confirmed
-                    .filter(|_| s.last_reason != reason::NONE)
-                    .map(|c| (kind::ROLLBACK, c, s.last_reason)),
-                s.pending.map(|p| (kind::SLOT_PENDING, p, reason::NONE)),
-                s.confirmed.map(|c| (kind::SNAPSHOT, c, s.attempts)),
-            ];
-            for (k, at, why) in carry.into_iter().flatten() {
+            for (k, at, why) in s.carry() {
                 let b = self.slot_record(t, k, at, why);
                 self.write(mem, b)?;
             }

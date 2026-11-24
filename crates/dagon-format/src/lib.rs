@@ -15,6 +15,10 @@ pub mod statelog;
 pub mod topology;
 pub mod version;
 
+/// The one node limit: the topology check, the Console and every write use
+/// it (`topology::MAX_NODES`), and a manifest holds that many nodes' images.
+pub const MAX_NODES: usize = 32;
+
 pub use bundle::{BundleItem, BundleView};
 pub use header::ImageHeader;
 pub use manifest::{Constraint, ManifestEntry, ManifestFields, ManifestView};

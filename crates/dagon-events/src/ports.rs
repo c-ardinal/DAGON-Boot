@@ -2,7 +2,7 @@
 //! parts it cannot, one record each. `site/src/content/docs/reference/ports.md`, the manifest
 //! validator and the sandbox service tables derive from it.
 
-use crate::catalog::Layer;
+use crate::event::Layer;
 
 /// Who may replace a part.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

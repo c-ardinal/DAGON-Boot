@@ -2,8 +2,9 @@
 //! transition delivers its event to, replay, and the bounded decision
 //! calls.
 
-use crate::catalog::{Layer, Replay};
+use crate::catalog::Replay;
 use crate::decisions;
+use crate::event::Layer;
 use crate::event::{Event, EventRecord, Payload};
 use crate::extension::{
     Accept, Ctx, DecisionId, Delay, ExtId, Extension, Health, Nop, RebootRequest, TrialInfo,

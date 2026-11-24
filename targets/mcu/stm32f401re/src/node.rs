@@ -35,9 +35,8 @@ use dagon_proto::max_payload;
 use dagon_proto::payload::{mode, role};
 use defmt::{info, warn};
 use embassy_executor::Spawner;
-use embassy_stm32::i2c::{I2c, MultiMaster};
 use embassy_stm32::peripherals::{FLASH, IWDG};
-use embassy_stm32::{mode::Async, pac, Peri, Peripherals};
+use embassy_stm32::{pac, Peri, Peripherals};
 use embassy_time::{Duration, Instant, Timer};
 use static_cell::StaticCell;
 
@@ -48,8 +47,7 @@ use crate::store::KindSStore;
 use crate::watchdog::{Guard, Iwdg, PeriodDog, Watch};
 use dagon_port::timeout::EraseRegion;
 
-/// The DAGON link: an I2C target (listening at the node's address).
-pub type I2cTarget = I2c<'static, Async, MultiMaster>;
+pub use crate::links::I2cTarget;
 pub type Store = KindSStore<SharedFlash>;
 /// The agent of a node on this MCU; its chain holds the app's extensions
 /// and CONFIRM check.

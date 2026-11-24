@@ -1,9 +1,6 @@
 //! The DAGON wire protocol mapped onto the agent's machines.
 
-use dagon_events::{
-    Accept, Clock, Composed, Delay, EventRecord, Extension, Health, Published, RebootRequest,
-    Refused, Replay, Sink, Snapshot, TrialInfo, Unreadable, UpdateOffer,
-};
+use dagon_events::{Accept, Delay, Health, RebootRequest, Refused, TrialInfo, UpdateOffer};
 use dagon_format::header::{self, image_kind, slot_binding, ImageHeader, HEADER_SIZE};
 use dagon_format::{FormatError, Sha256, SigVerifier};
 use dagon_proto::handler::{self, Ceiling, Handler};
@@ -16,6 +13,7 @@ use dagon_proto::{
     flags, frame_len, max_payload, split_status, Cmd, Frame, FrameError, Status, HEADER_LEN,
 };
 
+use crate::chain::AppChain;
 use crate::images::{ImageStore, ImageView};
 use crate::{
     node, protocol, relay, requests, session, writer, AbortCause, Config, NameDigest, SlotStore,
@@ -39,34 +37,6 @@ const SLOT_A: u8 = 0;
 const SLOT_B: u8 = 1;
 /// The recovery agent's slot (STATUS slot 2).
 const FACTORY: u8 = 2;
-
-/// The app layer's composed chain, as the agent uses it: where its
-/// transitions deliver, the decision points, and replay. Implemented only
-/// by `dagon_events::compose`'s chain (its supertrait is sealed), which the
-/// MCU package's start makes and hands to [`Agent::new`].
-pub trait AppChain: Sink {
-    fn accept_update(&mut self, o: &UpdateOffer) -> Accept;
-    fn allow_reboot_now(&mut self, r: &RebootRequest) -> Delay;
-    fn self_check(&mut self, t: &TrialInfo) -> Health;
-    fn replay(&mut self, machines: &[Replay], rec: &EventRecord) -> Result<(), Unreadable>;
-}
-
-impl<P: Snapshot, const N: usize, B: Extension, U: Extension, C: Clock> AppChain
-    for Composed<&'static Published<P, N>, B, U, C>
-{
-    fn accept_update(&mut self, o: &UpdateOffer) -> Accept {
-        Composed::accept_update(self, o)
-    }
-    fn allow_reboot_now(&mut self, r: &RebootRequest) -> Delay {
-        Composed::allow_reboot_now(self, r)
-    }
-    fn self_check(&mut self, t: &TrialInfo) -> Health {
-        Composed::self_check(self, t)
-    }
-    fn replay(&mut self, machines: &[Replay], rec: &EventRecord) -> Result<(), Unreadable> {
-        Composed::replay(self, machines, rec)
-    }
-}
 
 /// Response to send back, and whether to reboot after sending it.
 #[derive(Debug)]

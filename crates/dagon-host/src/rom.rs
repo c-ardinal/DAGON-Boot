@@ -14,7 +14,7 @@ use dagon_proto::payload::{self, phase, I2cRaw, RomTarget, SubCtl};
 use dagon_proto::{Cmd, Status};
 use dagon_romlink::{Loader, Region, RomLink, FRAME_TIMEOUT_MS};
 
-use crate::ops::Event;
+use crate::progress::Event;
 use crate::{Error, Host, HostClock, Target, Transport};
 
 /// Where an image goes: its header and its payload, and the largest

@@ -26,13 +26,13 @@ mod ports;
 mod published;
 
 pub use board::{BoardBringUp, BusError, Device, Shared};
-pub use catalog::{Catalog, Entry, Field, Flags, Layer, Machines, Observe, Replay};
+pub use catalog::{Catalog, Entry, Field, Flags, Machines, Observe, Replay};
 pub use compact::Compact;
 pub use compose::{
     compose, compose_boot, compose_unpublished, BootComposed, BootExtension, Bounds, Clock,
     Composed, Head, NoPublisher, Sink, Unreadable, Watchdog,
 };
-pub use event::{Event, EventRecord, Payload, Refused};
+pub use event::{Event, EventRecord, Layer, Payload, Refused};
 pub use extension::{
     Accept, Chain, Ctx, DecisionId, DecisionPoint, Delay, ExtId, Extension, Health, Nop,
     RebootRequest, TrialInfo, UpdateOffer, DECISIONS, DECISION_BOUND_MS,

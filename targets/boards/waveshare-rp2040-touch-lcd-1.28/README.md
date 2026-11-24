@@ -32,8 +32,11 @@ over the board's I2C0, PIO UART and STM32 control lines, with the touch
 controller held out of reset; the app's tasks take the guard tasks from
 `dagon_mcu_rp2040::relay::TASKS` on. This package binds I2C0_IRQ,
 PIO0_IRQ_0 and DMA_IRQ_0 (`Irqs`). It returns `Spare`, everything DAGON
-does not use, for the app: the display (`Spare::display`), GPIO 0-7, 12,
-14, 15, 19-21, 23, 24 and 29, I2C1, SPI0, UART0/1, PIO1, the ADC, DMA
+does not use, for the app: the display (`Spare::display`), each GPIO the
+node's board definition names for nothing (`pin_<n>`; on the built-in
+definition GPIO 0-7, 12, 14, 15, 19-21, 23, 24 and 29, and a project's
+`[board_override]` that moves a pin to a free one changes the list with
+it), I2C1, SPI0, UART0/1, PIO1, the ADC, DMA
 channels 1-11, the eight PWM slices and CORE1 (DAGON runs on core 0),
 and the node's events, which an app draws a display from. Some of those
 pins are wired on the board itself:

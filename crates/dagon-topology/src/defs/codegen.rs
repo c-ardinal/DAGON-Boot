@@ -345,8 +345,14 @@ pub fn devices_rs(b: &BoardDef) -> String {
 }
 
 /// The pin and block types of board `b` and the `take!` macro that moves
-/// them out of the HAL's peripherals, for `include!` beside [`board_rs`].
-pub fn pins_rs(b: &BoardDef, hal: &Hal<'_>) -> String {
+/// them out of the HAL's peripherals, for `include!` beside [`board_rs`];
+/// with them the GPIOs of its MCU `m` the definition names for nothing
+/// ([`spare_gpios`]): `spare_gpios!(m)` calls `m! { pin_0 PIN_0, ... }`
+/// with each one's field name and singleton, and `take_spare_gpios!(p, S
+/// { ... })` builds `S` with those fields moved out of `p` before the
+/// fields given. A board's code takes what its definition does not name
+/// from them, so a project that moves a pin to a free one changes both.
+pub fn pins_rs(b: &BoardDef, m: &McuDef, hal: &Hal<'_>) -> String {
     let mut o = format!(
         "// Written by the package's build script from board `{}`'s definition.\n\n",
         b.id
@@ -371,7 +377,35 @@ pub fn pins_rs(b: &BoardDef, hal: &Hal<'_>) -> String {
         let _ = writeln!(o, "    ($p:ident . {n}) => {{ $p.{} }};", (hal.name)(def));
     }
     o.push_str("}\n");
+    let spare: Vec<(String, String)> = spare_gpios(b, m)
+        .into_iter()
+        .map(|g| (format!("pin_{g}"), (hal.name)(&format!("GPIO{g}"))))
+        .collect();
+    let list =
+        |f: &dyn Fn(&(String, String)) -> String| spare.iter().map(f).collect::<Vec<_>>().join(" ");
+    let _ = write!(
+        o,
+        "\n/// Calls `$m!` with the field name and singleton of each GPIO the definition\n\
+         /// names for no pin or bus: `pin_0 PIN_0, ...`.\n\
+         #[macro_export]\nmacro_rules! spare_gpios {{\n    ($m:ident) => {{ $m! {{ {} }} }};\n}}\n\
+         \n/// Builds `$s` with each of those GPIOs moved out of `$p`, then the fields given.\n\
+         #[macro_export]\nmacro_rules! take_spare_gpios {{\n    \
+         ($p:ident, $s:ident {{ $($rest:tt)* }}) => {{ $s {{ {} $($rest)* }} }};\n}}\n",
+        list(&|(f, t)| format!("{f} {t},")),
+        list(&|(f, t)| format!("{f}: $p.{t},"))
+    );
     o
+}
+
+/// The numbered GPIOs of MCU `m` (below its `gpio_count`) that board `b`'s
+/// definition names for no pin, bus pin or boot indicator, in order; none
+/// on an MCU whose pins are not numbered.
+pub fn spare_gpios(b: &BoardDef, m: &McuDef) -> Vec<u8> {
+    let named: std::collections::BTreeSet<u8> = code_names(b)
+        .iter()
+        .filter_map(|(_, pin)| gpio_number(pin))
+        .collect();
+    (0..m.gpio_count).filter(|g| !named.contains(g)).collect()
 }
 
 /// How a HAL names DMA streams, their interrupts and its binding macro
@@ -542,7 +576,7 @@ pub fn package_build(hal: &Hal<'_>) {
         );
     }
     write(&out_dir().join("def.rs"), &def);
-    write(&out_dir().join("pins.rs"), &pins_rs(&l.board, hal));
+    write(&out_dir().join("pins.rs"), &pins_rs(&l.board, &l.mcu, hal));
     write(&out_dir().join("devices.rs"), &devices_rs(&l.board));
 }
 
@@ -588,7 +622,7 @@ fn boot_inputs() -> (PathBuf, BootFolder) {
 pub fn boot_build(hal: Option<&Hal<'_>>) -> Option<BoardDef> {
     let (mcu, f) = boot_inputs();
     // Checked for every node, with or without a board.
-    let (_, b, files) = boot_node(&mcu, &f).unwrap_or_else(|e| panic!("{e}"));
+    let (m, b, files) = boot_node(&mcu, &f).unwrap_or_else(|e| panic!("{e}"));
     watch(&files);
     let Some(b) = b else {
         write(&out_dir().join("board.rs"), &no_board_rs(&f.meta.node));
@@ -599,7 +633,7 @@ pub fn boot_build(hal: Option<&Hal<'_>>) -> Option<BoardDef> {
     };
     write(&out_dir().join("board.rs"), &board_rs(&b));
     if let Some(hal) = hal {
-        write(&out_dir().join("pins.rs"), &pins_rs(&b, hal));
+        write(&out_dir().join("pins.rs"), &pins_rs(&b, &m, hal));
     }
     Some(b)
 }
@@ -853,15 +887,38 @@ mod tests {
             name: &upper,
             lifetime: true,
         };
-        let rs = board_rs(b) + &pins_rs(b, &hal);
+        let m = reg.mcu("rp2040").unwrap();
+        let rs = board_rs(b) + &pins_rs(b, m, &hal);
         for want in [
             "pub const BOOT_LED_GPIO: Option<u8> = Some(25);",
             "pub type BootLed<'d> = hal::peripherals::GPIO25<'d>;",
             "($p:ident . child_i2c_sda) => { $p.GPIO16 };",
             "pub const BUS_CHILD_I2C_HZ: u32 = 400000;",
+            // The GPIOs the definition names for nothing, for the board's
+            // code to hand the app.
+            "($m:ident) => { $m! { pin_0 GPIO0, pin_1 GPIO1, ",
+            "pin_7 GPIO7, pin_12 GPIO12, pin_14 GPIO14, ",
+            "pin_24 GPIO24, pin_29 GPIO29, } };",
+            "$s { pin_0: $p.GPIO0, ",
         ] {
             assert!(rs.contains(want), "{want} in\n{rs}");
         }
+        assert_eq!(
+            spare_gpios(b, m),
+            [0, 1, 2, 3, 4, 5, 6, 7, 12, 14, 15, 19, 20, 21, 23, 24, 29]
+        );
+        // A pin moved to a free GPIO frees the one it left.
+        let mut moved = b.clone();
+        let touch = moved
+            .pins
+            .iter_mut()
+            .find(|p| p.name.as_deref() == Some("touch_rst"))
+            .unwrap();
+        touch.pin = "GPIO21".into();
+        assert_eq!(
+            spare_gpios(&moved, m),
+            [0, 1, 2, 3, 4, 5, 6, 7, 12, 14, 15, 19, 20, 22, 23, 24, 29]
+        );
         assert!(!board_rs(b).contains("macro_rules"));
         let m5 = reg.board("m5stopwatch").unwrap();
         let rs = board_rs(m5) + &devices_rs(m5);

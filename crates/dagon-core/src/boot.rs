@@ -220,7 +220,7 @@ pub struct Passing {
 
 impl Passing {
     /// Takes one more passing image (slots in order, lowest first).
-    pub fn add(self, r: SlotRef) -> Self {
+    pub fn with(self, r: SlotRef) -> Self {
         Passing {
             count: self.count.saturating_add(1),
             oldest: Some(self.oldest.filter(|o| o.version <= r.version).unwrap_or(r)),
@@ -283,7 +283,7 @@ pub fn rebuild<F: Flash, V: SigVerifier + ?Sized>(
             digest16: header_digest16(&raw),
         };
         if check(flash, slots, cfg, verifier, r).is_ok() {
-            passed = passed.add(r);
+            passed = passed.with(r);
         }
     }
     if passed.count == 0 {

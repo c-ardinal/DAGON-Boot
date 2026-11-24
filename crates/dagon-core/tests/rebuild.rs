@@ -191,7 +191,7 @@ fn the_records_follow_the_versions() {
     let r = |slot, minor| slot_ref(slot, &image(slot, minor).0);
     let of = |refs: &[SlotRef]| {
         refs.iter()
-            .fold(Passing::default(), |p, &x| p.add(x))
+            .fold(Passing::default(), |p, &x| p.with(x))
             .records()
             .collect::<Vec<_>>()
     };

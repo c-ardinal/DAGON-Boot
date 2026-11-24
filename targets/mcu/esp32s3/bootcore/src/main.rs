@@ -51,7 +51,7 @@ use clock::Cycles;
 use dagon_agent::update_mode::{serve_in, Entry};
 use dagon_agent::writer::BootCore;
 use dagon_agent::{Agent, Config};
-use dagon_core::boot::SlotLayout;
+use dagon_core::boot::{rebuild, BootConfig, SlotLayout};
 use dagon_ed25519::Ed25519Small;
 use dagon_events::{compose, Bounds, Composed, Layer, Nop, Published, Watchdog};
 use dagon_format::header::{mcu_id, port_kind};
@@ -202,6 +202,19 @@ pub extern "C" fn core_start() -> ! {
             window_ms: LISTEN_WINDOW_MS,
             feed_every_ms: FEED_EVERY_MS,
             feed: &mut feed,
+        },
+        |f: &mut RomFlash| {
+            let cfg = BootConfig {
+                mcu_id: mcu_id::ESP32S3,
+                target_tag: TAG,
+                max_attempts: TRIAL_ATTEMPTS,
+            };
+            let slots = SlotLayout {
+                slots: &layout::APP_PLACES,
+            };
+            // No image passing: the log stays lost and stage0's result
+            // brings the core back in recovery mode.
+            let _ = rebuild(f, &layout::APP_LOG, &slots, &cfg, &VERIFIER);
         },
     );
     let (entry, stay) = match next {

@@ -191,9 +191,36 @@ fn start(f: &mut Mem, cell: [u32; 2], requests: &[Cmd]) -> (Next, [u32; 2], usiz
             feed_every_ms: 10,
             feed: &mut feed,
         },
+        // Stands for `dagon_core::boot::rebuild`: a new app face.
+        |f: &mut Mem| {
+            REBUILDS.with(|n| n.set(n.get() + 1));
+            let face = FaceHeader { generation: 1 }.to_bytes();
+            f.0[APP_LOG.faces[0] as usize..][..face.len()].copy_from_slice(&face);
+        },
     );
     let waited = *now.borrow();
     (next, c.into_inner(), link.answered.len(), waited)
+}
+
+std::thread_local! {
+    /// Times [`start`]'s stand-in for the rebuild ran on this thread.
+    static REBUILDS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// The app log lost (no valid face): the core rebuilds it before it asks
+/// for the app, so stage0's decision reads the rebuilt log; a log with a
+/// valid face is never rebuilt.
+#[test]
+fn a_lost_app_log_is_rebuilt_before_the_request() {
+    let mut f = flash(false);
+    let (next, cell, _, _) = start(&mut f, CLEARED, &[]);
+    assert!(matches!(next, Next::AskForApp) && cell == START_APP);
+    assert_eq!(REBUILDS.with(|n| n.get()), 0);
+    f.0[APP_LOG.faces[0] as usize..][..32].fill(0xFF);
+    let (next, cell, _, _) = start(&mut f, CLEARED, &[]);
+    assert!(matches!(next, Next::AskForApp) && cell == START_APP);
+    assert_eq!(REBUILDS.with(|n| n.get()), 1);
+    assert!(Log::load(&mut f, &APP_LOG).is_ok());
 }
 
 fn entry(n: &Next) -> Option<Entry> {
@@ -309,6 +336,7 @@ fn a_pending_core_whose_cell_does_not_hold_resets() {
             feed_every_ms: 10,
             feed: &mut || {},
         },
+        |_: &mut Mem| panic!("no request for the app, no rebuild"),
     );
     assert!(matches!(next, Next::Reset));
 }

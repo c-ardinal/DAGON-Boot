@@ -78,7 +78,11 @@ fn flash_err(_: dagon_port::FlashError) -> StoreError {
 impl AppStore {
     fn append(&mut self, k: u8, slot: u8, header: &[u8; HEADER_SIZE]) -> Result<(), StoreError> {
         let at = image::ref_of(header, slot).ok_or(StoreError::Flash)?;
-        let mut log = Log::load(&mut self.flash, &APP_LOG_LAYOUT).map_err(|_| StoreError::Flash)?;
+        // A log with no valid face (lost, and no slot image passed the
+        // boot core's rebuild) is created empty: recovery mode records the
+        // app it receives.
+        let mut log =
+            Log::load_or_create(&mut self.flash, &APP_LOG_LAYOUT).map_err(|_| StoreError::Flash)?;
         if k == kind::SLOT_PENDING {
             // The trial then writes into this room, never erasing.
             log.reserve(&mut self.flash, trial_room(TRIAL_ATTEMPTS))

@@ -1,13 +1,17 @@
 //! Kind S boot decision (it never erases: records go into the room the
 //! agent reserved, `Log::reserve`): try the pending slot (a BOOT_ATTEMPT
 //! before every start, rollback once the attempts run out), otherwise start
-//! the confirmed slot. Every slot is checked before it starts: its header is
+//! the confirmed slot. A log with no valid face is rebuilt from the slots
+//! first ([`rebuild`], the one erase of the boot path: no record is left
+//! to lose). Every slot is checked before it starts: its header is
 //! the one the log names, its signature verifies, and its body matches the
 //! header's SHA-256. The log carries no key, so the signature is checked at
 //! every boot, not only on trial.
 
-use crate::log::{Log, SlotRef};
-use dagon_format::header::{header_digest16, image_kind, placement, verify_header, HEADER_SIZE};
+use crate::log::{Log, LogError, LogLayout, SlotRef};
+use dagon_format::header::{
+    header_digest16, image_kind, placement, verify_header, ImageHeader, HEADER_SIZE,
+};
 use dagon_format::statelog::{kind, reason, target};
 use dagon_format::SigVerifier;
 use dagon_port::Flash;
@@ -200,4 +204,90 @@ fn check<F: Flash, V: SigVerifier + ?Sized>(
         return Err(reason::HASH_MISMATCH);
     }
     Ok(body)
+}
+
+/// The APP images that pass the boot checks, taken in slot order, and the
+/// records [`rebuild`] writes for them ([`Passing::records`]).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Passing {
+    /// Images taken (saturating).
+    pub count: u8,
+    /// The lowest version, the lowest slot among equal ones.
+    pub oldest: Option<SlotRef>,
+    /// The highest version, the lowest slot among equal ones.
+    pub newest: Option<SlotRef>,
+}
+
+impl Passing {
+    /// Takes one more passing image (slots in order, lowest first).
+    pub fn with(self, r: SlotRef) -> Self {
+        Passing {
+            count: self.count.saturating_add(1),
+            oldest: Some(self.oldest.filter(|o| o.version <= r.version).unwrap_or(r)),
+            newest: Some(self.newest.filter(|n| n.version >= r.version).unwrap_or(r)),
+        }
+    }
+
+    /// With images of two versions, PROVISION for the oldest (the one the
+    /// node ran before a newer one was written) and SLOT_PENDING for the
+    /// newest, so the newest starts on trial and falls back to the oldest;
+    /// with several of one version, PROVISION for the lowest slot alone;
+    /// with one, SLOT_PENDING alone (an image no log confirmed starts only
+    /// on trial, and a failed trial ends in recovery mode); with none,
+    /// nothing.
+    pub fn records(&self) -> impl Iterator<Item = (u8, SlotRef)> {
+        let (provision, pending) = match (self.count, self.oldest, self.newest) {
+            (1, _, only) => (None, only),
+            (_, Some(o), Some(n)) if o.version == n.version => (Some(o), None),
+            (_, oldest, newest) => (oldest, newest),
+        };
+        provision
+            .map(|p| (kind::PROVISION, p))
+            .into_iter()
+            .chain(pending.map(|p| (kind::SLOT_PENDING, p)))
+    }
+}
+
+/// Rebuilds a state log that has no valid face (both faces corrupt) from
+/// the APP slots, so the node starts the images it holds without a new
+/// transfer: every slot whose image passes the checks a start makes
+/// (header, signature, kind, MCU, node tag, slot binding, place, body)
+/// is recorded as [`Passing::records`] says, in a new face
+/// ([`Log::create`], its header last). A log with a valid face is
+/// returned as it is, nothing written; with no image passing, nothing is
+/// written and the log stays lost (`LogError::NoValidFace`: recovery
+/// mode receives the app).
+pub fn rebuild<F: Flash, V: SigVerifier + ?Sized>(
+    flash: &mut F,
+    layout: &LogLayout,
+    slots: &SlotLayout,
+    cfg: &BootConfig,
+    verifier: &V,
+) -> Result<Log, LogError> {
+    match Log::load(flash, layout) {
+        Err(LogError::NoValidFace) => {}
+        other => return other,
+    }
+    let mut passed = Passing::default();
+    for (s, at) in slots.slots.iter().enumerate() {
+        let mut raw = [0u8; HEADER_SIZE];
+        if flash.read(at.header, &mut raw).is_err() {
+            continue;
+        }
+        let Ok(h) = ImageHeader::parse(&raw) else {
+            continue;
+        };
+        let r = SlotRef {
+            slot: u8::try_from(s).unwrap_or(u8::MAX),
+            version: h.version,
+            digest16: header_digest16(&raw),
+        };
+        if check(flash, slots, cfg, verifier, r).is_ok() {
+            passed = passed.with(r);
+        }
+    }
+    if passed.count == 0 {
+        return Err(LogError::NoValidFace);
+    }
+    Log::create(flash, layout, passed.records())
 }

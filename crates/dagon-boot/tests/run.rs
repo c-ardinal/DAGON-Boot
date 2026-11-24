@@ -368,7 +368,8 @@ fn corrupt_image() -> Mem {
     m
 }
 
-/// Both log faces garbage: no valid face, nothing to start.
+/// Both log faces garbage: no valid face; the log is rebuilt from the
+/// two images (A confirmed, B on trial).
 fn corrupt_log() -> Mem {
     let mut m = with_pending_b();
     for face in LOG.faces {
@@ -407,7 +408,14 @@ fn extensions_change_no_decision_and_no_write_in_any_state() {
     for (name, make) in STATES {
         // dagon-core alone.
         let mut core = make();
-        let want = match Log::load(&mut core, &LOG) {
+        // A log with no valid face is rebuilt from the slots first.
+        let loaded = match Log::load(&mut core, &LOG) {
+            Err(LogError::NoValidFace) => {
+                dagon_core::boot::rebuild(&mut core, &LOG, &SLOTS, &cfg(), &verifier())
+            }
+            other => other,
+        };
+        let want = match loaded {
             Ok(mut log) => decide(&mut core, &mut log, &SLOTS, &cfg(), &verifier()),
             Err(_) => Decision::NoImage,
         };

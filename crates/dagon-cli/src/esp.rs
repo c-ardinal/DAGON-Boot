@@ -134,14 +134,7 @@ pub(crate) fn checked_bootloader(bootloader: &Path, sums: &Path) -> Result<Vec<u
 /// CRC of an otadata entry, as the 2nd stage computes it over `ota_seq`
 /// (`esp_rom_crc32_le(UINT32_MAX, &seq, 4)`).
 fn seq_crc(seq: u32) -> u32 {
-    let mut crc = 0u32;
-    for b in seq.to_le_bytes() {
-        crc ^= u32::from(b);
-        for _ in 0..8 {
-            crc = (crc >> 1) ^ if crc & 1 != 0 { 0xEDB8_8320 } else { 0 };
-        }
-    }
-    !crc
+    dagon_format::crc32_after(u32::MAX, &seq.to_le_bytes())
 }
 
 /// otadata entry 0 selecting ota_0 as Valid (seq 1): the first write starts

@@ -43,7 +43,7 @@ description: "dagon-mcu.tomlとdagon-board.toml: DAGONが把握するマイコ�
 | `[codec]` | テーブル | 任意 | 通信コーデックの予算です。`bootcore`（マイコンの全ブートローダ）と`relay`（中継ファームウェア）に、それぞれ`{ flash_bytes, stack_bytes, ram_bytes }`を記述します。各値はコーデック（`dagon_proto`）の関数と名称付きの読出専用データのフラッシュ使用量、全関数起点の最大スタック使用量、RAM上の静的データ量で、単位はバイトです。`bootcore`は対象`bootcore`の`[[slot_layout]]`があるマイコン限定、`relay`は`[[relay_link]]`があるマイコン限定で、該当イメージがあるマイコンは記述必須です。CIは各イメージをrustcのスタックフレーム記録付きでビルドして計測し、値の超過時と、呼出グラフにハンドラ行の分岐以外の間接呼出、追跡不能な呼出、再帰が存在する時に失敗します（`scripts/codec_budget.py`）。 |
 | `[connection]` | テーブル | 必須 | 書込時に利用者が接続する方法: `label`、`hint`。 |
 | `[[doctor]]` | テーブルの配列 | 任意 | ツールの確認: `what`、`probe`（コマンド）、`expect`（`"runs"`、`{ line = "..." }`、`{ prefix = "..." }`）、`fix`（コマンド）、`hint`、`slow`（`true`: `dagon doctor --fix`が、インストールに時間を要することを開始前に通知します）。 |
-| `[ram]` | テーブル | 任意 | `{ at, size }`: マイコンのRAMの全体。イメージは、ブート記録、ヒューズのセル、拡張のリージョンより下位のRAMを取得します。 |
+| `[ram]` | テーブル | 任意 | `{ at, size }`: イメージがリンクするRAM。イメージは、拡張のリージョンより下位のRAMを取得します。 |
 | `[isolation]` | テーブル | 任意 | DAGONが拡張を自身から隔離する方法（下記）。省略時は`kind = "none"`、`level = "none"`です。 |
 | `[[peripheral]]` | テーブルの配列 | 任意 | レジスタブロックごと: `id`、`base`、`size`、`window_eligible`（拡張がウィンドウとして取得可能）、`bus_master`（メモリへの書込が可能）、`privileged_why`（`dma`、`flash`、`watchdog`、`clock`、`reset`、`irq-routing`、`pinmux`、`power`、`rom`、`core-control`、`protection`、`shared`の1つか一覧）、`dma = { streams, channels }`（DMAコントローラ、つまりバスマスタ: そのストリーム。各ストリームは`channels`個の要求から1つを選択します）、`dma_requests = [{ signal, controller, stream, channel }]`（マイコンのDMA要求の割当表のうち、このブロックの行: `signal`は`a-z 0-9`で`tx`、`rx`、`ch1`、`up`など。1つのセルは1つのブロック専用です）。ボードの定義とマイコンのテンプレートは、この情報からDMAのストリームを取得します（未使用のストリームのうち、その要求の最初の行）。 |
 | `[[core]]` | テーブルの配列 | 任意 | プロセッサのコアごと、`id`。DAGONは最初のコアで動作します。 |
@@ -51,7 +51,6 @@ description: "dagon-mcu.tomlとdagon-board.toml: DAGONが把握するマイコ�
 | `[execution]` | テーブル | 任意 | 実行モデルのハードウェアの事実（site/src/content/docs/en/explanation/lifecycle-events.mdの「Execution model」）: `masked_max_us`（DAGON自身のコードが割込を禁止する最長時間、1..=1000）、`flash_op`（消去や書込で停止するもの: `fetch-stall`、`xip-off-masked`、`cache-off-masked`）、`write_unit`（必須。フラッシュへの1回の書込の対象バイト数。2のべき乗で、全消去単位の約数であること）、`erased_value`（必須。消去済のフラッシュの読出値）、`erase_regions = [{ start, len, unit, unit_max_ms }]`（DAGONが消去するフラッシュ: 領域ごとの消去単位と、その単位の消去に要するデータシート上の最大時間。単位の整数倍で、重複しないこと。`unit_max_ms`の2倍が`watchdog.trial_ms`と`watchdog.confirmed_ms`以下であること）。事実とは、出典と照合した数値（コメントで出典を明示します）、`{ unverified = N }`、または`"unmeasured"`（値なし。`unit_max_ms`には使用不可）です。 |
 | `[[slot_layout]]` | テーブルの配列 | 任意 | ノードが受信するXFERの対象とスロットの全部: `target`（`app`、`bootcore`、`agent`。廃止した`topology`は拒否します）、`slot`（`a`、`b`、`factory`）、`start`、`capacity`（ヘッダを除外した本体の最大サイズ）、`header`（`start`の位置の`"inline"`か、`{ detached = <address> }`）、`partition`（任意: 本体の領域に該当するパーティション。パーティションの表と照合します）。対象とスロットごとに1つで、`[execution]`と同時に記述します。`[[slot]]`のイメージはそれぞれ固有の項目を保持し、最大の本体の消去範囲は`erase_regions`の範囲内です。ノードもホストも、全部の消去をこの情報から計画します。 |
 | `[conformance]` | テーブル | 任意 | `scratch = { at, size }`: 適合試験のビルドが消去と書込を実行するフラッシュ。どのスロット、ヘッダ、ログの面、stage0とも分離します。 |
-| `[boot]` | テーブル | 任意 | `[boot.record]`、DAGONのブート段階を保持するマイコン用: ブート記録とロックアップヒューズの格納先。`kind`（`ram`の中の`noinit-ram`、`[[peripheral]]`の中の`retained-registers`）、`at`、`size`（最大4096）、`survives`（`reset-random`、`reset-cleared`、`power`: 電断後に残存するもの）、`entropy = { source, min_bits }`（必須。新規の記録のシーケンスが混合する起動時のワード: `source`は`rng`、`ring-osc`、`osc-capture`、`adc-noise`のいずれか。`min_bits`はワードあたりの最小エントロピーで、事実です。値がある場合は16以上）、`rings = [{ writer, at, size }]`（ブート段階ごとに1つ、ブートの順番に、記録の内部）、`fuse = { cells = [{ image, at, size }] }`（`bootcore`、`app`。記録の外部）、`reserved`（記録が一切ストアしないアドレス）。内部のバイトのレイアウトは`boot-record`の規約に準拠します。 |
 | `boot_capabilities` | 文字列の配列 | 任意 | ボードのブートのアクションプログラムが、ピン以外に使用可能なもの: `["i2c"]`で`bus_write`を使用可能です。 |
 <!-- end of generated table -->
 
@@ -182,7 +181,7 @@ capacity = 0x11_FE00
 - 値の配列（文字列や整数の配列）は、記述すると全体を置換します。
 テーブルの配列は後述の表のとおりです。キーで合成する配列では、上書きのエントリは、キーが同一の既存のエントリのうち、記述した欄だけを変更します。新規キーのエントリは、既存のエントリの後に追加します。全体を追加か削除する配列では、既存のエントリの部分的な変更は不可能です。そのエントリを削除して、新規のエントリの全体を記述します（同一の上書き内で可能です）。
 
-順序に意味がある配列（最初の要素が既定の`flash_map`、最初の要素でDAGONが動作する`core`、ブート順の`boot.record.rings`）には、上書きのテーブルに`dagon-order.<array> = [<key>, ...]`を記述して順序を指定可能です。合成した配列のキーを、各1度ずつ列挙します。欠落や重複がある一覧や、存在しないキーを列挙した一覧は拒否します。ネストした配列はその位置を連結して記述します（`dagon-order.boot.record.rings`）。例えば16MiBのフラッシュを搭載したRP2040のボードのプロジェクトは、フラッシュマップを追加して既定にします。
+順序に意味がある配列（最初の要素が既定の`flash_map`、最初の要素でDAGONが動作する`core`）には、上書きのテーブルに`dagon-order.<array> = [<key>, ...]`を記述して順序を指定可能です。合成した配列のキーを、各1度ずつ列挙します。欠落や重複がある一覧や、存在しないキーを列挙した一覧は拒否します。例えば16MiBのフラッシュを搭載したRP2040のボードのプロジェクトは、フラッシュマップを追加して既定にします。
 
 ```toml
 [mcu_override.rp2040]
@@ -234,9 +233,6 @@ size = 0x30_0000
 | マイコン | `link_port` | キー（`name`）でエントリごとに合成 |
 | マイコン | `relay_link` | キー（`port`）でエントリごとに合成 |
 | マイコン | `relay_link.addressing` | 記述すると全体を置換 |
-| マイコン | `boot.record.rings` | キー（`writer`）でエントリごとに合成。`dagon-order`で順番を指定可能 |
-| マイコン | `boot.record.fuse.cells` | キー（`image`）でエントリごとに合成 |
-| マイコン | `boot.record.entropy.min_bits` | 記述すると全体を置換 |
 | マイコン | `isolation.capabilities.idau` | 記述すると全体を置換 |
 | マイコン | `isolation.tcm` | 記述すると全体を置換 |
 | マイコン | `slot_layout` | キー（`target`、`slot`）でエントリごとに合成 |

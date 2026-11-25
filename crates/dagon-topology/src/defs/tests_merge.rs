@@ -166,14 +166,13 @@ header = "inline"
 }
 
 #[test]
-fn dagon_order_gives_the_default_flash_map_dagons_core_and_the_ring_boot_order() {
+fn dagon_order_gives_the_default_flash_map_and_dagons_core() {
     let r = load(
         "order",
         r#"
 [mcu_override.rp2040]
 dagon-order.flash_map = ["rp2040-16m", "rp2040-4m"]
 dagon-order.core = ["core1", "core0"]
-dagon-order.boot.record.rings = ["bootcore", "stage0"]
 
 [[mcu_override.rp2040.flash_map]]
 name = "rp2040-16m"
@@ -188,16 +187,6 @@ xip = true
     assert_eq!(m.flash_maps[1], builtin_mcu("rp2040").flash_maps[0]);
     let cores: Vec<&str> = m.cores.iter().map(|c| c.id.as_str()).collect();
     assert_eq!(cores, ["core1", "core0"]);
-    let rings: Vec<ImageKind> = m
-        .boot
-        .record
-        .as_ref()
-        .unwrap()
-        .rings
-        .iter()
-        .map(|g| g.writer)
-        .collect();
-    assert_eq!(rings, [ImageKind::Bootcore, ImageKind::Stage0]);
     // Without an order, a new entry comes after the built-in ones.
     let r = load(
         "append",
@@ -287,7 +276,7 @@ fn add_or_delete_rows_take_whole_entries_and_refuse_a_partial_change() {
 }
 
 #[test]
-fn keyed_peripheral_rom_pair_ring_fuse_and_erase_rows_merge_by_key() {
+fn keyed_peripheral_rom_pair_and_erase_rows_merge_by_key() {
     let f401 = builtin_mcu("stm32f401re");
     let pair = f401.rom_i2c.as_ref().unwrap().pairs[0].clone();
     let with_dma = f401
@@ -302,8 +291,6 @@ fn keyed_peripheral_rom_pair_ring_fuse_and_erase_rows_merge_by_key() {
             "[[mcu_override.stm32f401re.rom_i2c.pairs]]\nsda = {:?}\nscl = {:?}\ncontroller = {:?}\n\n\
              [[mcu_override.stm32f401re.peripheral]]\nid = {:?}\nwindow_eligible = false\nprivileged_why = \"shared\"\n\
              dma_requests = [{{ signal = {:?}, controller = {:?}, stream = {}, channel = {} }}]\n\n\
-             [[mcu_override.rp2040.boot.record.rings]]\nwriter = \"bootcore\"\nsize = 0x500\n\n\
-             [[mcu_override.rp2040.boot.record.fuse.cells]]\nimage = \"app\"\nsize = 0x80\n\n\
              [[mcu_override.rp2040.execution.erase_regions]]\nstart = 0x1000_0000\nunit_max_ms = 400\n",
             pair.sda,
             pair.scl,
@@ -327,16 +314,6 @@ fn keyed_peripheral_rom_pair_ring_fuse_and_erase_rows_merge_by_key() {
         f401.rom_i2c.unwrap().pairs
     );
     let rp = r.mcu("rp2040").unwrap();
-    let rec = rp.boot.record.as_ref().unwrap();
-    let base = builtin_mcu("rp2040");
-    let brec = base.boot.record.as_ref().unwrap();
-    assert_eq!(rec.rings[1].size, 0x500);
-    assert_eq!(
-        (rec.rings[1].at, rec.rings[0]),
-        (brec.rings[1].at, brec.rings[0])
-    );
-    assert_eq!(rec.fuse.cells[1].size, 0x80);
-    assert_eq!(rec.fuse.cells[0], brec.fuse.cells[0]);
     let er = &rp.execution.as_ref().unwrap().erase_regions[0];
     assert_eq!(er.unit_max_ms, Fact::Known(400));
     assert_eq!(

@@ -60,24 +60,6 @@ pub struct Action {
     pub ops: &'static [Op],
 }
 
-/// One writer's ring of the boot record, or one lockup fuse cell.
-#[derive(Clone, Copy, Debug)]
-pub struct Area {
-    pub owner: &'static str,
-    pub at: u32,
-    pub size: u32,
-}
-
-#[derive(Clone, Copy, Debug)]
-pub struct Record {
-    pub kind: &'static str,
-    pub at: u32,
-    pub size: u32,
-    pub survives: &'static str,
-    pub rings: &'static [Area],
-    pub fuse: &'static [Area],
-}
-
 /// A register read at boot that must hold the definition's value, else
 /// the isolation level is none.
 #[derive(Clone, Copy, Debug)]
@@ -141,15 +123,6 @@ pub const WATCHDOG_TRIAL_MS: u32 = 8000;
 pub const WATCHDOG_CONFIRMED_MS: u32 = 8000;
 /// Longest an app may delay a requested reboot.
 pub const REBOOT_DELAY_MAX_MS: u32 = 4000;
-
-pub const RECORD: Option<Record> = Some(Record {
-    kind: "noinit-ram",
-    at: 0x20040000,
-    size: 0x800,
-    survives: "reset-random",
-    rings: &[Area { owner: "stage0", at: 0x20040000, size: 0x200 }, Area { owner: "bootcore", at: 0x20040200, size: 0x600 }],
-    fuse: &[Area { owner: "bootcore", at: 0x20040800, size: 0x100 }, Area { owner: "app", at: 0x20040900, size: 0x100 }],
-});
 
 pub const ISOLATION_LEVEL: &str = "mpu";
 pub const ISOLATION_KIND: &str = "armv6m-mpu";

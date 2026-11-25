@@ -56,7 +56,7 @@ errors; kind fields accept only the values listed below.
 | `[codec]` | table | no | The wire codec's budgets: `bootcore` (every boot core of the MCU) and `relay` (the relay firmware), each `{ flash_bytes, stack_bytes, ram_bytes }`: the codec's (`dagon_proto`) functions and named read-only data in flash, the deepest stack from any of its functions, and its static data in RAM, in bytes. `bootcore` only with a `[[slot_layout]]` of target `bootcore`, `relay` only with `[[relay_link]]`; an MCU with such an image gives its budget. CI builds each image with rustc's stack frame records, measures it, and fails above a value, and when the call graph has an indirect call other than a handler row's dispatch, a call it cannot follow or recursion (`scripts/codec_budget.py`). |
 | `[connection]` | table | yes | How the user connects it for a write: `label`, `hint`. |
 | `[[doctor]]` | tables | no | Tool check: `what`, `probe` (command), `expect` (`"runs"`, `{ line = "..." }`, `{ prefix = "..." }`), `fix` (command), `hint`, `slow` (`true`: `dagon doctor --fix` says the install takes a while before it starts). |
-| `[ram]` | table | no | `{ at, size }`: all of the MCU's RAM. Images get the RAM below the boot record, the fuse cells and the extension regions. |
+| `[ram]` | table | no | `{ at, size }`: the RAM the images link against. Images get the RAM below the extension regions. |
 | `[isolation]` | table | no | How DAGON keeps extensions away from itself (below). Left out: `kind = "none"`, `level = "none"`. |
 | `[[peripheral]]` | tables | no | Every register block: `id`, `base`, `size`, `window_eligible` (an extension may get it as a window), `bus_master` (it can write memory), `privileged_why` (one or a list of `dma`, `flash`, `watchdog`, `clock`, `reset`, `irq-routing`, `pinmux`, `power`, `rom`, `core-control`, `protection`, `shared`), `dma = { streams, channels }` (a DMA controller, a bus master: its streams, each selecting one of `channels` requests), `dma_requests = [{ signal, controller, stream, channel }]` (the block's rows of the MCU's DMA request mapping table: `signal` `a-z 0-9` such as `tx`, `rx`, `ch1`, `up`; one cell serves one block). Board packages and MCU templates take DMA streams from these (first row of the request on a free stream). |
 | `[[core]]` | tables | no | Every processor core, `id`; DAGON runs on the first. |
@@ -64,7 +64,6 @@ errors; kind fields accept only the values listed below.
 | `[execution]` | table | no | Hardware facts of the execution model (site/src/content/docs/en/explanation/lifecycle-events.md, "Execution model"): `masked_max_us` (longest DAGON's own code masks interrupts, 1..=1000), `flash_op` (what an erase or program stops: `fetch-stall`, `xip-off-masked`, `cache-off-masked`), `write_unit` (required: the bytes one flash write covers, a power of two dividing every erase unit), `erased_value` (required: the byte erased flash reads as), `erase_regions = [{ start, len, unit, unit_max_ms }]` (the flash DAGON erases in: each region's erase unit and that unit's datasheet maximum erase time; whole units, not overlapping; 2 x `unit_max_ms` at most `watchdog.trial_ms` and `watchdog.confirmed_ms`). A fact is a number checked against its source (cite it in a comment), `{ unverified = N }` or `"unmeasured"` (no value; not for `unit_max_ms`). |
 | `[[slot_layout]]` | tables | no | Every XFER target and slot the node receives into: `target` (`app`, `bootcore`, `agent`; the removed `topology` is refused), `slot` (`a`, `b`, `factory`), `start`, `capacity` (largest body, header excluded), `header` (`"inline"` at `start`, or `{ detached = <address> }`), `partition` (optional: the partition the body region is, checked against the table). One per target and slot, with `[execution]`; each `[[slot]]` image has its own, and an erase of the largest body lies in `erase_regions`. The node and the host plan every erase from these. |
 | `[conformance]` | table | no | `scratch = { at, size }`: flash a conformance build erases and writes; apart from every slot, header, log face and stage0. |
-| `[boot]` | table | no | `[boot.record]`, for MCUs with a DAGON boot stage: where the boot record and the lockup fuse live. `kind` (`noinit-ram` inside `ram`, `retained-registers` inside a `[[peripheral]]`), `at`, `size` (at most 4096), `survives` (`reset-random`, `reset-cleared`, `power`: what a power loss leaves), `entropy = { source, min_bits }` (required; the start-up word a new record sequence mixes in: `source` one of `rng`, `ring-osc`, `osc-capture`, `adc-noise`; `min_bits` its min-entropy per word, a fact, at least 16 when it has a value), `rings = [{ writer, at, size }]` (one per boot stage, in boot order, inside the record), `fuse = { cells = [{ image, at, size }] }` (`bootcore`, `app`; outside the record), `reserved` (addresses the record never stores to). The byte layout inside is the `boot-record` contract's. |
 | `boot_capabilities` | array of strings | no | What a board's boot action program may use besides pins: `["i2c"]` allows `bus_write`. |
 <!-- end of generated table -->
 
@@ -353,12 +352,10 @@ Merge rules:
   new entry (both in the same override).
 
 An array whose order carries meaning (`flash_map`, whose first entry is
-the default; `core`, whose first entry DAGON runs on;
-`boot.record.rings`, in boot order) takes its order from
+the default; `core`, whose first entry DAGON runs on) takes its order from
 `dagon-order.<array> = [<key>, ...]` in the override's table, listing
 every key of the merged array exactly once; a list that misses or repeats
-a key, or names a key the array does not have, is refused. A nested
-array is named by its path (`dagon-order.boot.record.rings`). For example,
+a key, or names a key the array does not have, is refused. For example,
 a project whose RP2040 boards carry 16 MiB of flash adds a flash map and
 makes it the default:
 
@@ -448,9 +445,6 @@ and the fields that may not change:
 | MCU | `link_port` | merged entry by entry by key (`name`) |
 | MCU | `relay_link` | merged entry by entry by key (`port`) |
 | MCU | `relay_link.addressing` | replaced whole when given |
-| MCU | `boot.record.rings` | merged entry by entry by key (`writer`); `dagon-order` gives its order |
-| MCU | `boot.record.fuse.cells` | merged entry by entry by key (`image`) |
-| MCU | `boot.record.entropy.min_bits` | replaced whole when given |
 | MCU | `isolation.capabilities.idau` | replaced whole when given |
 | MCU | `isolation.tcm` | replaced whole when given |
 | MCU | `slot_layout` | merged entry by entry by key (`target`, `slot`) |

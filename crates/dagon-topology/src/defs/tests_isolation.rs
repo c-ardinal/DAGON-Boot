@@ -2,10 +2,10 @@
 //! watchdog, boot record placement, and the board's boot and capability
 //! tables.
 
-use super::isolation::{Kind, Level, Why, RECORD_MAX};
+use super::isolation::{Kind, Level, Why};
 use super::load::parse_mcu_text;
 use super::tests::{mcu_err, FAKE_BOARD, FAKE_MCU};
-use super::{requirements, BoardDef, Registry};
+use super::{requirements, BoardDef, PortKind, Registry};
 
 /// Blocks of every class a protected definition needs, a bus master and
 /// two window-eligible blocks.
@@ -57,8 +57,8 @@ size = 0x400
 window_eligible = true
 "#;
 
-/// The fake MCU with an armv7m-mpu record, its blocks, a watchdog and a
-/// boot record (every numeric isolation field appears).
+/// The fake MCU with an armv7m-mpu record, its blocks and a watchdog
+/// (every numeric isolation field appears).
 pub(super) fn isolated_mcu() -> String {
     let top = FAKE_MCU.replace(
         "gpio_count = 16\n",
@@ -124,14 +124,6 @@ unwind = "cortex-m-exception"
 timer = "systick"
 fault_address = true
 
-[boot.record]
-kind = "noinit-ram"
-at = 0x2000_F000
-size = 0x400
-survives = "reset-random"
-entropy = {{ source = "rng", min_bits = 32 }}
-rings = [{{ writer = "bootcore", at = 0x2000_F000, size = 0x400 }}]
-fuse = {{ cells = [{{ image = "app", at = 0x2000_F400, size = 0x100 }}] }}
 {BLOCKS}"#
     )
 }
@@ -205,14 +197,18 @@ fn the_isolated_fake_loads_and_reports_its_kind() {
 }
 
 #[test]
-fn every_builtin_states_its_isolation_watchdog_and_record() {
+fn every_builtin_states_its_isolation_and_watchdog() {
     for m in Registry::builtin().mcus() {
         let i = m.isolation();
         assert!(m.isolation.is_some(), "{}", m.id);
         assert!(m.watchdog.is_some(), "{}", m.id);
         assert!(!m.cores.is_empty(), "{}", m.id);
-        // A DAGON boot stage keeps a boot record; others have none.
-        assert_eq!(i.boot_extensions, m.record().is_some(), "{}", m.id);
+        // Only a DAGON boot stage runs boot extensions.
+        assert!(
+            !i.boot_extensions || m.port == PortKind::SelfBoot,
+            "{}",
+            m.id
+        );
     }
 }
 
@@ -328,49 +324,6 @@ fn missing_classes_and_bus_master_windows_are_refused() {
     let none = FAKE_MCU.to_string() + "\n[isolation]\nkind = \"none\"\n";
     parse_mcu_text(&none, &[]).unwrap();
     assert!(Why::Protection.as_str() == "protection");
-}
-
-#[test]
-fn the_record_lies_inside_ram_within_its_limit() {
-    for (from, to, want) in [
-        (
-            "size = 0x400\nsurvives",
-            &*format!("size = {:#x}\nsurvives", RECORD_MAX + 1),
-            "boot.record.size",
-        ),
-        (
-            "at = 0x2000_F000\nsize",
-            "at = 0x2001_0000\nsize",
-            "outside its memory",
-        ),
-        (
-            "{ writer = \"bootcore\", at = 0x2000_F000, size = 0x400 }",
-            "{ writer = \"stage0\", at = 0x2000_F000, size = 0x400 }",
-            "no such boot stage",
-        ),
-        (
-            "{ writer = \"bootcore\", at = 0x2000_F000, size = 0x400 }",
-            "{ writer = \"bootcore\", at = 0x2000_F200, size = 0x400 }",
-            "outside the record",
-        ),
-        (
-            "{ image = \"app\", at = 0x2000_F400",
-            "{ image = \"app\", at = 0x2000_F300",
-            "overlaps the record",
-        ),
-        (
-            "ram = { at = 0x2000_0000, size = 0x1_0000 }\n",
-            "",
-            "needs the MCU's ram",
-        ),
-    ] {
-        let e = mcu_err(&isolated(from, to));
-        assert!(e.contains(want), "{to}: {e}");
-    }
-    let e = mcu_err(&isolated("trial_ms = 4_000", "trial_ms = 0"));
-    assert!(e.contains("[watchdog driver"), "{e}");
-    let e = mcu_err(&isolated("trial_attempts = 3", "trial_attempts = 0"));
-    assert!(e.contains("trial_attempts must be above 0"), "{e}");
 }
 
 /// `[watchdog] range_ms`: the periods the MCU's watchdog can run. A trial
@@ -887,12 +840,26 @@ fn flash_offsets_of_an_mmu_mapped_mcu_share_no_space_with_register_blocks() {
     }
 }
 
-/// `[watchdog] flag` and `[boot.record] entropy`: required, facts with an
-/// establishment state, and the fuse is available only with a flag.
 #[test]
-fn the_watchdog_flag_and_the_record_entropy_are_stated_facts() {
+fn the_ram_and_the_watchdog_are_checked() {
+    let e = mcu_err(&isolated("size = 0x1_0000 }", "size = 0 }"));
+    assert!(e.contains("is empty or past 2^32"), "{e}");
+    let e = mcu_err(&isolated(
+        "ram = { at = 0x2000_0000, size",
+        "ram = { at = 0xFFFF_F000, size",
+    ));
+    assert!(e.contains("is empty or past 2^32"), "{e}");
+    let e = mcu_err(&isolated("trial_ms = 4_000", "trial_ms = 0"));
+    assert!(e.contains("[watchdog driver"), "{e}");
+    let e = mcu_err(&isolated("trial_attempts = 3", "trial_attempts = 0"));
+    assert!(e.contains("trial_attempts must be above 0"), "{e}");
+}
+
+/// `[watchdog] flag`: required, a fact with an establishment state.
+#[test]
+fn the_watchdog_flag_is_a_stated_fact() {
     use super::execution::Fact;
-    use super::isolation::{EntropySource, WatchdogFlag};
+    use super::isolation::WatchdogFlag;
 
     let reg = Registry::builtin();
     let flag = |id: &str| reg.mcu(id).unwrap().watchdog.unwrap().flag;
@@ -909,37 +876,12 @@ fn the_watchdog_flag_and_the_record_entropy_are_stated_facts() {
         }
     );
     assert_eq!(flag("esp32s3").value(), None, "unmeasured");
-    let entropy = |id: &str| reg.mcu(id).unwrap().record().unwrap().entropy;
-    let st = entropy("stm32f401re");
-    assert_eq!(st.source, EntropySource::OscCapture);
-    assert_eq!(st.min_bits.value(), None, "to be measured");
-    assert_eq!(entropy("rp2040").source, EntropySource::RingOsc);
-    // A boot record and a flag with a source; a vendor stage has neither.
-    assert_eq!(reg.mcu("stm32f401re").unwrap().fuse_unavailable(), None);
-    assert_eq!(reg.mcu("rp2040").unwrap().fuse_unavailable(), None);
-    assert!(reg.mcu("esp32s3").unwrap().fuse_unavailable().is_some());
 
-    // Required keys.
+    // A required key; unknown words.
     let e = mcu_err(&isolated("flag = \"register\"\n", ""));
     assert!(e.contains("flag"), "{e}");
-    let e = mcu_err(&isolated(
-        "entropy = { source = \"rng\", min_bits = 32 }\n",
-        "",
-    ));
-    assert!(e.contains("entropy"), "{e}");
-    // Below the record's need; unknown words.
-    let e = mcu_err(&isolated("min_bits = 32", "min_bits = { unverified = 8 }"));
-    assert!(e.contains("at least 16"), "{e}");
-    assert!(parse_mcu_text(&isolated("\"rng\"", "\"dice\""), &[]).is_err());
     assert!(parse_mcu_text(&isolated("\"register\"", "\"fuse\""), &[]).is_err());
-    // The loader says why a fuse is unavailable.
-    let none = parse_mcu_text(&isolated("\"register\"", "\"none\""), &[]).unwrap();
-    assert!(none.fuse_unavailable().unwrap().contains("none"));
-    let open = parse_mcu_text(&isolated("\"register\"", "\"unmeasured\""), &[]).unwrap();
-    assert!(open.fuse_unavailable().unwrap().contains("unmeasured"));
-    let unverified = isolated("\"register\"", "{ unverified = \"package\" }");
-    assert_eq!(
-        parse_mcu_text(&unverified, &[]).unwrap().fuse_unavailable(),
-        None
-    );
+    for word in ["\"none\"", "\"unmeasured\"", "{ unverified = \"package\" }"] {
+        parse_mcu_text(&isolated("\"register\"", word), &[]).unwrap();
+    }
 }

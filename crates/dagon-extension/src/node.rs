@@ -76,20 +76,9 @@ fn fail(cond: bool, msg: impl FnOnce() -> String) -> Result<(), String> {
     }
 }
 
-/// The RAM an image may use: the MCU's RAM below the boot record and the
-/// fuse cells.
+/// The RAM an image may use: the RAM the MCU's images link against.
 pub fn image_ram(def: &McuDef) -> Option<(u32, u32)> {
-    let ram = def.ram?;
-    let end = u64::from(ram.at) + u64::from(ram.size);
-    let kept = def
-        .record()
-        .into_iter()
-        .flat_map(|r| std::iter::once(r.at).chain(r.fuse.cells.iter().map(|c| c.at)))
-        .map(u64::from)
-        .filter(|&a| a >= u64::from(ram.at) && a < end)
-        .min()
-        .unwrap_or(end);
-    Some((ram.at, (kept - u64::from(ram.at)) as u32))
+    def.ram.map(|r| (r.at, r.size))
 }
 
 /// The extension and board checks that hold at every level.

@@ -481,11 +481,6 @@ impl Definition {
         region(self.t.get("ram")?, "ram")
     }
 
-    /// `[boot.record]`: (start, bytes).
-    pub fn boot_record(&self) -> Option<(u32, u32)> {
-        region(self.t.get("boot")?.get("record")?, "[boot.record]")
-    }
-
     /// A `[layout]` log: its two faces and the face bytes.
     fn log(&self, key: &str) -> Option<([u32; 2], u32)> {
         let l = self.t.get("layout")?.get(key)?;
@@ -565,11 +560,6 @@ impl Definition {
         }
         for (name, what, v) in [
             ("RAM_REGION", "RAM (`ram`)", self.ram()),
-            (
-                "BOOT_RECORD_REGION",
-                "The boot record (`[boot.record]`)",
-                self.boot_record(),
-            ),
             (
                 "STAGE0_REGION",
                 "Stage0's region (`[layout] stage0`)",
@@ -1651,8 +1641,7 @@ mod tests {
                           [watchdog]\ntrial_attempts = 3\ntrial_ms = 4000\nconfirmed_ms = 8000\n\
                        range_ms = { min = 1, max = 9000 }\n\
                           [execution]\nmasked_max_us = 50\nwrite_unit = 1\nerased_value = 0xFF\n\
-                          erase_regions = [{ start = 0x1000_0000, len = 0x10_0000, unit = 0x1000, unit_max_ms = 400 }]\n\
-                          [boot.record]\nat = 0x2000_F000\nsize = 0x800\n";
+                          erase_regions = [{ start = 0x1000_0000, len = 0x10_0000, unit = 0x1000, unit_max_ms = 400 }]\n";
 
     fn layout() -> Definition {
         Definition::parse(LAYOUT, |f| panic!("no file {f}"))
@@ -1706,7 +1695,6 @@ mod tests {
             "pub const MCU_ID_BYTES: [u8; 8] = [24, 226, 216, 25, 151, 20, 117, 118];",
             "pub const DEFAULT_FLASH: (u32, u32) = (0x10000000, 0x100000);",
             "pub const RAM_REGION: (u32, u32) = (0x20000000, 0x10000);",
-            "pub const BOOT_RECORD_REGION: (u32, u32) = (0x2000f000, 0x800);",
             "pub const STAGE0_REGION: (u32, u32) = (0x10000000, 0x4000);",
             "pub const APP_LOG_REGION: ([u32; 2], u32) = ([0x10004000, 0x10005000], 0x1000);",
             "pub const BOOTCORE_LOG_REGION: ([u32; 2], u32) = ([0x10006000, 0x10007000], 0x1000);",
@@ -1716,10 +1704,9 @@ mod tests {
         let d = layout();
         assert_eq!(d.stage0(), Some((0x1000_0000, 0x4000)));
         assert_eq!(d.ram(), Some((0x2000_0000, 0x1_0000)));
-        assert_eq!(d.boot_record(), Some((0x2000_F000, 0x800)));
     }
 
-    /// A definition without stage0, logs, RAM or boot record states none of
+    /// A definition without stage0, logs or RAM states none of
     /// them (its package has no use for them).
     #[test]
     fn facts_a_definition_leaves_out_are_not_made_up() {
@@ -1729,7 +1716,6 @@ mod tests {
             "STAGE0_REGION",
             "APP_LOG_REGION",
             "RAM_REGION",
-            "BOOT_RECORD_REGION",
             "PARTITION_TABLE",
         ] {
             assert!(!rs.contains(absent), "{absent}\n{rs}");

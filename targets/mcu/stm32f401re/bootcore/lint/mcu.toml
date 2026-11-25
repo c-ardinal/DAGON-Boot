@@ -17,31 +17,6 @@ n = 336
 p = 4
 q = 7
 
-[boot.record]
-at = 536965120
-kind = "noinit-ram"
-size = 2048
-survives = "reset-random"
-
-[boot.record.entropy]
-min_bits = "unmeasured"
-source = "osc-capture"
-
-[[boot.record.fuse.cells]]
-at = 536967168
-image = "bootcore"
-size = 256
-
-[[boot.record.fuse.cells]]
-at = 536967424
-image = "app"
-size = 256
-
-[[boot.record.rings]]
-at = 536965120
-size = 2048
-writer = "bootcore"
-
 [boot_receive]
 listen_window_ms = 50
 

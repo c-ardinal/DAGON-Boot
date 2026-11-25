@@ -231,7 +231,7 @@ pub fn for_kind(kind: Kind) -> Option<&'static dyn ProtectionKind> {
 pub(crate) const MPU_GUARANTEED: &[&str] = &[
     "unprivileged execution of extension handlers",
     "DAGON's code and data denied",
-    "flash controller, watchdog, state log and boot record denied",
+    "flash controller, watchdog and state log denied",
     "bus masters, clock, reset and interrupt routing denied",
     "service calls validated",
     "only declared windows reachable",

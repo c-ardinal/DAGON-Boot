@@ -316,22 +316,6 @@ fn memories(def: &McuDef) -> (Vec<Span>, Option<Span>) {
     (bodies, ram)
 }
 
-/// What DAGON keeps in RAM beside the image: the boot record and the fuse.
-fn kept(def: &McuDef) -> Vec<(String, (u64, u64))> {
-    let Some(r) = def.record() else {
-        return Vec::new();
-    };
-    let range = |at: u32, size: u32| (u64::from(at), u64::from(at) + u64::from(size));
-    std::iter::once(("the boot record".to_string(), range(r.at, r.size)))
-        .chain(
-            r.fuse
-                .cells
-                .iter()
-                .map(|c| (format!("the {:?} fuse cell", c.image), range(c.at, c.size))),
-        )
-        .collect()
-}
-
 fn check_region(def: &McuDef, prm: &Params, e: &ExtMap, r: &Region, out: &mut Vec<Violation>) {
     let mut v = |msg: String| out.push(Violation(format!("{} region {}: {msg}", e.id, r.number)));
     if !r.size.is_power_of_two() || r.size < prm.min {
@@ -404,11 +388,6 @@ fn check_region(def: &McuDef, prm: &Params, e: &ExtMap, r: &Region, out: &mut Ve
             if !ram.is_some_and(|m| inside(whole, m)) {
                 v("outside the MCU's RAM".into());
             }
-            for (what, k) in kept(def) {
-                if overlaps(whole, k) {
-                    v(format!("overlaps {what}"));
-                }
-            }
         }
         Purpose::Window(p) => {
             match def.peripheral(p) {
@@ -416,8 +395,7 @@ fn check_region(def: &McuDef, prm: &Params, e: &ExtMap, r: &Region, out: &mut Ve
                 }
                 _ => v(format!("does not hold peripheral {p}")),
             }
-            // A window never reaches memory: RAM, flash, the image slots,
-            // the boot record or the fuse cells.
+            // A window never reaches memory: RAM, flash or the image slots.
             // Flash and slots are CPU addresses only where images run in place.
             let xip = def.flash_is_cpu_mapped();
             let flash = def.flash_maps.iter().filter(|_| xip).map(|f| {
@@ -433,11 +411,6 @@ fn check_region(def: &McuDef, prm: &Params, e: &ExtMap, r: &Region, out: &mut Ve
                 .chain(bodies.iter().filter(|_| xip).map(|b| ("an image slot", *b)));
             for (what, m) in mems {
                 if ranges.iter().any(|&x| overlaps(x, m)) {
-                    v(format!("window reaches {what}"));
-                }
-            }
-            for (what, k) in kept(def) {
-                if ranges.iter().any(|&x| overlaps(x, k)) {
                     v(format!("window reaches {what}"));
                 }
             }

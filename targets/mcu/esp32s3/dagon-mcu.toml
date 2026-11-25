@@ -164,7 +164,6 @@ range_ms = { min = 1, max = 3_600_000 }
 trial_attempts = 1
 # Whether the ESP32-S3 has a watchdog-reset flag that survives a later
 # reset (the RTC reset cause names only the last reset) is not established.
-# No [boot.record] here, so no lockup fuse either way.
 flag = "unmeasured"
 
 # The flash cache is off during an operation; the flash driver masks

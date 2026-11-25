@@ -51,7 +51,7 @@ use crate::schema::{ControlKind, LinkKind, RomEntry, UartIface};
 pub use board_boot::{BoardBoot, BoardBus, BoardDevice, BoardPeripheral, BoardPin};
 pub use clock::{BoardClock, ClockKind, ClockSetup, ClockSource, ClockStage, StageClocks};
 pub use execution::{BoardFlash, Conformance, EraseRegionDef, Execution, Fact, FlashOp, OpenFact};
-pub use isolation::{Core, Isolation, McuBoot, PeriodRange, Peripheral, RecordPlacement, Watchdog};
+pub use isolation::{Core, Isolation, PeriodRange, Peripheral, Watchdog};
 pub use link_rate::{I2cController, LinkClock, LinkClockOn, LinkI2c, LinkUart, RateLimit};
 pub use load::{DefError, DefSource, Source, BUILTIN_FILES};
 pub use slot_layout::{HeaderDef, OwnedLayout, SlotLayoutDef, SlotName, TargetName};
@@ -700,8 +700,8 @@ pub struct McuDef {
     /// takes a while before it starts).
     #[serde(default)]
     pub doctor: Vec<DoctorCheck>,
-    /// `{ at, size }`: all of the MCU's RAM. Images get the RAM below the boot record, the fuse
-    /// cells and the extension regions.
+    /// `{ at, size }`: the RAM the images link against. Images get the RAM below the extension
+    /// regions.
     pub ram: Option<Region>,
     /// How DAGON keeps extensions away from itself (below). Left out: `kind = "none"`, `level =
     /// "none"`.
@@ -758,18 +758,6 @@ pub struct McuDef {
     /// `scratch = { at, size }`: flash a conformance build erases and writes; apart from every
     /// slot, header, log face and stage0.
     pub conformance: Option<Conformance>,
-    /// `[boot.record]`, for MCUs with a DAGON boot stage: where the boot record and
-    /// the lockup fuse live. `kind`
-    /// (`noinit-ram` inside `ram`, `retained-registers` inside a `[[peripheral]]`), `at`, `size`
-    /// (at most 4096), `survives` (`reset-random`, `reset-cleared`, `power`: what a power loss
-    /// leaves), `entropy = { source, min_bits }` (required; the start-up word a new record sequence
-    /// mixes in: `source` one of `rng`, `ring-osc`, `osc-capture`, `adc-noise`; `min_bits` its
-    /// min-entropy per word, a fact, at least 16 when it has a value), `rings = [{ writer, at, size
-    /// }]` (one per boot stage, in boot order, inside the record), `fuse = { cells = [{ image, at,
-    /// size }] }` (`bootcore`, `app`; outside the record), `reserved` (addresses the record never
-    /// stores to). The byte layout inside is the `boot-record` contract's.
-    #[serde(default)]
-    pub boot: McuBoot,
     /// What a board's boot action program may use besides pins: `["i2c"]` allows `bus_write`.
     #[serde(default)]
     pub boot_capabilities: Vec<isolation::BootCapability>,

@@ -694,7 +694,6 @@ version = "0.0.0"
 dependencies = [
  "dagon-core",
  "dagon-format",
- "dagon-proto",
 ]
 
 [[package]]

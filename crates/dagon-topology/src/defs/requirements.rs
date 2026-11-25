@@ -361,20 +361,10 @@ pub const MCU: &[Requirement<McuCheck>] = &[
         check: execution::conformance,
     },
     Requirement {
-        engine: "boot record and lockup fuse placement (memory.x fragments)",
-        fields: &[
-            "ram.at",
-            "ram.size",
-            "boot.record.at",
-            "boot.record.size",
-            "boot.record.entropy.min_bits",
-            "boot.record.rings[].at",
-            "boot.record.rings[].size",
-            "boot.record.fuse.cells[].at",
-            "boot.record.fuse.cells[].size",
-        ],
-        rule: "entropy min_bits a fact, at least ENTROPY_MIN_BITS (16) when it has a value; record 1..=RECORD_MAX bytes inside RAM (noinit-ram) or a declared block (retained-registers); 1..=16 rings inside it, apart, one per boot stage the MCU has; fuse cells apart, outside the record, one per image kind",
-        check: isolation::record,
+        engine: "image RAM (memory.x fragments)",
+        fields: &["ram.at", "ram.size"],
+        rule: "size >= 1; inside the 32-bit address space",
+        check: isolation::ram,
     },
 ];
 

@@ -212,8 +212,8 @@ fn stm32f401re_boot_map_holds_one_extension_with_two_windows() {
             )
         })
         .collect();
-    // Code at the top of boot core slot A's body, data and stack below the
-    // boot record, windows exactly the 1 KiB blocks.
+    // Code at the top of boot core slot A's body, data and stack at the top
+    // of RAM, windows exactly the 1 KiB blocks.
     assert_eq!(
         shape,
         [
@@ -228,7 +228,7 @@ fn stm32f401re_boot_map_holds_one_extension_with_two_windows() {
             ),
             (
                 1,
-                0x2001_6800,
+                0x2001_7800,
                 0x800,
                 0,
                 Access::ReadWrite,
@@ -237,7 +237,7 @@ fn stm32f401re_boot_map_holds_one_extension_with_two_windows() {
             ),
             (
                 2,
-                0x2001_6000,
+                0x2001_7000,
                 0x800,
                 1,
                 Access::ReadWrite,
@@ -265,7 +265,7 @@ fn stm32f401re_boot_map_holds_one_extension_with_two_windows() {
         ]
     );
     assert_eq!(map.image_flash, (0x0801_0200, 0xEE00));
-    assert_eq!(map.image_ram, (0x2000_0000, 0x1_6000));
+    assert_eq!(map.image_ram, (0x2000_0000, 0x1_7000));
     // The app image gets its own map per slot.
     let app = node::plan(
         def,
@@ -303,7 +303,7 @@ fn rp2040_boot_map_uses_256_byte_regions_and_16_kib_windows() {
             .map(|r| (r.base, r.size))
             .collect();
         assert_eq!(windows, [(0x4003_8000, 0x4000), (0x5030_0000, 0x4000)]);
-        // RAM regions sit below SRAM4, where the boot record is.
+        // RAM regions sit inside SRAM0-3.
         assert!(r[1].end() <= 0x2004_0000 && r[2].end() <= 0x2004_0000);
     }
     // A privileged block is never a window.
@@ -544,8 +544,6 @@ fn check_finds_what_a_bad_map_breaks() {
         w.base = 0x4002_3C00; // the flash interface
     });
     assert!(e.contains("opens peripheral flash"), "{e}");
-    let e = broken(&|m| m.exts[0].regions[1].base = 0x2001_7000);
-    assert!(e.contains("overlaps the boot record"), "{e}");
     let e = broken(&|m| m.exts[0].regions.retain(|r| r.purpose != Purpose::Stack));
     assert!(e.contains("exactly one stack"), "{e}");
 }
@@ -824,19 +822,15 @@ fn linker_fragments_and_the_readable_map_follow_the_plan() {
         "{x}"
     );
     assert!(
-        x.contains("RAM : ORIGIN = 0x20000000, LENGTH = 0x16000"),
+        x.contains("RAM : ORIGIN = 0x20000000, LENGTH = 0x17000"),
         "{x}"
     );
     assert!(
         x.contains("EXT0_TEXT : ORIGIN = 0x0801f000, LENGTH = 0x1000"),
         "{x}"
     );
-    assert!(
-        x.contains("BOOT_RECORD : ORIGIN = 0x20017000, LENGTH = 0x800"),
-        "{x}"
-    );
     assert!(x.contains(".ext.logger.text"), "{x}");
-    // Without extensions the image keeps everything below the record.
+    // Without extensions the image keeps all of the RAM.
     let bare = node::plan(
         def,
         Some(board),
@@ -852,7 +846,7 @@ fn linker_fragments_and_the_readable_map_follow_the_plan() {
             flash_at: 0x0802_0200,
             flash_size: 0x1_FE00,
             ram_at: 0x2000_0000,
-            ram_size: 0x1_7000
+            ram_size: 0x1_8000
         }
     );
     assert!(!gen::linker_fragment("n1", def, &bare, b, &space).contains("SECTIONS"));

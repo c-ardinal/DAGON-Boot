@@ -1,6 +1,6 @@
 //! The files `dagon gen` writes for a node from its definitions and
 //! extensions: `boot_wiring.rs` (the boot stage's board values, action
-//! program, watchdog, boot record placement, isolation record and
+//! program, watchdog, isolation record and
 //! extension chain), one linker fragment per image slot, and the readable
 //! protection map.
 
@@ -110,24 +110,6 @@ pub enum Op {
 pub struct Action {
     pub on: &'static str,
     pub ops: &'static [Op],
-}
-
-/// One writer's ring of the boot record, or one lockup fuse cell.
-#[derive(Clone, Copy, Debug)]
-pub struct Area {
-    pub owner: &'static str,
-    pub at: u32,
-    pub size: u32,
-}
-
-#[derive(Clone, Copy, Debug)]
-pub struct Record {
-    pub kind: &'static str,
-    pub at: u32,
-    pub size: u32,
-    pub survives: &'static str,
-    pub rings: &'static [Area],
-    pub fuse: &'static [Area],
 }
 
 /// A register read at boot that must hold the definition's value, else
@@ -247,37 +229,6 @@ fn board_values(out: &mut String, boot: Option<&BoardBoot>, board: Option<&Board
         );
     }
     out.push_str("];\n\n");
-}
-
-fn record(out: &mut String, def: &McuDef) {
-    let Some(r) = def.record() else {
-        out.push_str("pub const RECORD: Option<Record> = None;\n\n");
-        return;
-    };
-    let area = |owner: String, at: u32, size: u32| {
-        format!("Area {{ owner: {owner:?}, at: {at:#010x}, size: {size:#x} }}")
-    };
-    let rings: Vec<_> = r
-        .rings
-        .iter()
-        .map(|x| area(format!("{:?}", x.writer).to_lowercase(), x.at, x.size))
-        .collect();
-    let fuse: Vec<_> = r
-        .fuse
-        .cells
-        .iter()
-        .map(|x| area(format!("{:?}", x.image).to_lowercase(), x.at, x.size))
-        .collect();
-    let _ = writeln!(
-        out,
-        "pub const RECORD: Option<Record> = Some(Record {{\n    kind: {:?},\n    at: {:#010x},\n    size: {:#x},\n    survives: {:?},\n    rings: &[{}],\n    fuse: &[{}],\n}});\n",
-        r.kind.as_str(),
-        r.at,
-        r.size,
-        r.survives.as_str(),
-        rings.join(", "),
-        fuse.join(", ")
-    );
 }
 
 fn isolation(out: &mut String, def: &McuDef) {
@@ -455,7 +406,6 @@ pub fn boot_wiring(
             w.reboot_delay_max_ms()
         );
     }
-    record(&mut out, def);
     isolation(&mut out, def);
     chain(&mut out, &plan.exts, known);
     maps(&mut out, &plan.maps);
@@ -464,7 +414,7 @@ pub fn boot_wiring(
 
 /// The linker fragment of one image slot: the image's own FLASH and RAM
 /// after the extension regions, each extension's regions with their
-/// sections, and the boot record and fuse cells as their own regions.
+/// sections.
 pub fn linker_fragment(
     node: &str,
     def: &McuDef,
@@ -511,22 +461,6 @@ pub fn linker_fragment(
             r.base, r.size
         );
     }
-    if let Some(r) = def.record() {
-        let _ = writeln!(
-            out,
-            "  BOOT_RECORD : ORIGIN = {:#010x}, LENGTH = {:#x}",
-            r.at, r.size
-        );
-        for c in &r.fuse.cells {
-            let _ = writeln!(
-                out,
-                "  FUSE_{} : ORIGIN = {:#010x}, LENGTH = {:#x}",
-                format!("{:?}", c.image).to_uppercase(),
-                c.at,
-                c.size
-            );
-        }
-    }
     out.push_str("}\n");
     if let Some(m) = map {
         out.push_str("\nSECTIONS\n{\n");
@@ -551,11 +485,6 @@ pub fn linker_fragment(
                 e.id, e.id
             );
         }
-    }
-    if def.record().is_some() {
-        out.push_str(
-            "\n__dagon_boot_record_start = ORIGIN(BOOT_RECORD);\n__dagon_boot_record_size = LENGTH(BOOT_RECORD);\n",
-        );
     }
     out
 }

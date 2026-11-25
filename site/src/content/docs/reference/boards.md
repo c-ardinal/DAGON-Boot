@@ -17,7 +17,7 @@ editUrl: false
 | Id | 名称 | ポート | フラッシュ | RAM | 上りリンク | 下りリンク | コーディネータ可否 | 初回の書込 |
 |---|---|---|---|---|---|---|---|---|
 | `esp32s3` | ESP32-S3 | `vendor-stage2` | 16 MiB |  | uart, usb-cdc |  |  | `espflash` |
-| `rp2040` | RP2040 | `self-boot` | 4 MiB | 264 KiB | usb-cdc | i2c, uart | 可 | `uf2-drive` |
+| `rp2040` | RP2040 | `self-boot` | 4 MiB | 256 KiB | usb-cdc | i2c, uart | 可 | `uf2-drive` |
 | `stm32f401re` | STM32F401RE | `self-boot` | 512 KiB | 96 KiB | i2c |  |  | `probe-rs` |
 
 ## ボード

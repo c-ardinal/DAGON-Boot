@@ -107,10 +107,6 @@ pub const ROWS: &[Row] = &[
     row(Mcu, "relay_link", Keyed(&["port"])),
     // "seven-bit" or { fixed = N }.
     row(Mcu, "relay_link.addressing", Whole),
-    // In boot order.
-    ordered(Mcu, "boot.record.rings", Keyed(&["writer"])),
-    row(Mcu, "boot.record.fuse.cells", Keyed(&["image"])),
-    row(Mcu, "boot.record.entropy.min_bits", Whole),
     row(Mcu, "isolation.capabilities.idau", Whole),
     row(Mcu, "isolation.tcm", Whole),
     row(Mcu, "slot_layout", Keyed(&["target", "slot"])),

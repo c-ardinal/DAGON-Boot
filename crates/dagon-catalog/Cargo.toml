@@ -6,9 +6,11 @@ version = "0.0.0"
 publish = false
 description = "Every DAGON state machine's catalog in one registry, and the generated Events and Ports pages of the documentation"
 
+# A crate here that invokes `state_machine!` is in the registry (build.rs),
+# in this order after dagon-events: the order of the Events page.
 [dependencies]
-dagon-agent = { path = "../dagon-agent" }
 dagon-boot = { path = "../dagon-boot" }
+dagon-agent = { path = "../dagon-agent" }
 # It prints the catalogs' docs.
 dagon-events = { path = "../dagon-events", features = ["catalog-docs"] }
 

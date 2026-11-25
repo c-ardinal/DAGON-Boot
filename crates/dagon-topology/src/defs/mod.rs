@@ -368,10 +368,24 @@ pub struct I2cPair {
     pub scl: String,
 }
 
-/// The ROM I2C bootloader (ROM entry kind `stm32-i2c-rom`).
+/// One ROM entry a definition gives a name (`[[rom_entry]]`): a topology
+/// link writes the name as `control.rom_entry`, and the node is asked for
+/// `method` in ENTER_ROM.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RomEntryDef {
+    pub name: String,
+    /// The ENTER_ROM method: not 0 (no entry) and not 3 (the ROM I2C loader's).
+    pub method: u8,
+}
+
+/// The ROM I2C bootloader.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RomI2c {
+    /// The ROM entry name a topology link writes to reach this loader
+    /// (`stm32-i2c-rom`).
+    pub entry: String,
     /// What check messages call it (`STM32 ROM bootloader`).
     pub name: String,
     pub addr: u8,
@@ -623,11 +637,16 @@ pub struct McuDef {
     /// clock, cannot make the speed, or runs on an internal setup without `tolerance_ppm`, and a
     /// bus driven by a node whose MCU states no `[link_i2c.controller]`.
     pub link_i2c: Option<LinkI2c>,
-    /// ROM I2C bootloader (`stm32-i2c-rom`): `name` (as check messages call it), `addr`, `max_hz`,
+    /// ROM I2C bootloader: `entry` (the name a topology link's `control.rom_entry` writes for it,
+    /// `stm32-i2c-rom`), `name` (as check messages call it), `addr`, `max_hz`,
     /// `erase_sectors` (erase units of `execution.erase_regions`, counted from the first region;
     /// the host waits each one's `unit_max_ms` and a margin), `pairs = [{ controller, sda, scl }]`
     /// it listens on.
     pub rom_i2c: Option<RomI2c>,
+    /// `[[rom_entry]]`: ROM entries this MCU's firmware takes in ENTER_ROM, `name` (as a topology
+    /// link's `control.rom_entry` writes it) and `method` (the ENTER_ROM method, not 0 or 3).
+    #[serde(default, rename = "rom_entry")]
+    pub rom_entries: Vec<RomEntryDef>,
     /// Link kinds the MCU package's firmware implements, `up` and `down`: the one source of its
     /// `LINK_KINDS`, which the package builds from them.
     #[serde(default)]
@@ -856,7 +875,7 @@ pub struct HeaderPin {
 }
 
 /// How a node board is wired to the hub unless the topology says otherwise.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DefaultLink {
     pub kind: LinkKind,
@@ -905,9 +924,13 @@ pub struct BoardDef {
     pub i2c_pairs: Vec<I2cPair>,
     /// How a node board is wired unless the topology says otherwise: `kind` (`i2c`, `uart`, `can`,
     /// `ethernet`), `iface` (`hw-uart0`, `pio-uart`), `addr`, `baud`, `control` (`full`,
-    /// `cooperative`), `rom_entry` (`force-download-boot`, `m5pm1`, `stm32-i2c-rom`). Left out for
+    /// `cooperative`), `rom_entry` (a name a definition gives a ROM entry). Left out for
     /// the coordinator.
     pub default_link: Option<DefaultLink>,
+    /// `[[rom_entry]]`: ROM entries this board's firmware takes in ENTER_ROM, as the MCU
+    /// definition's.
+    #[serde(default, rename = "rom_entry")]
+    pub rom_entries: Vec<RomEntryDef>,
     /// Parts built from the board package itself (`name`, `sub`, `bin`).
     #[serde(default, rename = "part")]
     pub parts: Vec<Part>,
@@ -1148,6 +1171,52 @@ impl Registry {
         self.mcus
             .iter()
             .find_map(|m| m.flash_maps.iter().find(|f| f.name == name).map(|f| (m, f)))
+    }
+
+    /// Every ROM entry the definitions name, with the code a compiled
+    /// topology carries for it (`dagon_format::topology::rom_entry`), in
+    /// definition order. A name has one code (checked on load); a code may
+    /// have several names, each node taking it as its own firmware does.
+    pub fn rom_entries(&self) -> Vec<(&str, u8)> {
+        let loaders = self
+            .mcus
+            .iter()
+            .filter_map(|m| m.rom_i2c.as_ref())
+            .map(|r| {
+                (
+                    r.entry.as_str(),
+                    dagon_format::topology::rom_entry::I2C_LOADER,
+                )
+            });
+        let methods = self
+            .mcus
+            .iter()
+            .flat_map(|m| &m.rom_entries)
+            .chain(self.boards.iter().flat_map(|b| &b.rom_entries))
+            .map(|e| (e.name.as_str(), e.method));
+        let mut all: Vec<(&str, u8)> = Vec::new();
+        for e in loaders.chain(methods) {
+            if !all.contains(&e) {
+                all.push(e);
+            }
+        }
+        all
+    }
+
+    /// The code a compiled topology carries for the ROM entry `name`.
+    pub fn rom_entry_code(&self, name: &str) -> Option<u8> {
+        self.rom_entries()
+            .into_iter()
+            .find_map(|(n, c)| (n == name).then_some(c))
+    }
+
+    /// A name of the ROM entry a compiled topology carries as `code` (the
+    /// first in definition order: every name of a code compiles back to
+    /// it); `NONE` and a code no definition names: none.
+    pub fn rom_entry_name(&self, code: u8) -> Option<&str> {
+        self.rom_entries()
+            .into_iter()
+            .find_map(|(n, c)| (c == code).then_some(n))
     }
 
     /// MCU by image header `mcu_id`.

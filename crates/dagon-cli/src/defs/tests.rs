@@ -75,6 +75,7 @@ out_hz = 1_000_000
 hzs = [100_000, 400_000]
 
 [rom_i2c]
+entry = "stm32-i2c-rom"
 name = "Fake ROM loader"
 addr = 0x3A
 max_hz = 400_000

@@ -7,7 +7,7 @@ description: "topology.yamlのlinks: 2つの端でノード間を接続し、方
 
 端（`ends`の各項目）にはノードと、そのノードのマイコン定義にある`[[link_port]]`の名称（[マイコンとボードの定義](/reference/definitions/)）を記述します。そのポートの種類はリンクの`kind`と同一です（V-27）。アドレスのある種類（I2C）では、対向側の端からそのノードへ到達するアドレスを、その端の`addr`に記述します。ノードごとのピン（`node_pins`、`pins`、`nrst`、`boot`）は、そのピンがあるノードの端に記述します。コンパイル済の構成は、リンクごとに両端のノード、ポートの番号、アドレスを保持します。`buses`は配線の確認用に残存し、ファームウェアやホストにリンクを提示するものではありません。
 
-リンクの`kind`、`control.rom_entry`、コーディネータの`uplink.host`は文字列です。このDAGONにない名称は、対応済の名称の一覧と共に名称を明示して拒否します（V-01: ``this DAGON does not know the link kind `lora` ``）。そのため、対応する種類が多数のDAGON用の構成と、形式が不正な構成を区別可能です。名称を追加しても形式の番号は不変で、`dagon: 2`のままです。
+リンクの`kind`、`control.rom_entry`、コーディネータの`uplink.host`は文字列です。このDAGONにない名称は、対応済の名称の一覧と共に名称を明示して拒否します（V-01: ``this DAGON does not know the link kind `lora` ``）。そのため、対応する種類が多数のDAGON用の構成と、形式が不正な構成を区別可能です。名称を追加しても形式の番号は不変で、`dagon: 2`のままです。`control.rom_entry`の名称はコードに一覧がなく、マイコンとボードの定義（`[rom_i2c] entry`、`[[rom_entry]]`）が提供します。定義の追加だけで、新規の名称が使用可能になります。
 
 ```yaml
 links:
@@ -31,7 +31,7 @@ links:
 | `bus` | 文字列 | 任意 | I2Cのリンクのバス: `buses`の`id`（V-01）。 |
 | `iface` | 文字列 | 任意 | UARTのリンクのUART: `hw-uart0`か`pio-uart`（V-01）。 |
 | `baud` | 整数 | 任意 | UARTのリンクのビットレート。省略時は115200です（V-26）。 |
-| `control` | テーブル | 任意 | このリンクでノードをROMのローダーに移行させる方法: `kind`（`full`、`cooperative`）と`rom_entry`（`force-download-boot`、`m5pm1`、`stm32-i2c-rom`）。I2CかUARTのリンクは、既定のcooperativeの場合に`rom_entry`が必要です（V-11）。 |
+| `control` | テーブル | 任意 | このリンクでノードをROMのローダーに移行させる方法: `kind`（`full`、`cooperative`）と`rom_entry`（マイコンかボードの定義がROM進入方式に付与した名称）。I2CかUARTのリンクは、既定のcooperativeの場合に`rom_entry`が必要です（V-11）。 |
 <!-- end of generated table -->
 
 ## 端

@@ -100,6 +100,7 @@ pub const ROWS: &[Row] = &[
     // DAGON runs on the first core.
     ordered(Mcu, "core", AddOrDelete(&["id"])),
     row(Mcu, "rom_i2c.pairs", Keyed(&["sda", "scl"])),
+    row(Mcu, "rom_entry", Keyed(&["name"])),
     // A topology link end names a port by `name`.
     row(Mcu, "link_port", Keyed(&["name"])),
     // One relay link per port; the id may change.
@@ -133,6 +134,7 @@ pub const ROWS: &[Row] = &[
     row(Board, "header", Keyed(&["pin"])),
     row(Board, "i2c", Keyed(&["sda", "scl"])),
     row(Board, "part", AddOrDelete(&["name"])),
+    row(Board, "rom_entry", Keyed(&["name"])),
     row(Board, "pin", Keyed(&["pin"])),
     row(Board, "bus", Keyed(&["id"])),
     row(Board, "peripheral", Keyed(&["id"])),

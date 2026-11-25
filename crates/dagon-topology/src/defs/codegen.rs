@@ -231,7 +231,7 @@ pub fn board_rs(b: &BoardDef) -> String {
         .halt
         .filter(|h| h.pattern == HaltPattern::Blink)
         .map(|h| h.period_ms);
-    let link = b.default_link;
+    let link = b.default_link.as_ref();
     let _ = writeln!(
         o,
         "/// The board id.\npub const BOARD_ID: &str = {:?};\n\
@@ -523,7 +523,7 @@ pub const LINK_BAUD_ENV: &str = "DAGON_LINK_BAUD";
 /// (`[default_link] baud`, or the baud of its `dagon = true` UART bus).
 /// A value that is not a bit rate fails the build, naming it.
 pub fn link_baud_rs(b: &BoardDef, env: Option<&str>) -> Result<String, String> {
-    let own = b.default_link.and_then(|l| l.baud).or_else(|| {
+    let own = b.default_link.as_ref().and_then(|l| l.baud).or_else(|| {
         b.buses
             .iter()
             .find(|x| x.dagon && x.baud.is_some())

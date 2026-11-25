@@ -696,7 +696,7 @@ mod tests {
             nrst_pin: 1,
             boot_pin: 2,
             baud: 400_000,
-            rom_entry: topo::rom_entry::STM32_I2C_ROM,
+            rom_entry: topo::rom_entry::I2C_LOADER,
             bus_id: 0,
             gpio_end: 0,
         }];

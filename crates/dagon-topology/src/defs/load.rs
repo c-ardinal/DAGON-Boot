@@ -836,6 +836,33 @@ fn resolve(table: &[Partition], s: &super::SlotDef) -> Result<Slot, String> {
     }
 }
 
+/// A ROM entry name has one code across the definitions, so a topology's
+/// name compiles to one code, and a board's own default names one of them.
+fn rom_entries(reg: &Registry) -> Result<(), DefError> {
+    let all = reg.rom_entries();
+    for (i, (name, code)) in all.iter().enumerate() {
+        if let Some((_, c)) = all[..i].iter().find(|(n, _)| n == name) {
+            return err(
+                "ROM entries",
+                format!("'{name}' is code {c} in one definition and {code} in another: a name has one code"),
+            );
+        }
+    }
+    for b in &reg.boards {
+        let entry = b.default_link.as_ref().and_then(|l| l.rom_entry.as_ref());
+        if let Some(r) = entry.filter(|r| reg.rom_entry_code(r.name()).is_none()) {
+            return err(
+                format!("board '{}'", b.id),
+                format!(
+                    "default_link.rom_entry: no definition names the ROM entry '{}'",
+                    r.name()
+                ),
+            );
+        }
+    }
+    Ok(())
+}
+
 /// Registry-wide rules: unique ids, identities and flash map names; every
 /// board's MCU exists and its flash holds one of the MCU's flash maps.
 fn validate(reg: &Registry) -> Result<(), DefError> {
@@ -899,6 +926,7 @@ fn validate(reg: &Registry) -> Result<(), DefError> {
         };
         super::requirements::check_board(b, m).or_else(|e| err(&at, e))?;
     }
+    rom_entries(reg)?;
     for m in &reg.mcus {
         let at = format!("MCU '{}'", m.id);
         let defaults: Vec<&str> = reg

@@ -281,7 +281,7 @@ fn mcu_facts(m: &McuDef) -> Value {
 }
 
 fn board_facts(b: &BoardDef) -> Value {
-    let link = b.default_link.map(|l| {
+    let link = b.default_link.as_ref().map(|l| {
         json!({
             "kind": l.kind.name(),
             "iface": l.iface.map(|i| match i {
@@ -294,7 +294,7 @@ fn board_facts(b: &BoardDef) -> Value {
                 ControlKind::Full => "full",
                 ControlKind::Cooperative => "cooperative",
             },
-            "rom_entry": l.rom_entry.map(RomEntry::name),
+            "rom_entry": l.rom_entry.as_ref().map(RomEntry::name),
         })
     });
     json!({

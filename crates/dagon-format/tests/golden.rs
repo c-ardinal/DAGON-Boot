@@ -163,7 +163,7 @@ fn topology() -> Vec<u8> {
             nrst_pin: 18,
             boot_pin: 28,
             baud: 400_000,
-            rom_entry: rom_entry::STM32_I2C_ROM,
+            rom_entry: rom_entry::I2C_LOADER,
             bus_id: 0,
             gpio_end: 0,
         },
@@ -187,7 +187,8 @@ fn topology() -> Vec<u8> {
             nrst_pin: tp::NONE,
             boot_pin: tp::NONE,
             baud: 115_200,
-            rom_entry: rom_entry::FORCE_DOWNLOAD_BOOT,
+            // An ENTER_ROM method a definition names (`[[rom_entry]]`).
+            rom_entry: 1,
             bus_id: tp::NONE,
             gpio_end: 0,
         },

@@ -201,7 +201,7 @@ macro_rules! link_requirements {
 #[doc(hidden)]
 #[macro_export]
 macro_rules! __link_requirement_message {
-    (($mcu:literal, $hop:literal, $kind:ident, $yet:ident) $( $v:ident = $c:literal, $n:literal; )*) => {
+    (($mcu:literal, $hop:literal, $kind:ident, $yet:ident) $( $v:ident = $c:literal, $n:literal, [$($t:ident)*]; )*) => {
         #[allow(unreachable_patterns)]
         match ($kind, $yet) {
             $(

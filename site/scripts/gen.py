@@ -824,7 +824,7 @@ LINK = ROOT / "crates" / "dagon-format" / "src" / "link.rs"
 @functools.cache
 def link_kinds():
     """The link kinds' names in code order, from `dagon_format::with_link_kinds!`."""
-    return re.findall(r'^\s*\w+ = \d+, "([a-z0-9-]+)";', LINK.read_text(encoding="utf-8"), re.M)
+    return re.findall(r'^\s*\w+ = \d+, "([a-z0-9-]+)", \[[a-z ]*\];', LINK.read_text(encoding="utf-8"), re.M)
 
 
 def kind_list(lang, names, last):

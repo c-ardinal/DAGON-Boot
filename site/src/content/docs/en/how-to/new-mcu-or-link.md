@@ -25,7 +25,7 @@ The layer figure is in [Explanation](/en/explanation/).
 
 The link kinds are a closed list, in one place in the code, so this does change `crates/`.
 
-1. Add one line to `with_link_kinds!` in `crates/dagon-format/src/link.rs`. The name a 構成 uses and the code events carry come from it.
+1. Add one line to `with_link_kinds!` in `crates/dagon-format/src/link.rs`. The name a 構成 uses and the code events carry come from it. The line's traits say what the medium is: `compiled` (the compiled topology carries it between a coordinator and a node), `addressed` (its nodes are reached at a 7-bit address), `enumerated` (the other end enumerates it before it carries a frame).
 2. On each MCU that has the link, implement `dagon_port::Link` (`StreamPort` for a byte stream from the hub to a child). `targets/mcu/esp32s3/src/links.rs` is an example.
 3. Add it to `[links]` in the MCU's `dagon-mcu.toml`. The package's `LINK_KINDS` (`targets/mcu/rp2040/src/kinds.rs`) is built from `[links]` and changes with it.
 4. Add the words DAGON Console shows for it to `LINK_KIND_WORDS` in `web/src/app/copy.ts` (`label` on the canvas and in the table, `choice` in the inspector's list). DAGON Console's tests fail until it is there.

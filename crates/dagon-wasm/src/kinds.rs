@@ -9,7 +9,7 @@ use js_sys::{Array, Object};
 use wasm_bindgen::prelude::*;
 
 macro_rules! link_kind_exports {
-    (() $( $v:ident = $c:literal, $n:literal; )*) => {
+    (() $( $v:ident = $c:literal, $n:literal, [$($t:ident)*]; )*) => {
         /// A link kind by its code (the code events carry): what the page
         /// decides on.
         #[wasm_bindgen]

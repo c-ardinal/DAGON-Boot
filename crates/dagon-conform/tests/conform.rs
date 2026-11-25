@@ -6,7 +6,7 @@ use dagon_port::{SlotStore, StoreError};
 use std::cell::RefCell;
 
 use dagon_agent::{Agent, Config, Transition};
-use dagon_conform::node::{self, NodeSetup, RESPONSE_MAX};
+use dagon_conform::node::{self, NodeSetup, Session, RESPONSE_MAX};
 use dagon_conform::pc::{Channel, Images, NoAnswer, Runner, SetupError};
 use dagon_conform::report::{Progress, Report, Verdict};
 use dagon_conform::CTS;
@@ -17,6 +17,7 @@ use dagon_format::statelog::reason;
 use dagon_format::{key_id, sha256, Version};
 use dagon_port::timeout::{link_limits, NodeTimings};
 use dagon_port::{Flash, FlashError, FlashRegion, LinkKind};
+use dagon_proto::handler::Ceiling;
 use dagon_proto::payload::*;
 use dagon_proto::{plant, split_status, Cmd, Frame, Status, MAX_FRAME};
 use ed25519_compact::{KeyPair, Seed};
@@ -298,6 +299,10 @@ struct Faults {
     hello_max_payload: Option<u16>,
     /// The node has app slot A only.
     one_slot: bool,
+    /// A node-side test keeps the node from answering for this long.
+    test_takes_ms: u64,
+    /// The node resets while a node-side test runs: its results are gone.
+    resets_in_a_test: bool,
 }
 
 type Chain = Composed<&'static Published<(), 4>, Nop, Nop, fn() -> u64>;
@@ -321,6 +326,7 @@ struct FakeNode {
     mem: &'static RefCell<Mem>,
     agent: Agent<&'static RefCell<Mem>, Chain, Ed25519Compact>,
     flash: MemFlash,
+    session: Session,
     max_payload: usize,
     faults: Faults,
     now: u64,
@@ -356,6 +362,7 @@ impl FakeNode {
             mem,
             cfg,
             flash,
+            session: Session::new(),
             max_payload,
             faults,
             now: 0,
@@ -483,14 +490,20 @@ impl Channel for &mut FakeNode {
             declared: &REGIONS,
             scratch: SCRATCH,
         };
-        let (frame, reboot) = match node::handle_frame(
-            &req[..n],
-            self.max_payload,
-            &mut self.flash,
-            &setup,
-            &mut out,
-            &mut || {},
-        ) {
+        let answered = self
+            .session
+            .handle_frame(&req[..n], self.max_payload, &mut out);
+        // The test runs after its CONF_RUN was answered; the node answers
+        // nothing meanwhile.
+        if self.session.pending() {
+            self.session
+                .run_pending(&mut self.flash, &setup, &mut || {});
+            self.up_at = self.now + self.faults.test_takes_ms;
+            if self.faults.resets_in_a_test {
+                self.session = Session::new();
+            }
+        }
+        let (frame, reboot) = match answered {
             Some(len) => (out[..len].to_vec(), false),
             None => {
                 let r = self.agent.handle(&req[..n]).expect("agent reply");
@@ -795,96 +808,164 @@ fn node_side_geometry_checks() {
     assert_eq!(node::run(&mut f, &ok, req(4), &mut || {}), None);
 }
 
-/// A conformance build serves CONF_RUN in front of the agent and nothing
-/// else, and a CONF_RUN with an unknown must field, a field sent twice or
-/// a bad length is refused with the flash not touched and the watchdog
-/// hook not called.
+/// A conformance build serves CONF_LIST, CONF_RUN and CONF_RESULT in front
+/// of the agent and nothing else, and one of them with an unknown must
+/// field, a field sent twice or a bad length is refused with nothing taken.
 #[test]
-fn conf_run_is_read_before_a_test_runs() {
-    let mut f = MemFlash::new();
-    let setup = NodeSetup {
-        declared: &REGIONS,
-        scratch: SCRATCH,
-    };
-    let mut feeds = 0;
-    let ask = |cmd: u8, payload: &[u8], f: &mut MemFlash, feeds: &mut usize| {
+fn a_conformance_request_is_read_before_anything_is_taken() {
+    let mut s = Session::new();
+    let ask = |s: &mut Session, cmd: u8, payload: &[u8], ceiling: Ceiling| {
         let mut req = [0u8; 600];
         let mut out = [0u8; RESPONSE_MAX];
         req[8..8 + payload.len()].copy_from_slice(payload);
         let n = dagon_proto::finish(&mut req, 0, 1, cmd, payload.len()).unwrap();
-        let len = node::handle_frame(&req[..n], 512, f, &setup, &mut out, &mut || *feeds += 1)?;
+        let len = s.handle_frame(&req[..n], ceiling, &mut out)?;
         let (fr, _) = Frame::decode(&out[..len], 256).unwrap();
         Some(split_status(fr.payload).unwrap().0)
     };
-    assert_eq!(node::CMDS, CmdSet::EMPTY.with(Cmd::ConfRun as u8));
+    let wide = Ceiling::from(512usize);
+    let ours = [Cmd::ConfList, Cmd::ConfRun, Cmd::ConfResult];
+    let cmds = ours.iter().fold(CmdSet::EMPTY, |c, n| c.with(*n as u8));
+    assert_eq!(node::CMDS, cmds);
     let mut served = CmdSet::EMPTY;
-    plant::each_probe(|n, p| match ask(n, p, &mut f, &mut feeds) {
+    plant::each_probe(|n, p| match ask(&mut s, n, p, wide) {
         Some(Status::Field) => served = served.with(n),
         other => assert_eq!(other, None, "{n:#x} is left to the agent"),
     });
     assert_eq!(served, node::CMDS, "what answers is what it says");
     let commands = plant::each(&node::CMDS, |n, plant, p| {
-        let st = ask(n, p, &mut f, &mut feeds);
+        let st = ask(&mut s, n, p, wide);
         assert_eq!(st, Some(plant.status()), "{plant:?}");
-        assert_eq!((f.calls, feeds), (0, 0), "{plant:?}");
+        assert!(!s.pending(), "{plant:?}");
     });
-    assert_eq!(commands, 1);
+    assert_eq!(commands, 3);
     // A requester that takes the smallest payload a link offers cannot
-    // take CONF_RUN's answer: refused, and no test runs.
-    let floor = dagon_proto::handler::Ceiling {
+    // take CONF_RESULT's answer: refused.
+    let floor = Ceiling {
         link: 512,
         peer: Some(dagon_proto::max_payload::SMALLEST as u16),
     };
-    let mut req = [0u8; 32];
-    let mut out = [0u8; RESPONSE_MAX];
-    req[8] = 2;
-    let n = dagon_proto::finish(&mut req, 0, 1, Cmd::ConfRun as u8, 1).unwrap();
-    let len = node::handle_frame(&req[..n], floor, &mut f, &setup, &mut out, &mut || {
-        feeds += 1
-    });
-    let (fr, _) = Frame::decode(&out[..len.unwrap()], 256).unwrap();
-    assert_eq!(split_status(fr.payload).unwrap().0, Status::Arg);
-    assert_eq!((f.calls, feeds), (0, 0));
-    // A well-formed request does run its test.
     assert_eq!(
-        ask(Cmd::ConfRun as u8, &[2], &mut f, &mut feeds),
-        Some(Status::Ok)
+        ask(&mut s, Cmd::ConfResult as u8, &[2], floor),
+        Some(Status::Arg)
     );
-    assert!(f.calls > 0 && feeds > 0);
+    // A test that does not run in the node is not taken.
+    assert_eq!(
+        ask(&mut s, Cmd::ConfRun as u8, &[12], wide),
+        Some(Status::Unsupported)
+    );
+    assert_eq!(
+        ask(&mut s, Cmd::ConfResult as u8, &[12], wide),
+        Some(Status::Unsupported)
+    );
+    // Another command is the agent's.
+    assert_eq!(ask(&mut s, Cmd::Status as u8, &[], wide), None);
+    assert!(!s.pending());
 }
 
+/// CONF_RUN answers before the test runs; the test runs in `run_pending`;
+/// CONF_RESULT tells its state before and after; a second CONF_RUN is
+/// refused until the first has run; CONF_LIST forgets every result.
 #[test]
-fn handle_frame_passes_other_commands_on() {
+fn a_test_is_taken_then_run_then_its_result_is_read() {
     let mut f = MemFlash::new();
     let setup = NodeSetup {
         declared: &REGIONS,
         scratch: SCRATCH,
     };
-    let mut req = [0u8; 64];
+    let mut s = Session::new();
     let mut out = [0u8; RESPONSE_MAX];
-    let n = Frame {
-        flags: 0,
-        seq: 1,
-        cmd: Cmd::Status as u8,
-        payload: &[],
+    let mut ask = |s: &mut Session, cmd: Cmd, payload: &[u8]| {
+        let mut req = [0u8; 64];
+        req[8..8 + payload.len()].copy_from_slice(payload);
+        let n = dagon_proto::finish(&mut req, 0, 1, cmd as u8, payload.len()).unwrap();
+        let len = s.handle_frame(&req[..n], 512usize, &mut out).unwrap();
+        let (fr, _) = Frame::decode(&out[..len], 512).unwrap();
+        let (st, body) = split_status(fr.payload).unwrap();
+        (st, body.to_vec())
+    };
+    let result = |body: &[u8]| {
+        let r = ConfResultResp::parse(body).unwrap();
+        (r.state, r.run_id, r.verdict, r.measured)
+    };
+
+    let (st, body) = ask(&mut s, Cmd::ConfList, &[]);
+    assert_eq!(st, Status::Ok);
+    assert_eq!(ConfListResp::parse(&body).unwrap().tests, node::TESTS);
+    let (_, body) = ask(&mut s, Cmd::ConfResult, &[2]);
+    assert_eq!(result(&body), (conf_state::NONE, 0, verdict::PENDING, 0));
+
+    let (st, body) = ask(&mut s, Cmd::ConfRun, &[2]);
+    assert_eq!(st, Status::Ok);
+    let taken = ConfRunResp::parse(&body).unwrap();
+    assert_eq!((taken.verdict, taken.run_id), (verdict::PENDING, 1));
+    assert_eq!(f.calls, 0, "the test has not run when CONF_RUN answers");
+    let (_, body) = ask(&mut s, Cmd::ConfResult, &[2]);
+    assert_eq!(result(&body), (conf_state::RUNNING, 1, verdict::PENDING, 0));
+    assert_eq!(ask(&mut s, Cmd::ConfRun, &[3]).0, Status::State);
+
+    let mut feeds = 0;
+    s.run_pending(&mut f, &setup, &mut || feeds += 1);
+    assert!(f.calls > 0 && feeds > 0 && !s.pending());
+    let (_, body) = ask(&mut s, Cmd::ConfResult, &[2]);
+    assert_eq!(result(&body), (conf_state::DONE, 1, verdict::PASS, 0x8000));
+    let (_, body) = ask(&mut s, Cmd::ConfResult, &[3]);
+    assert_eq!(result(&body).0, conf_state::NONE);
+
+    // A failing test keeps its detail; the run's number goes on.
+    let bad = NodeSetup {
+        scratch: SCRATCH + 4,
+        ..setup
+    };
+    let (_, body) = ask(&mut s, Cmd::ConfRun, &[3]);
+    assert_eq!(ConfRunResp::parse(&body).unwrap().run_id, 2);
+    s.run_pending(&mut f, &bad, &mut || {});
+    let (_, body) = ask(&mut s, Cmd::ConfResult, &[3]);
+    let r = ConfResultResp::parse(&body).unwrap();
+    assert_eq!((r.state, r.verdict), (conf_state::DONE, verdict::FAIL));
+    assert!(!r.detail.is_empty());
+
+    ask(&mut s, Cmd::ConfList, &[]);
+    let (_, body) = ask(&mut s, Cmd::ConfResult, &[2]);
+    assert_eq!(result(&body), (conf_state::NONE, 0, verdict::PENDING, 0));
+}
+
+/// A node-side test that keeps the node from answering passes while it is
+/// done within its deadline, and fails once it is not.
+#[test]
+fn a_node_side_test_has_until_its_deadline() {
+    let slow = |ms| {
+        faulty(Faults {
+            test_takes_ms: ms,
+            ..Default::default()
+        })
+    };
+    // CT-01's deadline over UART is 11 s (no work, the link, the margin).
+    let limits = link_limits(LinkKind::Uart).unwrap();
+    let timings = NodeTimings::<dagon_port::timeout::EraseLayout>::FALLBACK;
+    assert_eq!(timings.conf_deadline_s(1, limits), Some(11));
+    assert_all_pass(&slow(9_000));
+    let r = slow(12_000);
+    for id in [1, 2, 3, 7, 8] {
+        let ct = r.results.iter().find(|c| c.id == id).unwrap();
+        // The tests with work to do have longer deadlines than 12 s.
+        let late = matches!(id, 1 | 8);
+        assert_eq!(ct.verdict == Verdict::Fail, late, "CT-{id:02}");
+        if late {
+            assert_eq!(ct.detail.as_bytes(), b"no result in 11 s");
+        }
     }
-    .encode(&mut req)
-    .unwrap();
-    assert_eq!(
-        node::handle_frame(&req[..n], 256, &mut f, &setup, &mut out, &mut || {}),
-        None
-    );
-    let n = Frame {
-        flags: 0,
-        seq: 2,
-        cmd: Cmd::ConfRun as u8,
-        payload: &[12],
-    }
-    .encode(&mut req)
-    .unwrap();
-    let len = node::handle_frame(&req[..n], 256, &mut f, &setup, &mut out, &mut || {}).unwrap();
-    let (fr, _) = Frame::decode(&out[..len], 256).unwrap();
-    assert_eq!(split_status(fr.payload).unwrap().0, Status::Unsupported);
+}
+
+#[test]
+fn a_node_that_resets_in_a_test_fails_it() {
+    let r = faulty(Faults {
+        resets_in_a_test: true,
+        ..Default::default()
+    });
+    let ct = r.results.iter().find(|c| c.id == 2).unwrap();
+    assert_eq!(ct.verdict, Verdict::Fail);
+    assert!(ct.detail.as_bytes().ends_with(b"lost (the node reset)"));
 }
 
 #[test]

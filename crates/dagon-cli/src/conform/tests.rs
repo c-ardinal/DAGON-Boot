@@ -1,13 +1,14 @@
 //! The conformance run against the simulator: the F401 behind the hub
 //! (RELAY on I2C) and an F401 on the PC's port directly (USB as UART). The
-//! simulated node has no CONF_RUN handler, so a conformance build is
-//! modelled here: CONF_RUN frames are answered by dagon-conform's node
-//! handler over the node's flash; everything else goes to the node.
+//! simulated node has no conformance session, so a conformance build is
+//! modelled here: CONF_LIST, CONF_RUN and CONF_RESULT frames are answered by
+//! dagon-conform's node session, a test running over the node's flash after
+//! its CONF_RUN was answered; everything else goes to the node.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
-use dagon_conform::node::{self, NodeSetup, RESPONSE_MAX};
+use dagon_conform::node::{self, NodeSetup, Session, RESPONSE_MAX};
 use dagon_conform::report::Verdict;
 use dagon_format::header::{image_kind, SIGN_DOMAIN};
 use dagon_format::Version;
@@ -90,9 +91,15 @@ fn the_images_folder_holds_one_pair_per_app_slot() {
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
-/// CONF_RUN answered by the node-side handler, as a conformance build does:
-/// on the MCU definition's scratch, apart from every image.
-fn conf_run(node: &mut SimNode, frame: &[u8], max: usize) -> Option<Vec<u8>> {
+/// A conformance request answered by the node-side session, as a
+/// conformance build does: the test CONF_RUN took runs after the answer, on
+/// the MCU definition's scratch, apart from every image.
+fn conformance(
+    session: &RefCell<Session>,
+    node: &mut SimNode,
+    frame: &[u8],
+    max: usize,
+) -> Option<Vec<u8>> {
     if !node.responsive() {
         return None;
     }
@@ -107,42 +114,42 @@ fn conf_run(node: &mut SimNode, frame: &[u8], max: usize) -> Option<Vec<u8>> {
         scratch: scratch.at,
     };
     let mut out = vec![0u8; RESPONSE_MAX];
-    let n = node::handle_frame(frame, max, &mut *node.flash(), &setup, &mut out, &mut || {})?;
+    let mut session = session.borrow_mut();
+    let n = session.handle_frame(frame, max, &mut out)?;
+    session.run_pending(&mut *node.flash(), &setup, &mut || {});
     out.truncate(n);
     Some(out)
 }
 
-fn is_conf_run(frame: &[u8], max: usize) -> bool {
-    Frame::decode(frame, max).is_ok_and(|(f, _)| f.cmd == Cmd::ConfRun as u8)
+fn is_conformance(frame: &[u8], max: usize) -> bool {
+    Frame::decode(frame, max).is_ok_and(|(f, _)| node::CMDS.has(f.cmd))
 }
 
-/// The relaying node's USB stream, with RELAYed CONF_RUN served by the handler.
+/// The relaying node's USB stream, with RELAYed conformance requests served
+/// by the session.
 #[derive(Clone)]
 struct RelaySim {
     relay: Rc<RefCell<SimRelay>>,
     cut: Rc<RefCell<FrameCutter>>,
     pending: Vec<u8>,
+    session: Rc<RefCell<Session>>,
 }
 
 impl RelaySim {
-    fn relay_conf_run(&mut self, frame: &[u8]) -> Option<Vec<u8>> {
+    fn relay_conformance(&mut self, frame: &[u8]) -> Option<Vec<u8>> {
         let (f, _) = Frame::decode(frame, max_payload::USB).ok()?;
         if f.cmd != Cmd::Relay as u8 {
             return None;
         }
         let r = Relay::parse(f.payload).ok()?;
-        if !is_conf_run(r.inner, max_payload::I2C) {
+        if !is_conformance(r.inner, max_payload::I2C) {
             return None;
         }
-        assert!(
-            u32::from(r.timeout_ms.unwrap_or(0)) >= dagon_port::timeout::CONF_RUN_MS,
-            "CONF_RUN relayed with {} ms",
-            r.timeout_ms.unwrap_or(0)
-        );
         let mut relay = self.relay.borrow_mut();
         relay.advance_ms(dagon_sim::relay::PC_ROUND_TRIP_MS);
         let port = relay.links().iter().find(|l| l.id == r.link)?.port;
-        let inner = conf_run(relay.bus.i2c_node(port, r.addr)?, r.inner, max_payload::I2C);
+        let node = relay.bus.i2c_node(port, r.addr)?;
+        let inner = conformance(&self.session, node, r.inner, max_payload::I2C);
         // OK with the node's frame as bulk, or the relay's E_TIMEOUT alone.
         let mut out = vec![0u8; frame_len(2 + inner.as_ref().map_or(0, Vec::len))];
         let len = match &inner {
@@ -172,7 +179,7 @@ impl Transport for RelaySim {
     async fn write(&mut self, bytes: &[u8]) -> Result<(), ()> {
         let frames = self.cut.borrow_mut().push(bytes, max_payload::USB);
         for f in frames {
-            match self.relay_conf_run(&f) {
+            match self.relay_conformance(&f) {
                 Some(r) => self.pending.extend(r),
                 None => self.relay.borrow_mut().usb_write(&f),
             }
@@ -207,6 +214,7 @@ struct DirectSim {
     now: Rc<Cell<u64>>,
     cut: Rc<RefCell<FrameCutter>>,
     pending: Vec<u8>,
+    session: Rc<RefCell<Session>>,
 }
 
 impl Transport for DirectSim {
@@ -222,8 +230,8 @@ impl Transport for DirectSim {
         let now = self.now.get();
         for f in frames {
             let mut node = self.node.borrow_mut();
-            let r = if is_conf_run(&f, max_payload::UART) {
-                conf_run(&mut node, &f, max_payload::UART)
+            let r = if is_conformance(&f, max_payload::UART) {
+                conformance(&self.session, &mut node, &f, max_payload::UART)
             } else {
                 node.handle_frame(&f, now)
             };
@@ -293,6 +301,7 @@ fn twelve_of_twelve_through_the_hub() {
         relay: Rc::new(RefCell::new(hub)),
         cut: Rc::default(),
         pending: Vec::new(),
+        session: Rc::default(),
     };
     let mut host = Host::new(sim.clone(), sim);
     let (to, link) = seg();
@@ -331,6 +340,7 @@ fn twelve_of_twelve_on_usb_as_uart() {
         now: Rc::default(),
         cut: Rc::default(),
         pending: Vec::new(),
+        session: Rc::default(),
     };
     let mut host = Host::new(sim.clone(), sim);
     let report = run(
@@ -352,6 +362,7 @@ fn unreachable_node_gives_a_full_not_run_file() {
         relay: Rc::new(RefCell::new(hub)),
         cut: Rc::default(),
         pending: Vec::new(),
+        session: Rc::default(),
     };
     let mut host = Host::new(sim.clone(), sim);
     let (to, link) = seg();

@@ -8,8 +8,8 @@
 //!   a board without one emits nothing) and, with `Confirm::Own`, confirms
 //!   the app's trial.
 //!   It waits on both links with interrupt-driven async reads (no polling),
-//!   serves each request (CONF_RUN in a conformance build, ENTER_ROM, the
-//!   agent) and replies on the link the request came in on. Agent access is
+//!   serves each request (the conformance session in a conformance build,
+//!   ENTER_ROM, the agent) and replies on the link the request came in on. Agent access is
 //!   serialized here.
 //! - It runs at [`LINK_PRIORITY`], above the thread-mode executor where the
 //!   app's own tasks run, so the app's work never delays DAGON traffic.
@@ -328,6 +328,9 @@ struct Link {
     /// The flash, for a conformance build's tests.
     #[cfg(feature = "conform")]
     storage: &'static RefCell<FlashStorage<'static>>,
+    /// The conformance session: the test taken and the results.
+    #[cfg(feature = "conform")]
+    session: dagon_conform::node::Session,
     uart: links::Uart,
     usb: links::UsbCdc,
     board: RomBoard,
@@ -405,6 +408,8 @@ impl Link {
             wdt,
             #[cfg(feature = "conform")]
             storage,
+            #[cfg(feature = "conform")]
+            session: dagon_conform::node::Session::new(),
             uart,
             usb,
             board,
@@ -553,20 +558,17 @@ impl Link {
         EspReset.reset()
     }
 
-    /// CONF_RUN in a conformance build, on the definition's scratch
-    /// (`[conformance] scratch`: no image, header or selection data is
-    /// there); without one the request falls through to the agent
-    /// (E_UNSUPPORTED).
+    /// CONF_LIST, CONF_RUN and CONF_RESULT in a conformance build, on the
+    /// definition's scratch (`[conformance] scratch`: no image, header or
+    /// selection data is there); without one the request falls through to
+    /// the agent (E_UNSUPPORTED). The test CONF_RUN took runs first, when
+    /// the next request arrives: CONF_RUN's answer has left by then.
     #[cfg(feature = "conform")]
     fn conform(&mut self, frame: &[u8], via: Via, out: &mut [u8]) -> Option<usize> {
         use crate::layout::REGIONS;
-        use dagon_conform::node::{handle_frame, NodeSetup};
-        use dagon_proto::{Cmd, Frame};
+        use dagon_conform::node::NodeSetup;
 
         let max = dagon_proto::max_payload::UART;
-        if Frame::decode(frame, max).ok()?.0.cmd != Cmd::ConfRun as u8 {
-            return None;
-        }
         let (scratch, _) = crate::CONFORM_SCRATCH?;
         let setup = NodeSetup {
             declared: &REGIONS,
@@ -574,18 +576,20 @@ impl Link {
         };
         let mut flash = EspFlash::new(self.storage);
         let wdt = self.wdt;
+        self.session
+            .run_pending(&mut flash, &setup, &mut || wdt.borrow_mut().feed());
         let ceiling = self.agent.ceiling_on(via as usize).within(max);
-        handle_frame(frame, ceiling, &mut flash, &setup, out, &mut || {
-            wdt.borrow_mut().feed()
-        })
+        self.session.handle_frame(frame, ceiling, out)
     }
 }
 
 /// ENTER_ROM requests not acted on because their OK did not leave the node.
 pub static ROM_REPLY_LOST: AtomicU32 = AtomicU32::new(0);
 
-/// Room for the largest reply frame (agent STATUS 84 B, CONF_RUN 82 B).
+/// Room for the largest reply frame (agent STATUS 84 B, CONF_RESULT 93 B).
 const REPLY_MAX: usize = 128;
+#[cfg(feature = "conform")]
+const _: () = assert!(dagon_conform::node::RESPONSE_MAX <= REPLY_MAX);
 
 /// Copies a received frame out of its link (the link task answers on it).
 fn copy(req: &mut [u8; MAX_UART_FRAME], f: &[u8]) -> usize {

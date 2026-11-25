@@ -10,8 +10,8 @@ use crate::field::{
     read, shortest, shortest_value, FieldSpec, FieldWriter, MsgSpec, Parsed, Refusal,
 };
 use crate::table::{
-    caps, conf_run, confirm, error, hello, i2c_raw, reboot, relay, set_pending, show, status,
-    subctl, version, xfer_begin, xfer_end, ERROR,
+    caps, conf_list, conf_result, conf_run, confirm, error, hello, i2c_raw, reboot, relay,
+    set_pending, show, status, subctl, version, xfer_begin, xfer_end, ERROR,
 };
 use crate::{Cmd, FrameError, Status};
 use dagon_format::header::McuId;
@@ -113,10 +113,21 @@ pub mod boot0 {
     pub const HIGH: u8 = 1;
 }
 
-/// CONF_RUN `verdict`.
+/// CONF_RUN and CONF_RESULT `verdict`.
 pub mod verdict {
+    /// CONF_RUN: the node took the test and runs it after this answer;
+    /// CONF_RESULT tells how it ended.
+    pub const PENDING: u8 = 0;
     pub const PASS: u8 = 1;
     pub const FAIL: u8 = 2;
+}
+
+/// CONF_RESULT `state`.
+pub mod conf_state {
+    /// The test has not run in this session.
+    pub const NONE: u8 = 0;
+    pub const RUNNING: u8 = 1;
+    pub const DONE: u8 = 2;
 }
 
 /// Per-slot state in STATUS.
@@ -1260,23 +1271,51 @@ impl ConfRunReq {
     }
 }
 
-/// CONF_RUN response body, sent when the test has finished.
+/// CONF_LIST response body.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ConfListResp<'a> {
+    /// The `test_id` of every test the node runs.
+    pub tests: &'a [u8],
+}
+
+impl<'a> ConfListResp<'a> {
+    /// The longest body.
+    pub const MAX_LEN: usize = 2 + conf_list::TESTS.max as usize;
+
+    pub fn parse(b: &'a [u8]) -> Result<Self, Status> {
+        let p = rd(b, &Cmd::ConfList.spec().resp)?;
+        Ok(ConfListResp {
+            tests: p.field(&conf_list::TESTS).unwrap_or(&[]),
+        })
+    }
+    pub fn encode(&self, out: &mut [u8]) -> Result<usize, FrameError> {
+        let mut w = FieldWriter::new(out);
+        w.field(&conf_list::TESTS, self.tests)?;
+        Ok(w.len())
+    }
+}
+
+/// CONF_RUN response body: the node took the test (`verdict` PENDING and
+/// the run's number) and runs it after this answer.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ConfRunResp<'a> {
     pub verdict: u8,
+    /// 0 is left out on the wire.
+    pub run_id: u16,
     pub measured: u32,
     pub detail: &'a [u8],
 }
 
 impl<'a> ConfRunResp<'a> {
     /// The longest body.
-    pub const MAX_LEN: usize = 1 + 6 + 2 + CONF_DETAIL_MAX;
+    pub const MAX_LEN: usize = 1 + 6 + 2 + CONF_DETAIL_MAX + 4;
 
     pub fn parse(b: &'a [u8]) -> Result<Self, Status> {
         let p = rd(b, &Cmd::ConfRun.spec().resp)?;
         let [verdict] = at(p.core, 0)?;
         Ok(ConfRunResp {
             verdict,
+            run_id: val(&p, &conf_run::RUN_ID)?.map_or(0, u16::from_le_bytes),
             measured: val(&p, &conf_run::MEASURED)?.map_or(0, u32::from_le_bytes),
             detail: p.field(&conf_run::DETAIL).unwrap_or(&[]),
         })
@@ -1284,8 +1323,68 @@ impl<'a> ConfRunResp<'a> {
     pub fn encode(&self, out: &mut [u8]) -> Result<usize, FrameError> {
         let mut w = FieldWriter::new(out);
         w.put(&[self.verdict])?
-            .field(&conf_run::MEASURED, &self.measured.to_le_bytes())?
-            .field(&conf_run::DETAIL, self.detail)?;
+            .field_unless(&conf_run::MEASURED, &self.measured.to_le_bytes(), &[0; 4])?
+            .field_unless(&conf_run::DETAIL, self.detail, &[])?
+            .field_unless(&conf_run::RUN_ID, &self.run_id.to_le_bytes(), &[0; 2])?;
+        Ok(w.len())
+    }
+}
+
+/// CONF_RESULT request: its `test_id`.
+pub fn parse_conf_result(b: &[u8]) -> Result<u8, Status> {
+    conf_result_of(&rd(b, &Cmd::ConfResult.spec().req)?)
+}
+
+/// From a request the reader accepted.
+pub fn conf_result_of(p: &Parsed<'_>) -> Result<u8, Status> {
+    let [test_id] = at(p.core, 0)?;
+    Ok(test_id)
+}
+
+pub fn encode_conf_result(test_id: u8, out: &mut [u8]) -> Result<usize, FrameError> {
+    let mut w = FieldWriter::new(out);
+    w.put(&[test_id])?;
+    Ok(w.len())
+}
+
+/// CONF_RESULT response body: the node's last run of the test.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ConfResultResp<'a> {
+    /// [`conf_state`].
+    pub state: u8,
+    pub run_id: u16,
+    /// [`verdict`]; PENDING until the state is DONE.
+    pub verdict: u8,
+    pub measured: u32,
+    pub detail: &'a [u8],
+}
+
+impl<'a> ConfResultResp<'a> {
+    /// The longest body.
+    pub const MAX_LEN: usize = 1 + 4 + 3 + 6 + 2 + CONF_DETAIL_MAX;
+
+    pub fn parse(b: &'a [u8]) -> Result<Self, Status> {
+        let p = rd(b, &Cmd::ConfResult.spec().resp)?;
+        let [state] = at(p.core, 0)?;
+        Ok(ConfResultResp {
+            state,
+            run_id: val(&p, &conf_result::RUN_ID)?.map_or(0, u16::from_le_bytes),
+            verdict: byte(&p, &conf_result::VERDICT, verdict::PENDING)?,
+            measured: val(&p, &conf_result::MEASURED)?.map_or(0, u32::from_le_bytes),
+            detail: p.field(&conf_result::DETAIL).unwrap_or(&[]),
+        })
+    }
+    pub fn encode(&self, out: &mut [u8]) -> Result<usize, FrameError> {
+        let mut w = FieldWriter::new(out);
+        w.put(&[self.state])?
+            .field_unless(&conf_result::RUN_ID, &self.run_id.to_le_bytes(), &[0; 2])?
+            .field_unless(&conf_result::VERDICT, &[self.verdict], &[verdict::PENDING])?
+            .field_unless(
+                &conf_result::MEASURED,
+                &self.measured.to_le_bytes(),
+                &[0; 4],
+            )?
+            .field_unless(&conf_result::DETAIL, self.detail, &[])?;
         Ok(w.len())
     }
 }
@@ -1358,7 +1457,9 @@ requests! {
     Relay(Relay<'a>) relay = Relay::of;
     SubCtl(SubCtl) sub_ctl = SubCtl::of;
     I2cRaw(I2cRaw<'a>) i2c_raw = I2cRaw::of;
+    ConfList(()) conf_list = nothing;
     ConfRun(ConfRunReq) conf_run = ConfRunReq::of;
+    ConfResult(u8) conf_result = conf_result_of;
 }
 
 /// Bytes of an XFER_HDR / XFER_DATA response body: the next offset.
@@ -1380,7 +1481,9 @@ impl Req<'_> {
             Req::XferData(_) | Req::XferHdr(_) => NEXT_OFFSET_LEN,
             Req::XferEnd(()) => DIGEST_LEN,
             Req::I2cRaw(raw) => BULK_RESP_AT + usize::from(raw.read_len),
+            Req::ConfList(()) => ConfListResp::MAX_LEN,
             Req::ConfRun(_) => ConfRunResp::MAX_LEN,
+            Req::ConfResult(_) => ConfResultResp::MAX_LEN,
             Req::Relay(_) => return None,
             Req::Stay(())
             | Req::XferBegin(_)
@@ -1411,6 +1514,7 @@ impl Req<'_> {
 // The table's lengths are the ones the typed payloads name.
 const _: () = assert!(show::TEXT.max as usize == SHOW_TEXT_MAX);
 const _: () = assert!(conf_run::DETAIL.max as usize == CONF_DETAIL_MAX);
+const _: () = assert!(conf_result::DETAIL.max as usize == CONF_DETAIL_MAX);
 const _: () = assert!(version::BOOTCORE_SLOTS.max as usize == VersionSlots::<2>::LEN);
 const _: () = assert!(version::APP_SLOTS.max as usize == VersionSlots::<3>::LEN);
 

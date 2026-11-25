@@ -1,12 +1,14 @@
 //! DAGON conformance tests: the 12 normal-path checks a port must pass.
 //!
-//! Everything is synchronous: a test runs to completion before it answers.
+//! A test that runs inside the node is asynchronous: CONF_RUN answers at
+//! once, the test runs after the answer, and CONF_RESULT tells how it
+//! ended, within the test's deadline.
 //!
-//! - [`node`]: the CONF_RUN handler a conformance build of the node app
+//! - [`node`]: the conformance session a conformance build of the node app
 //!   serves (CT-01, CT-02, CT-03, CT-07, CT-08 run inside the node).
 //! - [`pc`]: the sequence the PC drives through the hub (CT-04, CT-09,
-//!   CT-10, CT-11, CT-12, CT-18, CT-20), plus the CONF_RUN calls for the
-//!   node-side tests.
+//!   CT-10, CT-11, CT-12, CT-18, CT-20), plus the CONF_LIST, CONF_RUN and
+//!   CONF_RESULT calls for the node-side tests.
 //! - [`report`]: results and the result file (JSON) the CLI and the browser
 //!   read.
 //!

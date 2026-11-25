@@ -486,6 +486,11 @@ macro_rules! __machine {
 
                 impl $crate::__private::Generated for $ev {}
 
+                impl $crate::Kind for $ev {
+                    const REPLAYS: bool =
+                        $ev::ENTRY.observe.replay && !$ev::ENTRY.flags.retired;
+                }
+
                 impl $crate::Payload for $ev {
                     fn layer(&self) -> $crate::Layer {
                         $crate::Layer::$layer
@@ -493,13 +498,6 @@ macro_rules! __machine {
 
                     fn kind(&self) -> u8 {
                         $code
-                    }
-
-                    fn replays(&self) -> bool {
-                        // A constant, so the entry is not linked.
-                        const REPLAYS: bool =
-                            $ev::ENTRY.observe.replay && !$ev::ENTRY.flags.retired;
-                        REPLAYS
                     }
 
                     #[allow(unused_mut, unused_variables, unused_assignments)]

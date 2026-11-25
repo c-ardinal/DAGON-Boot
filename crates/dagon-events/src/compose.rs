@@ -396,8 +396,8 @@ impl<H: Head, B: Extension, U: Extension, C> Composed<H, B, U, C> {
     /// Re-emits what an earlier stage left in the state log as its typed
     /// event with `replayed: true`. Only kinds the catalog marks `replay`
     /// and not `retired` are replayed. A layer-start API.
-    pub fn replay(&mut self, p: &dyn Payload) -> Result<(), NotReplayed> {
-        if !p.replays() {
+    pub fn replay<P: crate::Kind>(&mut self, p: &P) -> Result<(), NotReplayed> {
+        if !P::REPLAYS {
             return Err(NotReplayed);
         }
         self.parts.send(&Event::replayed(p));

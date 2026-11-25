@@ -32,7 +32,7 @@ pub use compose::{
     compose, compose_boot, compose_unpublished, BootComposed, BootExtension, Bounds, Clock,
     Composed, Head, NoPublisher, NotReplayed, Sink, Watchdog,
 };
-pub use event::{Event, EventRecord, Layer, Payload, Refused};
+pub use event::{Event, EventRecord, Kind, Layer, Payload, Refused};
 pub use extension::{
     Accept, Chain, Ctx, DecisionId, DecisionPoint, Delay, ExtId, Extension, Health, Nop,
     RebootRequest, TrialInfo, UpdateOffer, DECISIONS, DECISION_BOUND_MS,

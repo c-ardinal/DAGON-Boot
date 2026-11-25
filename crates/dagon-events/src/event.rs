@@ -45,8 +45,13 @@ pub trait Payload: crate::sealed::SealedPayload + Any {
     fn kind(&self) -> u8;
     /// The owned form ([`EventRecord::payload`]): the fields in order.
     fn compact(&self) -> [u8; PAYLOAD_BYTES];
+}
+
+/// What is known of a payload's kind where its type is: a constant, so
+/// asking costs a firmware image no table and no call.
+pub trait Kind: Payload + Sized {
     /// Whether the catalog marks the kind `replay` and not `retired`.
-    fn replays(&self) -> bool;
+    const REPLAYS: bool;
 }
 
 /// An event as extensions observe it: a borrowed payload and whether it

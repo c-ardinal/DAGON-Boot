@@ -132,7 +132,10 @@ pub const RECOVERY_DEFINITION: &str = "recovery-mcu.toml";
 /// ([`definition`] has checked the folder's hashes first).
 fn recovery_text(folder: &Path) -> Option<String> {
     let path = folder.join(RECOVERY_DEFINITION);
-    println!("cargo:rerun-if-changed={}", recovery_watch(folder).display());
+    println!(
+        "cargo:rerun-if-changed={}",
+        recovery_watch(folder).display()
+    );
     path.is_file().then(|| read(&path))
 }
 

@@ -157,6 +157,12 @@ struct Faults {
     /// (command, n): the response to every such request after the first n
     /// is lost.
     drop_resp_after: Option<(u8, usize)>,
+    /// (command, n): every such request after the first n never reaches the
+    /// hub.
+    drop_req_after: Option<(u8, usize)>,
+    /// The response to every request with this command to the hub itself
+    /// (not relayed) is lost.
+    drop_local_resp: Option<u8>,
     /// The node holds NRST low during the next RELAY (it NACKs), then is
     /// released.
     nack_once: bool,
@@ -224,6 +230,10 @@ impl Transport for Sim {
             d.1 -= 1;
             return Ok(());
         }
+        let sent = f.seen.iter().filter(|s| s.0 == cmd).count();
+        if f.drop_req_after.is_some_and(|(c, k)| c == cmd && sent > k) {
+            return Ok(());
+        }
         let mut hub = self.relay.borrow_mut();
         if cmd == Cmd::XferEnd as u8 {
             let seg = hub
@@ -248,7 +258,8 @@ impl Transport for Sim {
             f.drop_resp_first = None;
         }
         let after = f.drop_resp_after.is_some_and(|(c, k)| c == cmd && n > k);
-        if every || first || after {
+        let local = bytes[5] != Cmd::Relay as u8 && f.drop_local_resp == Some(cmd);
+        if every || first || after || local {
             hub.usb_read();
         }
         Ok(())
@@ -2649,4 +2660,34 @@ fn a_node_whose_way_back_lost_its_replies_is_reported_as_it_runs() {
         matches!(out[0].outcome, Outcome::Realigned(v) if v == Version::new(1, 0, 0)),
         "{out:?}"
     );
+}
+
+/// The seg goes back, but no CONFIRM of that reaches it: it stays on trial,
+/// so no version of it is settled and the result is a failure.
+#[test]
+fn a_node_left_on_trial_on_its_way_back_is_a_failure() {
+    let faults = Faults {
+        drop_req_after: Some((Cmd::Confirm as u8, 1)),
+        ..Default::default()
+    };
+    let (mut h, out) = refused_hub(LOCKSTEP, faults);
+    assert!(matches!(out[0].outcome, Outcome::Failed(_)), "{out:?}");
+    assert!(block_on(h.status(seg_at())).unwrap().hello.trial);
+}
+
+/// The hub's STATUS replies are lost, so the host sends it nothing and has
+/// no state of it from its turn. It still answers HELLO on its earlier
+/// version: the seg goes back to stay in lockstep with it.
+#[test]
+fn a_node_whose_state_could_not_be_read_still_counts_for_a_constraint() {
+    let faults = Faults {
+        drop_local_resp: Some(Cmd::Status as u8),
+        ..Default::default()
+    };
+    let (_h, out) = refused_hub(LOCKSTEP, faults);
+    assert!(
+        matches!(out[0].outcome, Outcome::Realigned(v) if v == Version::new(1, 0, 0)),
+        "{out:?}"
+    );
+    assert!(matches!(out[1].outcome, Outcome::Failed(_)), "{out:?}");
 }

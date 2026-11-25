@@ -266,10 +266,14 @@ impl<T: Transport, C: HostClock> Host<T, C> {
                     Ok(h) => (was, h.active_version),
                     Err(_) => continue,
                 },
-                (Outcome::NotStarted, _) => match self.hello(r.target).await {
-                    Ok(h) => (h.active_version, h.active_version),
-                    Err(_) => continue,
-                },
+                // Nothing was sent to a node that was not started, or whose
+                // state could not be read: it runs what it ran.
+                (Outcome::NotStarted, _) | (Outcome::Failed(_), None) => {
+                    match self.hello(r.target).await {
+                        Ok(h) => (h.active_version, h.active_version),
+                        Err(_) => continue,
+                    }
+                }
                 _ => continue,
             };
             nodes.push(crate::realign::Node {
@@ -311,8 +315,9 @@ impl<T: Transport, C: HostClock> Host<T, C> {
                     Ok(h) if !h.trial && Some(h.active_version) == *was => {
                         Outcome::Realigned(h.active_version)
                     }
-                    Ok(h) => Outcome::Incompatible(h.active_version),
-                    Err(_) => Outcome::Failed(e),
+                    Ok(h) if !h.trial => Outcome::Incompatible(h.active_version),
+                    // On trial or silent, no version of the node is settled.
+                    _ => Outcome::Failed(e),
                 },
             };
         }

@@ -58,6 +58,17 @@ Options:
   -h, --help
           Print help
 
+Words:
+  node      One microcontroller of your setup
+  hub       The node on the PC's USB; it relays writes to the other nodes
+  topology  The nodes, their links and the write order (topology.yaml)
+  link      A connection between two nodes
+  image     A program written to a node: a signed header and a body
+  package   A file (.dgb) holding the images signed for a topology
+  slot      The flash area that holds one image
+  trial     How a new version runs after its write, until it is confirmed
+  confirm   The decision to keep a new version on trial
+
 Most commands take their defaults from ./dagon.toml (or --config <file>).
 The hub is found by USB ID c0de:cafe or product "DAGON hub" unless --port is given.
 The secret key file is --key <file> or $DAGON_SIGNING_KEY and must lie outside any git
@@ -527,7 +538,7 @@ Options:
           Secret signing key file, outside any git work tree [default: the one set of $DAGON_SIGNING_KEY_COMMAND, $DAGON_SIGNING_KEY_SEED, $DAGON_SIGNING_KEY]
 
       --no-host-verify
-          Leave signature and digest checks to the nodes (for demonstration only)
+          Leave signature and digest checks to the nodes (to see a node refuse an image)
 
       --config <FILE>
           Project file the defaults come from [default: ./dagon.toml]

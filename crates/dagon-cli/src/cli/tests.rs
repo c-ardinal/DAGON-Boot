@@ -854,6 +854,10 @@ fn top_help_lists_the_commands_under_task_headings() {
     .map(|(h, c)| (h.to_string(), c.into_iter().map(String::from).collect()))
     .collect();
     let mut got = help_sections(&help);
+    let (words, terms) = got.pop().expect("the Words section");
+    assert_eq!(words, "Words", "{help}");
+    let listed: Vec<&str> = super::WORDS.iter().map(|(w, _)| *w).collect();
+    assert_eq!(terms, listed, "{help}");
     let last = got.pop().map(|(h, _)| h);
     assert_eq!(last.as_deref(), Some("Options"), "{help}");
     assert_eq!(got, want, "{help}");
@@ -862,6 +866,32 @@ fn top_help_lists_the_commands_under_task_headings() {
         help.contains("`dagon <command> --help` describes"),
         "{help}"
     );
+}
+
+#[test]
+fn every_word_of_the_help_is_a_term_of_the_documentation() {
+    let page = include_str!("../../../../site/src/content/docs/en/explanation/words.md");
+    for (word, meaning) in super::WORDS {
+        assert!(page.contains(&format!("- **{word}**: ")), "{word}");
+        assert!(
+            !meaning.ends_with('.'),
+            "{word}: as the command list, no full stop"
+        );
+    }
+    // The product's own words: neither names a thing of DAGON's.
+    let mut root = super::command();
+    root.build();
+    let mut helps = vec![root.render_long_help().to_string()];
+    helps.extend(
+        root.get_subcommands_mut()
+            .map(|c| c.render_long_help().to_string()),
+    );
+    for help in helps {
+        let lower = help.to_lowercase();
+        for word in ["desk", "demo"] {
+            assert!(!lower.contains(word), "{word} in:\n{help}");
+        }
+    }
 }
 
 #[test]

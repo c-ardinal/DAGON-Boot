@@ -1,7 +1,9 @@
 //! Seeded scenario runs of every world: the default profile in `cargo
 //! test`, the full profile as `--ignored` (run it with `--release`).
 
+use dagon_retained_model::codec::{CodecWorld, TopologyCodec, TrialCellCodec};
 use dagon_retained_model::harness::{run_many, run_params, World};
+use dagon_retained_model::identity::{IdentityWorld, Production};
 use dagon_retained_model::world_hand_off::HandOffWorld;
 use dagon_retained_model::world_trial::TrialWorld;
 
@@ -37,4 +39,37 @@ fn hand_off_default() {
 #[ignore = "full profile: cargo test --release -- --ignored"]
 fn hand_off_full() {
     go::<HandOffWorld>("hand_off", FULL);
+}
+
+#[test]
+fn identity_default() {
+    go::<IdentityWorld<Production>>("identity", DEFAULT);
+}
+
+#[test]
+#[ignore = "full profile: cargo test --release -- --ignored"]
+fn identity_full() {
+    go::<IdentityWorld<Production>>("identity", FULL);
+}
+
+#[test]
+fn topology_codec_default() {
+    go::<CodecWorld<TopologyCodec>>("topology codec", DEFAULT);
+}
+
+#[test]
+#[ignore = "full profile: cargo test --release -- --ignored"]
+fn topology_codec_full() {
+    go::<CodecWorld<TopologyCodec>>("topology codec", FULL);
+}
+
+#[test]
+fn trial_cell_codec_default() {
+    go::<CodecWorld<TrialCellCodec>>("trial cell codec", DEFAULT);
+}
+
+#[test]
+#[ignore = "full profile: cargo test --release -- --ignored"]
+fn trial_cell_codec_full() {
+    go::<CodecWorld<TrialCellCodec>>("trial cell codec", FULL);
 }

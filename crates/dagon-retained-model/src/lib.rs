@@ -8,9 +8,13 @@
 //! the app hand-off through that cell) generate seeded scenarios with
 //! faults, run them against an oracle and check their properties after
 //! every operation; a failure shrinks to a minimal case ([`harness`]).
-//! [`identity`] holds the MCU identity rules.
+//! [`identity`] holds the MCU identity rules and [`codec`] the shape of a
+//! codec; the shipped identity and the shipped codecs of the compiled
+//! topology and the trial cell run in the same harness
+//! ([`identity::IdentityWorld`], [`codec::CodecWorld`]).
 #![forbid(unsafe_code)]
 
+pub mod codec;
 pub mod harness;
 pub mod identity;
 pub mod rng;

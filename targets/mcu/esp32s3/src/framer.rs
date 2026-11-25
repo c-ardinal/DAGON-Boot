@@ -1,17 +1,20 @@
-//! Cuts DAGON frames out of a UART byte stream: SOF search, length bound and
-//! CRC come from `dagon_proto::Frame::decode`; anything that fails is skipped
-//! up to the next possible SOF.
+//! Cuts DAGON frames out of a UART byte stream, one byte at a time: the
+//! shared reader (`dagon_mcu_common::frames::FrameReader`) searches the
+//! SOF, bounds the length, checks the CRC and skips what fails up to the
+//! next possible SOF. This keeps a frame it handed out until the next
+//! byte, and the arrival times as the wrapping milliseconds this MCU's
+//! tasks count in.
 
-use dagon_proto::{find_sof, frame_len, max_payload, Frame, FrameError, SOF};
+use dagon_mcu_common::frames::{FrameReader, GAP_MS};
+use dagon_proto::{frame_len, max_payload};
 
 /// Largest frame on the UART link (1024-byte payload).
 pub const MAX_UART_FRAME: usize = frame_len(max_payload::UART);
 /// A partial frame is dropped after this long without a byte.
-pub const INTER_BYTE_TIMEOUT_MS: u32 = 20;
+pub const INTER_BYTE_TIMEOUT_MS: u32 = GAP_MS as u32;
 
 pub struct FrameCutter {
-    buf: [u8; MAX_UART_FRAME],
-    len: usize,
+    reader: FrameReader<MAX_UART_FRAME>,
     /// Length of the frame handed out by the last `push`, dropped on the next.
     done: usize,
     /// Arrival time (ms, wrapping) of the last byte given to `push_at`.
@@ -27,8 +30,7 @@ impl Default for FrameCutter {
 impl FrameCutter {
     pub const fn new() -> Self {
         Self {
-            buf: [0; MAX_UART_FRAME],
-            len: 0,
+            reader: FrameReader::new(max_payload::UART),
             done: 0,
             last_ms: 0,
         }
@@ -39,16 +41,16 @@ impl FrameCutter {
     /// after the receiver could not run for longer than
     /// [`INTER_BYTE_TIMEOUT_MS`].
     pub fn drop_partial(&mut self) {
-        if self.len > self.done {
-            self.len = self.done;
-        }
+        self.reader.truncate(self.done);
     }
 
     /// [`FrameCutter::push`] for a byte that arrived at `now_ms`: a partial
     /// frame older than [`INTER_BYTE_TIMEOUT_MS`] is dropped first, and the
     /// search for the next SOF starts over.
     pub fn push_at(&mut self, byte: u8, now_ms: u32) -> Option<&[u8]> {
-        if self.len > self.done && now_ms.wrapping_sub(self.last_ms) >= INTER_BYTE_TIMEOUT_MS {
+        if self.reader.buffered() > self.done
+            && now_ms.wrapping_sub(self.last_ms) >= INTER_BYTE_TIMEOUT_MS
+        {
             self.clear();
         }
         self.last_ms = now_ms;
@@ -57,50 +59,20 @@ impl FrameCutter {
 
     /// Forgets any partial frame (after a receive error).
     pub fn clear(&mut self) {
-        self.len = 0;
+        self.reader.clear();
         self.done = 0;
     }
 
     /// Feeds one byte; returns the frame it completed, valid until the next call.
     pub fn push(&mut self, byte: u8) -> Option<&[u8]> {
         if self.done > 0 {
-            self.drop_front(self.done);
+            self.reader.consume(self.done);
             self.done = 0;
         }
-        if self.len == 0 && byte != SOF[0] {
-            return None;
-        }
-        // Never full here: an incomplete frame is shorter than MAX_UART_FRAME,
-        // longer ones fail decode with TooLong and get skipped.
-        self.buf[self.len] = byte;
-        self.len += 1;
-        while self.len > 0 {
-            match Frame::decode(&self.buf[..self.len], max_payload::UART).map(|(_, n)| n) {
-                Ok(n) => {
-                    self.done = n;
-                    return Some(&self.buf[..n]);
-                }
-                Err(FrameError::Incomplete) => return None,
-                // A frame of another wire version: its start goes on, for
-                // the answer that refuses it (`dagon_proto::version_refusal`).
-                Err(FrameError::BadVersion)
-                    if dagon_proto::is_refused_start(&self.buf[..self.len]) =>
-                {
-                    self.done = dagon_proto::REFUSED_LEN;
-                    return Some(&self.buf[..self.done]);
-                }
-                Err(_) => {
-                    let next = find_sof(&self.buf[..self.len], 1).unwrap_or(self.len);
-                    self.drop_front(next);
-                }
-            }
-        }
-        None
-    }
-
-    fn drop_front(&mut self, n: usize) {
-        self.buf.copy_within(n..self.len, 0);
-        self.len -= n;
+        self.reader.push(&[byte]);
+        let n = self.reader.poll()?;
+        self.done = n;
+        Some(self.reader.frame(n))
     }
 }
 

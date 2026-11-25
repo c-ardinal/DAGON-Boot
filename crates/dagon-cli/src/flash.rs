@@ -566,11 +566,12 @@ pub(crate) fn build_parts(
         };
         // A boot core library is linked into the node's boot crate, which
         // is what builds (slot A, as for a first write).
+        let mut target = cfg.base.join("out/flash/target").join(&part.name);
         if boot_library(&dir)? {
             dir = boot_crate(cfg, n)?;
             bin = BOOT_BIN.to_string();
+            target = boot_core_target(cfg);
         }
-        let target = cfg.base.join("out/flash/target").join(&part.name);
         log(&format!(
             "{node}: building {} in {}",
             part.name,
@@ -638,12 +639,9 @@ pub(crate) fn build_core_slots(
         return Ok(Vec::new());
     }
     let dir = boot_crate(cfg, n)?;
-    // One target folder for the node's slots: cargo keeps the builds apart
-    // by their features, so the second slot compiles only what differs.
-    let target = cfg
-        .base
-        .join("out/deploy/target")
-        .join(format!("{}-boot", n.id));
+    // One target folder for the slots: cargo keeps the builds apart by
+    // their features, so the second slot compiles only what differs.
+    let target = boot_core_target(cfg);
     let mut out = Vec::new();
     for (slot, features) in slots {
         log(&format!("{}: building the boot core for slot {slot}", n.id));
@@ -668,6 +666,13 @@ pub(crate) fn build_core_slots(
 }
 
 /// The features node `id`'s boot core builds with for a release.
+/// The target folder every build of a boot crate uses, a first write's and
+/// a release's alike: a release after a first write finds slot A's boot
+/// core built (the same crate, features and inputs) and compiles nothing.
+fn boot_core_target(cfg: &Config) -> PathBuf {
+    cfg.base.join("out/boot/target")
+}
+
 fn core_features(cfg: &Config, id: &str, slot_b: bool) -> Vec<String> {
     let linked = slot_b.then(|| SLOT_B_FEATURE.to_string());
     let asked = cfg.build.get(id).map(|b| b.boot_features.clone());

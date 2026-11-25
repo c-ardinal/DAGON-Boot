@@ -15,6 +15,10 @@ block types and `take!`.
 | Flash | 16 MB (`FLASH_SIZE`, espflash `--flash-size 16mb`); partition table from the MCU crate |
 | Node tag | `TARGET_TAG`: `DAGON_TARGET_TAG` at build time (the node's tag in the 構成; the build fails without it) |
 
+The definition has no `[boot]` section (boot LED, halt pattern, power
+hold): the ESP32-S3 starts its app from the vendor's 2nd stage, so no DAGON
+boot stage runs that would read it.
+
 `start` opens the internal bus and puts it into `SYS_I2C`
 (`dagon_events::Shared`); DAGON's bring-up (`M5StopWatch`, the
 `BoardBringUp` port and the MCU crate's `BoardDef`) and the app both take it

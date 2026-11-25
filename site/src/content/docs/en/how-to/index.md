@@ -13,4 +13,5 @@ These guides go on from there.
 - [Swapping a link](/en/how-to/swap-link/): change how a node is linked
 - [Adding DAGON to existing firmware](/en/how-to/existing-firmware/): add it to firmware not made by `dagon new`
 - [Adding an MCU or a link](/en/how-to/new-mcu-or-link/): give DAGON a new MCU or link
+- [Writing an extension](/en/how-to/extensions/): observe update events, answer decision points and replace a port
 - [Claude help in your project](/en/how-to/claude-help/): the Claude Code instructions and skills a new project comes with

@@ -280,27 +280,40 @@ impl<T: Transport, C: HostClock> Host<T, C> {
             });
         }
         let plan = crate::realign::realign(&constraints, &nodes);
-        for r in out.iter_mut() {
-            let Outcome::Done(v) = r.outcome else {
-                continue;
+        for (r, was) in out.iter_mut().zip(before) {
+            // A node that failed and still came up on the release's version,
+            // confirmed, goes back like one that is done; it keeps its
+            // failure as its result.
+            let done = match r.outcome {
+                Outcome::Done(v) => Some(v),
+                Outcome::Failed(_) => None,
+                _ => continue,
             };
-            if plan.stuck.contains(&r.node) {
+            if let (Some(v), true) = (done, plan.stuck.contains(&r.node)) {
                 r.outcome = Outcome::Incompatible(v);
             }
             if !plan.back.contains(&r.node) {
                 continue;
             }
             let slots = slots_of(b, r.node, image_kind::APP);
-            r.outcome = match self.rollback(r.target, r.node, &slots, on_event).await {
-                Ok(was) => Outcome::Realigned(was),
-                Err(e) => {
-                    self.note(&format!(
-                        "{:?}: could not go back from {v}: {}",
-                        r.target,
-                        reason(&e)
-                    ));
-                    Outcome::Incompatible(v)
-                }
+            let went = self.rollback(r.target, r.node, &slots, on_event).await;
+            if let Err(e) = &went {
+                self.note(&format!("{:?}: could not go back: {}", r.target, reason(e)));
+            }
+            if done.is_none() {
+                continue;
+            }
+            r.outcome = match went {
+                Ok(v) => Outcome::Realigned(v),
+                // The switch may have happened before the error: what the
+                // node runs now is read again, not assumed.
+                Err(e) => match self.hello(r.target).await {
+                    Ok(h) if !h.trial && Some(h.active_version) == *was => {
+                        Outcome::Realigned(h.active_version)
+                    }
+                    Ok(h) => Outcome::Incompatible(h.active_version),
+                    Err(_) => Outcome::Failed(e),
+                },
             };
         }
     }

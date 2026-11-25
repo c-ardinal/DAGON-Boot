@@ -154,6 +154,9 @@ struct Faults {
     drop_resp_every: Option<(u8, usize)>,
     /// The response to the next request with this command is lost.
     drop_resp_first: Option<u8>,
+    /// (command, n): the response to every such request after the first n
+    /// is lost.
+    drop_resp_after: Option<(u8, usize)>,
     /// The node holds NRST low during the next RELAY (it NACKs), then is
     /// released.
     nack_once: bool,
@@ -244,7 +247,8 @@ impl Transport for Sim {
         if first {
             f.drop_resp_first = None;
         }
-        if every || first {
+        let after = f.drop_resp_after.is_some_and(|(c, k)| c == cmd && n > k);
+        if every || first || after {
             hub.usb_read();
         }
         Ok(())
@@ -2525,6 +2529,11 @@ fn wire(enc: impl FnOnce(&mut [u8]) -> Result<usize, dagon_proto::FrameError>) -
 /// with the hub's images tampered (the hub refuses them), the host-side
 /// checks off. The seg is written first and confirms.
 fn apply_with_a_refused_hub(constraints: &str) -> (Host<Sim, Sim>, Vec<NodeOutcome<()>>) {
+    refused_hub(constraints, Faults::default())
+}
+
+/// [`apply_with_a_refused_hub`] over a link with `faults`.
+fn refused_hub(constraints: &str, faults: Faults) -> (Host<Sim, Sim>, Vec<NodeOutcome<()>>) {
     use dagon_format::bundle::{dest, BundleView};
     let yaml = format!("{}{constraints}", yaml());
     let t = dagon_topology::parse_str(&yaml).unwrap();
@@ -2546,8 +2555,10 @@ fn apply_with_a_refused_hub(constraints: &str) -> (Host<Sim, Sim>, Vec<NodeOutco
         b[off + 0x18] ^= 1;
     }
     let s = sim();
+    *s.faults.borrow_mut() = faults;
     let mut h = host(&s);
     let out = block_on(h.apply_unverified(&b, &topology(&yaml), None, &mut |_| {})).unwrap();
+    *s.faults.borrow_mut() = Faults::default();
     (h, out)
 }
 
@@ -2598,6 +2609,42 @@ fn a_node_that_needs_the_one_that_stayed_goes_back() {
     let (_h, out) = apply_with_a_refused_hub(
         "constraints:\n  - requires: { node: seg, needs: hub, min: 1.1.0 }\n",
     );
+    assert!(
+        matches!(out[0].outcome, Outcome::Realigned(v) if v == Version::new(1, 0, 0)),
+        "{out:?}"
+    );
+}
+
+const LOCKSTEP: &str = "constraints:\n  - lockstep: [hub, seg]\n";
+
+/// The seg confirmed the new version but no CONFIRM reply reached the host:
+/// it failed for the host, and the hub was not started. It goes back as a
+/// node that is done would, and keeps its failure as its result.
+#[test]
+fn a_failed_node_that_confirmed_the_new_version_goes_back_too() {
+    let faults = Faults {
+        drop_resp_every: Some((Cmd::Confirm as u8, 1)),
+        ..Default::default()
+    };
+    let (mut h, out) = refused_hub(LOCKSTEP, faults);
+    assert!(matches!(out[0].outcome, Outcome::Failed(_)), "{out:?}");
+    assert!(matches!(out[1].outcome, Outcome::NotStarted), "{out:?}");
+    let st = block_on(h.status(seg_at())).unwrap();
+    assert_eq!(
+        (st.hello.active_version, st.hello.trial, st.status.confirmed),
+        (Version::new(1, 0, 0), false, 0)
+    );
+}
+
+/// The seg goes back, but the replies to that CONFIRM are lost: the host
+/// reads what the seg runs and reports that, not the version it left.
+#[test]
+fn a_node_whose_way_back_lost_its_replies_is_reported_as_it_runs() {
+    let faults = Faults {
+        drop_resp_after: Some((Cmd::Confirm as u8, 1)),
+        ..Default::default()
+    };
+    let (_h, out) = refused_hub(LOCKSTEP, faults);
     assert!(
         matches!(out[0].outcome, Outcome::Realigned(v) if v == Version::new(1, 0, 0)),
         "{out:?}"

@@ -49,7 +49,7 @@ The result of each node tells what happened:
 | `done, <version>` | Runs the new version, confirmed. |
 | `back on <version>` | Was written and confirmed, then went back for a constraint. |
 | `on <version>, against a compatibility constraint ...` | A constraint does not hold and the node could not go back: it has one slot, its other slot holds no valid image, or it ran the new version before this write. |
-| `stopped: ...` | The node the write stopped at. |
+| `stopped: ...` | The node the write stopped at. When it runs the new version, confirmed (the replies to its confirm were lost), it goes back for a constraint as well and keeps this result. |
 | `not started` | A node after it. |
 
 The command ends with an error whenever a node failed, so a script sees a write that left the nodes on mixed versions.

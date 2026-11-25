@@ -314,7 +314,7 @@ build runner are ports (2.1).
 | Case | When | The write | `host.node.result` |
 |---|---|---|---|
 | Lost | A record of the node exists (it answered before) | Stops | `Failed(LOST)` |
-| Never reached | The records are complete and none is of the node (a node added to the topology and not yet written) | Skips the node, goes on, and points to its first, direct write | `NeedsFirstWrite` |
+| Never reached | The records are complete and none is of the node (a node added to the topology that was never written) | Skips the node, goes on, and points to its first, direct write | `NeedsFirstWrite` |
 | History unknown | The records cannot be checked: the node on the PC does not serve PEERS, the read failed, or the records are not complete (no PEERS_KEPT, or the limit reached) | Stops | `Failed(HISTORY UNKNOWN)` |
 
 - Only a node the node on the PC reported as not answering (RELAY `E_TIMEOUT`) is told apart. A node on the PC that does not answer is a failed connection: the host starts that exchange, and the host keeps no records.

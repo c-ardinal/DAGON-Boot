@@ -28,6 +28,37 @@ pub mod kind {
     /// UPDATE_STAY's).
     pub const UPDATE_DONE: u8 = 0x09;
     pub const SNAPSHOT: u8 = 0x0A;
+    /// The log has kept every [`PEER_SEEN`] since the first write.
+    /// Node-wide (fields as UPDATE_STAY's). Only the log a first write
+    /// makes holds it: no node appends it, a compaction copies it, and a
+    /// log rebuilt or made by an older release has none, so records that
+    /// were lost are never taken for a peer that never answered.
+    pub const PEERS_KEPT: u8 = 0x0B;
+    /// A node this one relays to answered with a valid frame at least
+    /// once. Node-wide; `digest16[0]` is the relay link's id and
+    /// `digest16[1]` the node's address on it ([`super::peer`]). One for
+    /// each peer.
+    pub const PEER_SEEN: u8 = 0x0C;
+}
+
+/// The peer records of a node that relays: where a [`kind::PEER_SEEN`]
+/// names its peer in `digest16`, and how many a log holds.
+pub mod peer {
+    pub const LINK: usize = 0;
+    pub const ADDR: usize = 1;
+    /// The most [`super::kind::PEER_SEEN`] records a log holds.
+    pub const MAX: usize = 16;
+
+    /// Records a face of a relaying node's app log must hold, so a
+    /// compaction with every peer recorded still leaves the room of a
+    /// trial (`attempts`: the boot attempts a trial gets): the carried
+    /// state of both targets (four records and the attempts each), the
+    /// room kept for the trials (`2 * (attempts + 3)`), the stay and its
+    /// consumption, PEERS_KEPT, every PEER_SEEN and the record being
+    /// appended (`dagon_core::log` checks the sum against its own parts).
+    pub const fn face_records(attempts: u8) -> u32 {
+        4 * attempts as u32 + 18 + MAX as u32
+    }
 }
 
 /// Record `reason` values written by this release (0 = none).
@@ -156,8 +187,13 @@ mod tests {
             kind::PROVISION,
             kind::UPDATE_DONE,
             kind::SNAPSHOT,
+            kind::PEERS_KEPT,
+            kind::PEER_SEEN,
         ];
-        assert_eq!(kinds, [0x01, 0x02, 0x03, 0x04, 0x06, 0x08, 0x09, 0x0A]);
+        assert_eq!(
+            kinds,
+            [0x01, 0x02, 0x03, 0x04, 0x06, 0x08, 0x09, 0x0A, 0x0B, 0x0C]
+        );
         for k in kinds {
             let r = Record {
                 kind: k,

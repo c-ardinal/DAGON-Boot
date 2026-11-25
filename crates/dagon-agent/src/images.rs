@@ -5,7 +5,7 @@ use dagon_events::{compose_unpublished, Layer, Nop, Refused, Sink};
 use dagon_format::header::HEADER_SIZE;
 use dagon_format::Version;
 use dagon_port::{SlotStore, StoreError};
-use dagon_proto::payload::{target, SlotState, StatusResp};
+use dagon_proto::payload::{target, Peer, PeerLog, SlotState, StatusResp};
 use dagon_proto::Status;
 
 use crate::chain::AppChain;
@@ -261,6 +261,17 @@ impl<S: SlotStore<Transition = Transition>> ImageStore<S> {
 
     pub(crate) fn view(&self) -> &ImageView {
         &self.view
+    }
+
+    /// Records that a node this one relays to answered
+    /// ([`SlotStore::note_peer`]); no image state changes.
+    pub(crate) fn note_peer(&mut self, peer: Peer) -> Result<(), Status> {
+        self.store.note_peer(peer).map_err(store_status)
+    }
+
+    /// The peers the store records ([`SlotStore::peers`]).
+    pub(crate) fn peers(&mut self) -> Option<PeerLog> {
+        self.store.peers()
     }
 
     /// The stage0 version mark the store reads ([`SlotStore::stage0_version`]).

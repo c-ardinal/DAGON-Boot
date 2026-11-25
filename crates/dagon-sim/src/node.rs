@@ -444,6 +444,17 @@ impl SimNode {
         }
     }
 
+    /// A node this one relays to answered: its agent records the peer
+    /// (`dagon_agent::Agent::peer_answered`).
+    pub fn peer_answered(&mut self, link: u8, addr: u8) -> bool {
+        self.agent.peer_answered(link, addr)
+    }
+
+    /// The peers its state log records (`dagon_agent::Agent::peers`).
+    pub fn peers(&mut self) -> Option<dagon_proto::payload::PeerLog> {
+        self.agent.peers()
+    }
+
     /// The node answers the commands of `front` before its agent does (a
     /// relay's): its agent's HELLO and CAPS name them too.
     pub fn also_serves(&mut self, front: dagon_proto::payload::CmdSet) {

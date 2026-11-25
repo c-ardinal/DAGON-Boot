@@ -487,6 +487,26 @@ fn typed(cmd: Cmd, resp: bool) -> Typed {
                 Box::new(|b| dbg(Relay::parse(b))),
             )
         }
+        (Cmd::Peers, false) => (
+            enc(|b| encode_peers(1, b).unwrap()),
+            Box::new(|b| dbg(parse_peers(b))),
+        ),
+        (Cmd::Peers, true) => {
+            let mut log = PeerLog::new(true);
+            log.insert(Peer {
+                link: ANY_LINK,
+                addr: 0x42,
+            });
+            log.insert(Peer {
+                link: 2,
+                addr: 0xFF,
+            });
+            let m = PeersResp::page(&log, 0);
+            (
+                enc(|b| m.encode(b).unwrap()),
+                Box::new(|b| dbg(PeersResp::parse(b))),
+            )
+        }
         (Cmd::Relay | Cmd::I2cRaw, true) => (
             enc(|b| encode_bulk_resp(&[0, 0xDA, 0x6F], b).unwrap()),
             Box::new(move |b| dbg(parse_bulk_resp(cmd, b))),
@@ -663,6 +683,8 @@ fn golden_cores_and_samples() {
         (Cmd::Show, true, 0, ""),
         (Cmd::Relay, false, 1, "01 030142 04022C01 00 DA6F0009"),
         (Cmd::Relay, true, 0, "00 00DA6F"),
+        (Cmd::Peers, false, 1, "01"),
+        (Cmd::Peers, true, 0, "020101 040102 0604014202FF"),
         (Cmd::SubCtl, false, 0, "030102 050101"),
         (Cmd::SubCtl, true, 0, ""),
         (Cmd::I2cRaw, false, 0, "03020300 00 00FF"),

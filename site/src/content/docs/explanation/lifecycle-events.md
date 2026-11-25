@@ -148,7 +148,7 @@ len, next }`です。プロトコルのリクエストは例外なく遷移で�
 | `host.node.discovered` | 検出 | `target`、識別 |
 | `host.node.step` | ノードの各段階（TRANSFER、VERIFY、REBOOT、CONFIRM、REJECTED、FAILED、ROM） | `node`、`target`、`phase`、`percent`、`version` |
 | `host.node.reconnecting` | 再起動後のバージョンを待機中 | `node`、`elapsed_ms`、`other_version?` |
-| `host.node.result` | | `node`、`Done(v) \| Failed(reason, status?) \| NotStarted \| NeedsFirstWrite \| Realigned(v) \| Incompatible(v)`（`NeedsFirstWrite`: 無応答で、区分が通信実績なしのノードです。このノードへの送信はなく、他ノードの書込は継続します。このノードには初回の直接書込が必要です。`Realigned`: 書込と確定の後、パッケージのバージョン以外に残留したノードとの互換制約を維持する目的で`v`へ復帰したノードです。`Incompatible`: 該当の制約が不成立で、復帰不能だったノードです。[ノード間のバージョンの整合](/how-to/constraints/)を参照） |
+| `host.node.result` | | `node`、`Done(v) \| Failed(reason, status?) \| NotStarted \| NeedsFirstWrite \| Realigned(v) \| Incompatible(v)`（`NeedsFirstWrite`: 無応答で、区分が通信実績なしのノードです。このノードへの送信はなく、他ノードの書込は継続します。このノードには最初の直接書込が必要です。`Realigned`: 書込と確定の後、パッケージのバージョン以外に残留したノードとの互換制約を維持する目的で`v`へ復帰したノードです。`Incompatible`: 該当の制約が不成立で、復帰不能だったノードです。[ノード間のバージョンの整合](/how-to/constraints/)を参照） |
 | `host.confirm.result` | | `Confirmed \| NotOnTrial \| NeedsChoice` |
 | `host.rollback.*`、`host.recover.*` | deployと同一の形式 | |
 | `host.provision.started` / `host.provision.recorded` | ROM経由の初回インストール。インストールしたブートイメージの識別を記録した | `node`、`boot_sha256` |
@@ -164,12 +164,12 @@ len, next }`です。プロトコルのリクエストは例外なく遷移で�
 | 区分 | 判定 | 書込の処理 | `host.node.result` |
 |---|---|---|---|
 | 途絶 | そのノードの記録が存在します（以前は応答していたノードです） | 停止します | `Failed(LOST)` |
-| 通信実績なし | 記録が完全で、そのノードの記録が存在しません（構成に追加した直後の未書込ノードです） | そのノードを省略して続行し、初回の直接書込を案内します | `NeedsFirstWrite` |
+| 通信実績なし | 記録が完全で、そのノードの記録が存在しません（構成に追加した直後の未書込ノードです） | そのノードを省略して続行し、最初の直接書込を案内します | `NeedsFirstWrite` |
 | 履歴不明 | 記録の確認が不可能です: PC接続ノードがPEERSに非対応、読出の失敗、記録が不完全（PEERS_KEPTの不在、上限への到達） | 停止します | `Failed(HISTORY UNKNOWN)` |
 
 - 区分の対象は、PC接続ノードが中継先の無応答（RELAYの`E_TIMEOUT`）を応答したノードだけです。PC接続ノード自身の無応答は接続の失敗です。PC接続ノードとの通信を開始するのはホストで、ホストは記録を保持しないので、区分しません。
 - 区分に使用するのはノード側の記録だけです。同一セッション内の応答の有無は使用しません。
-- 履歴不明のノードが応答を再開すれば、区分は不要になります。未書込のノードには、初回の直接書込を実施します。PC接続ノードの記録を完全な状態にするのは、PC接続ノードの初回書込だけです。
+- 履歴不明のノードが応答を再開すれば、区分は不要になります。未書込のノードには、最初の直接書込を実施します。PC接続ノードの記録を完全な状態にするのは、PC接続ノードの最初の書込だけです。
 
 ### 1.6 永続の状態とその状態機械
 

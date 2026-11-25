@@ -157,6 +157,32 @@ fn log_faces_hold_a_provisioned_face() {
     parse_mcu_text(&exact, &[]).unwrap();
 }
 
+/// An MCU with relay links keeps its peer records in the app log: a face
+/// holds them with the copy of a compaction and the room of a trial. An
+/// MCU without relay links needs no such room.
+#[test]
+fn a_relaying_mcus_log_face_holds_its_peer_records() {
+    let rule = MCU
+        .iter()
+        .find(|r| r.engine == "relay peer records")
+        .unwrap();
+    let reg = super::Registry::builtin();
+    let mut m = reg.mcu("rp2040").unwrap().clone();
+    assert!(!m.relay_links.is_empty());
+    let min = requirements::relay_log_face_min(m.watchdog.unwrap().trial_attempts);
+    // 32 bytes of header and 46 records of 32 bytes, with 3 attempts.
+    assert_eq!((m.watchdog.unwrap().trial_attempts, min), (3, 1504));
+    assert!((rule.check)(&m).is_ok());
+    let log = m.layout.app_log.as_mut().unwrap();
+    log.face_size = min;
+    assert!((rule.check)(&m).is_ok());
+    m.layout.app_log.as_mut().unwrap().face_size = min - 1;
+    let e = (rule.check)(&m).unwrap_err();
+    assert!(e.contains("peer records") && e.contains("1504"), "{e}");
+    m.relay_links.clear();
+    assert!((rule.check)(&m).is_ok());
+}
+
 #[test]
 fn flash_maps_suit_the_flash_image() {
     let e = mcu_err(&FAKE_MCU.replace("base = 0x0010_0000", "base = 0x0010_0080"));

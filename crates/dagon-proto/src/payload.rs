@@ -10,7 +10,7 @@ use crate::field::{
     read, shortest, shortest_value, FieldSpec, FieldWriter, MsgSpec, Parsed, Refusal,
 };
 use crate::table::{
-    caps, conf_list, conf_result, conf_run, confirm, error, hello, i2c_raw, reboot, relay,
+    caps, conf_list, conf_result, conf_run, confirm, error, hello, i2c_raw, peers, reboot, relay,
     set_pending, show, status, subctl, version, xfer_begin, xfer_end, ERROR,
 };
 use crate::{Cmd, FrameError, Status};
@@ -1389,6 +1389,158 @@ impl<'a> ConfResultResp<'a> {
     }
 }
 
+/// The most peers a node keeps a record of.
+pub const MAX_PEERS: usize = dagon_format::statelog::peer::MAX;
+
+/// A node another one relays to: the relay link's id and the node's
+/// address on it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Peer {
+    pub link: u8,
+    pub addr: u8,
+}
+
+/// The peers a node's state log records as having answered at least once.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct PeerLog {
+    /// The log has kept every record since the node's first write.
+    pub kept: bool,
+    len: u8,
+    peers: [Peer; MAX_PEERS],
+}
+
+impl PeerLog {
+    /// No peers recorded yet, in a log that kept its records (`kept`) or
+    /// not.
+    pub const fn new(kept: bool) -> Self {
+        PeerLog {
+            kept,
+            len: 0,
+            peers: [Peer { link: 0, addr: 0 }; MAX_PEERS],
+        }
+    }
+
+    pub fn peers(&self) -> &[Peer] {
+        &self.peers[..usize::from(self.len)]
+    }
+
+    pub fn has(&self, p: Peer) -> bool {
+        self.peers().contains(&p)
+    }
+
+    /// No further peer can be recorded.
+    pub fn is_full(&self) -> bool {
+        usize::from(self.len) >= MAX_PEERS
+    }
+
+    /// Whether a peer without a record never answered: every record was
+    /// kept, and a peer that answers still gets one.
+    pub fn complete(&self) -> bool {
+        self.kept && !self.is_full()
+    }
+
+    /// Takes `p` as recorded; false when it already is or no further peer
+    /// can be.
+    pub fn insert(&mut self, p: Peer) -> bool {
+        if self.has(p) || self.is_full() {
+            return false;
+        }
+        self.peers[usize::from(self.len)] = p;
+        self.len += 1;
+        true
+    }
+}
+
+/// PEERS request: its page.
+pub fn parse_peers(b: &[u8]) -> Result<u8, Status> {
+    peers_of(&rd(b, &Cmd::Peers.spec().req)?)
+}
+
+/// From a request the reader accepted.
+pub fn peers_of(p: &Parsed<'_>) -> Result<u8, Status> {
+    let [page] = at(p.core, 0)?;
+    Ok(page)
+}
+
+pub fn encode_peers(page: u8, out: &mut [u8]) -> Result<usize, FrameError> {
+    let mut w = FieldWriter::new(out);
+    w.put(&[page])?;
+    Ok(w.len())
+}
+
+/// PEERS response body: one page of a node's [`PeerLog`].
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct PeersResp {
+    /// [`PeerLog::complete`].
+    pub complete: bool,
+    /// Records of all pages.
+    pub total: u8,
+    len: u8,
+    peers: [Peer; peers::PAGE as usize],
+}
+
+impl PeersResp {
+    /// The longest body.
+    pub const MAX_LEN: usize = 3 + 3 + 2 + (peers::PAGE * peers::PEER_LEN) as usize;
+
+    /// Page `page` of `log`; past its last page, no peers.
+    pub fn page(log: &PeerLog, page: u8) -> Self {
+        let mut out = PeersResp {
+            complete: log.complete(),
+            total: log.len,
+            ..Default::default()
+        };
+        let from = usize::from(page) * usize::from(peers::PAGE);
+        let rest = log.peers().get(from..).unwrap_or(&[]);
+        for (to, p) in out.peers.iter_mut().zip(rest) {
+            *to = *p;
+            out.len += 1;
+        }
+        out
+    }
+
+    /// The peers of this page.
+    pub fn peers(&self) -> &[Peer] {
+        &self.peers[..usize::from(self.len)]
+    }
+
+    pub fn parse(b: &[u8]) -> Result<Self, Status> {
+        let p = rd(b, &Cmd::Peers.spec().resp)?;
+        let mut out = PeersResp {
+            complete: byte(&p, &peers::COMPLETE, 0)? == 1,
+            total: byte(&p, &peers::TOTAL, 0)?,
+            ..Default::default()
+        };
+        let sent = p.field(&peers::PEERS).unwrap_or(&[]);
+        for (to, x) in out
+            .peers
+            .iter_mut()
+            .zip(sent.chunks_exact(usize::from(peers::PEER_LEN)))
+        {
+            let [link, addr] = at(x, 0)?;
+            *to = Peer { link, addr };
+            out.len += 1;
+        }
+        Ok(out)
+    }
+
+    pub fn encode(&self, out: &mut [u8]) -> Result<usize, FrameError> {
+        let mut packed = [0u8; (peers::PAGE * peers::PEER_LEN) as usize];
+        let n = self.peers().len() * usize::from(peers::PEER_LEN);
+        for (x, p) in packed
+            .chunks_exact_mut(usize::from(peers::PEER_LEN))
+            .zip(self.peers())
+        {
+            x.copy_from_slice(&[p.link, p.addr]);
+        }
+        let mut w = FieldWriter::new(out);
+        w.field_unless(&peers::COMPLETE, &[u8::from(self.complete)], &[0])?
+            .field(&peers::TOTAL, &[self.total])?
+            .field_unless(&peers::PEERS, &packed[..n], &[])?;
+        Ok(w.len())
+    }
+}
+
 /// A request that says nothing (VERSION, STAY, XFER_END).
 fn nothing(_: &Parsed<'_>) -> Result<(), Status> {
     Ok(())
@@ -1455,6 +1607,7 @@ requests! {
     EnterRom(EnterRom) enter_rom = EnterRom::of;
     Show(Show<'a>) show = Show::of;
     Relay(Relay<'a>) relay = Relay::of;
+    Peers(u8) peers = peers_of;
     SubCtl(SubCtl) sub_ctl = SubCtl::of;
     I2cRaw(I2cRaw<'a>) i2c_raw = I2cRaw::of;
     ConfList(()) conf_list = nothing;
@@ -1484,6 +1637,7 @@ impl Req<'_> {
             Req::ConfList(()) => ConfListResp::MAX_LEN,
             Req::ConfRun(_) => ConfRunResp::MAX_LEN,
             Req::ConfResult(_) => ConfResultResp::MAX_LEN,
+            Req::Peers(_) => PeersResp::MAX_LEN,
             Req::Relay(_) => return None,
             Req::Stay(())
             | Req::XferBegin(_)

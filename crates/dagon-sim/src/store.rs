@@ -27,7 +27,7 @@ use dagon_format::header::{
 use dagon_format::statelog::{self, kind, reason, FaceHeader, Record, RECORD_SIZE};
 use dagon_format::{sha256, stage0, Version};
 use dagon_port::{Flash, FlashError, FlashRegion};
-use dagon_proto::payload::{target, SlotInfo, SlotState, StatusResp};
+use dagon_proto::payload::{target, Peer, PeerLog, SlotInfo, SlotState, StatusResp};
 
 /// The version of the stage0 a provisioned layout with boot core slots
 /// carries (its mark at [`STAGE0_MARK_AT`] of the `bootcore` region).
@@ -419,8 +419,62 @@ impl SimStore {
         self.erase_body(target::APP, slot, body.len() as u32)?;
         self.write_body(target::APP, slot, 0, body)?;
         self.place_header(slot, &hdr)?;
+        // The first write of a node that relays starts its peer records.
+        let first = self.records().0 == 0 && !self.layout.definition().relay_links.is_empty();
         self.append(Self::log_record(kind::PROVISION, slot, reason::NONE, &hdr))?;
-        self.append(Self::log_record(kind::CONFIRMED, slot, reason::NONE, &hdr))
+        self.append(Self::log_record(kind::CONFIRMED, slot, reason::NONE, &hdr))?;
+        if first {
+            self.append(Self::node_wide(kind::PEERS_KEPT, [0; 16]))?;
+        }
+        Ok(())
+    }
+
+    /// A record that names no slot.
+    fn node_wide(kind: u8, digest16: [u8; 16]) -> Record {
+        Record {
+            kind,
+            target: statelog::target::APP,
+            slot: statelog::slot::NONE,
+            reason: reason::NONE,
+            seq: 0,
+            version: Version::default(),
+            digest16,
+        }
+    }
+
+    /// The peers the log records, as `dagon_core::log::Log` folds them.
+    fn peer_log(&mut self) -> Option<PeerLog> {
+        let (generation, _, recs) = self.records();
+        if generation == 0 {
+            return None;
+        }
+        let mut log = PeerLog::new(false);
+        for r in recs {
+            match r.kind {
+                kind::PEERS_KEPT => log.kept = true,
+                kind::PEER_SEEN => {
+                    log.insert(Peer {
+                        link: r.digest16[statelog::peer::LINK],
+                        addr: r.digest16[statelog::peer::ADDR],
+                    });
+                }
+                _ => {}
+            }
+        }
+        Some(log)
+    }
+
+    /// Rewrites the log without its PEERS_KEPT: the log of a node whose
+    /// peer records were lost (rebuilt, or written before they existed).
+    pub fn lose_peers_kept(&mut self) -> Result<(), StoreError> {
+        let (base, len) = self.layout.log;
+        let (_, _, recs) = self.records();
+        self.flash()
+            .erase(base, len)
+            .map_err(|_| StoreError::Flash)?;
+        recs.into_iter()
+            .filter(|r| r.kind != kind::PEERS_KEPT)
+            .try_for_each(|r| self.append(r))
     }
 
     /// Erases every unit touching `start..end`.
@@ -958,6 +1012,23 @@ impl SlotStore for SimStore {
                 .map_err(|_| StoreError::Flash),
             Err(_) => Ok(()),
         }
+    }
+
+    /// One PEER_SEEN for a peer the log has none of (this model's one
+    /// face does not compact: a full face fails).
+    fn note_peer(&mut self, peer: Peer) -> Result<(), StoreError> {
+        let log = self.peer_log().ok_or(StoreError::Flash)?;
+        if log.has(peer) || log.is_full() {
+            return Ok(());
+        }
+        let mut digest16 = [0; 16];
+        digest16[statelog::peer::LINK] = peer.link;
+        digest16[statelog::peer::ADDR] = peer.addr;
+        self.append(Self::node_wide(kind::PEER_SEEN, digest16))
+    }
+
+    fn peers(&mut self) -> Option<PeerLog> {
+        self.peer_log()
     }
 
     /// Stage0's mark in the `bootcore` region, on a layout that models a

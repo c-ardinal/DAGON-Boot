@@ -16,8 +16,8 @@
 use dagon_port::{Link, Nrst, SubControl};
 use dagon_proto::handler::{self, Handler};
 use dagon_proto::payload::{
-    self, boot0, nrst, CapsReq, CapsResp, CmdSet, I2cRaw, Relay as RelayReq, Req as Asked,
-    RomTarget, SubCtl,
+    self, boot0, nrst, CapsReq, CapsResp, CmdSet, I2cRaw, Peer, PeersResp, Relay as RelayReq,
+    Req as Asked, RomTarget, SubCtl,
 };
 use dagon_proto::{flags, Cmd, Frame, FrameError, Status, HEADER_LEN, MAX_FRAME};
 
@@ -56,8 +56,9 @@ pub struct Relay<'a, A, C, W, T> {
 /// The commands the relay answers itself. Its handlers wait on the
 /// node's links, so the rows have no action: [`Pc::handle`] takes the
 /// typed request of a row and runs it.
-const TABLE: [Handler<(), ()>; 3] = [
+const TABLE: [Handler<(), ()>; 4] = [
     Handler::deferred(Cmd::Relay),
+    Handler::deferred(Cmd::Peers),
     Handler::deferred(Cmd::SubCtl),
     Handler::deferred(Cmd::I2cRaw),
 ];
@@ -69,13 +70,13 @@ const CAPS: Handler<(), ()> = Handler::deferred(Cmd::Caps);
 /// The most recovery targets a relay tells apart (one bit each of BOOT0).
 pub const MAX_RECOVERY: usize = 32;
 
-/// The commands of its own a relay serves: RELAY, and with recovery targets
-/// SUBCTL and I2C_RAW. The node's HELLO names them with its agent's.
+/// The commands of its own a relay serves: RELAY and PEERS, and with
+/// recovery targets SUBCTL and I2C_RAW. The node's HELLO names them with its agent's.
 pub const fn cmds(recovery: bool) -> CmdSet {
     if recovery {
         handler::cmds(&TABLE)
     } else {
-        CmdSet::EMPTY.with(Cmd::Relay as u8)
+        CmdSet::EMPTY.with(Cmd::Relay as u8).with(Cmd::Peers as u8)
     }
 }
 
@@ -86,6 +87,9 @@ struct Pc<'a, A, C, W, T> {
     /// BOOT0 of each recovery target (bit i: `recovery[i]`) as last set
     /// successfully (I2C_RAW only while it is high).
     boot0_high: u32,
+    /// The peer whose answer was last recorded: its further answers (a
+    /// transfer's) are not looked at again.
+    seen: Option<Peer>,
 }
 
 /// Serves the PC over the uplink `up`, whatever its kind, for good. A
@@ -104,6 +108,7 @@ where
         resp: [0; MAX_FRAME],
         next_id: 1,
         boot0_high: 0,
+        seen: None,
     };
     pc.r.agent.also_serves(cmds(!pc.r.recovery.is_empty()));
     let max = up.max_payload();
@@ -192,6 +197,7 @@ where
             Ok(Asked::SubCtl(s)) => (self.lines(s).await, 0),
             Ok(Asked::I2cRaw(raw)) => self.i2c_raw(raw, room).await,
             Ok(Asked::Relay(r)) => self.relay(&r, room).await,
+            Ok(Asked::Peers(page)) => self.peers(page),
             Ok(_) => (Status::Unsupported, 0),
         };
         let out = &mut self.resp[HEADER_LEN..];
@@ -299,7 +305,54 @@ where
         self.r.agent.relayed(r.link, r.addr, inner_cmd);
         let wait = r.timeout_ms.unwrap_or(dagon_port::timeout::RELAY_WAIT_MS);
         let req = self.req(Op::Relay, r.addr, wait, 0);
-        self.via(port, req, r.inner, max).await
+        let (status, len) = self.via(port, req, r.inner, max).await;
+        if status == Status::Ok {
+            let peer = Peer {
+                link: r.link,
+                addr: r.addr,
+            };
+            self.answered(peer, len);
+        }
+        (status, len)
+    }
+
+    /// The node `peer` answered a relayed request with the `len` bytes
+    /// now in the response's bulk: when they are one valid response
+    /// frame, whatever it says, the agent records the peer in the state
+    /// log (once for each peer; [`OwnAgent::peer_answered`]). The relayed
+    /// answer is the same whether or not the record could be written.
+    fn answered(&mut self, peer: Peer, len: usize) {
+        if self.seen == Some(peer) {
+            return;
+        }
+        let at = HEADER_LEN + 1 + payload::BULK_RESP_AT;
+        let valid = self
+            .resp
+            .get(at..at + len)
+            .and_then(|b| Frame::decode(b, usize::MAX).ok())
+            .is_some_and(|(f, _)| f.flags & flags::RESP != 0);
+        if !valid {
+            return;
+        }
+        // The record may compact the log (an erase): it gets a full
+        // watchdog period, as a request does.
+        self.r.watch.progress(task::PC);
+        if self.r.agent.peer_answered(peer.link, peer.addr) {
+            self.seen = Some(peer);
+        }
+    }
+
+    /// PEERS: page `page` of the peers this node's state log records.
+    /// E_UNSUPPORTED when they cannot be read. The body goes after the
+    /// status byte; returns its length.
+    fn peers(&mut self, page: u8) -> (Status, usize) {
+        let Some(log) = self.r.agent.peers() else {
+            return (Status::Unsupported, 0);
+        };
+        match PeersResp::page(&log, page).encode(&mut self.resp[HEADER_LEN + 1..]) {
+            Ok(n) => (Status::Ok, n),
+            Err(_) => (Status::Arg, 0),
+        }
     }
 
     /// The recovery target a SUBCTL or I2C_RAW names, by index.

@@ -22,15 +22,15 @@ use dagon_port::{
 };
 use dagon_port::{Addressing, RelayLinkDef};
 use dagon_proto::payload::{
-    boot0, nrst, CapsReq, CapsResp, CmdSet, HelloResp, I2cRaw, Relay as RelayReq, RomTarget, Show,
-    SubCtl,
+    boot0, nrst, CapsReq, CapsResp, CmdSet, HelloResp, I2cRaw, Peer, PeersResp, Relay as RelayReq,
+    RomTarget, Show, SubCtl,
 };
 use dagon_proto::{finish, frame_len, max_payload, plant, split_status, Cmd, Frame, Status};
 use dagon_relay::{
     run_link, serve, task, Config, LinkRoute, Liveness, OwnAgent, Port, Recovery, Relay, RelayClock,
 };
-use dagon_sim::store::SimStore;
-use dagon_sim::{sample_hub, SimBus, NODE_I2C_ADDR, NODE_I2C_PORT, WATCH_UART_PORT};
+use dagon_sim::store::{Layout, SimStore};
+use dagon_sim::{sample_hub, SimBus, SimFlash, NODE_I2C_ADDR, NODE_I2C_PORT, WATCH_UART_PORT};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex as Cs;
 use embassy_sync::channel::Channel;
 
@@ -331,6 +331,12 @@ impl OwnAgent for NodeAgent {
         noted_relay("child_raw");
         self.0.child_raw(addr, len, read_len)
     }
+    fn peer_answered(&mut self, link: u8, addr: u8) -> bool {
+        self.0.peer_answered(link, addr)
+    }
+    fn peers(&mut self) -> Option<dagon_proto::payload::PeerLog> {
+        self.0.peers()
+    }
 }
 
 /// This node's agent, and what its app reads from it.
@@ -347,13 +353,17 @@ fn agent() -> (NodeAgent, Reader<AppSnapshot, 8>) {
     let cfg = dagon_sim::hub_config();
     let verifier = Ed25519Compact::new(dagon_sim::sample::PUBKEY);
     let app = chain.reader();
+    // As its first write left it: the app in slot A and the state log.
+    let mut store = SimStore::new(
+        SimFlash::rp2040_4m(1),
+        Layout::of("rp2040"),
+        dagon_sim::sample::PUBKEY,
+    );
+    store
+        .provision(0, dagon_sim::sample::HUB_1_0_0)
+        .expect("the hub fixture fits");
     (
-        NodeAgent(dagon_agent::Agent::new(
-            cfg,
-            verifier,
-            SimStore::default(),
-            chain,
-        )),
+        NodeAgent(dagon_agent::Agent::new(cfg, verifier, store, chain)),
         app,
     )
 }
@@ -671,6 +681,21 @@ fn the_relay_serves_the_pc_over_its_links() {
         clock.wait_until(clock.now_ms() + 60_000).await;
         assert_eq!(bus_asked.borrow().len(), before, "nothing sent unasked");
 
+        // The nodes that answered are on record in this node's state log,
+        // once each: not the address nobody answered, nor a request the
+        // relay refused.
+        let (s, body) = pc.ask(Cmd::Peers, &[0]).await;
+        let recorded = PeersResp::parse(&body).unwrap();
+        let answered =
+            [(BUS, NODE_I2C_ADDR), (STREAM, STREAM_ADDR)].map(|(link, addr)| Peer { link, addr });
+        assert_eq!(
+            (s, recorded.complete, recorded.total, recorded.peers()),
+            (Status::Ok, true, 2, &answered[..])
+        );
+        let (s, body) = pc.ask(Cmd::Peers, &[1]).await;
+        let past = PeersResp::parse(&body).unwrap();
+        assert_eq!((s, past.total, past.peers()), (Status::Ok, 2, &[][..]));
+
         // The relay's own work went out as its events: the PC link first.
         let seen = RELAY_EVENTS.with(|e| e.borrow().clone());
         assert_eq!(seen.first(), Some(&"pc_up"));
@@ -895,7 +920,7 @@ fn the_relay_says_what_it_serves_and_reads_before_it_acts() {
         use Cmd::*;
         let want = [
             Hello, Status, Version, Caps, Stay, XferBegin, XferData, XferEnd, XferHdr, SetPending,
-            Reboot, Confirm, Show, Relay, SubCtl, I2cRaw,
+            Reboot, Confirm, Show, Relay, Peers, SubCtl, I2cRaw,
         ];
         let mut req = [0u8; 32];
         let n = hello_request(max_payload::USB, 1, &mut req).unwrap();
@@ -1213,12 +1238,12 @@ fn a_relay_recovers_a_node_on_each_of_two_buses() {
 /// A relay without recovery lines does not say it serves SUBCTL and
 /// I2C_RAW.
 #[test]
-fn a_relay_without_a_recovery_serves_relay_alone() {
+fn a_relay_without_a_recovery_serves_relay_and_peers_alone() {
     assert_eq!(
         dagon_relay::cmds(false),
-        CmdSet::EMPTY.with(Cmd::Relay as u8)
+        CmdSet::EMPTY.with(Cmd::Relay as u8).with(Cmd::Peers as u8)
     );
-    let all = [Cmd::Relay, Cmd::SubCtl, Cmd::I2cRaw];
+    let all = [Cmd::Relay, Cmd::Peers, Cmd::SubCtl, Cmd::I2cRaw];
     assert_eq!(
         dagon_relay::cmds(true),
         all.iter().fold(CmdSet::EMPTY, |s, c| s.with(*c as u8))

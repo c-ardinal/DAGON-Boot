@@ -12,13 +12,18 @@
 //! written the old face stays the valid one, so a cut compaction is simply
 //! redone. An unconsumed UPDATE_STAY is carried over too, so a hand-over
 //! to the boot core's update mode survives a compaction.
+//!
+//! A node that relays also keeps here which of the nodes it relays to
+//! answered at least once ([`Log::peers`], [`Log::note_peer`]): one
+//! PEER_SEEN each, and the PEERS_KEPT of the log a first write made, all
+//! carried over by a compaction.
 
 use dagon_format::statelog::{
-    kind, reason, slot, target, FaceHeader, Record, FACE_HEADER_SIZE, RECORD_SIZE,
+    kind, peer, reason, slot, target, FaceHeader, Record, FACE_HEADER_SIZE, RECORD_SIZE,
 };
 use dagon_format::Version;
 use dagon_port::{Flash, FlashError};
-use dagon_proto::payload::{SlotInfo, SlotState, StatusResp};
+use dagon_proto::payload::{Peer, PeerLog, SlotInfo, SlotState, StatusResp, MAX_PEERS};
 
 /// The image a record refers to.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -226,6 +231,21 @@ pub const fn trial_room(max: u8) -> u32 {
 /// UPDATE_DONE.
 pub const STAY_ROOM: u32 = 2;
 
+/// Records a compaction carries for the peers at most: PEERS_KEPT and
+/// every PEER_SEEN.
+pub const PEER_RECORDS: u32 = 1 + MAX_PEERS as u32;
+
+/// The reference a PEER_SEEN names its peer with.
+fn peer_ref(p: Peer) -> SlotRef {
+    let mut digest16 = [0; 16];
+    digest16[peer::LINK] = p.link;
+    digest16[peer::ADDR] = p.addr;
+    SlotRef {
+        digest16,
+        ..NO_SLOT
+    }
+}
+
 /// The reference of a record that names no slot (UPDATE_STAY, UPDATE_DONE,
 /// a carried ROLLBACK with no confirmed image to go back to).
 pub const NO_SLOT: SlotRef = SlotRef {
@@ -266,6 +286,10 @@ pub struct Log {
     /// An UPDATE_STAY no UPDATE_DONE has consumed: the boot core enters
     /// update mode at its start.
     pub update_stay: bool,
+    /// The nodes this one relays to that answered at least once
+    /// (PEER_SEEN), and whether the log kept every such record since the
+    /// first write (PEERS_KEPT).
+    pub peers: PeerLog,
     pub generation: u32,
     layout: LogLayout,
     /// Index of the active face in `layout.faces`.
@@ -296,6 +320,7 @@ impl Log {
             state: LogState::default(),
             core: LogState::default(),
             update_stay: false,
+            peers: PeerLog::new(false),
             generation,
             layout: *layout,
             face,
@@ -355,6 +380,7 @@ impl Log {
             state: LogState::default(),
             core: LogState::default(),
             update_stay: false,
+            peers: PeerLog::new(false),
             generation: 1,
             layout: *layout,
             face: 0,
@@ -458,7 +484,34 @@ impl Log {
         Ok(true)
     }
 
-    /// Appends a node-wide record (UPDATE_STAY, UPDATE_DONE) in place.
+    /// Records that peer `p` answered: one PEER_SEEN, written only while
+    /// `keep` records (the room the store keeps for trials) stay free
+    /// after it, compacting first when the face lacks that (the app
+    /// runs, no boot is waiting). `Ok(false)`, nothing written, for a
+    /// peer already recorded and for a log that holds as many as it can
+    /// ([`PeerLog::is_full`]: it then states nothing about the others).
+    pub fn note_peer<F: Flash>(
+        &mut self,
+        flash: &mut F,
+        p: Peer,
+        keep: u32,
+    ) -> Result<bool, LogError> {
+        if self.peers.has(p) || self.peers.is_full() {
+            return Ok(false);
+        }
+        self.reserve(flash, keep + 1)?;
+        self.append_in_place(
+            flash,
+            target::APP,
+            kind::PEER_SEEN,
+            peer_ref(p),
+            reason::NONE,
+        )?;
+        Ok(true)
+    }
+
+    /// Appends a node-wide record (UPDATE_STAY, UPDATE_DONE, PEERS_KEPT) in
+    /// place.
     fn append_marker<F: Flash>(&mut self, flash: &mut F, k: u8) -> Result<(), LogError> {
         self.append_in_place(flash, target::APP, k, NO_SLOT, reason::NONE)
     }
@@ -488,6 +541,13 @@ impl Log {
         match r.kind {
             kind::UPDATE_STAY => self.update_stay = true,
             kind::UPDATE_DONE => self.update_stay = false,
+            kind::PEERS_KEPT => self.peers.kept = true,
+            kind::PEER_SEEN => {
+                self.peers.insert(Peer {
+                    link: r.digest16[peer::LINK],
+                    addr: r.digest16[peer::ADDR],
+                });
+            }
             _ => {}
         }
     }
@@ -530,6 +590,7 @@ impl Log {
     fn copy_to_other_face<F: Flash>(&mut self, flash: &mut F) -> Result<(), LogError> {
         let carried = [(target::BOOTCORE, self.core), (target::APP, self.state)];
         let stay = self.update_stay;
+        let peers = self.peers;
         let generation = self.generation.wrapping_add(1);
         self.face ^= 1;
         let face = self.layout.faces[self.face];
@@ -538,6 +599,7 @@ impl Log {
         self.state = LogState::default();
         self.core = LogState::default();
         self.update_stay = false;
+        self.peers = PeerLog::new(false);
         for (t, s) in carried {
             for (kind, at, why) in s.carry() {
                 let addr = self.next.ok_or(LogError::Full)?;
@@ -549,6 +611,18 @@ impl Log {
         }
         if stay {
             self.append_marker(flash, kind::UPDATE_STAY)?;
+        }
+        if peers.kept {
+            self.append_marker(flash, kind::PEERS_KEPT)?;
+        }
+        for p in peers.peers() {
+            self.append_in_place(
+                flash,
+                target::APP,
+                kind::PEER_SEEN,
+                peer_ref(*p),
+                reason::NONE,
+            )?;
         }
         flash.write(face, &FaceHeader { generation }.to_bytes())?;
         self.generation = generation;
@@ -712,6 +786,7 @@ mod tests {
         let mut log = Log {
             core: LogState::default(),
             update_stay: false,
+            peers: PeerLog::new(false),
             state: LogState {
                 confirmed: Some(a),
                 pending: Some(b),
@@ -920,6 +995,150 @@ mod tests {
         assert_eq!(after.state.reverted, Some(b));
         assert_eq!((after.state.pending, after.state.attempts), (Some(a2), 1));
         assert_eq!(after.core.reverted, Some(core_a2));
+    }
+
+    /// A log in two faces of `records` records each, as a first write
+    /// (`kept`) or a rebuild leaves it.
+    fn peer_log(records: u32, kept: bool) -> (Tiny, LogLayout, Log) {
+        let face_len = FACE_HEADER_SIZE as u32 + records * RECORD_SIZE as u32;
+        let layout = LogLayout {
+            faces: [0, face_len],
+            face_len,
+        };
+        let mut flash = Tiny(std::vec![0xFF; 2 * face_len as usize]);
+        flash
+            .write(0, &FaceHeader { generation: 1 }.to_bytes())
+            .unwrap();
+        let mut log = Log::load(&mut flash, &layout).unwrap();
+        let a = SlotRef::of(&rec(kind::PROVISION, 0));
+        log.append(&mut flash, kind::PROVISION, a, reason::NONE)
+            .unwrap();
+        if kept {
+            log.append_marker(&mut flash, kind::PEERS_KEPT).unwrap();
+        }
+        (flash, layout, log)
+    }
+
+    fn peer(addr: u8) -> Peer {
+        Peer { link: 1, addr }
+    }
+
+    #[test]
+    fn a_peer_is_recorded_once_and_read_back() {
+        let (mut flash, layout, mut log) = peer_log(8, true);
+        assert!(log.peers.complete());
+        assert_eq!(log.note_peer(&mut flash, peer(0x42), 0), Ok(true));
+        let written = flash.0.clone();
+        assert_eq!(log.note_peer(&mut flash, peer(0x42), 0), Ok(false));
+        assert_eq!(flash.0, written);
+        let other = Peer {
+            link: 2,
+            addr: 0x42,
+        };
+        assert_eq!(log.note_peer(&mut flash, other, 0), Ok(true));
+        let read = Log::load(&mut flash, &layout).unwrap();
+        assert_eq!(read.peers, log.peers);
+        assert_eq!(read.peers.peers(), [peer(0x42), other]);
+        assert!(read.peers.complete());
+        // The slot records fold as before.
+        assert_eq!(read.state, log.state);
+        assert_eq!(read.state.confirmed.map(|c| c.slot), Some(0));
+    }
+
+    /// A log no first write made (rebuilt, or older than these records)
+    /// records peers too, and never says its records are complete.
+    #[test]
+    fn a_log_without_the_first_writes_mark_is_never_complete() {
+        let (mut flash, layout, mut log) = peer_log(8, false);
+        assert_eq!(log.note_peer(&mut flash, peer(3), 0), Ok(true));
+        log.compact(&mut flash).unwrap();
+        let read = Log::load(&mut flash, &layout).unwrap();
+        assert_eq!(read.peers.peers(), [peer(3)]);
+        assert!(!read.peers.kept && !read.peers.complete());
+    }
+
+    #[test]
+    fn a_compaction_carries_the_mark_and_every_peer() {
+        let (mut flash, layout, mut log) = peer_log(4 + MAX_PEERS as u32, true);
+        for a in 0..MAX_PEERS as u8 {
+            assert_eq!(log.note_peer(&mut flash, peer(a), 0), Ok(true));
+        }
+        // As many as it holds: it states nothing about another peer, and
+        // writes nothing for one.
+        assert!(log.peers.kept && !log.peers.complete());
+        let written = flash.0.clone();
+        assert_eq!(log.note_peer(&mut flash, peer(0x70), 0), Ok(false));
+        assert_eq!(flash.0, written);
+        let before = log;
+        log.compact(&mut flash).unwrap();
+        let read = Log::load(&mut flash, &layout).unwrap();
+        assert_eq!(read.generation, before.generation + 1);
+        assert_eq!((read.peers, read.state), (before.peers, before.state));
+    }
+
+    /// The record leaves the room asked for, compacting to make it; with
+    /// no face that has it, nothing is written.
+    #[test]
+    fn a_peer_record_keeps_the_room_of_a_trial() {
+        let (mut flash, layout, mut log) = peer_log(6, true);
+        let a = SlotRef::of(&rec(kind::PROVISION, 0));
+        // PROVISION, PEERS_KEPT and three more: one record of room.
+        for _ in 0..3 {
+            log.append(&mut flash, kind::CONFIRMED, a, reason::NONE)
+                .unwrap();
+        }
+        assert_eq!(log.room(), 1);
+        assert_eq!(log.note_peer(&mut flash, peer(1), 2), Ok(true));
+        // Compacted: SNAPSHOT, PEERS_KEPT, PEER_SEEN, and three free.
+        assert_eq!((log.generation, log.room()), (2, 3));
+        assert_eq!(log.note_peer(&mut flash, peer(2), 2), Ok(true));
+        assert_eq!(log.note_peer(&mut flash, peer(3), 2), Err(LogError::Full));
+        let read = Log::load(&mut flash, &layout).unwrap();
+        assert_eq!(read.peers.peers(), [peer(1), peer(2)]);
+        assert!(read.room() >= 2);
+    }
+
+    /// The face a relaying node's definition must give holds everything
+    /// a compaction carries at most, the room of a trial and one record.
+    #[test]
+    fn the_relay_face_takes_a_full_log_and_a_trial() {
+        let max = 3;
+        assert_eq!(
+            peer::face_records(max),
+            2 * (u32::from(max) + 4) + trial_room(max) + STAY_ROOM + PEER_RECORDS + 1
+        );
+        let (mut flash, layout, mut log) = peer_log(peer::face_records(max), true);
+        let (a, b) = (
+            SlotRef::of(&rec(kind::CONFIRMED, 0)),
+            SlotRef::of(&rec(kind::SLOT_PENDING, 1)),
+        );
+        for t in [target::APP, target::BOOTCORE] {
+            for (k, at) in [
+                (kind::CONFIRMED, a),
+                (kind::SLOT_PENDING, b),
+                (kind::ROLLBACK, a),
+                (kind::SLOT_PENDING, b),
+            ] {
+                log.append_for(&mut flash, t, k, at, reason::TRIAL_EXHAUSTED)
+                    .unwrap();
+            }
+            for _ in 0..max {
+                log.append_for(&mut flash, t, kind::BOOT_ATTEMPT, b, reason::NONE)
+                    .unwrap();
+            }
+        }
+        log.request_stay(&mut flash, 0).unwrap();
+        for addr in 0..MAX_PEERS as u8 - 1 {
+            log.note_peer(&mut flash, peer(addr), trial_room(max))
+                .unwrap();
+        }
+        log.compact(&mut flash).unwrap();
+        assert_eq!(
+            log.note_peer(&mut flash, peer(0x7F), trial_room(max) + STAY_ROOM),
+            Ok(true)
+        );
+        assert!(log.room() >= trial_room(max) + STAY_ROOM);
+        assert_eq!(Log::load(&mut flash, &layout).unwrap().peers, log.peers);
     }
 
     #[test]

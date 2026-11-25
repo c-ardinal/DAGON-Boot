@@ -94,7 +94,7 @@ const F401_BIN_SHA256: &str = "3fea1467341eeb816d19af5bb2ffa6fc73eaaede153680b94
 
 const F401_BIN_LEN: usize = 133_120;
 /// RP2040 rescue.uf2: 81920 bytes (160 blocks).
-const RP2040_UF2_SHA256: &str = "bf03c27fdc615d227b696d25c9ac3dd30af295497f111e96e09dc95a1e5a89b8";
+const RP2040_UF2_SHA256: &str = "ea7fb46e7ff57dc9e80b43b0d10859815533ba42337dd585478c906ecadffb6c";
 const RP2040_UF2_LEN: usize = 81_920;
 
 fn key() -> KeyPair {
@@ -174,6 +174,54 @@ fn engines_match_their_declared_requirements() {
     let uf2 = f.to_uf2_with(1, requirements::PAGE);
     assert_eq!(uf2.len(), 512);
     assert_eq!(&uf2[16..20], &requirements::PAGE.to_le_bytes());
+}
+
+/// The first write of an MCU that relays starts its app log's peer
+/// records with PEERS_KEPT, after the slot's records; an MCU that does
+/// not relay gets none.
+#[test]
+fn the_first_write_of_a_relaying_mcu_starts_its_peer_records() {
+    use dagon_format::statelog::{kind, FaceHeader, Record, FACE_HEADER_SIZE, RECORD_SIZE};
+    let reg = dagon_topology::defs::Registry::builtin();
+    let kinds_of = |mcu: &str, stage0: usize| {
+        let def = reg.mcu(mcu).unwrap();
+        let (bs, boot) = signed(mcu, image_kind::BOOTCORE, slot_binding::A);
+        let (as_, app) = signed(mcu, image_kind::APP, slot_binding::A);
+        let f = provision::first_install(
+            def,
+            Some(&payload(stage0, 0x5A)),
+            (&bs, &boot),
+            (&as_, &app),
+        )
+        .unwrap();
+        let log = def.layout.app_log.unwrap();
+        let base = def.flash_maps[0].base;
+        let face = &f.to_bin(base)[(log.faces[0] - base) as usize..][..log.face_size as usize];
+        FaceHeader::parse(face[..FACE_HEADER_SIZE].try_into().unwrap()).unwrap();
+        face[FACE_HEADER_SIZE..]
+            .chunks_exact(RECORD_SIZE)
+            .map(|r| <&[u8; RECORD_SIZE]>::try_from(r).unwrap())
+            .take_while(|r| !Record::is_erased(r))
+            .map(|r| Record::parse(r).unwrap())
+            .filter(|r| r.target == dagon_format::statelog::target::APP)
+            .map(|r| (r.kind, r.seq))
+            .collect::<Vec<_>>()
+    };
+    assert!(!reg.mcu("rp2040").unwrap().relay_links.is_empty());
+    assert_eq!(
+        kinds_of("rp2040", 0x3F00),
+        [
+            (kind::PROVISION, 1),
+            (kind::CONFIRMED, 2),
+            (kind::PEERS_KEPT, 3)
+        ]
+    );
+    assert!(reg.mcu("stm32f401re").unwrap().relay_links.is_empty());
+    let f401: Vec<u8> = kinds_of("stm32f401re", 0x3000)
+        .into_iter()
+        .map(|(k, _)| k)
+        .collect();
+    assert_eq!(f401, [kind::PROVISION, kind::CONFIRMED]);
 }
 
 #[test]

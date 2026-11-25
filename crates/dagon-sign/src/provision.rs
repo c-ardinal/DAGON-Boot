@@ -42,6 +42,23 @@ pub fn initial_log_for(images: &[(u8, &[u8])]) -> Vec<u8> {
     out
 }
 
+/// PEERS_KEPT, the record with which the app log of a node that relays
+/// starts its peer records: only a first write puts it there, so a log
+/// that lost records never says a peer has not answered. `seq` follows
+/// the records before it.
+pub fn peers_kept(seq: u32) -> [u8; statelog::RECORD_SIZE] {
+    Record {
+        kind: kind::PEERS_KEPT,
+        target: statelog::target::APP,
+        slot: slot::NONE,
+        reason: reason::NONE,
+        seq,
+        version: Default::default(),
+        digest16: [0; 16],
+    }
+    .to_bytes()
+}
+
 /// The page the definitions are checked against (`requirements::PAGE`).
 const PAGE: usize = requirements::PAGE as usize;
 
@@ -156,8 +173,9 @@ type LogImages<'a> = &'a [(u8, &'a [u8])];
 
 /// First-install contents of `mcu` from its definition: stage0 at its
 /// region (exactly when the layout has one), each state log with face A
-/// provisioned (PROVISION + CONFIRMED for slot A) and face B erased, and
-/// the boot core and app images in their slots. Callers check sizes.
+/// provisioned (PROVISION + CONFIRMED for slot A; the app log of an MCU
+/// with relay links also PEERS_KEPT) and face B erased, and the boot core
+/// and app images in their slots. Callers check sizes.
 pub fn first_install(
     mcu: &McuDef,
     stage0: Option<&[u8]>,
@@ -187,7 +205,11 @@ pub fn first_install(
         for face in log.faces {
             f.blank(face, log.face_size);
         }
-        let face = initial_log_for(images);
+        let mut face = initial_log_for(images);
+        if Some(log) == mcu.layout.app_log && !mcu.relay_links.is_empty() {
+            let records = (face.len() - statelog::FACE_HEADER_SIZE) / statelog::RECORD_SIZE;
+            face.extend_from_slice(&peers_kept(records as u32 + 1));
+        }
 
         assert!(
             face.len() as u32 <= log.face_size,

@@ -17,7 +17,7 @@ use dagon_port::{BusError, LinkKind, Nrst, RelayLinkDef};
 use dagon_proto::handler::{self, Handler};
 use dagon_proto::mailbox::{State, STATE_LEN};
 use dagon_proto::payload::{
-    self, boot0, nrst, CapsReq, CapsResp, CmdSet, I2cRaw, Relay, Req, RomTarget, SubCtl,
+    self, boot0, nrst, CapsReq, CapsResp, CmdSet, I2cRaw, PeersResp, Relay, Req, RomTarget, SubCtl,
 };
 use dagon_proto::{find_sof, flags, frame_len, max_payload, Cmd, Frame, FrameError, Status};
 use dagon_topology::defs::{McuDef, PortDef};
@@ -330,6 +330,9 @@ pub struct SimRelay {
     /// NRST/BOOT0, from its MCU definition (set by [`SimRelay::add_i2c`],
     /// as the MCU package's build generates it for the relay).
     pub rom_addr: Option<u8>,
+    /// False: a relay built before PEERS (it answers `Unsupported`, as its
+    /// agent does for any command it does not know).
+    pub serves_peers: bool,
 }
 
 type Answer = (Status, Vec<u8>);
@@ -352,7 +355,7 @@ impl SimRelay {
             "the definition of {} given to a node of {mcu}",
             def.id
         );
-        node.also_serves(CmdSet::EMPTY.with(Cmd::Relay as u8));
+        node.also_serves(CmdSet::EMPTY.with(Cmd::Relay as u8).with(Cmd::Peers as u8));
         SimRelay {
             node,
             bus: SimBus::new(),
@@ -362,6 +365,7 @@ impl SimRelay {
             ports: def.ports.clone(),
             links: def.relay_link_defs(),
             rom_addr: None,
+            serves_peers: true,
         }
     }
 
@@ -498,12 +502,13 @@ impl SimRelay {
         if self.node.in_boot_core() {
             return self.node.handle_frame(frame, self.bus.now_ms);
         }
-        // As the relay on a node: RELAY always, SUBCTL and I2C_RAW with a
-        // node on the recovery lines, CAPS about RELAY; the rest is the
-        // node's own agent.
+        // As the relay on a node: RELAY and PEERS always, SUBCTL and
+        // I2C_RAW with a node on the recovery lines, CAPS about RELAY; the
+        // rest is the node's own agent.
         let wired = self.bus.sub.is_some();
         let row = handler::find(&Self::TABLE, f.cmd)
-            .filter(|h| wired || matches!(h.cmd, Cmd::Relay))
+            .filter(|h| wired || matches!(h.cmd, Cmd::Relay | Cmd::Peers))
+            .filter(|h| self.serves_peers || h.cmd != Cmd::Peers)
             .or((f.cmd == Cmd::Caps as u8).then_some(&Self::CAPS));
         let Some(row) = row else {
             return self.node.handle_frame(frame, self.bus.now_ms);
@@ -521,6 +526,7 @@ impl SimRelay {
             }
             Ok(Req::Caps(c)) => self.caps(c, room),
             Ok(Req::Relay(r)) => self.relay(&r, room),
+            Ok(Req::Peers(page)) => self.peers(page),
             Ok(Req::SubCtl(s)) => self.subctl(s),
             Ok(Req::I2cRaw(raw)) => self.i2c_raw(&raw),
             Ok(_) => (Status::Unsupported, Vec::new()),
@@ -545,8 +551,9 @@ impl SimRelay {
 
     /// The commands the relay answers itself; [`SimRelay::request`] takes
     /// the typed request of a row and runs it, as the relay on a node.
-    const TABLE: [Handler<(), ()>; 3] = [
+    const TABLE: [Handler<(), ()>; 4] = [
         Handler::deferred(Cmd::Relay),
+        Handler::deferred(Cmd::Peers),
         Handler::deferred(Cmd::SubCtl),
         Handler::deferred(Cmd::I2cRaw),
     ];
@@ -603,8 +610,33 @@ impl SimRelay {
             _ => return (Status::Unsupported, Vec::new()),
         };
         match resp {
-            Some(f) => (Status::Ok, f),
+            Some(f) => {
+                // As the relay on a node: a peer that answers with a valid
+                // response frame is recorded.
+                let valid = Frame::decode(&f, usize::MAX)
+                    .is_ok_and(|(inner, _)| inner.flags & flags::RESP != 0);
+                if valid {
+                    self.node.peer_answered(r.link, r.addr);
+                }
+                (Status::Ok, f)
+            }
             None => (Status::Timeout, Vec::new()),
+        }
+    }
+
+    /// PEERS: page `page` of the peers the node's state log records;
+    /// `Unsupported` when they cannot be read.
+    fn peers(&mut self, page: u8) -> Answer {
+        let Some(log) = self.node.peers() else {
+            return (Status::Unsupported, Vec::new());
+        };
+        let mut body = vec![0u8; PeersResp::MAX_LEN];
+        match PeersResp::page(&log, page).encode(&mut body) {
+            Ok(n) => {
+                body.truncate(n);
+                (Status::Ok, body)
+            }
+            Err(_) => (Status::Arg, Vec::new()),
         }
     }
 

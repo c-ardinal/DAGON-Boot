@@ -15,7 +15,7 @@ use dagon_format::{stage0, Version};
 use dagon_port::timeout::{EraseLayout, EraseRegion, Plan};
 use dagon_port::Flash;
 use dagon_port::{SlotStore, StoreError};
-use dagon_proto::payload::{target, SlotInfo, StatusResp};
+use dagon_proto::payload::{target, Peer, PeerLog, SlotInfo, StatusResp};
 
 /// Slot this build is linked for (`slot-b`).
 pub const ACTIVE: u8 = if cfg!(feature = "slot-b") { 1 } else { 0 };
@@ -236,6 +236,22 @@ impl SlotStore for AppStore {
             crate::bl::HandOverError::Unsupported => StoreError::Unsupported,
             crate::bl::HandOverError::Log(_) => StoreError::Flash,
         })
+    }
+
+    /// One PEER_SEEN in the app log, the room of a trial kept after it
+    /// (`Log::note_peer`: a compaction first when the face lacks it).
+    fn note_peer(&mut self, peer: Peer) -> Result<(), StoreError> {
+        let mut log = Log::load(&mut self.flash, &APP_LOG_LAYOUT).map_err(|_| StoreError::Flash)?;
+        log.note_peer(&mut self.flash, peer, trial_room(TRIAL_ATTEMPTS))
+            .map(|_| ())
+            .map_err(|_| StoreError::Flash)
+    }
+
+    /// The peers the app log records; `None` with no valid face.
+    fn peers(&mut self) -> Option<PeerLog> {
+        Log::load(&mut self.flash, &APP_LOG_LAYOUT)
+            .ok()
+            .map(|l| l.peers)
     }
 
     /// Stage0's version mark in its region (`dagon_format::stage0`).

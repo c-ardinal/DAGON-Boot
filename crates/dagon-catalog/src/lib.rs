@@ -4,9 +4,10 @@
 //!
 //! A workspace crate declares its machines in one
 //! `dagon_events::state_machine!` at its root, which defines its
-//! `MACHINES` static; [`REGISTRY`] lists each such crate's `MACHINES` by
-//! path, and a test fails while a crate that invokes the macro is missing
-//! from it. A crate without the macro has no machine and is not listed
+//! `MACHINES` static; [`REGISTRY`] lists the `MACHINES` of each such crate
+//! this package depends on (its build script writes the list from the
+//! manifest's `[dependencies]`, so no list is edited), and a test fails
+//! while a workspace crate that invokes the macro is not among them. A crate without the macro has no machine and is not listed
 //! (the simulator, whose nodes run the agent's machines). A crate that
 //! depends on this one (the CLI) reads the
 //! catalogs and declares no machine. The tests also check the layers'
@@ -40,7 +41,7 @@ macro_rules! registry {
 }
 
 /// Each machine-declaring crate's `MACHINES`, one entry per crate.
-pub static REGISTRY: &[&Machines] = registry![dagon_events, dagon_boot, dagon_agent];
+pub static REGISTRY: &[&Machines] = include!(concat!(env!("OUT_DIR"), "/registry.rs"));
 
 /// Every machine of every layer.
 pub fn machines() -> Vec<Catalog> {

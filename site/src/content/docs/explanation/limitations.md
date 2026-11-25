@@ -49,7 +49,6 @@ description: "DAGONの設計上の範囲外、利用者の責任範囲、設計�
 - VERSIONの0x07、0x08、0x09、0x11、0x12の定義（`version_id::TABLE`）。5.4節の表はこの定義と同一です。
 - ブート段階の拡張: 状態機械`boot_extensions`（`boot.extension_overran`）、`targets/boot-extension-template`、マニフェストの`trusted`、`stack_bytes`、`ram_bytes`、`dagon-extension`の保護マップの生成と信頼された拡張の検査。
 - マイコン定義の`[isolation]`と`[[peripheral]]`。設計の`root_protection`は独立したテーブルです。コードでは`[isolation]`の欄で、コードの変更時に独立したテーブルに移動します。
-- `state_machine!`が生成する、ブート記録のリプレイ用の解読`REPLAY`。
 
 リンク:
 

@@ -403,7 +403,7 @@ action program (5.2); *replay* is the app's agent re-emitting it at
 start from the state log; *host* is the CLI and the serve stream, which also see
 every device-side event that a reply or VERSION carries. Replay
 delivers only kinds the catalog marks `replay` and not `retired`; any
-other record is refused, not guessed.
+other kind is refused.
 
 | Events | Layer | Live | Replay | Host |
 |---|---|---|---|---|

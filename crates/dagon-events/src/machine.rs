@@ -78,11 +78,9 @@
 ///   forms in order.
 /// - `CATALOG`, the machine's [`crate::Catalog`], and `ENTRY` on each
 ///   payload type.
-/// - `REPLAY`, the decoding of the machine's [`crate::EventRecord`]s back
-///   into its payloads, which the layer's replay
-///   ([`crate::Composed::replay`]) takes.
-/// - Each payload's [`crate::Payload`] gives its layer and code only: an
-///   image that delivers events links no catalog name.
+/// - Each payload's [`crate::Payload`] gives its layer, its code and
+///   whether the layer's replay ([`crate::Composed::replay`]) delivers it:
+///   an image that delivers events links no catalog name.
 /// - A test, `every_transition`, that calls every transition from every
 ///   state (fields and arguments at their `Default`) and checks it moves
 ///   exactly from its `from` states to its `to` state and delivers exactly
@@ -445,39 +443,8 @@ macro_rules! __machine {
                 initial: stringify!($initial),
                 states: &[$(stringify!($S)),+],
                 entries: &[$($ev::ENTRY),+],
-                __replay,
                 __transits,
             };
-
-            /// Decodes the machine's records for [`crate::Composed::replay`].
-            pub const REPLAY: $crate::Replay = __replay;
-
-            fn __replay(
-                rec: &$crate::EventRecord,
-                deliver: &mut dyn FnMut(&dyn $crate::Payload),
-            ) -> bool {
-                if rec.layer != $crate::Layer::$layer.code() {
-                    return false;
-                }
-                $(
-                    if rec.kind == $code {
-                        // A constant, so the entry is not linked.
-                        const READS: bool =
-                            $ev::ENTRY.observe.replay && !$ev::ENTRY.flags.retired;
-                        if !READS {
-                            return false;
-                        }
-                        return match $ev::__decode(&rec.payload) {
-                            ::core::option::Option::Some(p) => {
-                                deliver(&p);
-                                true
-                            }
-                            ::core::option::Option::None => false,
-                        };
-                    }
-                )+
-                false
-            }
 
             $(
                 $(#[doc = $tdoc])*
@@ -519,19 +486,6 @@ macro_rules! __machine {
 
                 impl $crate::__private::Generated for $ev {}
 
-                impl $ev {
-                    #[allow(unused_mut, unused_variables, unused_assignments)]
-                    fn __decode(b: &[u8; $crate::PAYLOAD_BYTES]) -> ::core::option::Option<Self> {
-                        let mut at = 0usize;
-                        $(
-                            let n = <$pt as $crate::Compact>::SIZE;
-                            let $pf = <$pt as $crate::Compact>::get(&b[at..at + n])?;
-                            at += n;
-                        )*
-                        ::core::option::Option::Some($ev { $($pf),* })
-                    }
-                }
-
                 impl $crate::Payload for $ev {
                     fn layer(&self) -> $crate::Layer {
                         $crate::Layer::$layer
@@ -539,6 +493,13 @@ macro_rules! __machine {
 
                     fn kind(&self) -> u8 {
                         $code
+                    }
+
+                    fn replays(&self) -> bool {
+                        // A constant, so the entry is not linked.
+                        const REPLAYS: bool =
+                            $ev::ENTRY.observe.replay && !$ev::ENTRY.flags.retired;
+                        REPLAYS
                     }
 
                     #[allow(unused_mut, unused_variables, unused_assignments)]
@@ -589,8 +550,8 @@ macro_rules! __machine {
             #[cfg(test)]
             #[test]
             fn every_transition() {
-                /// Events seen, the last one's record, and how many were replays.
-                struct Count(usize, $crate::EventRecord, usize);
+                /// Events seen and the last one's record.
+                struct Count(usize, $crate::EventRecord);
                 impl $crate::Extension for Count {
                     fn id(&self) -> &'static str {
                         "count"
@@ -598,7 +559,6 @@ macro_rules! __machine {
                     fn on_event(&mut self, e: &$crate::Event<'_>, _: &$crate::Ctx<'_>) {
                         self.0 += 1;
                         self.1 = e.record(0);
-                        self.2 += usize::from(e.is_replayed());
                     }
                 }
                 let all: &[State] = &[
@@ -606,7 +566,7 @@ macro_rules! __machine {
                 ];
                 $(
                     for s in all {
-                        let mut seen = Count(0, ::core::default::Default::default(), 0);
+                        let mut seen = Count(0, ::core::default::Default::default());
                         let mut m = Machine { state: *s };
                         let from: &[&str] = &[$(stringify!($from)),+];
                         let leaves = from.contains(&"*") || from.contains(&s.name());
@@ -622,23 +582,7 @@ macro_rules! __machine {
                             r.unwrap_or_else(|e| panic!("{e}"));
                             assert_eq!(m.state().name(), stringify!($to), "{}", stringify!($trig));
                             assert_eq!(seen.0, 1, "{} delivers one event", stringify!($trig));
-                            let rec = seen.1;
-                            assert_eq!(rec.kind, $code);
-                            let replayed = {
-                                let mut out = $crate::compose_unpublished(
-                                    $crate::Layer::$layer, $crate::Nop, &mut seen,
-                                );
-                                out.replay(&[REPLAY], &rec)
-                            };
-                            let entry = &$ev::ENTRY;
-                            if entry.observe.replay && !entry.flags.retired {
-                                assert!(replayed.is_ok(), "{} replays", stringify!($trig));
-                                assert_eq!((seen.0, seen.2), (2, 1), "{} replays once", stringify!($trig));
-                                assert_eq!(seen.1.payload, rec.payload, "{} decodes", stringify!($trig));
-                            } else {
-                                assert!(replayed.is_err(), "{} is not replayable", stringify!($trig));
-                                assert_eq!(seen.0, 1, "{} was replayed", stringify!($trig));
-                            }
+                            assert_eq!(seen.1.kind, $code);
                         } else {
                             assert!(r.is_err(), "{} from {}", stringify!($trig), s.name());
                             assert_eq!(m.state(), *s, "a refused {} changed the state", stringify!($trig));

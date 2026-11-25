@@ -1,7 +1,7 @@
 //! The image lifecycle machine around the board's slot store: the only
 //! holder of the store's mutators, and the read-only view apps get.
 
-use dagon_events::{compose_unpublished, EventRecord, Layer, Nop, Payload, Refused, Replay, Sink};
+use dagon_events::{compose_unpublished, Layer, Nop, Payload, Refused, Sink};
 use dagon_format::header::HEADER_SIZE;
 use dagon_format::Version;
 use dagon_port::{SlotStore, StoreError};
@@ -228,7 +228,7 @@ impl<S: SlotStore<Transition = Transition>> ImageStore<S> {
                         reason: cs.last_reason,
                         version: cs.slots[usize::from(s)].version,
                     };
-                    replay(chain, core_image::REPLAY, &p);
+                    replay(chain, &p);
                 }
             }
         }
@@ -251,7 +251,7 @@ impl<S: SlotStore<Transition = Transition>> ImageStore<S> {
                 _ => None,
             };
             if let Some(p) = payload {
-                replay(chain, image::REPLAY, p);
+                replay(chain, p);
             }
         }
     }
@@ -536,14 +536,8 @@ impl<S: SlotStore<Transition = Transition>> ImageStore<S> {
 }
 
 /// Delivers `p`, a state the boot stage made, to `chain` as a replay.
-fn replay(chain: &mut impl AppChain, machine: Replay, p: &dyn Payload) {
-    let rec = EventRecord {
-        layer: p.layer().code(),
-        kind: p.kind(),
-        payload: p.compact(),
-        ..EventRecord::default()
-    };
-    let replayed = chain.replay(&[machine], &rec);
+fn replay(chain: &mut impl AppChain, p: &dyn Payload) {
+    let replayed = chain.replay(p);
     debug_assert!(replayed.is_ok());
 }
 

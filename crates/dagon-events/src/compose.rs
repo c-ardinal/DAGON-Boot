@@ -2,10 +2,9 @@
 //! transition delivers its event to, replay, and the bounded decision
 //! calls.
 
-use crate::catalog::Replay;
 use crate::decisions;
 use crate::event::Layer;
-use crate::event::{Event, EventRecord, Payload};
+use crate::event::{Event, Payload};
 use crate::extension::{
     Accept, Ctx, DecisionId, Delay, ExtId, Extension, Health, Nop, RebootRequest, TrialInfo,
     UpdateOffer, DECISION_BOUND_MS,
@@ -388,26 +387,21 @@ impl<U: Extension, C: Clock> Sink for BootComposed<U, C> {
     }
 }
 
-/// A record [`Composed::replay`] could not deliver.
+/// A payload [`Composed::replay`] does not deliver: its kind is not marked
+/// `replay`, or is `retired`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Unreadable;
+pub struct NotReplayed;
 
 impl<H: Head, B: Extension, U: Extension, C> Composed<H, B, U, C> {
-    /// Re-emits a record an earlier stage kept (the boot record, the state
-    /// log) as its typed event with `replayed: true`, decoded by the
-    /// [`Replay`] of the machine that declared it (its `REPLAY`). Only
-    /// kinds the catalog marks `replay` and not `retired` are replayed.
-    /// `Unreadable` when no decoder in `machines` reads it (another layer,
-    /// an unknown or non-replayable kind, a value from a newer writer). A
-    /// layer-start API.
-    pub fn replay(&mut self, machines: &[Replay], rec: &EventRecord) -> Result<(), Unreadable> {
-        let parts = &mut self.parts;
-        let mut deliver = |p: &dyn Payload| parts.send(&Event::replayed(p));
-        if machines.iter().any(|m| m(rec, &mut deliver)) {
-            Ok(())
-        } else {
-            Err(Unreadable)
+    /// Re-emits what an earlier stage left in the state log as its typed
+    /// event with `replayed: true`. Only kinds the catalog marks `replay`
+    /// and not `retired` are replayed. A layer-start API.
+    pub fn replay(&mut self, p: &dyn Payload) -> Result<(), NotReplayed> {
+        if !p.replays() {
+            return Err(NotReplayed);
         }
+        self.parts.send(&Event::replayed(p));
+        Ok(())
     }
 }
 

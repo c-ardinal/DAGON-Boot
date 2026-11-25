@@ -902,6 +902,12 @@ privileged_why = "flash"
 size = 528
 
 [[peripheral]]
+base = 536836624
+id = "device-signature"
+privileged_why = "rom"
+size = 20
+
+[[peripheral]]
 base = 536854528
 id = "option-bytes"
 privileged_why = ["flash", "protection"]

@@ -253,6 +253,19 @@ base = 0x6000_4000
 size = 0x1000
 privileged_why = ["pinmux", "shared"]
 
+# The radio's front end, which the Wi-Fi and Bluetooth drivers share.
+[[peripheral]]
+id = "fe2"
+base = 0x6000_5000
+size = 0x1000
+privileged_why = "shared"
+
+[[peripheral]]
+id = "fe"
+base = 0x6000_6000
+size = 0x1000
+privileged_why = "shared"
+
 [[peripheral]]
 id = "efuse"
 base = 0x6000_7000
@@ -270,6 +283,14 @@ id = "io-mux"
 base = 0x6000_9000
 size = 0x1000
 privileged_why = "pinmux"
+
+# The I2C master of the analog parts (the PLLs, the regulators and the
+# radio): its registers lie inside a page, at the chip data's address.
+[[peripheral]]
+id = "i2c-ana-mst"
+base = 0x6000_E040
+size = 0xC
+privileged_why = ["clock", "power"]
 
 [[peripheral]]
 id = "i2s0"
@@ -314,6 +335,19 @@ id = "ledc"
 base = 0x6001_9000
 size = 0x1000
 window_eligible = true
+
+# The radio's receiver and baseband.
+[[peripheral]]
+id = "nrx"
+base = 0x6001_CC00
+size = 0x400
+privileged_why = "shared"
+
+[[peripheral]]
+id = "bb"
+base = 0x6001_D000
+size = 0x1000
+privileged_why = "shared"
 
 [[peripheral]]
 id = "mcpwm0"
@@ -365,6 +399,23 @@ base = 0x6002_7000
 size = 0x1000
 window_eligible = true
 
+# The SD/MMC host moves data with its own DMA.
+[[peripheral]]
+id = "sdhost"
+base = 0x6002_8000
+size = 0x1000
+bus_master = true
+privileged_why = "dma"
+
+# Light sleep's register backup copies peripheral registers to and from
+# memory by itself.
+[[peripheral]]
+id = "peri-backup"
+base = 0x6002_A000
+size = 0x1000
+bus_master = true
+privileged_why = ["dma", "power"]
+
 [[peripheral]]
 id = "twai"
 base = 0x6002_B000
@@ -389,6 +440,14 @@ id = "uart2"
 base = 0x6002_E000
 size = 0x1000
 window_eligible = true
+
+# The random number register (the last word of the block), in the Wi-Fi
+# device's registers: the chip data's address and extent.
+[[peripheral]]
+id = "rng"
+base = 0x6003_4F6C
+size = 0x114
+privileged_why = "shared"
 
 [[peripheral]]
 id = "usb-serial-jtag"
@@ -485,6 +544,28 @@ id = "extmem"
 base = 0x600C_4000
 size = 0x1000
 privileged_why = ["flash", "protection"]
+
+# The flash MMU's mapping table.
+[[peripheral]]
+id = "mmu-table"
+base = 0x600C_5000
+size = 0x1000
+privileged_why = ["flash", "protection"]
+
+# Flash encryption.
+[[peripheral]]
+id = "xts-aes"
+base = 0x600C_C000
+size = 0x1000
+privileged_why = ["flash", "protection"]
+
+# The debug assist watches each core's program counter, stack and bus
+# accesses.
+[[peripheral]]
+id = "assist-debug"
+base = 0x600C_E000
+size = 0x1000
+privileged_why = ["core-control", "protection"]
 
 [[peripheral]]
 id = "world-controller"

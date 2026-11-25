@@ -112,7 +112,7 @@ Options:
 ```text
 Make one Rust crate per node in nodes/<id> on the board support packages
 
-Rewrites only wiring.rs and the package line, never app.rs (main.rs only with --force-main).
+Rewrites only wiring.rs and the package line, never app.rs (main.rs only with --force-main). While app.rs differs from its template, the template is written beside it as app.rs.new.
 
 Usage: dagon gen [OPTIONS] [ID]...
 

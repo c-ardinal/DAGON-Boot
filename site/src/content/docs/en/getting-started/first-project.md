@@ -106,6 +106,7 @@ Write your application in `nodes/<id>/src/app.rs`. It has two things:
 
 - It rewrites only `src/wiring.rs` and the DAGON crate lines of `Cargo.toml`.
 - It never touches `app.rs`, nor `main.rs` unless `--force-main`.
+- While your `app.rs` differs from its template, it writes the template beside it as `src/app.rs.new` and says so when it writes it, so that you can compare the two after the template changed. When the two are the same again, it removes `app.rs.new`.
 
 `dagon new` and `dagon gen` never write or remove anything through a symbolic link or a junction. A node whose `nodes/<id>` (or `nodes`, or any file `dagon gen` writes) is one is skipped with the reason, and `dagon gen` then exits with an error.
 

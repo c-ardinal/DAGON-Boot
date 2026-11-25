@@ -900,7 +900,10 @@ pub fn gen(
                 "Cargo.toml" if contained(base, Path::new(&path))?.exists() => {
                     refresh_manifest(base, &path, &text, &mut r.written)?
                 }
-                "src/app.rs" => write(base, &path, &text, false, &mut r.written)?,
+                "src/app.rs" => {
+                    write(base, &path, &text, false, &mut r.written)?;
+                    app_template(base, &path, &text, &mut r.written)?;
+                }
                 "src/main.rs" => write(base, &path, &text, force_main, &mut r.written)?,
                 "src/wiring.rs" => {}
                 _ => write(base, &path, &text, false, &mut r.written)?,
@@ -927,6 +930,38 @@ pub fn gen(
         )?;
     }
     Ok(r)
+}
+
+/// Suffix of the template gen writes beside a file of the developer's that
+/// differs from it.
+pub(crate) const NEW_SUFFIX: &str = ".new";
+
+/// The template of the developer's file `rel`, written beside it as
+/// `<rel>.new` while the two differ (line ends aside), so that a template
+/// that changed can be compared and taken over by hand; the file itself is
+/// never touched. Once they are the same, the copy gen wrote is removed.
+fn app_template(base: &Path, rel: &str, text: &str, out: &mut Vec<Written>) -> Result<(), String> {
+    let new = format!("{rel}{NEW_SUFFIX}");
+    let read = |rel: &str| -> Result<Option<String>, String> {
+        let path = genfs::checked(base, &genfs::Rel::new(rel)?)?;
+        Ok(std::fs::read_to_string(path)
+            .ok()
+            .map(|t| t.replace("\r\n", "\n")))
+    };
+    let template = text.replace("\r\n", "\n");
+    if read(rel)?.is_some_and(|own| own != template) {
+        return write(base, &new, text, true, out);
+    }
+    // Only gen's own copy is removed: one the developer changed stays.
+    if read(&new)?.is_some_and(|copy| copy == template)
+        && genfs::remove(base, &genfs::Rel::new(&new)?)?
+    {
+        out.push(Written {
+            path: new,
+            action: "removed",
+        });
+    }
+    Ok(())
 }
 
 /// Adds `[build.<id>]` for nodes that have none (comments kept).
@@ -1011,6 +1046,18 @@ pub(crate) fn outcome(lines: &[String]) -> Result<(), String> {
     ))
 }
 
+/// What gen tells of a template it wrote, or wrote anew, beside the
+/// developer's file.
+fn template_note(w: &Written) -> Option<String> {
+    let own = w.path.strip_suffix(NEW_SUFFIX)?;
+    matches!(w.action, "created" | "rewritten").then(|| {
+        format!(
+            "note: {own} differs from its template, which is in {}: compare the two and take over what you need ({own} is never rewritten)",
+            w.path
+        )
+    })
+}
+
 /// `dagon gen` for the project whose dagon.toml is `config`: the lines it
 /// reports (written, skipped, added, notes).
 pub fn gen_project(config: &Path, only: &[String], force: bool) -> Result<Vec<String>, String> {
@@ -1030,6 +1077,7 @@ pub fn gen_project(config: &Path, only: &[String], force: bool) -> Result<Vec<St
     for (id, why) in &report.skipped {
         out.push(format!("skipped    nodes/{id}: {why}"));
     }
+    out.extend(report.written.iter().filter_map(template_note));
     // Every selected node's generated folder holds exactly this run's
     // files; a node whose crate was skipped keeps none.
     let failed: Vec<String> = report.skipped.iter().map(|(id, _)| id.clone()).collect();

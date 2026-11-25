@@ -106,6 +106,7 @@ dagon gen
 
 - 再生成の対象は`src/wiring.rs`と、`Cargo.toml`にあるDAGONのcrateの行だけです。
 - `app.rs`は変更しません。`main.rs`も`--force-main`の指定時以外は変更しません。
+- `app.rs`とテンプレートに差分がある間は、テンプレートを`src/app.rs.new`として出力し、出力時に通知します。テンプレートの変更後に両者を比較可能です。差分が解消した時点で`app.rs.new`を削除します。
 
 `dagon new`と`dagon gen`はシンボリックリンクやジャンクションを経由したファイルの保存と削除をしません。`nodes/<id>`（または`nodes`、`dagon gen`の出力ファイル）がそれに該当するノードは、理由を表示して処理を省略します。その後に`dagon gen`はエラーで終了します。
 

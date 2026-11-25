@@ -66,6 +66,9 @@ ed25519-compact = { version = "2.6", default-features = false }
 # SVD). Host tests only: the PAC is esp-hal's own dependency on the target.
 [target.'cfg(not(target_arch = "xtensa"))'.dev-dependencies]
 esp32s3 = { version = "0.36", default-features = false }
+# tests/pin_map.rs: the boards' pins against Espressif's chip metadata, as
+# esp-hal uses it (its own dependency on the target).
+esp-metadata-generated = { version = "0.5.3", features = ["esp32s3"] }
 toml = { version = "0.8", default-features = false, features = ["parse"] }
 
 [target.'cfg(target_arch = "xtensa")'.dependencies]

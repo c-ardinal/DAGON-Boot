@@ -30,7 +30,10 @@ method = 2
 
 # DAGON's link: UART0 on the rear pins MUX_IO_1/2 (the expander's PYG1
 # low routes them to UART0), at the topology link's baud (dagon gives it to
-# the build; default_link.baud otherwise).
+# the build; default_link.baud otherwise). GPIO43 and GPIO44 are the pins the
+# chip gives U0TXD and U0RXD on the IO MUX (function 0) in Espressif's chip
+# metadata (esp-metadata-generated; targets/mcu/esp32s3/tests/pin_map.rs
+# holds the board to it).
 [[bus]]
 id = "link"
 kind = "uart"

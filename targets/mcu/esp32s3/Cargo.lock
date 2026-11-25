@@ -266,6 +266,7 @@ dependencies = [
  "embedded-io-async 0.7.0",
  "esp-bootloader-esp-idf",
  "esp-hal",
+ "esp-metadata-generated",
  "esp-rtos",
  "esp32s3",
  "static_cell",

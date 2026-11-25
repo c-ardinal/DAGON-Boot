@@ -16,6 +16,15 @@
 //! of the section (one already overdue stays overdue); afterwards every
 //! other deadline moves later by exactly the section's length. Time it spends awaiting (reply
 //! transmission, waiting for input) is not excused: lower tasks can run then.
+//!
+//! This is not the accounting of the other MCUs' guard
+//! (`dagon_mcu_common::liveness`), and the two differ in what they excuse.
+//! That one freezes the background deadlines for as long as any preempting
+//! task is busy, its waits included, with the tasks and their levels fixed
+//! when the guard is declared and a critical section around each change.
+//! This one freezes them only for the sections the link task marks, so a
+//! stuck task is seen while the link task awaits; tasks register at run
+//! time, and the registry is lock-free.
 
 use core::sync::atomic::{AtomicBool, AtomicU32, AtomicU8, Ordering};
 

@@ -88,6 +88,17 @@ impl<const N: usize> FrameReader<N> {
         self.buf.copy_within(n..self.len, 0);
         self.len -= n;
     }
+
+    /// The bytes buffered so far.
+    pub fn buffered(&self) -> usize {
+        self.len
+    }
+
+    /// Keeps the first `n` buffered bytes and drops the rest (a partial
+    /// frame behind a frame still in use).
+    pub fn truncate(&mut self, n: usize) {
+        self.len = self.len.min(n);
+    }
 }
 
 #[cfg(test)]

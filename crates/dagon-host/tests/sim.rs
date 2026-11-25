@@ -2691,3 +2691,34 @@ fn a_node_whose_state_could_not_be_read_still_counts_for_a_constraint() {
     );
     assert!(matches!(out[1].outcome, Outcome::Failed(_)), "{out:?}");
 }
+
+/// The hub already runs 1.1.0 on trial over its confirmed 1.0.0 when the
+/// release is applied: the seg takes 1.1.0, the hub fails. The hub keeps
+/// 1.0.0 unless its trial is confirmed, so the seg goes back to stay in
+/// lockstep with it.
+#[test]
+fn a_node_already_on_trial_counts_as_on_its_confirmed_version() {
+    let yaml = format!("{}{LOCKSTEP}", yaml());
+    let t = dagon_topology::parse_str(&yaml).unwrap();
+    let v = Version::new(1, 1, 0);
+    let images = [seg_img(0, v), seg_img(1, v), hub_img(0, v), hub_img(1, v)];
+    let reg = dagon_topology::defs::Registry::builtin();
+    let b = dagon_sign::release::build(reg, &t, &topology(&yaml), &images, "r1.1", &key())
+        .unwrap()
+        .bundle;
+    let s = sim();
+    s.relay.borrow_mut().node.trial_app = TrialApp::NeverConfirms;
+    let mut h = host(&s);
+    let hub_only =
+        block_on(h.apply(&b, &topology(&yaml), &key().pk, Some(&[0]), &mut |_| {})).unwrap();
+    assert!(matches!(hub_only[0].outcome, Outcome::Failed(_)));
+    let hello = block_on(h.hello(Target::Local)).unwrap();
+    assert_eq!((hello.active_version, hello.trial), (v, true));
+
+    let out = block_on(h.apply(&b, &topology(&yaml), &key().pk, None, &mut |_| {})).unwrap();
+    assert!(
+        matches!(out[0].outcome, Outcome::Realigned(v) if v == Version::new(1, 0, 0)),
+        "{out:?}"
+    );
+    assert!(matches!(out[1].outcome, Outcome::Failed(_)), "{out:?}");
+}

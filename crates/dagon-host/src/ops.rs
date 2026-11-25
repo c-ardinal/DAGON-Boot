@@ -241,7 +241,7 @@ impl<T: Transport, C: HostClock> Host<T, C> {
     /// back to the version they ran, where a compatibility constraint of the
     /// release no longer holds with a node that stayed off the release's
     /// version ([`crate::realign::realign`]). `before` is the app version
-    /// each node of `out` ran when its turn came.
+    /// each node of `out` kept when its turn came ([`kept`]).
     async fn realign(
         &mut self,
         b: &BundleView<'_>,
@@ -267,12 +267,16 @@ impl<T: Transport, C: HostClock> Host<T, C> {
                     Err(_) => continue,
                 },
                 // Nothing was sent to a node that was not started, or whose
-                // state could not be read: it runs what it ran.
+                // state could not be read: it keeps what it kept.
                 (Outcome::NotStarted, _) | (Outcome::Failed(_), None) => {
-                    match self.hello(r.target).await {
-                        Ok(h) => (h.active_version, h.active_version),
-                        Err(_) => continue,
-                    }
+                    let v = match self.status(r.target).await {
+                        Ok(st) => kept(&st),
+                        Err(_) => match self.hello(r.target).await {
+                            Ok(h) => h.active_version,
+                            Err(_) => continue,
+                        },
+                    };
+                    (v, v)
                 }
                 _ => continue,
             };
@@ -345,7 +349,7 @@ impl<T: Transport, C: HostClock> Host<T, C> {
             Ok(v) => Outcome::Done(v),
             Err(e) => Outcome::Failed(e),
         };
-        (Some(st.hello.active_version), outcome)
+        (Some(kept(&st)), outcome)
     }
 
     async fn update_node(
@@ -1434,6 +1438,16 @@ fn image_of<'a>(b: &BundleView<'a>, node: u8, kind: u8, slot: u8) -> Option<&'a 
             && (e.slot_binding == slot || e.slot_binding == slot_binding::ANY);
         fits.then(|| b.item_bytes(i))
     })
+}
+
+/// The app version a node keeps: the one it runs, or its confirmed one
+/// while it runs on trial (a version on trial is taken back unless it is
+/// confirmed).
+fn kept(st: &NodeState) -> Version {
+    match st.status.slots.get(usize::from(st.status.confirmed)) {
+        Some(slot) if st.hello.trial => slot.version,
+        _ => st.hello.active_version,
+    }
 }
 
 /// The newest app version the release gives `node`.

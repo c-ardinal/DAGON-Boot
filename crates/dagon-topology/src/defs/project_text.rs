@@ -3,8 +3,8 @@
 //! products, labels, connection copy, doctor names and hints) that are not
 //! [`page_safe`] are stored as [`PROJECT_TEXT`]; identifiers and writer
 //! parameters other text names (ids, flash maps, pins, controllers, part
-//! names, the UF2 drive's info file, header and Board-ID, probe-rs and
-//! espflash chip names) must be `page_safe` or the definition does not
+//! names, ROM entry names, the UF2 drive's info file, header and Board-ID,
+//! probe-rs and espflash chip names) must be `page_safe` or the definition does not
 //! load. File paths and doctor commands stay as written: they are never
 //! put into text that leaves the terminal.
 
@@ -68,7 +68,11 @@ pub(super) fn mcu(m: &mut McuDef) -> Result<(), String> {
     for c in &m.cores {
         plain("core.id", &c.id)?;
     }
+    for e in &m.rom_entries {
+        plain("rom_entry.name", &e.name)?;
+    }
     if let Some(r) = &mut m.rom_i2c {
+        plain("rom_i2c.entry", &r.entry)?;
         plain_pairs("rom_i2c.pairs", &r.pairs)?;
         scrub(&mut r.name);
     }
@@ -87,6 +91,12 @@ pub(super) fn board(b: &mut BoardDef) -> Result<(), String> {
     plain("id", &b.id)?;
     plain("mcu", &b.mcu)?;
     plain_pairs("i2c", &b.i2c_pairs)?;
+    for e in &b.rom_entries {
+        plain("rom_entry.name", &e.name)?;
+    }
+    if let Some(r) = b.default_link.as_ref().and_then(|l| l.rom_entry.as_ref()) {
+        plain("default_link.rom_entry", r.name())?;
+    }
     for h in &mut b.header {
         plain("header.pin", &h.pin)?;
         if let Some(l) = &mut h.label {

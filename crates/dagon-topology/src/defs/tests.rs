@@ -477,6 +477,14 @@ fn a_rom_entry_a_definition_names_is_checked_and_compiled() {
     // A builtin definition names this one as method 1.
     let m = refused("rom-entry-twice", &entry("force-download-boot", 9));
     assert!(m.contains("a name has one code"), "{m}");
+    // A project's names reach check messages and the page: plain words only.
+    let m = refused("rom-entry-markup", &entry("<b>x</b>", 7));
+    assert!(m.contains("rom_entry.name must be"), "{m}");
+    let named = format!("{FAKE_BOARD}rom_entry = [{{ name = \"C:/x\", method = 7 }}]\n");
+    let m = fake_load_board("rom-entry-board-markup", 400_000, "", &named)
+        .unwrap_err()
+        .msg;
+    assert!(m.contains("rom_entry.name must be"), "{m}");
     // A board's default link names an entry a definition has.
     let board = FAKE_BOARD.replace(
         "control = \"full\"",

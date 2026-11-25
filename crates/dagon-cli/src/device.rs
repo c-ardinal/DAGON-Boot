@@ -6,7 +6,8 @@ use std::path::{Path, PathBuf};
 use dagon_format::header::port_kind;
 use dagon_format::Version;
 use dagon_host::{
-    Event, Host, HostClock, LocalNode, NodeState, Outcome, RouteError, Target, Transport, WritePath,
+    Event, Host, HostClock, LocalNode, NodeState, Outcome, RouteError, Silence, Target, Transport,
+    WritePath,
 };
 use dagon_proto::payload::{phase, SlotState, StatusResp, VersionResp, VersionSlots};
 use dagon_proto::Status;
@@ -625,18 +626,15 @@ where
     let report = run.map_err(|e| format!("apply refused: {e:?}"))?;
     let mut ok = true;
     for r in &report {
-        let line = match &r.outcome {
+        let silent = Silence::of(&r.outcome).map(|case| silence_line(case, name(r.node)));
+        ok &= silent.is_none();
+        let line = silent.unwrap_or_else(|| match &r.outcome {
             Outcome::Done(v) => format!("done, {v}"),
             Outcome::Failed(e) => {
                 ok = false;
                 format!("stopped: {e:?}")
             }
             Outcome::NotStarted => "not started".into(),
-            Outcome::NeedsFirstWrite => {
-                ok = false;
-                let node = name(r.node);
-                format!("does not answer, nothing sent; write it directly: dagon flash {node}")
-            }
             Outcome::Realigned(v) => format!(
                 "back on {v}: a compatibility constraint ties it to a node that stayed off the package's version"
             ),
@@ -647,7 +645,7 @@ where
                 ok = false;
                 format!("not confirmed: {other:?}")
             }
-        };
+        });
         println!("{}: {line}", name(r.node));
     }
     if ok {
@@ -657,11 +655,42 @@ where
     }
 }
 
+/// What `dagon update` says of a node that does not answer: the name of
+/// its case ([`Silence::name`], the design's and the page's three), what
+/// was done and what to do.
+fn silence_line(case: Silence, node: &str) -> String {
+    let name = case.name();
+    match case {
+        Silence::Lost => format!(
+            "stopped: {name}: it answered before and does not answer; check its power and wiring"
+        ),
+        Silence::NeverReached => {
+            format!("{name}: nothing sent; write it directly: dagon flash {node}")
+        }
+        Silence::HistoryUnknown => format!(
+            "stopped: {name}: it does not answer and the relaying node's records cannot tell whether it ever did; check its power and wiring, or write it directly: dagon flash {node}"
+        ),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use dagon_proto::payload::{SlotInfo, SlotVersion};
     use dagon_proto::Cmd;
+
+    /// The three cases keep the names the design and the page give them,
+    /// and only a node that was never reached lets the run go on.
+    #[test]
+    fn a_node_that_does_not_answer_is_named_by_its_case() {
+        let line = |case| silence_line(case, "seg");
+        assert!(line(Silence::Lost).starts_with("stopped: lost: "));
+        assert!(line(Silence::NeverReached).starts_with("never reached: nothing sent; "));
+        assert!(line(Silence::HistoryUnknown).starts_with("stopped: history unknown: "));
+        for case in [Silence::NeverReached, Silence::HistoryUnknown] {
+            assert!(line(case).ends_with("dagon flash seg"));
+        }
+    }
 
     #[test]
     fn status_names_the_reset_cause_a_node_reports() {

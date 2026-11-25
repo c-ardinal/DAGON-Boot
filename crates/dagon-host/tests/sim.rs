@@ -10,7 +10,7 @@ use dagon_format::header::{image_kind, target_tag, McuId};
 use dagon_format::Version;
 use dagon_host::{
     rom, ConfirmOutcome, Error, Event, Host, HostClock, NodeOutcome, Outcome, RecoverAssets,
-    RecoverPath, Target, Transport, WritePath,
+    RecoverPath, Silence, Target, Transport, WritePath,
 };
 use dagon_port::timeout::{CONFIRM_RETRY_MS, NODE_POLL_MS, REQUEST_MS};
 use dagon_proto::payload::{phase, SlotState};
@@ -807,11 +807,8 @@ fn node_that_falls_back_stops_the_run_and_confirm_rule() {
     assert!(matches!(r, Err(Error::NoPreviousVersion)));
 }
 
-/// A node added to the configuration since the last write runs no DAGON
-/// yet: it answers nothing. A write of every node gives it its own outcome,
-/// sends it nothing, and writes the others.
-#[test]
-fn a_node_that_was_never_written_does_not_stop_the_others() {
+/// A hub as its first write left it, and nothing on its links.
+fn hub_alone() -> SimRelay {
     let mut hub = demo_hub(*key().pk, 7);
     hub.node
         .provision_core(|m| *key().sk.sign(m, None))
@@ -819,47 +816,138 @@ fn a_node_that_was_never_written_does_not_stop_the_others() {
     hub.node
         .provision(&hub_img(0, Version::new(1, 0, 0)), 0)
         .unwrap();
-    let s = sim_of(hub);
+    hub
+}
+
+/// A write of every node of the sample.
+fn apply_all(h: &mut Host<Sim, Sim>) -> Vec<NodeOutcome<()>> {
+    block_on(h.apply(&release(), &topology(&yaml()), &key().pk, None, &mut |_| {})).unwrap()
+}
+
+fn xfers(s: &Sim) -> usize {
+    let seen = &s.faults.borrow().seen;
+    seen.iter().filter(|c| c.0 == Cmd::XferBegin as u8).count()
+}
+
+/// Never reached. A node added to the configuration since the last write
+/// runs no DAGON yet: it answers nothing, and the hub's records, complete
+/// since its first write, hold none of it. A write of every node gives it
+/// its own outcome, sends it nothing, and writes the others.
+#[test]
+fn a_node_that_was_never_reached_does_not_stop_the_others() {
+    let s = sim_of(hub_alone());
     let mut h = host(&s);
-    let out =
-        block_on(h.apply(&release(), &topology(&yaml()), &key().pk, None, &mut |_| {})).unwrap();
+    let out = apply_all(&mut h);
     assert_eq!(out[0].node, SEG);
     assert!(
         matches!(out[0].outcome, Outcome::NeedsFirstWrite),
         "{out:?}"
     );
+    assert_eq!(Silence::of(&out[0].outcome), Some(Silence::NeverReached));
     assert!(
         matches!(out[1].outcome, Outcome::Done(v) if v == Version::new(1, 1, 0)),
         "{out:?}"
     );
-    let xfers = s
-        .faults
-        .borrow()
-        .seen
-        .iter()
-        .filter(|c| c.0 == Cmd::XferBegin as u8)
-        .count();
-    assert_eq!(xfers, 1, "only the relaying node took a transfer");
+    assert_eq!(xfers(&s), 1, "only the relaying node took a transfer");
 }
 
-/// A node that answered in this session ran DAGON: silent now, it fails and
-/// stops the run as any written node that fails.
+/// Lost. The hub recorded the node when it answered; silent now, it stops
+/// the run as any written node that fails. The record decides, in the
+/// hub's flash: a session that never saw the node answer says the same,
+/// and so does one after the hub restarted.
 #[test]
-fn a_node_that_answered_and_went_silent_stops_the_run() {
+fn a_node_that_answered_before_and_is_silent_stops_the_run() {
     let s = sim();
-    let mut h = host(&s);
-    block_on(h.hello(seg_at())).unwrap();
+    block_on(host(&s).hello(seg_at())).unwrap();
     wipe_seg(&s);
-    let out =
-        block_on(h.apply(&release(), &topology(&yaml()), &key().pk, None, &mut |_| {})).unwrap();
+    s.relay.borrow_mut().node.reset(0);
+    let mut h = host(&s);
+    let out = apply_all(&mut h);
     assert!(
-        matches!(
-            out[0].outcome,
-            Outcome::Failed(Error::Relay(Status::Timeout))
-        ),
+        matches!(out[0].outcome, Outcome::Failed(Error::Lost { node: SEG })),
         "{out:?}"
     );
+    assert_eq!(Silence::of(&out[0].outcome), Some(Silence::Lost));
+    assert_eq!(dagon_host::reason(&Error::<()>::Lost { node: SEG }), "LOST");
     assert!(matches!(out[1].outcome, Outcome::NotStarted), "{out:?}");
+    assert_eq!(xfers(&s), 0, "nothing was written");
+}
+
+/// History unknown. A hub whose log lost its records (rebuilt, or written
+/// before the records existed) cannot say the node never answered: the
+/// run stops and nothing is written. So does a hub built before PEERS.
+#[test]
+fn a_silent_node_whose_history_the_hub_cannot_tell_stops_the_run() {
+    let unknown = |hub: SimRelay| {
+        let s = sim_of(hub);
+        let mut h = host(&s);
+        let out = apply_all(&mut h);
+        assert!(
+            matches!(
+                out[0].outcome,
+                Outcome::Failed(Error::HistoryUnknown { node: SEG })
+            ),
+            "{out:?}"
+        );
+        assert_eq!(Silence::of(&out[0].outcome), Some(Silence::HistoryUnknown));
+        assert!(matches!(out[1].outcome, Outcome::NotStarted), "{out:?}");
+        assert_eq!(xfers(&s), 0, "nothing was written");
+    };
+    let mut lost_records = hub_alone();
+    lost_records.node.store().lose_peers_kept().unwrap();
+    unknown(lost_records);
+    let mut before_peers = hub_alone();
+    before_peers.serves_peers = false;
+    unknown(before_peers);
+    assert_eq!(
+        dagon_host::reason(&Error::<()>::HistoryUnknown { node: SEG }),
+        "HISTORY UNKNOWN"
+    );
+}
+
+/// A record of the node is a record whatever else the log lost: lost,
+/// not history unknown.
+#[test]
+fn a_record_of_the_node_outweighs_an_incomplete_history() {
+    let s = sim();
+    block_on(host(&s).hello(seg_at())).unwrap();
+    wipe_seg(&s);
+    let hub = &s.relay;
+    hub.borrow_mut().node.store().lose_peers_kept().unwrap();
+    assert_eq!(block_on(host(&s).silence(seg_at())).unwrap(), Silence::Lost);
+}
+
+/// The records are read a page at a time: a record on a later page is
+/// found, a node on none of them was never reached, and a log that holds
+/// as many records as it can says nothing of a node it has none of.
+#[test]
+fn the_hubs_records_are_read_page_by_page() {
+    let s = sim_of(hub_alone());
+    let Target::Linked { link, addr, .. } = seg_at() else {
+        panic!("the seg is a linked node");
+    };
+    let record = |a: u8| assert!(s.relay.borrow_mut().node.peer_answered(link, a));
+    // Nine other peers: more than a page of eight.
+    (0..9).for_each(|i| record(addr + 1 + i));
+    assert_eq!(
+        block_on(host(&s).silence(seg_at())).unwrap(),
+        Silence::NeverReached
+    );
+    record(addr);
+    assert_eq!(block_on(host(&s).silence(seg_at())).unwrap(), Silence::Lost);
+
+    let full = sim_of(hub_alone());
+    let record = |a: u8| full.relay.borrow_mut().node.peer_answered(link, a);
+    assert!((0..16).all(|i| record(addr + 1 + i)));
+    assert_eq!(
+        block_on(host(&full).silence(seg_at())).unwrap(),
+        Silence::HistoryUnknown
+    );
+    // The node the PC is connected to is not a peer of anyone.
+    assert_eq!(
+        block_on(host(&full).silence(Target::Local)).unwrap(),
+        Silence::HistoryUnknown
+    );
 }
 
 #[test]

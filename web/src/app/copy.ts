@@ -154,8 +154,8 @@ export const BAND_FOR = {
   stoppedAt: (stuck: string) => ({ pair: ['推定', '約1分'] as const, sentence: `${stuck}の修正後に未書込ノードへの書込が可能です。` }),
   /** done when doneAll is not true: the nodes that did not answer were not updated. */
   doneSome: (n: number) => ({ sentence: `応答なしの${n}ノードは旧バージョンのままのため、電源と配線の確認後に書込を実行してください。` }),
-  /** done when dagon-host sent nothing to nodes that answered nothing (needsFirstWrite): their first write goes from their card. */
-  doneFirst: (n: number) => ({ sentence: `応答なしの${n}ノードへの送信はありません。各ノードの「${WRITE.run}」で初回の書込を実行してください。` }),
+  /** done when dagon-host sent nothing to nodes that were never reached (needsFirstWrite): their first write goes from their card. */
+  doneFirst: (n: number) => ({ sentence: `${SILENCE.neverReached.word}の${n}ノードへの送信はありません。各ノードの「${WRITE.run}」で最初の書込を実行してください。` }),
   /** done after 「前のバージョンへの復元」. */
   /** done when some nodes were already on the package. */
   donePart: (wrote: number, same: number) => ({ sentence: `${wrote}ノードへの書込が完了し、同一内容の${same}ノードは書込を省略しました。` }),
@@ -1351,6 +1351,18 @@ export const TOPOLOGY_READ = {
   detail: '構成のファイルの読込に失敗したため、変更は保存しません。プロジェクトを再度オープンしてください。',
 } as const;
 
+/**
+ * The three cases of a node that does not answer, by dagon-host's key: it
+ * answered before (途絶), the relaying node's records are complete and hold
+ * none of it (通信実績なし), or the records cannot tell (履歴不明). The CLI
+ * and the design say the same three.
+ */
+export const SILENCE = {
+  lost: { word: '途絶', chip: '× 途絶' },
+  neverReached: { word: '通信実績なし', chip: '× 通信実績なし' },
+  historyUnknown: { word: '履歴不明', chip: '× 履歴不明' },
+} as const;
+
 export const WRITE = {
   noneChecked: { label: 'ノード未選択', detail: '書込対象のノードのカードをチェックしてください。' },
   alreadyOn: (v: string, coreToo: boolean) => ({ label: `全ノード${v}`, detail: `チェックしたノードは${v}で動作中${coreToo ? 'でブートローダも同一のため' : 'のため'}、書込を省略しました。` }),
@@ -1387,6 +1399,11 @@ export const WRITE = {
   /** The real cause and the next step for a write that could not be made, by what the node or the link said. */
   why: {
     silent: { reason: 'ノードがPC接続ノードからの要求に応答しませんでした。', fix: 'ノードの電源とPC側のノードとの配線を確認後に再度書込を実行してください。' },
+    LOST: { reason: '通信実績が存在するノードが応答しませんでした（途絶）。', fix: 'ノードの電源とPC側のノードとの配線を確認後に再度書込を実行してください。' },
+    'HISTORY UNKNOWN': {
+      reason: 'ノードが応答せず、PC接続ノードの通信実績の記録では過去の応答の有無が判定不能でした（履歴不明）。',
+      fix: 'ノードの電源とPC側のノードとの配線を確認後に再度書込を実行してください。未書込のノードは、USBで直接接続してカードの「書込」で最初の書込を実行してください。',
+    },
     E_SIGNATURE: { reason: 'ノードでパッケージの配布元の検証に失敗しました。別のキーで作成したパッケージです。', fix: 'このプロジェクトのキーで再ビルド後に再度書込を実行してください。' },
     E_KEY: { reason: 'ノードでパッケージの配布元の検証に失敗しました。別のキーで作成したパッケージです。', fix: 'このプロジェクトのキーで再ビルド後に再度書込を実行してください。' },
     E_DIGEST: { reason: '受信した内容が途中で破損していました。', fix: 'PC側のノードとの配線とケーブルを確認後に再度書込を実行してください。' },

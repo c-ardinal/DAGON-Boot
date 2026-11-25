@@ -2,10 +2,11 @@
 // from the Rust side (dagon_topology::RULES, dagon_host::REASONS, dagon_host::jobs), so one added
 // there fails here until it has them, and a word for something no list names fails too.
 import { describe, expect, test } from 'vitest';
-import { JOBS, NODE, RULE_FIX, RULE_SHORT, SLOT, WRITE } from './copy.ts';
+import { JOBS, NODE, RULE_FIX, RULE_SHORT, SILENCE, SLOT, WRITE } from './copy.ts';
 import { stageWord } from './console/states.ts';
+import { resultChip } from './nodeState.ts';
 import { failureStage, REFUSALS } from './writeProgress.ts';
-import { failure_reasons, job_kinds, job_states, rule_ids } from '../wasm/pkg/dagon_wasm.js';
+import { failure_reasons, job_kinds, job_states, rule_ids, silence_keys } from '../wasm/pkg/dagon_wasm.js';
 import { wireNumbers } from '../wasm/dagon.ts';
 
 const sorted = (xs: Iterable<string>) => [...xs].sort();
@@ -34,6 +35,20 @@ describe("dagon-host's reasons", () => {
     const stages = ['silent', 'refused', 'cannotFix'];
     expect(Object.keys(WRITE.why).filter((r) => !reasons.has(r) && !stages.includes(r))).toEqual([]);
     expect(REFUSALS.every((r) => reasons.has(r))).toBe(true);
+  });
+});
+
+describe('a node that does not answer', () => {
+  test("has the design's word for each of dagon-host's cases, and for nothing else", () => {
+    expect(sorted(Object.keys(SILENCE))).toEqual(sorted(silence_keys()));
+    expect(Object.values(SILENCE).map((s) => s.word)).toEqual(['途絶', '通信実績なし', '履歴不明']);
+  });
+  test('says its case on its card and in the cause of a stop', () => {
+    expect(resultChip('silent', 'lost')).toEqual({ chip: '× 途絶', spoken: '途絶', silent: true });
+    expect(resultChip('silent', 'neverReached')?.chip).toBe('× 通信実績なし');
+    expect(resultChip('silent', 'historyUnknown')?.chip).toBe('× 履歴不明');
+    expect(WRITE.why[failureStage('LOST').reason!].reason).toContain(SILENCE.lost.word);
+    expect(WRITE.why[failureStage('HISTORY UNKNOWN').reason!].reason).toContain(SILENCE.historyUnknown.word);
   });
 });
 

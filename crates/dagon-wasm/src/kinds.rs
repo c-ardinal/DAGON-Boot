@@ -78,6 +78,16 @@ pub fn failure_reasons() -> Vec<String> {
         .collect()
 }
 
+/// The key of every case of a node that does not answer
+/// (`dagon_host::Silence`): the page shows its own word for each.
+#[wasm_bindgen]
+pub fn silence_keys() -> Vec<String> {
+    dagon_host::Silence::ALL
+        .iter()
+        .map(|s| s.key().to_string())
+        .collect()
+}
+
 /// Every job kind `dagon serve` runs (`dagon_host::jobs::KINDS`).
 #[wasm_bindgen]
 pub fn job_kinds() -> Vec<String> {

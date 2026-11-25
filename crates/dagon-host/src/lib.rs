@@ -23,7 +23,7 @@ mod timings;
 pub use dagon_romlink::{RomError, Stats as RomStats};
 pub use ops::{
     agent_digest, app_digest, check_release, reason, ConfirmOutcome, Discovery, NodeOutcome,
-    NodeState, Outcome, RecoverAssets, RecoverPath, WritePath, HUB_RECONNECT_MS, REASONS,
+    NodeState, Outcome, RecoverAssets, RecoverPath, Silence, WritePath, HUB_RECONNECT_MS, REASONS,
 };
 pub use percent::{transfer_percent, trial_percent};
 pub use ports::{Agent, Prompt};
@@ -114,6 +114,17 @@ pub enum Error<E> {
     },
     /// The topology gives no relay route to the node.
     Unreachable {
+        node: u8,
+    },
+    /// The node does not answer and the relaying node's records say it
+    /// answered before ([`Silence::Lost`]); nothing was sent to it.
+    Lost {
+        node: u8,
+    },
+    /// The node does not answer and the relaying node's records cannot say
+    /// whether it ever did ([`Silence::HistoryUnknown`]); nothing was sent
+    /// to it.
+    HistoryUnknown {
         node: u8,
     },
     /// No target reaches this node ([`Target::of_node`] from

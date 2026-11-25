@@ -4,10 +4,11 @@ import type { LinkClock } from '../serial/hostLink.ts';
 import { MockTransport, SAMPLE_HUB_HELLO, type MockOptions } from '../serial/mock.ts';
 import { PHASE, versionText, type UpdateEvent } from '../wasm/dagon.ts';
 import { bandOf } from './band.ts';
-import { ANNOUNCE, BAND, BAND_CHIP, BAND_FOR, BUTTON_FOR, NODE } from './copy.ts';
+import { ANNOUNCE, BAND, BAND_CHIP, BAND_FOR, BUTTON_FOR, NODE, SILENCE } from './copy.ts';
 import { Define } from './define/define.svelte.ts';
 import { topoDiff } from './define/diff.ts';
 import { fromYaml, type Topo } from './define/model.ts';
+import { resultChip } from './nodeState.ts';
 import { Operate } from './operate.svelte.ts';
 import { waterOf } from './writeProgress.ts';
 import { SAMPLE_CONFIG, SAMPLE_YAML } from './sample.ts';
@@ -528,8 +529,33 @@ describe('update from the page with dagon-host apply against the mock PC-connect
     await op.update();
     expect(t.reboots).toEqual(['uart', 'hub']);
     expect([op.state, op.progress.seg.stage, op.live.seg.responding]).toEqual(['done', 'silent', false]);
+    expect(op.progress.seg.silence).toBe('neverReached');
     expect(op.finished).toMatchObject({ kind: 'updated', firstWrite: 1 });
     expect(bandOf(op.state, op.ctx, { finish: op.finished }).sentence).toBe(BAND_FOR.doneFirst(1).sentence);
+  }, 60_000);
+
+  test('a checked node that answered before and is silent now stops the update as 途絶, with nothing sent to it', async () => {
+    const { t, op } = await sentTo({ quiet: ['i2c:66'], seen: ['i2c:66'] });
+    op.takeFile('sample-1.1.0.dgb', RELEASE);
+    op.choose('seg', true);
+    await op.update();
+    expect([op.state, op.failed]).toEqual(['stopped', 'seg']);
+    expect(op.progress.seg).toMatchObject({ stage: 'silent', reason: 'LOST', silence: 'lost' });
+    expect(resultChip(op.progress.seg.stage, op.progress.seg.silence)?.chip).toBe(SILENCE.lost.chip);
+    expect(t.reboots).not.toContain('i2c:66');
+    expect(op.finished).toBeNull();
+  }, 60_000);
+
+  test.each([
+    ['does not serve PEERS', { noPeers: true }],
+    ['lost records', { recordsLost: true }],
+  ])('a silent checked node behind a PC-connected node that %s stops the update as 履歴不明', async (_, hub) => {
+    const { op } = await sentTo({ quiet: ['i2c:66'], ...hub });
+    op.takeFile('sample-1.1.0.dgb', RELEASE);
+    op.choose('seg', true);
+    await op.update();
+    expect([op.state, op.failed]).toEqual(['stopped', 'seg']);
+    expect(op.progress.seg).toMatchObject({ stage: 'silent', reason: 'HISTORY UNKNOWN', silence: 'historyUnknown' });
   }, 60_000);
 
   test('done after 「前のバージョンへの復元」: says the node runs its previous version', async () => {

@@ -8,6 +8,7 @@ import init, {
   request_read,
   response_digest,
   response_next_offset,
+  response_peers,
   response_relay,
   response_status,
   response_status_slots,
@@ -119,8 +120,11 @@ export interface UpdateEvent {
 }
 
 
+/** A node that does not answer: it answered before (`lost`), never did (`neverReached`), or the relaying node's records cannot tell (`historyUnknown`). */
+export type Silence = 'lost' | 'neverReached' | 'historyUnknown';
+
 export interface NodeFailure {
-  /** dagon-host's short reason: `NO ANSWER`, `ROLLED BACK`, `E_SIGNATURE`, ... */
+  /** dagon-host's short reason: `NO ANSWER`, `LOST`, `ROLLED BACK`, `E_SIGNATURE`, ... */
   reason: string;
   /** Version the node came back on, when it is not the new one. */
   running: number | null;
@@ -134,6 +138,8 @@ export interface NodeResult {
   outcome: 'done' | 'failed' | 'notStarted' | 'needsFirstWrite' | 'realigned' | 'incompatible' | 'unknown';
   version: number | null;
   failure: NodeFailure | null;
+  /** Which case a node that does not answer is (dagon-host's Silence); null for any other result. */
+  silence: Silence | null;
 }
 
 export interface ConfirmResult {
@@ -230,6 +236,7 @@ export interface WireNumbers {
   cmdConfirm: number;
   cmdShow: number;
   cmdRelay: number;
+  cmdPeers: number;
   statusOk: number;
   statusUnsupported: number;
   statusArg: number;
@@ -275,6 +282,7 @@ export function wireNumbers(): WireNumbers {
       cmdConfirm: w.cmd_confirm,
       cmdShow: w.cmd_show,
       cmdRelay: w.cmd_relay,
+      cmdPeers: w.cmd_peers,
       statusOk: w.status_ok,
       statusUnsupported: w.status_unsupported,
       statusArg: w.status_arg,
@@ -327,6 +335,8 @@ export interface WireRequest {
   offset: number;
   link: number;
   addr: number;
+  /** PEERS's page. */
+  page: number;
   /** A chunk's data, or a RELAY's inner frame. */
   bulk: Uint8Array;
 }
@@ -336,7 +346,7 @@ export function readRequest(cmd: number, payload: Uint8Array, relays: boolean): 
   const r = request_read(cmd, payload, relays);
   try {
     const refusal = r.refusal;
-    return { refusal: refusal.length ? refusal : null, target: r.target, slot: r.slot, offset: r.offset, link: r.link, addr: r.addr, bulk: r.bulk };
+    return { refusal: refusal.length ? refusal : null, target: r.target, slot: r.slot, offset: r.offset, link: r.link, addr: r.addr, page: r.page, bulk: r.bulk };
   } finally {
     r.free();
   }
@@ -369,6 +379,8 @@ export const respond = {
   nextOffset: (next: number): Uint8Array => response_next_offset(next),
   digest: (sha256: Uint8Array): Uint8Array => response_digest(sha256),
   relay: (frame: Uint8Array): Uint8Array => response_relay(frame),
+  /** Page `page` of a relaying node's records: `peers` as [link, addr] pairs; `kept`: the log kept every record. */
+  peers: (kept: boolean, peers: readonly (readonly [number, number])[], page: number): Uint8Array => response_peers(kept, Uint8Array.from(peers.flat()), page),
 };
 
 /** Stream cutter: SOF search, length and CRC checks are dagon-proto's. */

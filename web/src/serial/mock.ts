@@ -87,6 +87,14 @@ function deviceAt(link: number, addr: number): DeviceKey | null {
   return hit ? (SAMPLE_DEVICE[hit[0]] ?? null) : null;
 }
 
+/** Where the PC-connected node reaches the device `key`: its relay link and address. */
+function targetOf(key: DeviceKey): { link: number; addr: number } | null {
+  sampleTargets ??= topo_targets(sampleYaml);
+  const hit = Object.entries(sampleTargets).find(([id, t]) => SAMPLE_DEVICE[id] === key && t.kind === 'linked');
+  const t = hit?.[1];
+  return t && t.kind === 'linked' ? { link: t.link, addr: t.addr } : null;
+}
+
 const aConfirmed = (): Slot[] => [
   { state: SLOT_STATE.confirmed, version: V100 },
   { state: SLOT_STATE.empty, version: 0 },
@@ -118,6 +126,12 @@ export interface MockOptions {
   delayMs?: number;
   /** Nodes behind the node connected to the PC that do not answer RELAY. */
   quiet?: DeviceKey[];
+  /** Nodes whose answers the PC-connected node recorded before this session (its records of peers). */
+  seen?: DeviceKey[];
+  /** The PC-connected node's log did not keep every record of a peer: it cannot tell a node that never answered. */
+  recordsLost?: boolean;
+  /** The PC-connected node does not serve PEERS (firmware that predates the records). */
+  noPeers?: boolean;
   /** Devices answering as their factory agent (HELLO mode 3) until the next REBOOT. */
   factory?: DeviceKey[];
   /** Devices that refuse the image at XFER_END with this status (0x07 E_FLASH, 0x09 E_SIGNATURE, ...). */
@@ -151,6 +165,8 @@ export class MockTransport implements Transport {
   readonly reboots: DeviceKey[] = [];
   /** Failing opens left while the rebooting PC-connected node is away. */
   private away = 0;
+  /** The peers the PC-connected node recorded an answer of, as [link, addr], in order. */
+  private readonly peers: [number, number][] = [];
   constructor(private readonly opts: MockOptions = {}) {
     this.quiet = new Set(opts.quiet);
     this.refuse = { ...opts.refuse };
@@ -214,7 +230,7 @@ export class MockTransport implements Transport {
     if (this.opts.nextWire) return this.queue.put(nextWireRefusal(raw));
     const req = readRequest(frame.cmd, frame.payload, true);
     const hub = this.devices.get('hub')!;
-    const body = req.refusal ?? (frame.cmd === CMD.RELAY ? await this.relay(req) : await answer(hub, frame.cmd, req, this.fellBack('hub'), this.refuse.hub));
+    const body = req.refusal ?? (frame.cmd === CMD.RELAY ? await this.relay(req) : frame.cmd === CMD.PEERS ? this.peersPage(req.page) : await answer(hub, frame.cmd, req, this.fellBack('hub'), this.refuse.hub));
     const resp = encodeFrame({ flags: WIRE.FLAG_RESP, seq: frame.seq, cmd: frame.cmd, payload: body });
     // Only the PC-connected node's own HELLO waits, so the checking state shows without slowing a scan.
     setTimeout(() => this.queue.put(resp), frame.cmd === CMD.HELLO ? (this.opts.delayMs ?? 0) : 0);
@@ -232,6 +248,20 @@ export class MockTransport implements Transport {
     return this.opts.fallBack?.includes(key) ?? false;
   }
 
+  /** The PC-connected node's records of the peers that answered, a page of them. */
+  private peersPage(page: number): Uint8Array {
+    if (this.opts.noPeers) return respond.status(STATUS.UNSUPPORTED);
+    for (const key of this.opts.seen ?? []) {
+      const at = targetOf(key);
+      if (at) this.record(at.link, at.addr);
+    }
+    return respond.peers(!this.opts.recordsLost, this.peers, page);
+  }
+
+  private record(link: number, addr: number): void {
+    if (!this.peers.some(([l, a]) => l === link && a === addr)) this.peers.push([link, addr]);
+  }
+
   private async relay(req: WireRequest): Promise<Uint8Array> {
     const key = deviceAt(req.link, req.addr);
     const dev = key && !this.quiet.has(key) ? this.devices.get(key) : undefined;
@@ -241,6 +271,7 @@ export class MockTransport implements Transport {
     const body = innerReq.refusal ?? (await answer(dev, inner.cmd, innerReq, this.fellBack(key), this.refuse[key]));
     if (inner.cmd === CMD.REBOOT && body[0] === STATUS.OK) this.reboots.push(key);
     const resp = encodeFrame({ flags: WIRE.FLAG_RESP, seq: inner.seq, cmd: inner.cmd, payload: body });
+    this.record(req.link, req.addr);
     return respond.relay(resp);
   }
 }

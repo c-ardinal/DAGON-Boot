@@ -51,13 +51,25 @@ pub enum FormatError {
 /// image. On a node it checks state log records and frames, a few hundred
 /// bytes at most, where the byte-wide table's speed is not needed.
 pub fn crc32(data: &[u8]) -> u32 {
-    let mut crc = 0xFFFF_FFFFu32;
+    crc32_shift(0xFFFF_FFFF, data) ^ 0xFFFF_FFFF
+}
+
+/// [`crc32`] carried on from `earlier`, the CRC of the bytes before `data`
+/// (0 when there are none): the CRC of both runs as one. The ESP ROM's
+/// `esp_rom_crc32_le(earlier, data)` is this.
+pub fn crc32_after(earlier: u32, data: &[u8]) -> u32 {
+    crc32_shift(earlier ^ 0xFFFF_FFFF, data) ^ 0xFFFF_FFFF
+}
+
+/// The CRC register after `data`, from the register value `crc`.
+#[inline(always)]
+fn crc32_shift(mut crc: u32, data: &[u8]) -> u32 {
     for &b in data {
         crc ^= u32::from(b);
         crc = CRC_TABLE[(crc & 0xF) as usize] ^ (crc >> 4);
         crc = CRC_TABLE[(crc & 0xF) as usize] ^ (crc >> 4);
     }
-    crc ^ 0xFFFF_FFFF
+    crc
 }
 
 /// The CRC of each 4-bit value, shifted through 4 bits.
@@ -187,6 +199,22 @@ mod tests {
     fn crc32_check_value() {
         assert_eq!(crc32(b"123456789"), 0xCBF4_3926);
         assert_eq!(crc32(b""), 0);
+    }
+
+    #[test]
+    fn crc32_after_carries_a_crc_over_a_split() {
+        let data = b"The quick brown fox jumps over the lazy dog";
+        for at in 0..=data.len() {
+            let (head, tail) = data.split_at(at);
+            assert_eq!(crc32_after(crc32(head), tail), crc32(data), "split at {at}");
+        }
+        assert_eq!(crc32_after(0, b"123456789"), 0xCBF4_3926);
+        // The ESP-IDF 2nd stage's CRC of an otadata entry with ota_seq 1:
+        // `esp_rom_crc32_le(UINT32_MAX, &ota_seq, 4)`.
+        assert_eq!(
+            crc32_after(u32::MAX, &1u32.to_le_bytes()).to_le_bytes(),
+            [154, 152, 67, 71]
+        );
     }
 
     /// The same CRC computed one bit at a time, the definition.

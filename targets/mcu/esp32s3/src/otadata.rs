@@ -61,17 +61,9 @@ pub const ENTRY_LEN: usize = 32;
 pub const SECTOR_LEN: u32 = crate::ERASE_REGIONS[0].unit;
 const OTA_SLOT_COUNT: u32 = 2;
 
-/// CRC of an entry: the 2nd stage's `esp_rom_crc32_le(UINT32_MAX, &ota_seq, 4)`
-/// (reflected 0x04C11DB7, init 0, final xor 0xFFFFFFFF).
+/// CRC of an entry: the 2nd stage's `esp_rom_crc32_le(UINT32_MAX, &ota_seq, 4)`.
 pub fn seq_crc(seq: u32) -> u32 {
-    let mut crc = 0u32;
-    for b in seq.to_le_bytes() {
-        crc ^= u32::from(b);
-        for _ in 0..8 {
-            crc = (crc >> 1) ^ if crc & 1 != 0 { 0xEDB8_8320 } else { 0 };
-        }
-    }
-    !crc
+    dagon_format::crc32_after(u32::MAX, &seq.to_le_bytes())
 }
 
 fn u32_at(e: &[u8; ENTRY_LEN], at: usize) -> u32 {

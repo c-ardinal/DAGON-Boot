@@ -6,8 +6,10 @@
 use std::collections::BTreeMap;
 
 /// Definition ids whose block ST's data names otherwise.
-const NAMED: [(&str, &str); 3] = [
+const NAMED: [(&str, &str); 4] = [
     ("rtc-bkp", "RTC"),
+    // The block starts at the unique device ID.
+    ("device-signature", "UID"),
     // One block for the ports: it starts at port A.
     ("gpio", "GPIOA"),
     ("usb-otg-fs", "USB_OTG_FS"),
@@ -68,18 +70,12 @@ fn every_block_starts_where_st_chip_data_puts_it() {
     assert!(wrong.is_empty(), "{wrong:#?}");
 }
 
-/// Blocks of ST's data the definition does not declare: the unique device
-/// ID (RM0368, device electronic signature), read-only words past the OTP
-/// area that no image is given.
-const NOT_DECLARED: [&str; 1] = ["UID"];
-
 #[test]
 fn every_block_of_st_chip_data_is_declared() {
     let blocks = definition();
     let outside: Vec<_> = stm32_metapac::metadata::METADATA
         .peripherals
         .iter()
-        .filter(|p| !NOT_DECLARED.contains(&p.name))
         .filter(|p| {
             !blocks
                 .iter()

@@ -1,7 +1,7 @@
 //! The definition's register blocks (`[[peripheral]] base`) start where the
 //! ESP32-S3's chip data puts them, as the esp32s3 PAC ships it (generated
 //! from Espressif's SVD; the data esp-hal builds on), and every block of
-//! that data is declared or listed here as left out.
+//! that data is declared.
 
 use std::collections::BTreeMap;
 
@@ -91,25 +91,6 @@ const NAMED: [(&str, &str); 6] = [
 /// Blocks the chip data has no peripheral for.
 const NOT_IN_CHIP_DATA: [&str; 0] = [];
 
-/// Blocks of the chip data the definition does not declare: the radio's
-/// (front end, receiver, baseband and its analog I2C master: the Wi-Fi and
-/// Bluetooth side DAGON never enables), and the SD host, the peripheral
-/// backup, the random number register, the MMU table, the flash encryption
-/// block and the debug assist, which no image is given.
-const NOT_DECLARED: [&str; 11] = [
-    "FE2",
-    "FE",
-    "I2C_ANA_MST",
-    "NRX",
-    "BB",
-    "SDHOST",
-    "PERI_BACKUP",
-    "RNG",
-    "MMU_TABLE",
-    "XTS_AES",
-    "ASSIST_DEBUG",
-];
-
 /// (id, base, size) of every block the definition declares.
 fn definition() -> Vec<(String, u64, u64)> {
     let t: toml::Table = include_str!("../dagon-mcu.toml").parse().unwrap();
@@ -153,7 +134,6 @@ fn every_block_of_the_chip_data_is_declared() {
     let blocks = definition();
     let outside: Vec<_> = chip_data()
         .into_iter()
-        .filter(|(name, _)| !NOT_DECLARED.contains(name))
         .filter(|(_, at)| {
             !blocks
                 .iter()

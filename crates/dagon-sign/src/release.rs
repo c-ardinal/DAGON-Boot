@@ -8,6 +8,7 @@ use std::fmt;
 use dagon_format::bundle::{self, dest, BundleItem, NO_ENTRY};
 use dagon_format::header::{image_kind, target_tag, ImageHeader, HEADER_SIZE};
 use dagon_format::manifest::{self, entry_flags, ManifestEntry, ManifestFields};
+use dagon_format::topology::TopologyView;
 use dagon_format::{crc32, header, key_id, sha256};
 use dagon_topology::defs::{OpenFact, Registry};
 use dagon_topology::schema::{Constraint, Role, Topology};
@@ -113,6 +114,18 @@ pub fn assemble(
     topology: &[u8],
     key: &dyn Signer,
 ) -> Result<Release, ReleaseError> {
+    assemble_with(name, release_seq, items, topology, &[], key)
+}
+
+/// [`assemble`] with the manifest's compatibility constraints.
+fn assemble_with(
+    name: &str,
+    release_seq: u32,
+    items: &[ReleaseItem<'_>],
+    topology: &[u8],
+    constraints: &[manifest::Constraint],
+    key: &dyn Signer,
+) -> Result<Release, ReleaseError> {
     let entries = items
         .iter()
         .enumerate()
@@ -137,8 +150,8 @@ pub fn assemble(
         release_name: target_tag(name),
         key_id: key_id(&key.public_key()),
     };
-    let mut man = vec![0u8; manifest::total_size(entries.len(), 0)];
-    manifest::encode(&fields, &entries, &[], &mut man)
+    let mut man = vec![0u8; manifest::total_size(entries.len(), constraints.len())];
+    manifest::encode(&fields, &entries, constraints, &mut man)
         .map_err(|e| fail("RB-02", "R-NODE", format!("manifest: {e:?}")))?;
     let body = man.len() - manifest::SIG_SIZE;
     let sig = key.sign(manifest::SIGN_DOMAIN, &man[..body]);
@@ -238,9 +251,19 @@ pub fn build(
             },
         })
         .collect();
-    let mut release = assemble(name, release_seq, &items, topology_bin, key)?;
+    let constraints = compiled_constraints(topology_bin)?;
+    let mut release = assemble_with(name, release_seq, &items, topology_bin, &constraints, key)?;
     release.open_facts = open_facts(reg, t, &placed);
     Ok(release)
+}
+
+/// The constraints of the compiled topology, as the manifest carries them:
+/// the same records, so a receiver that holds only the signed manifest
+/// reads which nodes its images keep in step.
+fn compiled_constraints(topology_bin: &[u8]) -> Result<Vec<manifest::Constraint>, ReleaseError> {
+    let v = TopologyView::parse(topology_bin)
+        .map_err(|e| fail("RB-02", "R-NODE", format!("topology binary: {e:?}")))?;
+    Ok((0..v.constraint_count()).map(|i| v.constraint(i)).collect())
 }
 
 /// The open facts of each node `placed` holds an image for, in `placed` order.

@@ -255,6 +255,7 @@ In both kinds offset 2 is `0xFF` (no slot) and the other fields of the kind are 
 - **Limit**: a log holds 16 PEER_SEEN records (`MAX_PEERS`). A log at the limit states nothing about a peer it has no record of.
 - **Where PEERS_KEPT comes from**: only the app state log a first write makes (`dagon flash`) holds PEERS_KEPT. No code of a node appends it. A rebuilt log (`rebuild`, `Log::load_or_create` in recovery mode), the log a recovery through the ROM loader writes, and a log made before these records existed hold none.
 - **Compaction**: copies PEERS_KEPT and every PEER_SEEN. The compaction of an older version, which skips these records as unknown kinds, does not copy PEERS_KEPT either. Losing records always loses PEERS_KEPT with them, so lost records are never read as "never reached".
+- **A damaged record**: reading the log ends its scan at a record whose CRC does not match (an append a power cut interrupted, or damage). That record or one after it may have been a peer's, so the read treats PEERS_KEPT as absent, and a later compaction does not copy PEERS_KEPT either.
 - **Budget**: at most 17 records (544 bytes). For an MCU that defines relay links (`[[relay_link]]`), the definition check makes sure a face of the app state log holds the copy of the fold, the room for a trial and these 17 records together.
 
 The records of a log are complete only when it holds PEERS_KEPT and fewer PEER_SEEN records than the limit. A peer without a PEER_SEEN in a complete log has not answered once since the first write.

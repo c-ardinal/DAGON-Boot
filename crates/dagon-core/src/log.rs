@@ -336,7 +336,13 @@ impl Log {
                 log.next = Some(addr);
                 break;
             }
-            let Ok(r) = Record::parse(&b) else { break };
+            let Ok(r) = Record::parse(&b) else {
+                // A torn or damaged record ends the scan. It, or one after
+                // it, may have been a peer's: the log no longer says it
+                // kept them all, and a compaction carries that.
+                log.peers.kept = false;
+                break;
+            };
             log.fold(&r);
             log.next_seq = log.next_seq.max(r.seq.wrapping_add(1));
             addr += RECORD_SIZE as u32;
@@ -1074,6 +1080,28 @@ mod tests {
         let read = Log::load(&mut flash, &layout).unwrap();
         assert_eq!(read.generation, before.generation + 1);
         assert_eq!((read.peers, read.state), (before.peers, before.state));
+    }
+
+    /// A damaged record ends the scan, and the peers after it are not
+    /// read: the log stops saying it kept every record, also after the
+    /// compaction the next append runs.
+    #[test]
+    fn a_damaged_record_ends_the_claim_of_a_complete_history() {
+        let (mut flash, layout, mut log) = peer_log(8, true);
+        for a in 1..=3 {
+            assert_eq!(log.note_peer(&mut flash, peer(a), 0), Ok(true));
+        }
+        // PROVISION, PEERS_KEPT, then the peers: damage the second one.
+        let second = layout.faces[log.face] as usize + FACE_HEADER_SIZE + 3 * RECORD_SIZE;
+        flash.0[second + 12] ^= 0x01;
+        let mut read = Log::load(&mut flash, &layout).unwrap();
+        assert_eq!(read.peers.peers(), [peer(1)]);
+        assert!(!read.peers.kept && !read.peers.complete());
+        assert_eq!(read.note_peer(&mut flash, peer(4), 0), Ok(true));
+        let again = Log::load(&mut flash, &layout).unwrap();
+        assert_eq!(again.generation, log.generation + 1);
+        assert_eq!(again.peers.peers(), [peer(1), peer(4)]);
+        assert!(!again.peers.kept);
     }
 
     /// The record leaves the room asked for, compacting to make it; with

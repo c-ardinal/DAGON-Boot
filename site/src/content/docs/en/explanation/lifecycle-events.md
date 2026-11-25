@@ -764,8 +764,15 @@ The one authentication rule, applied by every verifier
   in the field but is rebuilt for every new node with the toolchain of
   that build, so an image without spare room becomes a first write that
   cannot be built. Both stage0s use the compact SHA-256 rounds, since
-  the unrolled ones do not fit the RP2040's region. After the first public
-  release the stage0 region is fixed: a larger stage0 is a new format number,
+  the unrolled ones do not fit the RP2040's region. A 12 KiB region was
+  measured and not taken: the builds are 13,392 to 13,852 bytes, and a
+  12 KiB region allows 11,520 with its 1/16 left free. Byte-loop memory
+  routines (the boot loaders' `small-mem`) take about 1.3 to 1.5 KiB off
+  but raise a verify on a Cortex-M0+ from 49 to 73 million cycles, and an
+  interrupt table of one entry takes 956 bytes off the STM32F401RE's image
+  only. With both, by estimate, the STM32F401RE's builds fit (about 11,300
+  bytes) and the RP2040's do not (about 12,000 to 12,450). After the first
+  public release the stage0 region is fixed: a larger stage0 is a new format number,
   and existing nodes move to it by a first write through the ROM loader (a
   direct write), since the normal update path never rewrites stage0 (power-cut
   safety).

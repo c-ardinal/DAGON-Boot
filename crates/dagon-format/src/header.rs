@@ -209,6 +209,18 @@ pub fn header_digest16(raw: &[u8; HEADER_SIZE]) -> [u8; 16] {
     arr(&header_digest(raw), 0)
 }
 
+/// Where a first write keeps a second copy of a detached header: the last
+/// erase unit (`unit` bytes) of the body's own region (`start`, `capacity`),
+/// which outlives an erase of the partition holding the headers. `None`
+/// when a body of `payload` bytes reaches that unit or the region is
+/// smaller than one.
+pub const fn header_copy_at(start: u32, capacity: u32, unit: u32, payload: u32) -> Option<u32> {
+    if unit < HEADER_SIZE as u32 || capacity < unit || payload > capacity - unit {
+        return None;
+    }
+    start.checked_add(capacity - unit)
+}
+
 /// `target_tag` from an ASCII string (truncated to 16 bytes, NUL padded).
 pub const fn target_tag(s: &str) -> [u8; 16] {
     let src = s.as_bytes();

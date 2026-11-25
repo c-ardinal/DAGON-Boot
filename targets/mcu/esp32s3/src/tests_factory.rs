@@ -79,7 +79,12 @@ impl Pc {
     }
 
     fn factory() -> Self {
-        let store: &'static RefCell<Store> = Box::leak(Box::new(RefCell::new(store())));
+        Self::over(store())
+    }
+
+    /// The factory agent starting on the flash `store` holds.
+    fn over(store: Store) -> Self {
+        let store: &'static RefCell<Store> = Box::leak(Box::new(RefCell::new(store)));
         Pc {
             store,
             agent: Agent::new(Self::config(), Self::verifier(), store, chain()),
@@ -218,7 +223,11 @@ fn agent_image(minor: u8, body: &[u8], kp: &KeyPair) -> Vec<u8> {
 
 /// From the factory agent: app 1.0 in A, confirmed and running.
 fn app_confirmed_in_a(kp: &KeyPair) -> Pc {
-    let mut pc = Pc::factory();
+    confirm_app_in_a(Pc::factory(), kp)
+}
+
+/// [`app_confirmed_in_a`] on the flash `pc` holds.
+fn confirm_app_in_a(mut pc: Pc, kp: &KeyPair) -> Pc {
     assert_eq!(
         pc.transfer(SLOT_A, &image(0, &body(3000, 1), kp)),
         Status::Ok
@@ -280,6 +289,86 @@ fn the_running_app_writes_a_new_factory_agent() {
         pc.transfer_to(target::AGENT, SLOT_FACTORY, &app, usize::MAX),
         Status::Compat
     );
+}
+
+/// A first write as the host lays it out: the agent's body from the start
+/// of factory and its header in the partition's last erase unit, the dagon
+/// partition (the detached headers) erased.
+fn first_written(ag: &[u8]) -> Store {
+    let mut st = store();
+    let f = crate::layout::FACTORY;
+    st.flash.0[f.offset as usize..][..ag.len() - HEADER_SIZE].copy_from_slice(&ag[HEADER_SIZE..]);
+    st.flash.0[copy_at()..][..HEADER_SIZE].copy_from_slice(&ag[..HEADER_SIZE]);
+    st
+}
+
+/// Where the first write leaves the agent's header copy.
+fn copy_at() -> usize {
+    let f = crate::layout::FACTORY;
+    header_copy_at(f.offset, f.size, crate::layout::ERASE_UNIT, 0).unwrap() as usize
+}
+
+/// With the dagon partition erased, STATUS reports the factory agent from
+/// the header copy a first write left in the factory partition.
+#[test]
+fn status_reports_the_factory_agent_from_its_header_copy() {
+    let kp = keypair();
+    let ag = agent_image(7, &body(5000, 9), &kp);
+    let mut pc = Pc::over(first_written(&ag));
+    let st = pc.status();
+    assert_eq!(st.slots[2].state, SlotState::Confirmed, "factory runs");
+    assert_eq!(st.slots[2].version, Version::new(1, 7, 0));
+    assert_eq!(
+        st.slots[2].digest16,
+        header_digest16(ag[..HEADER_SIZE].try_into().unwrap())
+    );
+}
+
+/// A copy that does not name the body in factory is not reported: another
+/// body, an app's header, a length reaching the copy.
+#[test]
+fn a_header_copy_that_is_not_the_bodys_is_not_reported() {
+    let kp = keypair();
+    let ag = agent_image(7, &body(5000, 9), &kp);
+    let none = |st: Store, why: &str| {
+        let version = Pc::over(st).status().slots[2].version;
+        assert_eq!(version, Version::default(), "{why}");
+    };
+
+    let mut st = first_written(&ag);
+    st.flash.0[crate::layout::FACTORY.offset as usize + 4999] ^= 1;
+    none(st, "another body");
+
+    none(
+        first_written(&image(7, &body(5000, 9), &kp)),
+        "an app's header",
+    );
+
+    let mut st = first_written(&ag);
+    let mut h = ImageHeader::parse(ag[..HEADER_SIZE].try_into().unwrap()).unwrap();
+    h.payload_size = crate::layout::FACTORY.size;
+    st.flash.0[copy_at()..][..HEADER_SIZE].copy_from_slice(&h.to_bytes());
+    none(st, "a length reaching the copy");
+}
+
+/// An agent received later is reported from its detached header; the first
+/// write's copy, which names the old body, is not reported once that
+/// header is gone again.
+#[test]
+fn a_received_agent_replaces_the_header_copy() {
+    let kp = keypair();
+    let pc = Pc::over(first_written(&agent_image(7, &body(5000, 9), &kp)));
+    let mut pc = confirm_app_in_a(pc, &kp);
+    assert_eq!(pc.status().slots[2].version, Version::new(1, 7, 0));
+    let new = agent_image(8, &body(6000, 3), &kp);
+    assert_eq!(
+        pc.transfer_to(target::AGENT, SLOT_FACTORY, &new, usize::MAX),
+        Status::Ok
+    );
+    assert_eq!(pc.status().slots[2].version, Version::new(1, 8, 0));
+    let h = crate::store::header_addr(target::AGENT, SLOT_FACTORY).unwrap() as usize;
+    pc.store().flash.0[h..h + HEADER_SIZE].fill(0xFF);
+    assert_eq!(pc.status().slots[2].version, Version::default());
 }
 
 /// Never without a bootable recovery image: the factory is written only

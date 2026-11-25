@@ -14,11 +14,16 @@
 //!   partition the same way, header last; otadata never names it (the 2nd
 //!   stage starts factory when no OTA slot is valid), so there is nothing
 //!   to withdraw or select.
+//! - A first write also leaves the agent's header in the last erase unit
+//!   of the factory partition ([`header::header_copy_at`]). STATUS reports
+//!   that copy when the detached header is gone (the dagon partition
+//!   erased) and the copy's digest is the body's.
 
 use crate::layout::{SLOT_FACTORY, WRITE_UNIT};
 use crate::otadata::{selected_view, Counted, ENTRY_LEN};
 use dagon_agent::{erase_plan, Transition};
-use dagon_format::header::{self, ImageHeader, HEADER_SIZE};
+use dagon_format::header::{self, image_kind, ImageHeader, HEADER_SIZE};
+use dagon_format::Digest;
 use dagon_port::timeout::{EraseLayout, EraseRegion, HeaderPlace, Plan, SlotLayout};
 use dagon_port::{Flash, Watchdog};
 use dagon_port::{SlotStore, StoreError};
@@ -68,6 +73,9 @@ pub struct EspStore<F, O, W> {
     /// Where each target and slot lies (the definition's slot layouts).
     slots: &'static [SlotLayout],
     rx: Option<Rx>,
+    /// The agent's header copy, once looked for (`Some(None)`: none that
+    /// names the body); forgotten when the agent's slot is erased.
+    agent_copy: Option<Option<[u8; HEADER_SIZE]>>,
 }
 
 /// Where a body (start, capacity) and its detached header go, for a target
@@ -120,6 +128,7 @@ impl<F: Flash, O: Otadata, W: Watchdog> EspStore<F, O, W> {
             regions,
             slots: &crate::SLOT_LAYOUTS,
             rx: None,
+            agent_copy: None,
         }
     }
 
@@ -132,12 +141,55 @@ impl<F: Flash, O: Otadata, W: Watchdog> EspStore<F, O, W> {
         place(self.slots, t, slot)
     }
 
-    /// Parsable header of slot `slot` of target `t`, if any.
+    /// Parsable header of slot `slot` of target `t`, if any: the detached
+    /// one, else the agent's copy in its own partition.
     fn target_header(&mut self, t: u8, slot: u8) -> Option<[u8; HEADER_SIZE]> {
-        let at = self.place(t, slot).ok()?.header;
+        let p = self.place(t, slot).ok()?;
         let mut h = [0u8; HEADER_SIZE];
-        flash_err(self.flash.read(at, &mut h)).ok()?;
-        ImageHeader::parse(&h).ok().map(|_| h)
+        flash_err(self.flash.read(p.header, &mut h)).ok()?;
+        if ImageHeader::parse(&h).is_ok() {
+            return Some(h);
+        }
+        if t != target::AGENT {
+            return None;
+        }
+        if self.agent_copy.is_none() {
+            self.agent_copy = Some(self.header_copy(p));
+        }
+        self.agent_copy.flatten()
+    }
+
+    /// The agent header a first write left at the end of the body's region
+    /// `p`, only when it names the body there (kind, length, SHA-256): an
+    /// agent received since has another body, so its stale copy is not
+    /// reported.
+    fn header_copy(&mut self, p: Place) -> Option<[u8; HEADER_SIZE]> {
+        let unit = self
+            .regions
+            .iter()
+            .find(|r| p.start >= r.start && p.start - r.start < r.len)?
+            .unit;
+        let mut raw = [0u8; HEADER_SIZE];
+        // A copy is only where a body of no length leaves room for one.
+        let at = header::header_copy_at(p.start, p.capacity, unit, 0)?;
+        flash_err(self.flash.read(at, &mut raw)).ok()?;
+        let h = ImageHeader::parse(&raw).ok()?;
+        if h.image_kind != image_kind::AGENT
+            || header::header_copy_at(p.start, p.capacity, unit, h.payload_size) != Some(at)
+        {
+            return None;
+        }
+        let mut sha = dagon_format::Sha256::default();
+        let mut buf = [0u8; 256];
+        let mut done = 0u32;
+        while done < h.payload_size {
+            let n = (h.payload_size - done).min(buf.len() as u32) as usize;
+            self.wdt.feed();
+            flash_err(self.flash.read(p.start + done, &mut buf[..n])).ok()?;
+            sha.update(&buf[..n]);
+            done += n as u32;
+        }
+        (sha.finalize() == h.payload_sha256).then_some(raw)
     }
 
     fn program(&mut self, addr: u32, data: &[u8]) -> Result<(), StoreError> {
@@ -258,6 +310,8 @@ impl<F: Flash, O: Otadata, W: Watchdog> SlotStore for EspStore<F, O, W> {
         self.rx = None;
         if t == target::APP {
             self.ota.withdraw(slot)?;
+        } else {
+            self.agent_copy = None;
         }
         for op in plan {
             self.wdt.feed();

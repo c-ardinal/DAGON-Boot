@@ -753,12 +753,18 @@ pub(crate) fn prepare(
             let app_out = crate::genfs::Out::of(&cfg.base, out)?.join("app.bin")?;
             let app_bin = crate::genfs::check_out(&cfg.base, &app_out)?;
             let app = crate::esp::save_image(&esp, &i.app, &app_bin)?;
+            // The agent as espflash writes it from its ELF, to sign its
+            // header copy.
+            let agent_out = crate::genfs::Out::of(&cfg.base, out)?.join("factory.bin")?;
+            let agent_bin = crate::genfs::check_out(&cfg.base, &agent_out)?;
+            let agent = crate::esp::save_image(&esp, &i.bootcore, &agent_bin)?;
             esp_files(
                 &reg,
                 t,
                 node,
                 &i,
                 &app,
+                &agent,
                 &source_root(cfg)?,
                 out,
                 key,
@@ -789,6 +795,11 @@ fn esp_files_plan(mcu: &McuDef, esp: &Esp<'_>) -> Result<Vec<String>, String> {
             format!("in {}", l.factory.0),
             "recovery agent",
         ),
+        row(
+            "factory-header.bin",
+            format!("in {}", l.factory.0),
+            "its signed header, a copy at the end",
+        ),
         row("body.bin", format!("in {}", l.ota_0.0), "app, slot A"),
         row(
             "header.bin",
@@ -806,7 +817,10 @@ fn esp_files_plan(mcu: &McuDef, esp: &Esp<'_>) -> Result<Vec<String>, String> {
 /// Writes the espflash first-install files into `out` and returns the
 /// espflash commands (without the port, chosen when writing): the checked
 /// 2nd stage, the partition table and the recovery agent, then slot A's
-/// body and header and the otadata entry that selects it.
+/// body and header and the otadata entry that selects it. `agent_image` is
+/// the recovery agent as espflash writes it from its ELF: its signed header
+/// goes to the end of the agent's partition, where the node reads it when
+/// the header partition is erased (as this write erases it).
 #[allow(clippy::too_many_arguments)]
 fn esp_files(
     reg: &Registry,
@@ -814,6 +828,7 @@ fn esp_files(
     node: &str,
     i: &ProvisionInputs,
     app_image: &[u8],
+    agent_image: &[u8],
     home: &Path,
     out: &Path,
     key: &KeyPair,
@@ -851,6 +866,26 @@ fn esp_files(
         key,
     )?;
     let (header, body) = img.split_at(HEADER_SIZE);
+    let agent_opts = crate::commands::SignOpts {
+        version: match &i.bootcore_version {
+            Some(v) => crate::commands::version(v)?,
+            None => version,
+        },
+        bits: None,
+        ..opts
+    };
+    let agent = crate::commands::image_for_node(
+        reg,
+        t,
+        node,
+        image_kind::AGENT,
+        slot_binding::A,
+        agent_image,
+        Some(&agent_opts),
+        key,
+    )?;
+    let board = t.node(node).and_then(|n| reg.node_board(n));
+    let agent_copy = esp::agent_header_copy_at(mcu, board, agent_image.len() as u32);
     let dest = crate::genfs::Out::of(base, out)?;
     let file = |name: &str, bytes: &[u8]| -> Result<PathBuf, String> {
         crate::genfs::write_out(base, &dest.join(name)?, bytes)?;
@@ -863,6 +898,7 @@ fn esp_files(
     let body = file("body.bin", body)?;
     let header = file("header.bin", header)?;
     let otadata = file("otadata.bin", &esp::otadata_slot_a())?;
+    let agent_header = file("factory-header.bin", &agent[..HEADER_SIZE])?;
 
     let s = |v: &str| v.to_string();
     let p = |p: &PathBuf| p.display().to_string();
@@ -890,20 +926,20 @@ fn esp_files(
         c.extend([format!("{at:#x}"), p(f)]);
         c
     };
-    let commands = vec![
-        first,
+    let mut commands = vec![first];
+    commands.extend(agent_copy.map(|at| write_bin(at, &agent_header)));
+    commands.extend([
         write_bin(l.ota_0.1, &body),
         write_bin(l.dagon.1, &header),
         write_bin(l.otadata, &otadata),
-    ];
-    let files = vec![
+    ]);
+    let mut files = vec![
         (esp::BOOTLOADER_AT, bootloader),
         (e.table_at, table),
         (l.factory.1, factory),
-        (l.ota_0.1, body),
-        (l.dagon.1, header),
-        (l.otadata, otadata),
     ];
+    files.extend(agent_copy.map(|at| (at, agent_header)));
+    files.extend([(l.ota_0.1, body), (l.dagon.1, header), (l.otadata, otadata)]);
     crate::genfs::write_out(
         base,
         &dest.join("commands.txt")?,
@@ -1612,6 +1648,7 @@ mod tests {
             "m5stopwatch (tag watch-s3)",
             "SHA256SUMS",
             "bootloader.bin  at 0x0",
+            "factory-header.bin",
             "otadata.bin     in otadata",
             "USB 303a:1001",
         ] {
@@ -1621,12 +1658,26 @@ mod tests {
         let i = built(&cfg, false);
         let app = vec![0xE9; 7000];
         let reg = Registry::builtin();
-        let w = esp_files(reg, &t, "watch", &i, &app, &here(), &out, &key(), &here()).unwrap();
+        let agent = vec![0xE9; 5000];
+        let files_of = |agent: &[u8]| {
+            let (home, key) = (here(), key());
+            esp_files(reg, &t, "watch", &i, &app, agent, &home, &out, &key, &home).unwrap()
+        };
+        // An agent reaching the last erase unit of factory leaves no room
+        // for the copy of its header: the write goes without one.
+        let FirstWrite::Espflash { files, .. } = files_of(&vec![0xE9; 0x10_0000 - 0xFFF]) else {
+            panic!()
+        };
+        assert!(files.iter().all(|f| f.0 != 0x10_F000), "{files:?}");
+        let w = files_of(&agent);
         let FirstWrite::Espflash { files, commands } = w else {
             panic!("{w:?}")
         };
         let at: Vec<u32> = files.iter().map(|f| f.0).collect();
-        assert_eq!(at, [0, 0x8000, 0x1_0000, 0x11_0000, 0x71_0000, 0xD000]);
+        assert_eq!(
+            at,
+            [0, 0x8000, 0x1_0000, 0x10_F000, 0x11_0000, 0x71_0000, 0xD000]
+        );
         let read = |n: &str| std::fs::read(out.join(n)).unwrap();
         assert_eq!(
             dagon_sign::to_hex(&dagon_format::sha256(&read("bootloader.bin"))),
@@ -1638,9 +1689,16 @@ mod tests {
         assert_eq!([header, body].concat(), read("app-a.img"));
         assert_eq!(read("otadata.bin"), crate::esp::otadata_slot_a());
         assert_eq!(read("factory.elf"), std::fs::read(&i.bootcore).unwrap());
+        // The agent's header copy names the agent as espflash writes it.
+        let signed = [read("factory-header.bin"), agent.clone()].concat();
+        let h = dagon_sign::image::verify_image(&signed, &key().pk).unwrap();
+        assert_eq!(h.image_kind, dagon_format::header::image_kind::AGENT);
 
         let verbs: Vec<&str> = commands.iter().map(|c| c[0].as_str()).collect();
-        assert_eq!(verbs, ["flash", "write-bin", "write-bin", "write-bin"]);
+        assert_eq!(
+            verbs,
+            ["flash", "write-bin", "write-bin", "write-bin", "write-bin"]
+        );
         let first = commands[0].join(" ");
         for want in [
             "--chip esp32s3",
@@ -1651,9 +1709,10 @@ mod tests {
         ] {
             assert!(first.contains(want), "{want}: {first}");
         }
-        assert_eq!(commands[1][3], "0x110000");
-        assert_eq!(commands[2][3], "0x710000");
-        assert_eq!(commands[3][3], "0xd000");
+        assert_eq!(commands[1][3], "0x10f000");
+        assert_eq!(commands[2][3], "0x110000");
+        assert_eq!(commands[3][3], "0x710000");
+        assert_eq!(commands[4][3], "0xd000");
         assert!(commands.iter().all(|c| !c.contains(&"--port".to_string())));
         let aimed = with_port(&commands, "COM7");
         assert!(aimed

@@ -173,6 +173,12 @@ impl OwnAgent for RpAgent {
     fn child_raw(&mut self, addr: u8, len: u16, read_len: u16) {
         self.0.child_raw(addr, len, read_len)
     }
+    fn peer_answered(&mut self, link: u8, addr: u8) -> bool {
+        self.0.peer_answered(link, addr)
+    }
+    fn peers(&mut self) -> Option<dagon_proto::payload::PeerLog> {
+        self.0.peers()
+    }
 }
 
 type RpRelay = dagon_relay::Relay<'static, RpAgent, SubLines<'static>, RpWatch, RpClock>;

@@ -10,7 +10,7 @@ use dagon_format::Version;
 use dagon_proto::handler::{self, Ceiling, Handler};
 use dagon_proto::payload::{
     encode_bulk_resp, encode_digest, encode_next_offset, mode, phase, put_refusal, role, CmdSet,
-    HelloResp, SlotInfo, SlotState, StatusResp, XferChunk, REFUSAL_MAX,
+    HelloResp, Peer, PeerLog, PeersResp, SlotInfo, SlotState, StatusResp, XferChunk, REFUSAL_MAX,
 };
 use dagon_proto::{flags, max_payload, Cmd, FrameError, Status, CRC_LEN, HEADER_LEN};
 use wasm_bindgen::prelude::*;
@@ -32,6 +32,7 @@ pub struct Wire {
     pub cmd_confirm: u8,
     pub cmd_show: u8,
     pub cmd_relay: u8,
+    pub cmd_peers: u8,
     pub status_ok: u8,
     pub status_unsupported: u8,
     pub status_arg: u8,
@@ -83,6 +84,7 @@ pub fn wire() -> Wire {
         cmd_confirm: Cmd::Confirm as u8,
         cmd_show: Cmd::Show as u8,
         cmd_relay: Cmd::Relay as u8,
+        cmd_peers: Cmd::Peers as u8,
         status_ok: Status::Ok as u8,
         status_unsupported: Status::Unsupported as u8,
         status_arg: Status::Arg as u8,
@@ -133,6 +135,8 @@ pub struct Request {
     pub offset: u32,
     pub link: u8,
     pub addr: u8,
+    /// PEERS's page.
+    pub page: u8,
     /// A chunk's data, or a RELAY's inner frame.
     pub bulk: Vec<u8>,
 }
@@ -143,9 +147,9 @@ fn chunk(r: &mut Request, c: XferChunk<'_>) {
 }
 
 /// The commands the page's nodes serve: each row puts what its typed
-/// request says into the [`Request`] the page acts on. RELAY is the last
-/// row, for the node that relays.
-const TABLE: [Handler<Request, ()>; 11] = [
+/// request says into the [`Request`] the page acts on. RELAY and PEERS
+/// are the last rows, for the node that relays.
+const TABLE: [Handler<Request, ()>; 12] = [
     Handler::new(Cmd::Hello, |_, q| q.hello().map(|_| ())),
     Handler::new(Cmd::Status, |r, q| {
         r.target = q.status()?;
@@ -175,15 +179,23 @@ const TABLE: [Handler<Request, ()>; 11] = [
         (r.link, r.addr, r.bulk) = (x.link, x.addr, x.inner.to_vec());
         Ok(())
     }),
+    Handler::new(Cmd::Peers, |r, q| {
+        r.page = q.peers()?;
+        Ok(())
+    }),
 ];
 
+/// Rows of [`TABLE`] only the node that relays serves, at its end.
+const RELAY_ROWS: usize = 2;
+
 /// The rows a node serves: all of them when it relays, all but RELAY's
-/// when it does not.
+/// and PEERS's when it does not.
 fn table(relays: bool) -> &'static [Handler<Request, ()>] {
     const ROWS: &[Handler<Request, ()>] = &TABLE;
-    match ROWS.split_last() {
-        Some((relay, others)) if !relays && relay.cmd == Cmd::Relay => others,
-        _ => ROWS,
+    if relays {
+        ROWS
+    } else {
+        ROWS.split_at(ROWS.len() - RELAY_ROWS).0
     }
 }
 
@@ -322,6 +334,22 @@ pub fn response_digest(sha256: &[u8]) -> Result<Vec<u8>, JsError> {
     Ok(ok(40, |b| encode_digest(&d, b)))
 }
 
+/// An OK PEERS response: page `page` of the records of a node that
+/// relays. `peers` holds a record's link and address, two bytes each;
+/// `kept`: the log kept every record since the node's first write.
+#[wasm_bindgen]
+pub fn response_peers(kept: bool, peers: &[u8], page: u8) -> Vec<u8> {
+    let mut log = PeerLog::new(kept);
+    for p in peers.chunks_exact(2) {
+        log.insert(Peer {
+            link: p[0],
+            addr: p[1],
+        });
+    }
+    let resp = PeersResp::page(&log, page);
+    ok(PeersResp::MAX_LEN, |b| resp.encode(b))
+}
+
 /// An OK RELAY response carrying the node's response `frame`.
 #[wasm_bindgen]
 pub fn response_relay(frame: &[u8]) -> Vec<u8> {
@@ -370,13 +398,14 @@ mod tests {
     #[test]
     fn a_node_says_what_it_serves_and_a_planted_request_is_only_a_refusal() {
         use dagon_proto::plant;
-        for (relays, count) in [(true, 11), (false, 10)] {
+        for (relays, count) in [(true, 12), (false, 10)] {
             let said = node_cmds(relays);
             let body = hello_response_body(2, 0, 1, 1, 0, 0, false, &[0; 8], 1088, &said)
                 .ok()
                 .unwrap();
             let cmds = HelloResp::parse(&body).unwrap().cmds;
             assert_eq!(cmds.has(Cmd::Relay as u8), relays);
+            assert_eq!(cmds.has(Cmd::Peers as u8), relays);
             let mut served = CmdSet::EMPTY;
             plant::each_probe(|n, p| {
                 let refusal = request_read(n, p, relays).refusal;
@@ -390,8 +419,9 @@ mod tests {
                 let r = request_read(n, p, relays);
                 let status = split_status(&r.refusal).map(|s| s.0);
                 assert_eq!(status, Some(plant.status()), "{n:#x} {plant:?}");
-                let read = (r.target, r.slot, r.offset, r.link, r.addr, r.bulk.len());
+                let read = (r.target, r.slot, r.offset, r.link, r.addr, r.page);
                 assert_eq!(read, (0, 0, 0, 0, 0, 0), "{n:#x} {plant:?}");
+                assert!(r.bulk.is_empty(), "{n:#x} {plant:?}");
             });
             assert_eq!(commands, count, "every command it serves");
         }
@@ -406,5 +436,25 @@ mod tests {
         assert_eq!(parse_bulk_resp(Cmd::Relay, &r[1..]), Ok(&[1, 2, 3][..]));
         let w = wire();
         assert_eq!((w.cmd_relay, w.status_field), (0x50, 0x04));
+        assert_eq!(w.cmd_peers, 0x51);
+    }
+
+    /// The records of the node that relays come back a page at a time,
+    /// complete only from a log that kept them.
+    #[test]
+    fn a_peers_response_is_a_page_of_the_records() {
+        let records: Vec<u8> = (0..9).flat_map(|i| [1, 0x40 + i]).collect();
+        let page = |kept, n| PeersResp::parse(&response_peers(kept, &records, n)[1..]).unwrap();
+        let (first, second) = (page(true, 0), page(true, 1));
+        assert_eq!(
+            (first.complete, first.total, first.peers().len()),
+            (true, 9, 8)
+        );
+        let last = Peer {
+            link: 1,
+            addr: 0x48,
+        };
+        assert_eq!(second.peers(), &[last]);
+        assert!(!page(false, 0).complete);
     }
 }

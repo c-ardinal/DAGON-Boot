@@ -63,6 +63,9 @@ export const CMD = {
   get RELAY() {
     return n().cmdRelay;
   },
+  get PEERS() {
+    return n().cmdPeers;
+  },
 };
 
 /** Status numbers, as dagon-proto has them. */

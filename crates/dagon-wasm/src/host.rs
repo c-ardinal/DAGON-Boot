@@ -8,7 +8,8 @@ use core::cell::RefCell;
 
 use dagon_host::{
     check_release, reason, ConfirmOutcome, Discovery, Error, Event, Host, HostClock, NodeOutcome,
-    NodeState, Outcome, RecoverAssets, RecoverPath, RomStats, Target, Transport, WritePath,
+    NodeState, Outcome, RecoverAssets, RecoverPath, RomStats, Silence, Target, Transport,
+    WritePath,
 };
 use dagon_proto::payload::{HelloResp, SlotInfo, StatusResp, VersionResp, VersionSlots};
 use js_sys::{Array, Object, Promise, Reflect, Uint8Array};
@@ -493,11 +494,14 @@ fn outcome_js(r: &NodeOutcome<JsValue>) -> JsValue {
     set(&o, "outcome", kind.into());
     set(&o, "version", version);
     set(&o, "failure", why);
+    // Which of the three cases a node that does not answer is, if it is one.
+    let silence = Silence::of(&r.outcome).map_or(JsValue::NULL, |s| s.key().into());
+    set(&o, "silence", silence);
     o.into()
 }
 
 /// `{reason, running, trial}`: `reason` is dagon-host's short text
-/// (`NO ANSWER`, `ROLLED BACK`, `E_SIGNATURE`, ...); `running` the version
+/// (`NO ANSWER`, `LOST`, `ROLLED BACK`, `E_SIGNATURE`, ...); `running` the version
 /// the node came back on, when it came back on another one.
 fn failure_js(e: &Error<JsValue>) -> JsValue {
     let o = Object::new();

@@ -1,4 +1,5 @@
-import { NODE, STATE, WRITE } from './copy.ts';
+import type { Silence } from '../wasm/dagon.ts';
+import { NODE, SILENCE, STATE, WRITE } from './copy.ts';
 import type { Progress } from './writeProgress.ts';
 
 /** The six node states, each with its own mark (shape + colour) at the card's top-right. */
@@ -53,7 +54,9 @@ const RESULT: Partial<Record<Progress['stage'], { word: string; silent: boolean 
   unchanged: { word: NODE.unchanged, silent: false },
 };
 
-export function resultChip(stage: Progress['stage']): { chip: string; spoken: string; silent: boolean } | null {
+export function resultChip(stage: Progress['stage'], silence?: Silence): { chip: string; spoken: string; silent: boolean } | null {
+  // A node that did not answer says which of the three cases it is.
+  if (silence) return { chip: SILENCE[silence].chip, spoken: SILENCE[silence].word, silent: true };
   const r = RESULT[stage];
   return r ? { chip: r.word, spoken: r.word.slice(2), silent: r.silent } : null;
 }

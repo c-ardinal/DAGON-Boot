@@ -128,7 +128,7 @@ export class OperateLink {
   protected updated = new Set<string>();
   /** Nodes this run really wrote an image to; the others among `updated` were already on it. */
   protected wrote = new Set<string>();
-  /** Nodes of the last update that answered nothing and were sent nothing (dagon-host's needsFirstWrite). */
+  /** Nodes of the last update that were never reached and were sent nothing (dagon-host's needsFirstWrite). */
   protected firstWrite = 0;
   /** The run hubRestarting / reconnectNeeded belong to, so done says what it did. */
   protected running: 'update' | 'recover' | 'rollback' = 'update';

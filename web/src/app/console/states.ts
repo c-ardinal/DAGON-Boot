@@ -54,5 +54,5 @@ export function cardChipOf(p: Progress, to: number | undefined): Chip | null {
     const said = writingTo(p, to);
     return said === null ? null : { chip: said, spoken: said, silent: false };
   }
-  return resultChip(p.stage);
+  return resultChip(p.stage, p.silence);
 }

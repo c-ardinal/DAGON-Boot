@@ -26,3 +26,4 @@ For application developers, extension authors and DAGON contributors.
 - **component**: a unit released on its own, with its own SemVer version (`[[component]]` in `compat.toml`).
 - **contract**: a compatibility agreement between components (a file format, a protocol, an API).
 - **format number**: a contract's integer number. A reader refuses a number it does not know.
+- **lost / never reached / history unknown**: the three cases of a node that does not answer a relayed request. Lost: a record says it answered before. Never reached: the records are complete and none is of it. History unknown: the records cannot be checked. A write stops at a lost node and at one with unknown history, and skips a node never reached ([section 1.5 of Lifecycle events and extensions](/en/explanation/lifecycle-events/#15-host-operations)).

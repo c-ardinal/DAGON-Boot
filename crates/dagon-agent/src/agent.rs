@@ -7,9 +7,9 @@ use dagon_format::{CryptoProvider, Digest, FormatError, SigVerifier, Software};
 use dagon_port::SlotStore;
 use dagon_proto::handler::{self, Ceiling, Handler};
 use dagon_proto::payload::{
-    self, mode, phase, reboot_mode, target, CapsReq, CapsResp, CmdSet, HelloReq, HelloResp,
-    SetPending, Show, SlotState, StatusResp, VersionResp, VersionSlots, XferBegin, XferChunk,
-    IMAGE_HDR_LEN,
+    self, mode, phase, reboot_mode, target, CapsReq, CapsResp, CmdSet, HelloReq, HelloResp, Peer,
+    PeerLog, SetPending, Show, SlotState, StatusResp, VersionResp, VersionSlots, XferBegin,
+    XferChunk, IMAGE_HDR_LEN,
 };
 use dagon_proto::{
     flags, frame_len, max_payload, split_status, Cmd, Frame, FrameError, Status, HEADER_LEN,
@@ -333,6 +333,20 @@ impl<
     /// `addr` over its link `link` (`relay.relay_request`).
     pub fn relayed(&mut self, link: u8, addr: u8, cmd: u8) {
         noted(self.relay.relay_request(&mut self.chain, link, addr, cmd));
+    }
+
+    /// The node at `addr` on a relay's link `link` answered a relayed
+    /// request with a valid frame: its record is kept in the state log,
+    /// once ([`SlotStore::note_peer`]). False when it could not be
+    /// written, so the relay tells of the next answer again.
+    pub fn peer_answered(&mut self, link: u8, addr: u8) -> bool {
+        self.images.note_peer(Peer { link, addr }).is_ok()
+    }
+
+    /// The peers the state log records, for a relay's PEERS
+    /// ([`SlotStore::peers`]).
+    pub fn peers(&mut self) -> Option<PeerLog> {
+        self.images.peers()
     }
 
     /// A relay drove the lines of the recovery target on link `link`

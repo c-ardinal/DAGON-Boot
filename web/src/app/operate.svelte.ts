@@ -4,7 +4,7 @@
 // The link to the node connected to the PC and the watch are OperateLink's; here are the update,
 // the reconnect after the node connected to the PC reboots, and recovery.
 import { isNote, type Transport } from '../serial/transport.ts';
-import { LOCAL, PHASE, check_release_for, factorySlot, releaseAgentDigest, releaseCoreVersions, releaseVersions, topo_compile, versionText, type Host, type NodeResult, type ConfirmResult, type RecoverResult, type Refusal, type UpdateEvent } from '../wasm/dagon.ts';
+import { LOCAL, PHASE, check_release_for, factorySlot, releaseAgentDigest, releaseCoreVersions, releaseVersions, topo_compile, versionText, type Host, type NodeResult, type ConfirmResult, type RecoverResult, type Refusal, type Silence, type UpdateEvent } from '../wasm/dagon.ts';
 import type { RollbackRecord } from './agent.svelte.ts';
 import { ANNOUNCE, FILE } from './copy.ts';
 import { NODE_WRITE, type L } from './machine.ts';
@@ -192,9 +192,9 @@ export class Operate extends OperateLink {
     for (const r of results) {
       const id = reach[r.node]?.id;
       if (id && r.outcome === 'notStarted') this.progress[id] = { stage: 'unwritten', percent: 0 };
-      // The relaying node said the node answered nothing and dagon-host sent it nothing: its card takes the first write.
+      // The relaying node's records are complete and hold none of the node, and dagon-host sent it nothing: its card takes the first write.
       if (id && r.outcome === 'needsFirstWrite') {
-        this.progress[id] = { stage: 'silent', percent: 0 };
+        this.progress[id] = { stage: 'silent', percent: 0, silence: r.silence ?? undefined };
         this.live[id] = { ...(this.live[id] ?? UNKNOWN), responding: false };
       }
       // A confirmed node runs the new version now, also when a later node stops the run; one dagon-host took back
@@ -215,7 +215,7 @@ export class Operate extends OperateLink {
     const f =
       stop.outcome === 'unknown' ? { stage: 'cannotFix' as const, reason: undefined } : why?.running != null ? { stage: 'previous' as const } : failureStage(why?.reason ?? 'NO ANSWER');
     // A stopped update has no "cannot fix" yet: an unnamed failure is a refusal of the update.
-    this.stopAt(n.id, f.stage === 'cannotFix' ? 'refused' : f.stage, f.reason);
+    this.stopAt(n.id, f.stage === 'cannotFix' ? 'refused' : f.stage, f.reason, stop.silence ?? undefined);
     if (why?.running != null) this.backRead = this.recordBack(n.id, why.running, why.reason);
   }
 
@@ -234,10 +234,10 @@ export class Operate extends OperateLink {
     }
   }
 
-  private stopAt(id: string, stage: Progress['stage'], reason?: string): void {
+  private stopAt(id: string, stage: Progress['stage'], reason?: string, silence?: Silence): void {
     const n = this.config!.nodes.find((x) => x.id === id)!;
     this.failed = id;
-    this.progress[id] = { stage, percent: this.progress[id]?.percent ?? 0, reason };
+    this.progress[id] = { stage, percent: this.progress[id]?.percent ?? 0, reason, silence };
     this.status = stage === 'previous' ? ANNOUNCE.previous(n.name) : stage === 'coreBack' ? ANNOUNCE.coreBack(n.name) : ANNOUNCE.stopped(n.name);
     this.go(this.state === 'reconnectNeeded' ? 'revertedOnReconnect' : 'nodeStuck');
     this.startWatching();

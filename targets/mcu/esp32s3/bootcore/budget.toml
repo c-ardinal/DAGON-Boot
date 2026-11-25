@@ -8,7 +8,10 @@
 # ESP32-S3 stage0; each is the build's plus a quarter, in 256-byte steps;
 # measured 49,032 bytes when set, then 52,624 once the boot core rebuilt
 # the state log from the slots, which raised dagon-core, dagon-format and
-# mcu-package by the same rule.
+# mcu-package by the same rule. `other` (literal pools and padding, which
+# grow with any code) was within 16 bytes of its limit before the state
+# log carried the records of peers, and 4,390 with them: raised by the
+# same rule.
 
 [image]
 max_bytes = 196608
@@ -65,4 +68,4 @@ max_bytes = 3584
 
 [[part]]
 name = "other"
-max_bytes = 4352
+max_bytes = 5632

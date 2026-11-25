@@ -3,9 +3,9 @@
 //!
 //! - [`serve`]: answers the requests of the PC (or whoever drives this
 //!   node) over a [`dagon_port::Link`]: RELAY to a node over one of this
-//!   node's links, SUBCTL and I2C_RAW for the ROM recovery path
-//!   ([`Recovery`]), everything else to this node's own agent (SHOW
-//!   included).
+//!   node's links, PEERS for the record of the nodes that answered over
+//!   them, SUBCTL and I2C_RAW for the ROM recovery path ([`Recovery`]),
+//!   everything else to this node's own agent (SHOW included).
 //! - [`run_link`]: one worker per link ([`dagon_port::NodeLink`]): it
 //!   carries the requests [`serve`] hands it through a [`Port`]. A port and
 //!   its worker each hold one frame of their link's largest payload, sized
@@ -111,6 +111,18 @@ pub trait OwnAgent {
     fn child_control(&mut self, _link: u8, _nrst: u8, _boot0: u8) {}
     /// I2C_RAW reached the ROM loader at `addr` (`relay.child_raw`).
     fn child_raw(&mut self, _addr: u8, _len: u16, _read_len: u16) {}
+    /// The node at `addr` on link `link` answered a relayed request with
+    /// a valid frame: its record goes into this node's state log, once
+    /// (`dagon_agent::Agent::peer_answered`). False when it was not
+    /// written; the relay then tells of that node's next answer again.
+    fn peer_answered(&mut self, _link: u8, _addr: u8) -> bool {
+        false
+    }
+    /// The peers this node's state log records, which PEERS answers
+    /// with (`dagon_agent::Agent::peers`). `None`: they cannot be read.
+    fn peers(&mut self) -> Option<dagon_proto::payload::PeerLog> {
+        None
+    }
     /// What the requester's HELLO named as the payload it takes
     /// (`dagon_agent::Agent::ceiling`); the relay holds it over its own
     /// uplink.

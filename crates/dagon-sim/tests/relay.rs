@@ -246,7 +246,7 @@ fn the_relaying_node_says_what_it_serves_and_reads_before_it_acts() {
     let (st, body) = pc.ask(&mut relay, Cmd::Hello, &hello());
     assert_eq!(st, Status::Ok);
     let cmds = HelloResp::parse(&body).unwrap().cmds;
-    let own = [Cmd::Relay, Cmd::SubCtl, Cmd::I2cRaw];
+    let own = [Cmd::Relay, Cmd::Peers, Cmd::SubCtl, Cmd::I2cRaw];
     assert_eq!(cmds, set_of(&APP).union(set_of(&own)));
     let behind = pc.ok(&mut relay, Cmd::Hello, &hello());
     assert_eq!(HelloResp::parse(&behind).unwrap().cmds, set_of(&APP));
@@ -356,8 +356,8 @@ fn the_relaying_node_says_what_it_serves_and_reads_before_it_acts() {
     assert_ne!(st, Status::Arg);
     assert!(relay.bus.ops > ops);
 
-    // A relaying node with no node on its recovery lines serves RELAY alone
-    // of the relay's commands.
+    // A relaying node with no node on its recovery lines serves RELAY and
+    // PEERS alone of the relay's commands.
     let mut bare = SimRelay::new(SimNode::new(
         hub_config(),
         *kp().pk,
@@ -366,7 +366,7 @@ fn the_relaying_node_says_what_it_serves_and_reads_before_it_acts() {
     ));
     let (_, body) = pc.ask(&mut bare, Cmd::Hello, &hello());
     let cmds = HelloResp::parse(&body).unwrap().cmds;
-    assert_eq!(cmds, set_of(&APP).union(set_of(&[Cmd::Relay])));
+    assert_eq!(cmds, set_of(&APP).union(set_of(&[Cmd::Relay, Cmd::Peers])));
     let mut served = CmdSet::EMPTY;
     plant::each_probe(|n, p| {
         if pc.status(&mut bare, n, p) == Status::Field {
@@ -418,6 +418,70 @@ fn own_store_on_page_programmed_flash() {
         .ops()
         .iter()
         .all(|op| op.len % 256 == 0 || op.len % 0x1000 == 0));
+}
+
+/// PEERS page `n` of the relaying node.
+fn peers(pc: &mut Pc, relay: &mut SimRelay, n: u8) -> (Status, PeersResp) {
+    let (st, body) = pc.ask(relay, Cmd::Peers, &wire(|b| encode_peers(n, b)));
+    (st, PeersResp::parse(&body).unwrap_or_default())
+}
+
+/// The relaying node records a node behind it when that node first
+/// answers, once, in its own state log: PEERS reads the record, a reset
+/// keeps it, and a node that does not answer gets none.
+#[test]
+fn the_relaying_node_records_the_peers_that_answer() {
+    let mut relay = relay_with_f401();
+    let mut pc = Pc { seq: 0 };
+    // Before its first write the relaying node has no log to read.
+    assert_eq!(peers(&mut pc, &mut relay, 0).0, Status::Unsupported);
+    relay
+        .node
+        .provision(&image(0, Version::new(3, 0, 1), &[9; 1000]), 0)
+        .unwrap();
+    let (st, p) = peers(&mut pc, &mut relay, 0);
+    assert_eq!(
+        (st, p.complete, p.total, p.peers()),
+        (Status::Ok, true, 0, &[][..])
+    );
+
+    // A node that does not answer leaves no record.
+    let absent = NODE_I2C_ADDR + 1;
+    let (st, _) = pc.node(&mut relay, absent, Cmd::Hello, &hello());
+    assert_eq!(st, Status::Timeout);
+    assert_eq!(peers(&mut pc, &mut relay, 0).1.total, 0);
+
+    // The first answer is recorded; later ones write nothing.
+    pc.ok(&mut relay, Cmd::Hello, &hello());
+    let there = Peer {
+        link: link_on(NODE_I2C_PORT),
+        addr: NODE_I2C_ADDR,
+    };
+    let (_, p) = peers(&mut pc, &mut relay, 0);
+    assert_eq!((p.complete, p.total, p.peers()), (true, 1, &[there][..]));
+    let writes = relay.node.flash().ops().len();
+    pc.ok(&mut relay, Cmd::Status, &[]);
+    pc.ok(&mut relay, Cmd::Hello, &hello());
+    assert_eq!(relay.node.flash().ops().len(), writes);
+    // A refusal is an answer too, and a page past the last holds none.
+    let (st, inner) = pc.node(&mut relay, NODE_I2C_ADDR, Cmd::Peers, &[0]);
+    assert_eq!(
+        (st, inner.map(|i| i.0)),
+        (Status::Ok, Some(Status::Unsupported))
+    );
+    let (_, p) = peers(&mut pc, &mut relay, 1);
+    assert_eq!((p.total, p.peers()), (1, &[][..]));
+
+    // The record outlasts a reset.
+    relay.node.reset(0);
+    let (_, p) = peers(&mut pc, &mut relay, 0);
+    assert_eq!((p.complete, p.peers()), (true, &[there][..]));
+
+    // A log that lost its PEERS_KEPT keeps its records and no longer says
+    // they are complete.
+    relay.node.store().lose_peers_kept().unwrap();
+    let (_, p) = peers(&mut pc, &mut relay, 0);
+    assert_eq!((p.complete, p.peers()), (false, &[there][..]));
 }
 
 #[test]

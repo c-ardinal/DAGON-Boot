@@ -4,7 +4,7 @@
 use crate::timeout::{EraseLayout, Plan};
 use dagon_format::header::HEADER_SIZE;
 use dagon_format::Version;
-use dagon_proto::payload::{self, StatusResp};
+use dagon_proto::payload::{self, Peer, PeerLog, StatusResp};
 
 /// Why a [`SlotStore`] call failed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -164,6 +164,21 @@ pub trait SlotStore {
         (target == payload::target::APP).then(|| self.status())
     }
 
+    /// Records in the app state log that `peer`, a node this one relays
+    /// to, answered (`dagon_core::log::Log::note_peer`): one record for
+    /// each peer, kept across resets, and nothing written for a peer
+    /// already recorded. Without its own implementation: `Unsupported`, a
+    /// board that keeps no such records.
+    fn note_peer(&mut self, _peer: Peer) -> Result<(), StoreError> {
+        Err(StoreError::Unsupported)
+    }
+
+    /// The peers the app state log records ([`SlotStore::note_peer`]).
+    /// `None`: the records cannot be read, or this board keeps none.
+    fn peers(&mut self) -> Option<PeerLog> {
+        None
+    }
+
     /// The version mark of the stage0 this board boots behind
     /// (`dagon_format::stage0::find` over its stage0 region). `None`: no
     /// mark (a stage0 built before it) or no stage0.
@@ -307,6 +322,12 @@ impl<S: SlotStore + ?Sized> SlotStore for &core::cell::RefCell<S> {
     }
     fn stage0_version(&mut self) -> Option<Version> {
         self.borrow_mut().stage0_version()
+    }
+    fn note_peer(&mut self, peer: Peer) -> Result<(), StoreError> {
+        self.borrow_mut().note_peer(peer)
+    }
+    fn peers(&mut self) -> Option<PeerLog> {
+        self.borrow_mut().peers()
     }
     fn write_target_header(
         &mut self,

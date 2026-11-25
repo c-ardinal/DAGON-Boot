@@ -92,6 +92,10 @@ commands! {
     /// one number for the node's own display.
     Show = 0x41, idempotent: true, req: msg(1, &show::REQ, false), resp: NONE;
     Relay = 0x50, idempotent: true, req: msg(1, &relay::REQ, true), resp: msg(0, &[], true);
+    /// To a node that relays: the nodes it relays to that answered at
+    /// least once, as its state log records them, a page at a time
+    /// (`payload::PeersResp`). No other node serves it.
+    Peers = 0x51, idempotent: true, req: msg(1, &[], false), resp: msg(0, &peers::RESP, false);
     /// Not resent: the hub keeps no seq memory for its line controls.
     SubCtl = 0x60, idempotent: false, req: msg(0, &subctl::REQ, false), resp: NONE;
     /// Not resent: a raw transaction acts on the ROM loader every time.
@@ -263,6 +267,26 @@ pub mod relay {
     /// Left out: the relay's own wait for that link.
     pub const TIMEOUT_MS: FieldSpec = FieldSpec::opt(2, 2, 2);
     pub const REQ: [FieldSpec; 2] = [ADDR, TIMEOUT_MS];
+}
+
+/// PEERS. Request core: `page u8`, from 0. The response has no core.
+pub mod peers {
+    use super::FieldSpec;
+    /// Bytes of one peer: `link u8` (the relay link's id), `addr u8` (the
+    /// node's address on it).
+    pub const PEER_LEN: u8 = 2;
+    /// Peers of one page.
+    pub const PAGE: u8 = 8;
+    /// 1: the records are complete, so a peer without one never answered
+    /// since the node's first write. Left out: they are not (the log
+    /// lost records, or holds as many as it can), and a peer without one
+    /// may have answered.
+    pub const COMPLETE: FieldSpec = FieldSpec::opt(1, 1, 1);
+    /// Records of all pages.
+    pub const TOTAL: FieldSpec = FieldSpec::opt(2, 1, 1);
+    /// The peers of the page asked for, packed; none past the last page.
+    pub const PEERS: FieldSpec = FieldSpec::opt(3, 0, PAGE * PEER_LEN).packed(PEER_LEN);
+    pub const RESP: [FieldSpec; 3] = [COMPLETE, TOTAL, PEERS];
 }
 
 /// SUBCTL request. No core.

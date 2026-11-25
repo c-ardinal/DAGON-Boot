@@ -8,7 +8,7 @@
 use std::ops::RangeInclusive;
 
 use dagon_format::header::HEADER_SIZE;
-use dagon_format::statelog::{FACE_HEADER_SIZE, RECORD_SIZE};
+use dagon_format::statelog::{peer, FACE_HEADER_SIZE, RECORD_SIZE};
 
 use super::{
     board_boot, clock, dma, execution, isolation, slot_layout, Binding, BoardDef, ImageKind,
@@ -188,6 +188,12 @@ pub const MCU: &[Requirement<McuCheck>] = &[
         fields: &["layout.bootcore_log.face_size", "layout.app_log.face_size"],
         rule: "face_size >= LOG_FACE_MIN (96)",
         check: log_faces,
+    },
+    Requirement {
+        engine: "relay peer records",
+        fields: &["layout.app_log.face_size"],
+        rule: "with [[relay_link]]: face_size >= the face header and peer::face_records(watchdog.trial_attempts) records",
+        check: relay_log_face,
     },
     Requirement {
         engine: "UF2 builder",
@@ -750,6 +756,29 @@ fn log_faces(m: &McuDef) -> Result<(), String> {
         })?;
     }
     Ok(())
+}
+
+/// Bytes a face of a relaying MCU's app log needs for its peer records
+/// (`dagon_format::statelog::peer::face_records`).
+pub fn relay_log_face_min(trial_attempts: u8) -> u32 {
+    FACE_HEADER_SIZE as u32 + peer::face_records(trial_attempts) * RECORD_SIZE as u32
+}
+
+fn relay_log_face(m: &McuDef) -> Result<(), String> {
+    let (Some(log), Some(w)) = (m.layout.app_log, m.watchdog) else {
+        return Ok(());
+    };
+    if m.relay_links.is_empty() {
+        return Ok(());
+    }
+    let min = relay_log_face_min(w.trial_attempts);
+    fail(log.face_size < min, || {
+        format!(
+            "app_log.face_size {:#x} is below the {min} bytes the peer records of an MCU with \
+             [[relay_link]] need",
+            log.face_size
+        )
+    })
 }
 
 fn uf2_sector(m: &McuDef) -> Result<(), String> {

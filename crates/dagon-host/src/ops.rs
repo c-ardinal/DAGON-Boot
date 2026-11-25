@@ -12,8 +12,8 @@ use dagon_port::timeout::{
 };
 use dagon_port::Addressing;
 use dagon_proto::payload::{
-    self, phase, reboot_mode, target, HelloResp, SetPending, Show, SlotState, StatusResp,
-    VersionResp, XferBegin, XferChunk,
+    self, phase, reboot_mode, target, HelloResp, Peer, PeersResp, SetPending, Show, SlotState,
+    StatusResp, VersionResp, XferBegin, XferChunk,
 };
 use dagon_proto::{Cmd, Status};
 
@@ -64,11 +64,13 @@ pub enum Outcome<E> {
     /// Stopped here; later nodes are `NotStarted`.
     Failed(Error<E>),
     NotStarted,
-    /// A linked node that answered nothing in this session, not even HELLO
-    /// (the relaying node said so): no DAGON runs on it, as on a node added to the
-    /// configuration and never written. Nothing was sent to it and the run went on with the other nodes; it
-    /// takes its first write directly (the factory write, or the ROM path
-    /// where its MCU and link have one: [`Host::write_path`]).
+    /// A linked node that does not answer and was never reached
+    /// ([`Silence::NeverReached`]): the relaying node's records are
+    /// complete and hold none of it, as for a node added to the
+    /// configuration and never written. Nothing was sent to it and the run
+    /// went on with the other nodes; it takes its first write directly
+    /// (the factory write, or the ROM path where its MCU and link have
+    /// one: [`Host::write_path`]).
     NeedsFirstWrite,
     /// Written and confirmed on the release's version, then taken back to
     /// this one (the version it ran before): another node of the run stayed
@@ -79,6 +81,61 @@ pub enum Outcome<E> {
     /// with a node that stayed off the release's version does not hold: it
     /// could not be taken back.
     Incompatible(Version),
+}
+
+/// What a linked node that does not answer is, by the records of peers
+/// the relaying node keeps in its state log (PEERS). The host keeps no
+/// record of its own, and whether the node answered earlier in the
+/// session decides nothing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Silence {
+    /// A record of the node exists: it answered before. The write stops.
+    Lost,
+    /// The records are complete and none is of the node: it has not
+    /// answered once since the relaying node's first write. The write
+    /// skips it and goes on.
+    NeverReached,
+    /// The records cannot be checked: the relaying node does not serve
+    /// PEERS, the read failed, or the records are not complete. The write
+    /// stops.
+    HistoryUnknown,
+}
+
+impl Silence {
+    pub const ALL: [Silence; 3] = [
+        Silence::Lost,
+        Silence::NeverReached,
+        Silence::HistoryUnknown,
+    ];
+
+    /// The one name of the case in what the tools print (the CLI as it
+    /// is, the page through its own words for [`Silence::key`]).
+    pub const fn name(self) -> &'static str {
+        match self {
+            Silence::Lost => "lost",
+            Silence::NeverReached => "never reached",
+            Silence::HistoryUnknown => "history unknown",
+        }
+    }
+
+    /// The case as a key for a program (dagon-wasm's results).
+    pub const fn key(self) -> &'static str {
+        match self {
+            Silence::Lost => "lost",
+            Silence::NeverReached => "neverReached",
+            Silence::HistoryUnknown => "historyUnknown",
+        }
+    }
+
+    /// The case an outcome of [`Host::apply`] names, if any.
+    pub fn of<E>(outcome: &Outcome<E>) -> Option<Silence> {
+        match outcome {
+            Outcome::NeedsFirstWrite => Some(Silence::NeverReached),
+            Outcome::Failed(Error::Lost { .. }) => Some(Silence::Lost),
+            Outcome::Failed(Error::HistoryUnknown { .. }) => Some(Silence::HistoryUnknown),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -159,12 +216,54 @@ impl<T: Transport, C: HostClock> Host<T, C> {
         Ok(Discovery { hub, nodes })
     }
 
+    /// Tells the silent linked node `to` apart by the relaying node's
+    /// records of peers, read a page at a time (PEERS to the node the PC
+    /// is connected to). A record of the node is [`Silence::Lost`] whatever
+    /// else the records say; none in complete records is
+    /// [`Silence::NeverReached`]; anything that leaves the records
+    /// unchecked is [`Silence::HistoryUnknown`]. Only a transport error is
+    /// an error.
+    pub async fn silence(&mut self, to: Target) -> Result<Silence, T::Error> {
+        let Target::Linked { link, addr, .. } = to else {
+            return Ok(Silence::HistoryUnknown);
+        };
+        let node = Peer { link, addr };
+        let mut read = 0usize;
+        for page in 0..=u8::MAX {
+            let asked = request(|b| payload::encode_peers(page, b));
+            let body = match self
+                .call(Target::Local, Cmd::Peers, &asked, REQUEST_MS)
+                .await
+            {
+                Ok(b) => b,
+                Err(Error::Transport(e)) => return Err(Error::Transport(e)),
+                Err(_) => return Ok(Silence::HistoryUnknown),
+            };
+            let Ok(p) = PeersResp::parse(&body) else {
+                return Ok(Silence::HistoryUnknown);
+            };
+            if p.peers().contains(&node) {
+                return Ok(Silence::Lost);
+            }
+            read += p.peers().len();
+            if p.peers().is_empty() || read >= usize::from(p.total) {
+                return Ok(if p.complete && read == usize::from(p.total) {
+                    Silence::NeverReached
+                } else {
+                    Silence::HistoryUnknown
+                });
+            }
+        }
+        Ok(Silence::HistoryUnknown)
+    }
+
     /// Checks `bundle` (signature chain under `pubkey`, and that it was built
     /// for `topology`, the caller's current canonical binary), then updates
     /// the nodes: the others in update order, the node the PC is connected
     /// to last. `nodes` limits the run to these topology node indices. Stops
-    /// at the first node that fails; a linked node that has answered nothing
-    /// in this session is [`Outcome::NeedsFirstWrite`] and the run goes on.
+    /// at the first node that fails; a linked node that does not answer and
+    /// was never reached ([`Silence::NeverReached`]) is
+    /// [`Outcome::NeedsFirstWrite`] and the run goes on.
     pub async fn apply(
         &mut self,
         bundle: &[u8],
@@ -327,10 +426,11 @@ impl<T: Transport, C: HostClock> Host<T, C> {
         }
     }
 
-    /// One planned node of an apply: [`Outcome::NeedsFirstWrite`] when the
-    /// relaying node says it answers nothing and it has answered nothing in this
-    /// session, else its update. A node that answered earlier in the session
-    /// and is silent now ran DAGON: it fails and stops the run.
+    /// One planned node of an apply: its update, or, when the relaying
+    /// node says it answers nothing, what the relaying node's records
+    /// make of it ([`Host::silence`]): [`Outcome::NeedsFirstWrite`] for a
+    /// node never reached, a failure that stops the run for one that is
+    /// lost or whose history is unknown.
     async fn apply_node(
         &mut self,
         b: &BundleView<'_>,
@@ -340,8 +440,14 @@ impl<T: Transport, C: HostClock> Host<T, C> {
     ) -> (Option<Version>, Outcome<T::Error>) {
         let st = match self.status(to).await {
             Ok(st) => st,
-            Err(e) if is_silent(&e) && !self.opened.contains(&to) => {
-                return (None, Outcome::NeedsFirstWrite)
+            Err(e) if is_silent(&e) => {
+                let outcome = match self.silence(to).await {
+                    Ok(Silence::NeverReached) => Outcome::NeedsFirstWrite,
+                    Ok(Silence::Lost) => Outcome::Failed(Error::Lost { node }),
+                    Ok(Silence::HistoryUnknown) => Outcome::Failed(Error::HistoryUnknown { node }),
+                    Err(e) => Outcome::Failed(e),
+                };
+                return (None, outcome);
             }
             Err(e) => return (None, Outcome::Failed(e)),
         };
@@ -1100,9 +1206,10 @@ impl<T: Transport, C: HostClock> Host<T, C> {
     }
 }
 
-/// No DAGON answers at the node: the relaying node relayed its first request (HELLO)
-/// and answered that the node did not, after every resend, so nothing else
-/// was sent to it. A relaying node that does not answer is no such evidence.
+/// The node does not answer: the relaying node relayed its first request
+/// (HELLO) and answered that the node did not, after every resend, so
+/// nothing else was sent to it. A relaying node that does not answer is no
+/// such evidence.
 fn is_silent<E>(e: &Error<E>) -> bool {
     matches!(e, Error::Relay(Status::Timeout))
 }
@@ -1258,6 +1365,8 @@ pub const REASONS: &[&str] = &[
     "NOT HANDED OVER",
     "NO IMAGE",
     "ROM NOT CONFIRMED",
+    "LOST",
+    "HISTORY UNKNOWN",
     "FAILED",
 ];
 
@@ -1285,6 +1394,8 @@ pub fn reason<E>(e: &Error<E>) -> &'static str {
         Error::DigestMismatch => "E_DIGEST",
         Error::NoImage { .. } => "NO IMAGE",
         Error::RomNotConfirmed { .. } => "ROM NOT CONFIRMED",
+        Error::Lost { .. } => "LOST",
+        Error::HistoryUnknown { .. } => "HISTORY UNKNOWN",
         _ => "FAILED",
     }
 }

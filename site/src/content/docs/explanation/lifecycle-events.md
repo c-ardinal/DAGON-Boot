@@ -133,6 +133,8 @@ len, next }`です。プロトコルのリクエストは例外なく遷移で�
 | `relay.relay_request` | 中継のリクエストを受理した | `link`、`addr`、`cmd` |
 | `relay.child_control` / `relay.child_raw` | 接続先のノードの制御線を操作した/ ROMローダへ直接のバスアクセスを実施した | `link`、`nrst`、`boot0` / `addr`、`len`、`read_len` |
 
+リレーは、中継先のノードとの通信実績を自身の状態ログに記録します（[保持と永続の形式の6.1節](/explanation/retained-formats/#61-通信実績の記録)）。中継先のノードが検査に合格するフレームで最初に応答した時点で、そのノードの記録を1件追記します。記録はPEERSで読出します。PEERSはページ単位の読出で、リクエストはページ番号、応答は記録の完全性、記録の総数、そのページの`(link, addr)`の列（1ページ8件）です。PEERSに応答するのはリレーだけで、リレー以外のノードのHELLOはPEERSを列挙しません。
+
 ### 1.5 ホストの操作
 
 ホストは操作（`apply`、`rollback`、`recover`、`confirm`、`provision`、`build`）の進行をイベントで通知します。その他にプロジェクトのセッションとエージェントとの接続があります。ホストの転送、署名、ビルドの実行はポートです（2.1）。
@@ -146,7 +148,7 @@ len, next }`です。プロトコルのリクエストは例外なく遷移で�
 | `host.node.discovered` | 検出 | `target`、識別 |
 | `host.node.step` | ノードの各段階（TRANSFER、VERIFY、REBOOT、CONFIRM、REJECTED、FAILED、ROM） | `node`、`target`、`phase`、`percent`、`version` |
 | `host.node.reconnecting` | 再起動後のバージョンを待機中 | `node`、`elapsed_ms`、`other_version?` |
-| `host.node.result` | | `node`、`Done(v) \| Failed(reason, status?) \| NotStarted \| NeedsFirstWrite \| Realigned(v) \| Incompatible(v)`（`NeedsFirstWrite`: PC接続のノードの報告で無応答のノードです。このノードへの送信はなく、他ノードの書込は継続します。このノードには直接の書込が必要です。`Realigned`: 書込と確定の後、パッケージのバージョン以外に残留したノードとの互換制約を維持する目的で`v`へ復帰したノードです。`Incompatible`: 該当の制約が不成立で、復帰不能だったノードです。[ノード間のバージョンの整合](/how-to/constraints/)を参照） |
+| `host.node.result` | | `node`、`Done(v) \| Failed(reason, status?) \| NotStarted \| NeedsFirstWrite \| Realigned(v) \| Incompatible(v)`（`NeedsFirstWrite`: 無応答で、区分が通信実績なしのノードです。このノードへの送信はなく、他ノードの書込は継続します。このノードには最初の直接書込が必要です。`Realigned`: 書込と確定の後、パッケージのバージョン以外に残留したノードとの互換制約を維持する目的で`v`へ復帰したノードです。`Incompatible`: 該当の制約が不成立で、復帰不能だったノードです。[ノード間のバージョンの整合](/how-to/constraints/)を参照） |
 | `host.confirm.result` | | `Confirmed \| NotOnTrial \| NeedsChoice` |
 | `host.rollback.*`、`host.recover.*` | deployと同一の形式 | |
 | `host.provision.started` / `host.provision.recorded` | ROM経由の初回インストール。インストールしたブートイメージの識別を記録した | `node`、`boot_sha256` |
@@ -154,6 +156,20 @@ len, next }`です。プロトコルのリクエストは例外なく遷移で�
 | `host.agent.linked` / `host.agent.unlinked` | 同意を記録した/ 取消した | `agent`、`way` |
 | `host.version.read` | VERSIONに応答した、またはUnsupported | `target`、`VersionResp?` |
 | `host.job.*`、`host.device.*` | serveの作業とデバイスのメッセージ | |
+
+#### 無応答のノードの区分
+
+`apply`は、中継のHELLOに応答しないノードを、PC接続ノードから読出した通信実績の記録で区分します。区分の表記は、CLI、wasm、DAGON Consoleで同一です。
+
+| 区分 | 判定 | 書込の処理 | `host.node.result` |
+|---|---|---|---|
+| 途絶 | そのノードの記録が存在します（以前は応答していたノードです） | 停止します | `Failed(LOST)` |
+| 通信実績なし | 記録が完全で、そのノードの記録が存在しません（構成に追加した直後の未書込ノードです） | そのノードを省略して続行し、最初の直接書込を案内します | `NeedsFirstWrite` |
+| 履歴不明 | 記録の確認が不可能です: PC接続ノードがPEERSに非対応、読出の失敗、記録が不完全（PEERS_KEPTの不在、上限への到達） | 停止します | `Failed(HISTORY UNKNOWN)` |
+
+- 区分の対象は、PC接続ノードが中継先の無応答（RELAYの`E_TIMEOUT`）を応答したノードだけです。PC接続ノード自身の無応答は接続の失敗です。PC接続ノードとの通信を開始するのはホストで、ホストは記録を保持しないので、区分しません。
+- 区分に使用するのはノード側の記録だけです。同一セッション内の応答の有無は使用しません。
+- 履歴不明のノードが応答を再開すれば、区分は不要になります。未書込のノードには、最初の直接書込を実施します。PC接続ノードの記録を完全な状態にするのは、PC接続ノードの最初の書込だけです。
 
 ### 1.6 永続の状態とその状態機械
 

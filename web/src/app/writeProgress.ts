@@ -1,7 +1,7 @@
 // What the page knows about each node in an update: its last answers, where its write is and its one %,
 // the chosen release's verdict, and how dagon-host's results read as the node's chip.
 import type { HelloResp } from '../serial/hello.ts';
-import { SLOT_STATE, release_topology, releaseAppDigest, trialPercent, versionText, type ConfirmResult, type Refusal, type StatusResp, type VersionResp } from '../wasm/dagon.ts';
+import { SLOT_STATE, release_topology, releaseAppDigest, trialPercent, versionText, type ConfirmResult, type Refusal, type Silence, type StatusResp, type VersionResp } from '../wasm/dagon.ts';
 import { ANNOUNCE, WRITE } from './copy.ts';
 import { topoFromNames, type Topo } from './define/model.ts';
 
@@ -26,8 +26,10 @@ export const UNKNOWN: Live = { responding: null, rttMs: null, lastSeen: null, he
 export interface Progress {
   stage: 'waiting' | 'writing' | 'lastResort' | 'rebooting' | 'done' | 'unchanged' | 'silent' | 'refused' | 'previous' | 'coreBack' | 'unwritten' | 'cannotFix';
   percent: number;
-  /** dagon-host's reason when the node refused (`E_FLASH`, `E_SIGNATURE`, ...). */
+  /** dagon-host's reason when the node refused (`E_FLASH`, `E_SIGNATURE`, ...) or did not answer (`LOST`, `HISTORY UNKNOWN`). */
   reason?: string;
+  /** Which case a node that did not answer is; its chip says it. */
+  silence?: Silence;
   /** The boot core version being written, while it is; the app's write has none. */
   core?: number;
 }
@@ -133,12 +135,14 @@ export const LATEST_NAME = 'latest.dgb';
 
 /**
  * dagon-host's reason for a node that did not get through, as its chip:
- * no answer (`NO ANSWER`: timeout, RELAY timeout, lost link), back on the
+ * no answer (`NO ANSWER`: timeout, RELAY timeout, lost link; `LOST` and
+ * `HISTORY UNKNOWN`: a relayed node, by the relaying node's records), back on the
  * previous version (`ROLLED BACK`), an explicit refusal (`E_FLASH`, ...),
  * or a failure the page has no word for (cannot fix).
  */
 export function failureStage(reason: string): Pick<Progress, 'stage' | 'reason'> {
   if (reason === 'NO ANSWER') return { stage: 'silent' };
+  if (reason === 'LOST' || reason === 'HISTORY UNKNOWN') return { stage: 'silent', reason };
   if (reason === 'ROLLED BACK') return { stage: 'previous' };
   if (reason === 'BOOT CORE ROLLED BACK') return { stage: 'coreBack' };
   // A refused release (source, key, topology, format) keeps its kind: the chip says which.

@@ -89,9 +89,6 @@ pub struct Catalog {
     pub initial: &'static str,
     pub states: &'static [&'static str],
     pub entries: &'static [Entry],
-    /// The machine's `REPLAY` ([`Replay`]).
-    #[doc(hidden)]
-    pub __replay: Replay,
     /// The machine's generated transition table, by state index and
     /// event code ([`Catalog::leaves`]).
     #[doc(hidden)]
@@ -131,13 +128,6 @@ impl Machines {
             .find_map(|c| c.entry(code))
     }
 }
-
-/// A machine's record decoder (its generated `REPLAY`): decodes a record
-/// of the machine into its payload and hands it to the callback; `false`
-/// when the record is not the machine's, is not replayable, or does not
-/// decode. [`crate::Composed::replay`] takes the decoders of the machines
-/// it reads, so an image links no catalog to replay.
-pub type Replay = fn(&crate::EventRecord, &mut dyn FnMut(&dyn crate::Payload)) -> bool;
 
 impl Catalog {
     pub fn entry(&self, code: u8) -> Option<&'static Entry> {

@@ -1,8 +1,8 @@
 //! The app layer's composed chain as the agent and its image store use it.
 
 use dagon_events::{
-    Accept, Clock, Composed, Delay, EventRecord, Extension, Health, Published, RebootRequest,
-    Replay, Sink, Snapshot, TrialInfo, Unreadable, UpdateOffer,
+    Accept, Clock, Composed, Delay, Extension, Health, NotReplayed, Published, RebootRequest, Sink,
+    Snapshot, TrialInfo, UpdateOffer,
 };
 
 /// The app layer's composed chain, as the agent uses it: where its
@@ -13,7 +13,7 @@ pub trait AppChain: Sink {
     fn accept_update(&mut self, o: &UpdateOffer) -> Accept;
     fn allow_reboot_now(&mut self, r: &RebootRequest) -> Delay;
     fn self_check(&mut self, t: &TrialInfo) -> Health;
-    fn replay(&mut self, machines: &[Replay], rec: &EventRecord) -> Result<(), Unreadable>;
+    fn replay<K: dagon_events::Kind>(&mut self, p: &K) -> Result<(), NotReplayed>;
 }
 
 impl<P: Snapshot, const N: usize, B: Extension, U: Extension, C: Clock> AppChain
@@ -28,7 +28,7 @@ impl<P: Snapshot, const N: usize, B: Extension, U: Extension, C: Clock> AppChain
     fn self_check(&mut self, t: &TrialInfo) -> Health {
         Composed::self_check(self, t)
     }
-    fn replay(&mut self, machines: &[Replay], rec: &EventRecord) -> Result<(), Unreadable> {
-        Composed::replay(self, machines, rec)
+    fn replay<K: dagon_events::Kind>(&mut self, p: &K) -> Result<(), NotReplayed> {
+        Composed::replay(self, p)
     }
 }

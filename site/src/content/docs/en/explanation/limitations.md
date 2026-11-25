@@ -49,7 +49,6 @@ Parts the design no longer has that the code still declares:
 - VERSION ids 0x07, 0x08, 0x09, 0x11 and 0x12 in `version_id::TABLE`. The table of section 5.4 equals it.
 - Boot-stage extensions: the `boot_extensions` machine (`boot.extension_overran`), `targets/boot-extension-template`, the manifest's `trusted`, `stack_bytes` and `ram_bytes`, and `dagon-extension`'s protection map generation and trusted-extension checks.
 - The MCU definitions' `[isolation]` and `[[peripheral]]`. The design's `root_protection` is a table of its own; the code keeps it as a field of `[isolation]` and moves it to its own table with the code change.
-- `REPLAY`, the decoder for the boot record's replay that `state_machine!` generates.
 
 Links:
 

@@ -10,9 +10,8 @@ use core::task::{Context, Poll, Waker};
 
 use dagon_events::{
     compose, compose_unpublished, decisions, extensions, state_machine, Accept, Bounds, Compact,
-    Ctx, DecisionId, Delay, Event, EventRecord, ExtId, Extension, Health, Layer, Nop, Observe,
-    Published, Reader, RebootRequest, Refused, Snapshot, TrialInfo, Unreadable, UpdateOffer,
-    Watchdog,
+    Ctx, DecisionId, Delay, Event, EventRecord, ExtId, Extension, Health, Layer, Nop, NotReplayed,
+    Observe, Published, Reader, RebootRequest, Refused, Snapshot, TrialInfo, UpdateOffer, Watchdog,
 };
 use dagon_format::version::Version;
 
@@ -258,16 +257,7 @@ fn a_transition_delivers_its_event_then_moves() {
 }
 
 #[test]
-fn a_record_replays_as_its_typed_event() {
-    let mut first = Log::default();
-    {
-        let mut out = compose_unpublished(Layer::Boot, Nop, &mut first);
-        let mut m = transfer::Machine::new();
-        m.offered(&mut out, 1, 300).unwrap();
-        m.header_ok(&mut out).unwrap();
-        m.written(&mut out, 77).unwrap();
-        m.aborted(&mut out, Cause::Store).unwrap();
-    }
+fn a_payload_replays_as_its_typed_event() {
     /// (progress, abort cause, replayed) per event.
     type Seen = RefCell<Vec<(Option<(u32, u32)>, Option<Cause>, bool)>>;
     let seen = Seen::default();
@@ -285,33 +275,28 @@ fn a_record_replays_as_its_typed_event() {
         }
     }
     let mut out = compose_unpublished(Layer::App, Nop, Typed(&seen));
-    let results: Vec<_> = first
-        .0
-        .iter()
-        .map(|(_, rec, _)| out.replay(&[decisions::REPLAY, transfer::REPLAY], rec))
-        .collect();
+    let offered = transfer::UpdateOffered {
+        slot: 1,
+        body_len: 300,
+    };
+    let progress = transfer::TransferProgress {
+        done: 77,
+        total: 300,
+        last: None,
+    };
+    let aborted = transfer::TransferAborted {
+        cause: Cause::Store,
+    };
     // Only `transfer_progress` is marked `replay` and not retired:
     // live/host-only kinds and the retired one are refused.
+    assert_eq!(out.replay(&offered), Err(NotReplayed));
     assert_eq!(
-        results,
-        [Err(Unreadable), Err(Unreadable), Ok(()), Err(Unreadable)]
+        out.replay(&transfer::HeaderVerified { slot: 1 }),
+        Err(NotReplayed)
     );
+    assert_eq!(out.replay(&progress), Ok(()));
+    assert_eq!(out.replay(&aborted), Err(NotReplayed));
     assert_eq!(seen.borrow().clone(), [(Some((77, 300)), None, true)]);
-
-    // Unknown kinds, other layers and values a newer writer added are
-    // refused, not guessed.
-    let progress = first.0[2].1;
-    let mut rec = progress;
-    rec.payload[8] = 9; // `last`'s presence byte
-    assert_eq!(out.replay(&[transfer::REPLAY], &rec), Err(Unreadable));
-    let mut rec = progress;
-    rec.kind = 0x7F;
-    assert_eq!(out.replay(&[transfer::REPLAY], &rec), Err(Unreadable));
-    let mut rec = progress;
-    rec.layer = Layer::Host.code();
-    assert_eq!(out.replay(&[transfer::REPLAY], &rec), Err(Unreadable));
-    assert_eq!(out.replay(&[], &progress), Err(Unreadable));
-    assert_eq!(seen.borrow().len(), 1);
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]

@@ -47,8 +47,15 @@ pub trait Payload: crate::sealed::SealedPayload + Any {
     fn compact(&self) -> [u8; PAYLOAD_BYTES];
 }
 
+/// What is known of a payload's kind where its type is: a constant, so
+/// asking costs a firmware image no table and no call.
+pub trait Kind: Payload + Sized {
+    /// Whether the catalog marks the kind `replay` and not `retired`.
+    const REPLAYS: bool;
+}
+
 /// An event as extensions observe it: a borrowed payload and whether it
-/// happened now or is replayed from the boot record or the state log.
+/// happened now or is replayed from the state log.
 /// Only the layer's composed chain makes one, from a delivered payload.
 #[derive(Clone, Copy)]
 pub struct Event<'a> {

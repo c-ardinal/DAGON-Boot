@@ -102,7 +102,13 @@ python samples/hardware-test/hwt.py selftest
 - `NNN-<scenario>-<step>-<kind>.log`: each CLI call's full output,
   including the harness's answer to the prompt;
 - `results.json`: port and hub identity, PASS / FAIL / SKIPPED per
-  scenario, the restore record and the final status.
+  scenario, the restore record and the final status; under `times`, per
+  node, the number of image writes the CLI timed and the longest erase,
+  data and verify among them in milliseconds, each with the log it is in.
+  The erase is the round trip of the request the node erases before
+  answering, so it is the slot's whole erase plus one exchange over the
+  links: an upper figure to hold against the erase times of the MCU
+  definition (`[execution] erase_regions`, `unit_max_ms`).
 
 Exit code: 0 all passed, 1 a scenario failed and the restore succeeded,
 2 the restore failed or could not be verified.

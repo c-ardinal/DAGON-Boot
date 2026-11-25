@@ -222,6 +222,10 @@ fn gen_keeps_the_developers_code_and_refreshes_only_generated_parts() {
     let act = |p: &str| r.written.iter().find(|x| x.path == p).unwrap().action;
     assert_eq!(act("nodes/watch/src/app.rs"), "kept");
     assert_eq!(act("nodes/watch/src/main.rs"), "kept");
+    // The app's template is beside the changed app.rs, and only there.
+    assert_eq!(act("nodes/watch/src/app.rs.new"), "created");
+    assert!(read(&base, "nodes/watch/src/app.rs.new").contains("lease.busy(node::now_ms()"));
+    assert!(!base.join("nodes/watch/src/main.rs.new").exists());
     assert_eq!(act("nodes/watch/src/wiring.rs"), "rewritten");
     assert_eq!(act("nodes/watch/Cargo.toml"), "rewritten");
     assert_eq!(read(&base, "nodes/watch/src/app.rs"), "// mine");
@@ -247,6 +251,58 @@ fn gen_keeps_the_developers_code_and_refreshes_only_generated_parts() {
         "// mine",
         "app.rs even with --force-main"
     );
+}
+
+#[test]
+fn the_template_of_app_rs_is_beside_it_only_while_the_two_differ() {
+    let d = tmp("appnew");
+    let src = clone(&d);
+    let base = project(&d);
+    let run = || {
+        gen(
+            dagon_topology::defs::Registry::builtin(),
+            &base,
+            &sample(),
+            &src,
+            &["watch".into()],
+            false,
+        )
+        .unwrap()
+    };
+    let new = "nodes/watch/src/app.rs.new";
+    let act = |r: &GenReport| r.written.iter().find(|x| x.path == new).map(|x| x.action);
+    // A fresh app.rs is its template: nothing beside it, nothing told.
+    let r = run();
+    assert_eq!(act(&r), None);
+    assert!(!base.join(new).exists());
+    let template = read(&base, "nodes/watch/src/app.rs");
+
+    // The developer's app.rs, with the line ends of a Windows checkout,
+    // is still its template.
+    let own = base.join("nodes/watch/src/app.rs");
+    std::fs::write(&own, template.replace('\n', "\r\n")).unwrap();
+    assert_eq!(act(&run()), None);
+
+    std::fs::write(&own, format!("{template}// mine\n")).unwrap();
+    let r = run();
+    assert_eq!(act(&r), Some("created"));
+    assert_eq!(read(&base, new), template);
+    let notes: Vec<String> = r.written.iter().filter_map(template_note).collect();
+    assert_eq!(notes.len(), 1, "{notes:?}");
+    assert!(notes[0].contains("nodes/watch/src/app.rs.new"), "{notes:?}");
+    // Told when the template is written, not on every run after it.
+    let r = run();
+    assert_eq!(act(&r), Some("unchanged"));
+    assert_eq!(r.written.iter().filter_map(template_note).count(), 0);
+    assert!(read(&base, "nodes/watch/src/app.rs").ends_with("// mine\n"));
+
+    // Taken over: gen removes its copy. One the developer changed stays.
+    std::fs::write(&own, &template).unwrap();
+    assert_eq!(act(&run()), Some("removed"));
+    assert!(!base.join(new).exists());
+    std::fs::write(base.join(new), "// notes").unwrap();
+    assert_eq!(act(&run()), None);
+    assert_eq!(read(&base, new), "// notes");
 }
 
 #[test]

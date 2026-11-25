@@ -26,6 +26,36 @@ $DAGON_SIGNING_KEY_SEED to the 64 hex digits. Set only one of the three.
 
 `dagon <command> --help` describes a command and each of its options.";
 
+/// The words the help uses with one meaning each, as `dagon --help` lists
+/// them under "Words". Each is a term of the documentation's "What the
+/// words mean", in fewer words.
+pub(crate) const WORDS: &[(&str, &str)] = &[
+    ("node", "One microcontroller of your setup"),
+    (
+        "hub",
+        "The node on the PC's USB; it relays writes to the other nodes",
+    ),
+    (
+        "topology",
+        "The nodes, their links and the write order (topology.yaml)",
+    ),
+    ("link", "A connection between two nodes"),
+    (
+        "image",
+        "A program written to a node: a signed header and a body",
+    ),
+    (
+        "package",
+        "A file (.dgb) holding the images signed for a topology",
+    ),
+    ("slot", "The flash area that holds one image"),
+    (
+        "trial",
+        "How a new version runs after its write, until it is confirmed",
+    ),
+    ("confirm", "The decision to keep a new version on trial"),
+];
+
 /// DAGON Boot command line tool
 #[derive(Debug, Parser)]
 #[command(
@@ -83,8 +113,14 @@ pub fn command() -> clap::Command {
         }
         list.push('\n');
     }
+    let width = WORDS.iter().map(|(w, _)| w.len()).max().unwrap_or(0);
+    let words: String = WORDS
+        .iter()
+        .map(|(word, meaning)| format!("  {word:<width$}  {meaning}\n"))
+        .collect();
     cmd.help_template(format!(
-        "{{about-with-newline}}\n{{usage-heading}} {{usage}}\n\n{list}Options:\n{{options}}{{after-help}}"
+        "{{about-with-newline}}\n{{usage-heading}} {{usage}}\n\n{list}Options:\n{{options}}\n\nWords:\n{}{{after-help}}",
+        words.trim_end()
     ))
 }
 
@@ -384,7 +420,7 @@ pub struct ApplyArgs {
     pub pubkey: Option<String>,
     #[arg(long, value_name = "FILE", help = KEY)]
     pub key: Option<String>,
-    /// Leave signature and digest checks to the nodes (for demonstration only)
+    /// Leave signature and digest checks to the nodes (to see a node refuse an image)
     #[arg(long)]
     pub no_host_verify: bool,
     #[arg(long, value_name = "FILE", help = CONFIG)]

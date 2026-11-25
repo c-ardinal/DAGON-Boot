@@ -1,15 +1,14 @@
 //! What an MCU definition says about protecting DAGON from extensions:
 //! `[isolation]` (the protection hardware kind, its capability record, the
 //! level DAGON enforces), every register block (`[[peripheral]]`), every
-//! core (`[[core]]`), the watchdog (`[watchdog]`), the boot record and
-//! lockup fuse placement (`[boot.record]`), and the checks a definition
+//! core (`[[core]]`), the watchdog (`[watchdog]`), and the checks a definition
 //! must pass for a level above `none`. The kinds and their rules are one
 //! table here ([`KIND_RULES`]); a new kind is one row and one generator
 //! module in `dagon-extension`.
 
 use serde::Deserialize;
 
-use super::{Fact, ImageKind, McuDef, PortKind, Region};
+use super::{Fact, McuDef, PortKind, Region};
 
 /// The level of protection DAGON enforces on an MCU.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
@@ -403,45 +402,6 @@ impl WatchdogFlag {
     }
 }
 
-/// How an MCU package draws the boot record's entropy word (a part the
-/// design no longer has; the limitations page lists it).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum EntropySource {
-    /// A hardware random number generator.
-    Rng,
-    /// A ring oscillator's random bit, sampled repeatedly.
-    RingOsc,
-    /// A low-speed oscillator's period captured against a high-speed one.
-    OscCapture,
-    /// The low bits of repeated ADC conversions of an internal sensor.
-    AdcNoise,
-}
-
-impl EntropySource {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Rng => "rng",
-            Self::RingOsc => "ring-osc",
-            Self::OscCapture => "osc-capture",
-            Self::AdcNoise => "adc-noise",
-        }
-    }
-}
-
-/// `[boot.record] entropy`: the source of the start-up word a new record
-/// sequence mixes in, and its min-entropy per word in bits (a fact).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct Entropy {
-    pub source: EntropySource,
-    pub min_bits: Fact,
-}
-
-/// Least min-entropy a new boot record sequence needs (a part the design
-/// no longer has).
-pub const ENTROPY_MIN_BITS: u32 = 16;
-
 impl Watchdog {
     /// The longest an app may delay a requested reboot: half the shorter
     /// period.
@@ -450,108 +410,12 @@ impl Watchdog {
     }
 }
 
-/// Where the boot record lives.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum RecordKind {
-    /// RAM no image initialises.
-    NoinitRam,
-    /// Registers that keep their value over a reset.
-    RetainedRegisters,
-}
-
-impl RecordKind {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::NoinitRam => "noinit-ram",
-            Self::RetainedRegisters => "retained-registers",
-        }
-    }
-}
-
-/// What the record's bytes are after a power loss.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum Survives {
-    /// Random (SRAM).
-    ResetRandom,
-    /// Zero (registers cleared at power-on).
-    ResetCleared,
-    /// Kept (battery-backed).
-    Power,
-}
-
-impl Survives {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::ResetRandom => "reset-random",
-            Self::ResetCleared => "reset-cleared",
-            Self::Power => "power",
-        }
-    }
-}
-
-/// One writer's ring of the boot record, in boot order.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct Ring {
-    pub writer: ImageKind,
-    pub at: u32,
-    pub size: u32,
-}
-
-/// One lockup fuse cell: the image kind whose sandboxed calls it guards.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct FuseCell {
-    pub image: ImageKind,
-    pub at: u32,
-    pub size: u32,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct Fuse {
-    pub cells: Vec<FuseCell>,
-}
-
-/// `[boot.record]`: the boot record region, its rings and the fuse cells.
-/// Their byte layout is the `boot-record` contract's.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct RecordPlacement {
-    pub kind: RecordKind,
-    pub at: u32,
-    pub size: u32,
-    pub survives: Survives,
-    /// Required: an MCU without an entropy source has no boot record.
-    pub entropy: Entropy,
-    pub rings: Vec<Ring>,
-    pub fuse: Fuse,
-    /// Addresses inside the region the record never stores to (registers
-    /// another part of the MCU uses).
-    #[serde(default)]
-    pub reserved: Vec<u32>,
-}
-
-/// `[boot]` of an MCU definition.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct McuBoot {
-    pub record: Option<RecordPlacement>,
-}
-
 /// What a boot action program may use on this MCU besides pins.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum BootCapability {
     I2c,
 }
-
-/// Largest boot record region (VERSION pages address it with a u16).
-pub const RECORD_MAX: u32 = 4096;
-/// Most writers a boot record holds.
-pub const RECORD_WRITERS_MAX: usize = 16;
 
 /// Fields of the capability record, by name, for the kind table.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -865,28 +729,6 @@ impl McuDef {
     pub fn peripheral(&self, id: &str) -> Option<&Peripheral> {
         self.peripherals.iter().find(|p| p.id == id)
     }
-
-    /// The boot record placement, when the MCU has one.
-    pub fn record(&self) -> Option<&RecordPlacement> {
-        self.boot.record.as_ref()
-    }
-
-    /// Why this MCU has no lockup fuse, or `None` when it has one: fuse
-    /// cells and a watchdog-reset flag with a source (an unverified source
-    /// counts; tools report it as not established).
-    pub fn fuse_unavailable(&self) -> Option<&'static str> {
-        if self.record().is_none_or(|r| r.fuse.cells.is_empty()) {
-            return Some("no [boot.record] fuse cells");
-        }
-        match self.watchdog.map(|w| w.flag) {
-            None => Some("no [watchdog]"),
-            Some(Fact::Unmeasured(_)) => Some("watchdog.flag is unmeasured"),
-            Some(f) if f.value() == Some(WatchdogFlag::None) => {
-                Some("watchdog.flag is none: the MCU has no watchdog-reset flag")
-            }
-            Some(_) => None,
-        }
-    }
 }
 
 fn fail(cond: bool, msg: impl FnOnce() -> String) -> Result<(), String> {
@@ -900,11 +742,6 @@ fn fail(cond: bool, msg: impl FnOnce() -> String) -> Result<(), String> {
 fn overlaps(a: (u32, u32), b: (u32, u32)) -> bool {
     let end = |(at, size): (u32, u32)| u64::from(at) + u64::from(size);
     u64::from(a.0) < end(b) && u64::from(b.0) < end(a)
-}
-
-fn inside(inner: (u32, u32), outer: (u32, u32)) -> bool {
-    inner.0 >= outer.0
-        && u64::from(inner.0) + u64::from(inner.1) <= u64::from(outer.0) + u64::from(outer.1)
 }
 
 /// The capability record against its kind's row.
@@ -1170,102 +1007,12 @@ pub(super) fn watchdog(m: &McuDef) -> Result<(), String> {
     })
 }
 
-/// `ram` and `[boot.record]`: the record and its fuse cells inside RAM
-/// (noinit-ram) or a declared block (retained-registers), rings and cells
-/// inside their region and apart, within [`RECORD_MAX`].
-pub(super) fn record(m: &McuDef) -> Result<(), String> {
+/// `ram`: not empty, inside the address space.
+pub(super) fn ram(m: &McuDef) -> Result<(), String> {
     if let Some(r) = m.ram {
         fail(
             r.size == 0 || r.at.checked_add(r.size - 1).is_none(),
             || format!("ram {:#x}+{:#x} is empty or past 2^32", r.at, r.size),
-        )?;
-    }
-    let Some(rec) = m.record() else { return Ok(()) };
-    fail(m.port != PortKind::SelfBoot, || {
-        "boot.record needs a DAGON boot stage (port self-boot)".into()
-    })?;
-    fail(rec.size == 0 || rec.size > RECORD_MAX, || {
-        format!(
-            "boot.record.size {:#x} must be 1..={RECORD_MAX:#x}",
-            rec.size
-        )
-    })?;
-    let region = (rec.at, rec.size);
-    let host = match rec.kind {
-        RecordKind::NoinitRam => {
-            let ram = m
-                .ram
-                .ok_or("boot.record kind noinit-ram needs the MCU's ram")?;
-            (ram.at, ram.size)
-        }
-        RecordKind::RetainedRegisters => m
-            .peripherals
-            .iter()
-            .find(|p| inside(region, (p.base, p.size)))
-            .map(|p| (p.base, p.size))
-            .ok_or(
-                "boot.record kind retained-registers must lie inside a declared [[peripheral]]",
-            )?,
-    };
-    fail(!inside(region, host), || {
-        format!(
-            "boot.record {:#x}+{:#x} is outside its memory",
-            rec.at, rec.size
-        )
-    })?;
-    fail(
-        rec.entropy
-            .min_bits
-            .value()
-            .is_some_and(|b| b < ENTROPY_MIN_BITS),
-        || format!("boot.record.entropy.min_bits must be at least {ENTROPY_MIN_BITS}"),
-    )?;
-    fail(
-        rec.rings.is_empty() || rec.rings.len() > RECORD_WRITERS_MAX,
-        || format!("boot.record needs 1..={RECORD_WRITERS_MAX} rings"),
-    )?;
-    for (n, ring) in rec.rings.iter().enumerate() {
-        let what = format!("boot.record ring {n} ({:?})", ring.writer);
-        fail(
-            ring.size == 0 || !inside((ring.at, ring.size), region),
-            || format!("{what} is empty or outside the record"),
-        )?;
-        fail(
-            rec.rings[..n]
-                .iter()
-                .any(|o| o.writer == ring.writer || overlaps((o.at, o.size), (ring.at, ring.size))),
-            || format!("{what} repeats a writer or overlaps another ring"),
-        )?;
-        fail(
-            rec.reserved
-                .iter()
-                .any(|&a| inside((a, 1), (ring.at, ring.size))),
-            || format!("{what} holds a reserved address"),
-        )?;
-        let stage = match ring.writer {
-            ImageKind::Stage0 => m.layout.stage0.is_some(),
-            ImageKind::Bootcore => m.slots.iter().any(|s| s.image == ImageKind::Bootcore),
-            _ => false,
-        };
-        fail(!stage, || format!("{what}: the MCU has no such boot stage"))?;
-    }
-    for (n, c) in rec.fuse.cells.iter().enumerate() {
-        let what = format!("boot.record fuse cell {:?}", c.image);
-        fail(c.size == 0 || !inside((c.at, c.size), host), || {
-            format!("{what} is empty or outside the record's memory")
-        })?;
-        fail(overlaps((c.at, c.size), region), || {
-            format!("{what} overlaps the record")
-        })?;
-        fail(
-            rec.fuse.cells[..n]
-                .iter()
-                .any(|o| o.image == c.image || overlaps((o.at, o.size), (c.at, c.size))),
-            || format!("{what} repeats an image or overlaps another cell"),
-        )?;
-        fail(
-            !matches!(c.image, ImageKind::Bootcore | ImageKind::App),
-            || format!("{what}: cells guard the boot core or the app"),
         )?;
     }
     Ok(())

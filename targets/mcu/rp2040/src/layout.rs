@@ -41,9 +41,9 @@ pub const fn watchdog_ms(on_trial: bool) -> u32 {
     }
 }
 
-/// RAM every image links against: up to the boot record.
+/// RAM every image links against.
 pub const RAM: u32 = crate::RAM_REGION.0;
-pub const RAM_LEN: u32 = crate::BOOT_RECORD_REGION.0 - RAM;
+pub const RAM_LEN: u32 = crate::RAM_REGION.1;
 
 /// The boot core log for dagon-core (boot core records only).
 pub const BL_LOG_LAYOUT: LogLayout = LogLayout {

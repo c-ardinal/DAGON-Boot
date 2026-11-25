@@ -2,9 +2,7 @@
 //! test`, the full profile as `--ignored` (run it with `--release`).
 
 use dagon_retained_model::harness::{run_many, run_params, World};
-use dagon_retained_model::world_fuse::FuseWorld;
 use dagon_retained_model::world_hand_off::HandOffWorld;
-use dagon_retained_model::world_record::RecordWorld;
 use dagon_retained_model::world_trial::TrialWorld;
 
 const DEFAULT: u64 = 10_000;
@@ -17,28 +15,6 @@ fn go<W: World>(name: &str, default_count: u64) {
         Ok(n) => println!("{name}: {n} scenarios from base seed {base:#x}, no violation"),
         Err(f) => panic!("{name}: {f:#?}"),
     }
-}
-
-#[test]
-fn record_default() {
-    go::<RecordWorld>("record", DEFAULT);
-}
-
-#[test]
-#[ignore = "full profile: cargo test --release -- --ignored"]
-fn record_full() {
-    go::<RecordWorld>("record", FULL);
-}
-
-#[test]
-fn fuse_default() {
-    go::<FuseWorld>("fuse", DEFAULT);
-}
-
-#[test]
-#[ignore = "full profile: cargo test --release -- --ignored"]
-fn fuse_full() {
-    go::<FuseWorld>("fuse", FULL);
 }
 
 #[test]

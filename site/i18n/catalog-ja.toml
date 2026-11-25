@@ -134,7 +134,7 @@
 "receives the signing key from where the user chose to keep it (an environment variable, the OS key store, 1Password and so on)" = "利用者が選択した格納先（環境変数、OSのキーストア、1Passwordなど）から署名のキーを受信"
 "where the state log lives" = "状態ログの格納先"
 "There is no sandbox at run time (Service ABI, Entry Gate, Operation Cancellation, Fault Unwind, Lockup Fuse, Reset Cleanup, SandboxArch). Definitions are checked and protection maps are generated." = "実行時のサンドボックスは存在しません（Service ABI、Entry Gate、Operation Cancellation、Fault Unwind、Lockup Fuse、Reset Cleanup、SandboxArch）。定義の検査と保護マップの生成は実装済みです。"
-"The firmware writes no boot record: its format exists only in the executable model (`dagon-retained-model`)." = "ファームウェアはブート記録を保存しません。その形式の存在箇所は実行可能モデル（`dagon-retained-model`）のみです。"
+"The firmware writes no boot record." = "ファームウェアはブート記録を保存しません。"
 "A RELAY request was admitted and goes to the node at `addr` over the link `link` (its id); `cmd`: the inner frame's command." = "RELAYのリクエストを受理し、リンク`link`（そのid）経由でアドレス`addr`のノードへ転送します。`cmd`: 内側のフレームのコマンド。"
 "A relay's own work (a node whose MCU package runs `dagon-relay`): its PC link, the requests it relays and the child lines and raw bus it drives for a ROM recovery. Its own agent's `app.*` events are emitted as on any node." = "リレー（マイコン定義のコードが`dagon-relay`を実行するノード）自身の処理です。対象は、PCとのリンク、中継するリクエスト、ROMでの復旧で操作する子ノードの制御線と直接のバスアクセスです。リレー自身のエージェントの`app.*`イベントは、他のノードと同様に発行します。"
 "A reply to the PC could not be sent: the PC is gone." = "PCへの返答の送信に失敗しました。PCは切断済です。"

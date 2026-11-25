@@ -403,7 +403,6 @@ fn the_schema_walk_finds_arrays_and_variants_through_failures() {
         ("slot", Kind::Tables),
         ("peripheral.dma_requests", Kind::Tables),
         ("execution.erase_regions", Kind::Tables),
-        ("boot.record.rings", Kind::Tables),
         ("writer", Kind::Variant),
         ("execution.masked_max_us", Kind::Variant),
         ("connection", Kind::Field),

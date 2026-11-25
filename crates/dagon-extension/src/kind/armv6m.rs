@@ -1,7 +1,6 @@
 //! `armv6m-mpu`: the ARMv6-M MPU (PMSAv6). Every fault is a HardFault with
 //! no status or address register: a fault is attributed by the open call
-//! and the stacked PC; a fault while stacking locks the core up, which the
-//! lockup fuse covers.
+//! and the stacked PC; a fault while stacking locks the core up.
 
 use dagon_topology::defs::isolation::{Kind, Level, Unwind};
 use dagon_topology::defs::McuDef;

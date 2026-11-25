@@ -36,13 +36,7 @@ fn main() {
     if env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("none") {
         return;
     }
-    // Every image's RAM ends at the boot record (`[boot.record]`), which
-    // survives the resets between them.
-    let (ram, _) = def.ram().expect("the RP2040 definition gives its RAM");
-    let (record, _) = def
-        .boot_record()
-        .expect("the RP2040 definition gives its boot record");
-    let ram_len = record - ram;
+    let (ram, ram_len) = def.ram().expect("the RP2040 definition gives its RAM");
     if feature("IMAGE_STAGE0") {
         dagon_mcu_build::stage0_memory_x(BOOT2_SECTION, ram, ram_len);
         return;

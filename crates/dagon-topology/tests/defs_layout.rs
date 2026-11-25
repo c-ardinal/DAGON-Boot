@@ -66,11 +66,6 @@ fn the_generated_layout_is_the_loaders() {
             "{id}"
         );
         assert_eq!(def.ram(), m.ram.map(|r| (r.at, r.size)), "{id}");
-        assert_eq!(
-            def.boot_record(),
-            m.record().map(|r| (r.at, r.size)),
-            "{id}"
-        );
         let rs = def.rs();
         assert!(
             rs.contains(&format!(

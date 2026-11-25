@@ -24,36 +24,6 @@ usb_postdiv1 = 6
 usb_postdiv2 = 5
 usb_refdiv = 1
 
-[boot.record]
-at = 537133056
-kind = "noinit-ram"
-size = 2048
-survives = "reset-random"
-
-[boot.record.entropy]
-min_bits = "unmeasured"
-source = "ring-osc"
-
-[[boot.record.fuse.cells]]
-at = 537135104
-image = "bootcore"
-size = 256
-
-[[boot.record.fuse.cells]]
-at = 537135360
-image = "app"
-size = 256
-
-[[boot.record.rings]]
-at = 537133056
-size = 512
-writer = "stage0"
-
-[[boot.record.rings]]
-at = 537133568
-size = 1536
-writer = "bootcore"
-
 [boot_receive]
 listen_window_ms = 50
 
@@ -454,7 +424,7 @@ size = 1048576
 
 [ram]
 at = 536870912
-size = 270336
+size = 262144
 
 [relay]
 ram_bytes = 19456

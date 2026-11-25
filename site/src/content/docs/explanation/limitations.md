@@ -48,8 +48,7 @@ description: "DAGONの設計上の範囲外、利用者の責任範囲、設計�
 - `dagon_events::PORTS`のbootのレイヤー、信頼の方針（`trusted only`など）とサービスの列、`Action`のポート、`Display`の注記（ブート時はサンドボックス内で動作）、`BootRecord`と`Sandbox`の記録。[ライフサイクルイベントと拡張](/explanation/lifecycle-events/)の2.1節の表は、この宣言から生成します。
 - VERSIONの0x07、0x08、0x09、0x11、0x12の定義（`version_id::TABLE`）。5.4節の表はこの定義と同一です。
 - ブート段階の拡張: 状態機械`boot_extensions`（`boot.extension_overran`）、`targets/boot-extension-template`、マニフェストの`trusted`、`stack_bytes`、`ram_bytes`、`dagon-extension`の保護マップの生成と信頼された拡張の検査。
-- マイコン定義の`[isolation]`、`[[peripheral]]`、`[boot.record]`。設計の`root_protection`は独立したテーブルです。コードでは`[isolation]`の欄で、コードの変更時に独立したテーブルに移動します。
-- `dagon-retained-model`のブート記録、ロックアップヒューズ、状態ログのキー付記録、リンク診断（DTC）のモデル。
+- マイコン定義の`[isolation]`と`[[peripheral]]`。設計の`root_protection`は独立したテーブルです。コードでは`[isolation]`の欄で、コードの変更時に独立したテーブルに移動します。
 - `state_machine!`が生成する、ブート記録のリプレイ用の解読`REPLAY`。
 
 リンク:
@@ -74,7 +73,7 @@ description: "DAGONの設計上の範囲外、利用者の責任範囲、設計�
 
 <!-- generated from dagon_events::PORTS: DAGON_BLESS=1 cargo test -p dagon-catalog --test docs -->
 - 置換用のトレイトがコードに存在しないポート（括弧内は予定の配置）: `UpdateProtocol`（`dagon_agent::UpdateProtocol`）、`LogStorage`（`dagon_core::LogStorage`）、`Recovery`（`dagon_port::Recovery`）、`Diagnostics`（`dagon_agent::Diagnostics`）、`Display`（`dagon_events::Display`）、`LogSink`（`dagon_events::LogSink`）、`Action`（`dagon_host::Action`）
-- `BootRecord`: ファームウェアはブート記録を保存しません。その形式の存在箇所は実行可能モデル（`dagon-retained-model`）のみです。
+- `BootRecord`: ファームウェアはブート記録を保存しません。
 - `Sandbox`: 実行時のサンドボックスは存在しません（Service ABI、Entry Gate、Operation Cancellation、Fault Unwind、Lockup Fuse、Reset Cleanup、SandboxArch）。定義の検査と保護マップの生成は実装済みです。
 <!-- end of generated list -->
 <!-- generated from site/scripts/architecture.py: python site/scripts/gen.py -->

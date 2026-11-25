@@ -638,13 +638,15 @@ pub(crate) fn build_core_slots(
         return Ok(Vec::new());
     }
     let dir = boot_crate(cfg, n)?;
+    // One target folder for the node's slots: cargo keeps the builds apart
+    // by their features, so the second slot compiles only what differs.
+    let target = cfg
+        .base
+        .join("out/deploy/target")
+        .join(format!("{}-boot", n.id));
     let mut out = Vec::new();
     for (slot, features) in slots {
         log(&format!("{}: building the boot core for slot {slot}", n.id));
-        let target = cfg
-            .base
-            .join("out/deploy/target")
-            .join(format!("{}-boot-{slot}", n.id));
         let exe = nodebuild::cargo_build(
             &dir,
             BOOT_BIN,

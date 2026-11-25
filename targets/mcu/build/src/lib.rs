@@ -132,8 +132,23 @@ pub const RECOVERY_DEFINITION: &str = "recovery-mcu.toml";
 /// ([`definition`] has checked the folder's hashes first).
 fn recovery_text(folder: &Path) -> Option<String> {
     let path = folder.join(RECOVERY_DEFINITION);
-    println!("cargo:rerun-if-changed={}", path.display());
+    println!("cargo:rerun-if-changed={}", recovery_watch(folder).display());
     path.is_file().then(|| read(&path))
+}
+
+/// The file whose change tells a build that the folder's
+/// [`RECOVERY_DEFINITION`] came, went or changed. cargo runs a build script
+/// again at every build while a file it watches is missing, so a folder
+/// with no recovery definition is watched through [`DEFS_FILE`]: `dagon
+/// gen` writes the recovery definition's line there with the file.
+fn recovery_watch(folder: &Path) -> PathBuf {
+    let path = folder.join(RECOVERY_DEFINITION);
+    let defs = folder.join(DEFS_FILE);
+    if path.is_file() || !defs.is_file() {
+        path
+    } else {
+        defs
+    }
 }
 
 /// `RECOVERY_ROM_ADDR` of the node whose boot folder is `folder`, as
@@ -1376,7 +1391,13 @@ mod tests {
         let _ = fs::remove_dir_all(&d);
         fs::create_dir_all(&d).unwrap();
         assert_eq!(recovery_text(&d), None);
+        // Nothing to watch but the missing file itself.
+        assert_eq!(recovery_watch(&d), d.join(RECOVERY_DEFINITION));
         let mcu = "id = \"n\"\n";
+        fs::write(d.join(DEFS_FILE), defs_text(&[(NODE_DEFINITION, mcu)])).unwrap();
+        // No recovery definition: the hash list is watched, a file that
+        // is there, so the build script does not run at every build.
+        assert_eq!(recovery_watch(&d), d.join(DEFS_FILE));
         fs::write(d.join(NODE_DEFINITION), mcu).unwrap();
         fs::write(d.join(RECOVERY_DEFINITION), linked).unwrap();
         fs::write(d.join(DEFS_FILE), defs_text(&[(NODE_DEFINITION, mcu)])).unwrap();
@@ -1389,6 +1410,7 @@ mod tests {
         fs::write(d.join(DEFS_FILE), listed).unwrap();
         check_defs(&d, &mut |_| {}).unwrap();
         assert_eq!(recovery_text(&d).as_deref(), Some(linked));
+        assert_eq!(recovery_watch(&d), d.join(RECOVERY_DEFINITION));
         fs::remove_dir_all(&d).unwrap();
     }
 

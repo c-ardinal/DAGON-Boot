@@ -182,10 +182,13 @@ fn build_node(
         Some(n) => n.clone(),
         None => package_name(&dir)?,
     };
-    let mut slots = vec![('a', b.features.clone(), None)];
+    // Both slots build in the package's one target folder: cargo keeps a
+    // crate's builds apart by its features, so slot B compiles again only
+    // what its feature changes, not every dependency.
+    let mut slots = vec![('a', b.features.clone())];
     if let Some(f) = &b.slot_b_feature {
         let feats = b.features.iter().cloned().chain([f.clone()]).collect();
-        slots.push(('b', feats, Some(dir.join("target").join("slot-b"))));
+        slots.push(('b', feats));
     }
     let link_baud = link_baud(cfg, id)?;
     // The app builds from the node's MCU definition, as its boot stages do
@@ -198,7 +201,7 @@ fn build_node(
         version: Some(version.to_string()),
         slots: Vec::new(),
     };
-    for (slot, features, target_dir) in slots {
+    for (slot, features) in slots {
         log(&format!(
             "{id}: building slot {slot} in {}",
             b.package.display()
@@ -207,7 +210,7 @@ fn build_node(
             &dir,
             &bin,
             &features,
-            target_dir.as_deref(),
+            None,
             FirmwareEnv {
                 pubkey_hex,
                 target_tag: None,

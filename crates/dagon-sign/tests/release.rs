@@ -201,6 +201,46 @@ fn release_build_with_the_sample() {
 /// The built-in definitions with the facts of the sample's hub and segment
 /// stated: the hub's masking budget unmeasured and its erase time
 /// unverified, every fact of the segment checked.
+/// The manifest carries the constraints of the compiled topology, record
+/// for record; a topology without constraints gives a manifest without.
+#[test]
+fn release_build_writes_the_topology_constraints_into_the_manifest() {
+    let yaml = format!(
+        "{SAMPLE_YAML}\nconstraints:\n  - lockstep: [hub, seg]\n  - requires: {{node: seg, needs: hub, min: 1.0.0}}\n"
+    );
+    let t = dagon_topology::parse_str(&yaml).unwrap();
+    let bin = dagon_topology::compile(&t).unwrap();
+    let images = vec![hub_app(0), hub_app(1), f401_app(0), f401_app(1)];
+    let reg = dagon_topology::defs::Registry::builtin();
+    let r = release::build(reg, &t, &bin, &images, "release-1.1", &key()).unwrap();
+    let b = BundleView::parse(&r.bundle).unwrap();
+    b.verify(&dagon_ed25519::Ed25519Compact::new(TEST_PUBLIC_KEY))
+        .unwrap();
+    let m = b.manifest();
+    let topo = dagon_format::topology::TopologyView::parse(&bin).unwrap();
+    assert_eq!(m.constraint_count(), 2);
+    for i in 0..2 {
+        assert_eq!(m.constraint(i), topo.constraint(i), "constraint {i}");
+    }
+    assert_eq!(
+        m.constraint(0).kind,
+        dagon_format::manifest::constraint_kind::LOCKSTEP_PROTO
+    );
+    assert_eq!(m.constraint(0).node_mask, 0b011);
+
+    let plain = release::build(
+        reg,
+        &sample(),
+        &topology_bin(),
+        &images,
+        "release-1.1",
+        &key(),
+    );
+    let plain = plain.unwrap();
+    let b = BundleView::parse(&plain.bundle).unwrap();
+    assert_eq!(b.manifest().constraint_count(), 0);
+}
+
 fn registry_with_facts() -> dagon_topology::defs::Registry {
     let dir = std::env::temp_dir().join(format!("dagon-sign-facts-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();

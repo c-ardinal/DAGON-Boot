@@ -647,6 +647,14 @@ base = 0x1FFF_7800
 size = 0x210
 privileged_why = "flash"
 
+# The device electronic signature (RM0368, device electronic signature):
+# the unique device ID and the flash size, read-only factory words.
+[[peripheral]]
+id = "device-signature"
+base = 0x1FFF_7A10
+size = 0x14
+privileged_why = "rom"
+
 [[peripheral]]
 id = "option-bytes"
 base = 0x1FFF_C000

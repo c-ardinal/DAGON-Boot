@@ -56,6 +56,11 @@ ROM_ASK = re.compile(r"^No answer from (.+)\. Writing through the ROM loader rew
 ROM_DONE = "{}: rewritten through the ROM loader, {}"
 ROM_STATS = re.compile(r"^(?P<id>[\w-]+): ROM loader: attempts (?P<attempts>\d+), frames (?P<frames>\d+), "
                        r"max round trip (?P<max_rtt_ms>\d+) ms, elapsed (?P<elapsed_ms>\d+) ms")
+# How long a written image's erase, data and verify took, as the CLI prints
+# them after the image's verify line (the erase is the round trip of the
+# request the node erases before answering).
+TIMES = re.compile(r"^(?P<id>[\w-]+): erase (?P<erase_ms>\d+) ms, data (?P<data_ms>\d+) ms, "
+                   r"verify (?P<verify_ms>\d+) ms$")
 # dagon-romlink's limits the figures are checked against.
 ROMLINK = HERE.parent.parent / "crates" / "dagon-romlink" / "src" / "lib.rs"
 ROM_LIMITS = ("FRAME_TIMEOUT_MS", "FRAME_GAP_MS", "ATTEMPTS")
@@ -189,6 +194,26 @@ def rom_figures(lines, node, version, limits=None):
     return out
 
 
+def write_times(lines, log):
+    """Every image write the CLI timed in its lines [(ms, line)]:
+    [{log, node, erase_ms, data_ms, verify_ms}]."""
+    return [{"log": log, "node": m["id"], **{k: int(m[k]) for k in ("erase_ms", "data_ms", "verify_ms")}}
+            for m in (TIMES.match(l) for _, l in lines) if m]
+
+
+def times_summary(times):
+    """Per node, the number of image writes timed and the longest erase,
+    data and verify among them, with the log each longest is in."""
+    out = {}
+    for t in times:
+        n = out.setdefault(t["node"], {"writes": 0})
+        n["writes"] += 1
+        for k in ("erase_ms", "data_ms", "verify_ms"):
+            if k not in n or t[k] > n[k]["max"]:
+                n[k] = {"max": t[k], "log": t["log"]}
+    return out
+
+
 def rom_note(f):
     s = f["stats"]
     figures = (f"attempts {s['attempts']}, {s['frames']} frames, max round trip {s['max_rtt_ms']} ms"
@@ -302,6 +327,7 @@ class Run:
         self.erase_probe = getattr(a, "erase_probe", None)  # probe-rs selector; None: no erase
         self.erased = set()  # nodes this run erased (silent until written through their ROM)
         self.lines = []  # the last CLI call's output lines, (ms from its start, line)
+        self.times = []  # every image write the CLI timed (write_times)
 
     # -- running the CLI ----------------------------------------------------
 
@@ -363,6 +389,7 @@ class Run:
         rc = p.wait()
         log.write_text(f"$ {shown}\n# start {t0}\n{text}\n# rc={rc} end {now()}\n",
                        encoding="utf-8")
+        self.times += write_times(self.lines, log.name)
         if problem:
             raise Fail(f"refused the CLI's plan: {problem} (see {log.name})")
         if asked < len(checks):
@@ -770,10 +797,13 @@ class Run:
         final = restore["status"] if restore else self.status("final")
         (self.out / "results.json").write_text(json.dumps(
             {"port": self.port, "hub_identity": self.identity, "start_state": self.start_state,
-             "results": self.results,
+             "results": self.results, "times": times_summary(self.times),
              "restore": restore, "final_status": final}, indent=2, ensure_ascii=False),
             encoding="utf-8")
         print("\n".join(f"{r['id']:<16} {r['result']}" for r in self.results))
+        for node, t in times_summary(self.times).items():
+            print(f"{node}: {t['writes']} write(s) timed, longest erase {t['erase_ms']['max']} ms, "
+                  f"data {t['data_ms']['max']} ms, verify {t['verify_ms']['max']} ms")
         if restore:
             print(f"restore: {restore['result']}")
             if restore["result"] != "ok":  # failed or unverified: not known good
@@ -961,6 +991,7 @@ def selftest():
         raise AssertionError("change not seen")
     except Fail:
         pass
+    selftest_times()
     selftest_rom()
     selftest_rom_run()
     selftest_one_slot()
@@ -982,6 +1013,23 @@ def selftest():
         assert not d.exists()
     print("selftest ok")
     return 0
+
+
+def selftest_times():
+    """The CLI's times lines, and the longest of each per node."""
+    lines = [(10, "seg: erase 0% (2.0.6)"), (4000, "seg: verify ok"),
+             (4001, "seg: erase 3120 ms, data 880 ms, verify 41 ms"),
+             (4002, "seg: erase 3120 ms, data 880 ms"),  # not the CLI's line
+             (9000, "hub: erase 96 ms, data 1500 ms, verify 30 ms")]
+    a = write_times(lines, "003-apply.log")
+    assert a == [{"log": "003-apply.log", "node": "seg", "erase_ms": 3120, "data_ms": 880, "verify_ms": 41},
+                 {"log": "003-apply.log", "node": "hub", "erase_ms": 96, "data_ms": 1500, "verify_ms": 30}], a
+    b = write_times([(5, "seg: erase 2990 ms, data 910 ms, verify 40 ms")], "007-apply.log")
+    s = times_summary(a + b)
+    assert s["seg"] == {"writes": 2, "erase_ms": {"max": 3120, "log": "003-apply.log"},
+                        "data_ms": {"max": 910, "log": "007-apply.log"},
+                        "verify_ms": {"max": 41, "log": "003-apply.log"}}, s
+    assert s["hub"]["writes"] == 1 and times_summary([]) == {}
 
 
 def selftest_core():
@@ -1355,6 +1403,8 @@ def fake_dagon(argv):
             n["slots"]["AB"[n["active"]]][0] = "Written"
             n["slots"]["AB"[free]] = ["Confirmed", v]
             n["active"], n["version"] = free, v
+        for k in rel.get("nodes", nodes):
+            print(f"{k}: erase 120 ms, data 300 ms, verify 20 ms")
     path.write_text(json.dumps(st), encoding="utf-8")
     return 0
 
@@ -1432,6 +1482,10 @@ def selftest_restore():
         rec = r.restore()
         assert rec["result"] == "ok" and writes() == ["apply"], rec
         assert all(n["version"] == "6.6.6" for n in rec["status"].values())
+        assert times_summary(r.times) == {
+            k: {"writes": 1, **{f: {"max": ms, "log": r.times[0]["log"]} for f, ms in
+                                (("erase_ms", 120), ("data_ms", 300), ("verify_ms", 20))}}
+            for k in ("seg", "hub")}, r.times
 
         r = fresh()  # the start state was never acquired: unverified, exit 2
         r.start_state = None

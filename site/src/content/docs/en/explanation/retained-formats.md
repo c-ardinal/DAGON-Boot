@@ -26,6 +26,9 @@ cargo test -p dagon-retained-model --release -- --ignored # 10^6 scenarios per w
 DAGON_MODEL_SCENARIOS=<n> DAGON_MODEL_SEED=<seed>         # override count and base seed
 ```
 
+The pull request checks (`ci.yml`) run the first line; a workflow run once
+a day (`nightly.yml`) runs the second on `develop`.
+
 A failing scenario prints its seed, its configuration and its operation
 list shrunk to the smallest list that still fails the same property; the
 case is added to `tests/fixed.rs` as a regression.

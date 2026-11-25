@@ -15,6 +15,8 @@ cargo test -p dagon-retained-model --release -- --ignored # 10^6 scenarios per w
 DAGON_MODEL_SCENARIOS=<n> DAGON_MODEL_SEED=<seed>         # override count and base seed
 ```
 
+プルリクエストの検査（`ci.yml`）は1行目を実行し、1日1回のワークフロー（`nightly.yml`）は`develop`で2行目を実行します。
+
 失敗したシナリオは、そのシード、構成、そして同一の性質でなお失敗する最小の一覧まで縮小した操作の一覧を表示します。そのケースを回帰テストとして`tests/fixed.rs`に追加します。
 
 ## 1. 故障モデル

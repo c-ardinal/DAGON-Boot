@@ -1,0 +1,49 @@
+# The full profile of the retained-format model: 10^6 scenarios per world
+# (crates/dagon-retained-model, the tests marked `#[ignore]`), in a release
+# build. The pull request checks (ci.yml) run 10^4 per world. Runs once a
+# day on develop, by hand, and when the model, the codecs it runs or this
+# workflow change. A schedule starts only from the workflow file on the
+# default branch (main), and tests the branch named below. No secrets; the
+# token is read-only.
+name: nightly
+
+on:
+  schedule:
+    # 18:17 UTC, 03:17 in Japan.
+    - cron: "17 18 * * *"
+  workflow_dispatch:
+  push:
+    branches: ["**"]
+    paths:
+      - crates/dagon-retained-model/**
+      - crates/dagon-format/**
+      - crates/dagon-core/**
+      - Cargo.lock
+      - .github/workflows/nightly.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nightly-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  DAGON_ALLOW_TEST_KEY: "1"
+
+jobs:
+  retained-model:
+    name: retained-format model, 10^6 scenarios per world
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          # The schedule runs main's copy of this file; the work is on develop.
+          ref: ${{ github.event_name == 'schedule' && 'develop' || github.ref }}
+      - name: Rust from rust-toolchain.toml
+        run: rustup toolchain install
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+      - name: Full profile
+        run: cargo test -p dagon-retained-model --release --locked -- --ignored

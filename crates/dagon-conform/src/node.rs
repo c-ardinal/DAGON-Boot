@@ -1,8 +1,16 @@
-//! Node side: the CONF_RUN handler of a conformance build.
+//! Node side: the conformance session of a conformance build.
 //!
 //! Serve it in front of the agent: pass every request frame to
-//! [`handle_frame`] first and hand it to `dagon_agent::Agent::handle` when it
-//! returns `None`.
+//! [`Session::handle_frame`] first and hand it to
+//! `dagon_agent::Agent::handle` when it returns `None`. After the answer
+//! has left the node, call [`Session::run_pending`]: a test runs there, not
+//! while its request waits for an answer.
+//!
+//! | Command | Answer |
+//! |---|---|
+//! | CONF_LIST | forgets every result and names the tests below |
+//! | CONF_RUN | takes the test: verdict PENDING and the run's number. E_STATE while a test taken earlier has not run |
+//! | CONF_RESULT | the state of the test's last run and, once it is done, its verdict |
 //!
 //! | test_id | Test | Passes when |
 //! |---|---|---|
@@ -13,6 +21,9 @@
 //! | 8 | CT-08 sha-256 | FIPS 180-2 vectors (one-shot and incremental) match |
 //!
 //! `param` is unused (send 0). Other test ids answer E_UNSUPPORTED.
+//!
+//! The results are kept in RAM: they last until CONF_LIST or a reset, and
+//! none of these tests resets the node.
 //!
 //! `feed` is called before and after every erase, after every 256 bytes read
 //! back, every 4 KiB hashed and every signature check, so a watchdog that
@@ -25,20 +36,30 @@ use dagon_format::header::{self, HEADER_SIZE};
 use dagon_format::{sha256, verify_signed, CryptoProvider, Digest, Software};
 use dagon_port::{Flash, FlashRegion};
 use dagon_proto::handler::{self, Ceiling, Handler};
-use dagon_proto::payload::{verdict, CmdSet, ConfRunReq, ConfRunResp, CONF_DETAIL_MAX};
+use dagon_proto::payload::{
+    conf_state, verdict, CmdSet, ConfListResp, ConfResultResp, ConfRunReq, ConfRunResp, Req,
+};
 use dagon_proto::{flags, frame_len, Cmd, Frame, Status, HEADER_LEN};
 
-/// The command a conformance build answers in front of the agent. Its
-/// handler holds the board's flash and watchdog hook, so the row has no
-/// action: [`handle_frame`] takes its typed request and runs the test.
-const TABLE: [Handler<(), ()>; 1] = [Handler::deferred(Cmd::ConfRun)];
+/// The commands a conformance build answers in front of the agent. The
+/// session holds their state and the board's flash runs the tests, so the
+/// rows have no action: [`Session::handle_frame`] takes the typed request.
+const TABLE: [Handler<(), ()>; 3] = [
+    Handler::deferred(Cmd::ConfList),
+    Handler::deferred(Cmd::ConfRun),
+    Handler::deferred(Cmd::ConfResult),
+];
 
-/// What [`handle_frame`] answers: the node's HELLO names it with its
-/// agent's commands (`dagon_agent::Agent::also_serves`).
+/// What [`Session::handle_frame`] answers: the node's HELLO names it with
+/// its agent's commands (`dagon_agent::Agent::also_serves`).
 pub const CMDS: CmdSet = handler::cmds(&TABLE);
 
-/// Response frame size `handle_frame` may need.
-pub const RESPONSE_MAX: usize = frame_len(1 + 5 + CONF_DETAIL_MAX);
+/// Response frame size [`Session::handle_frame`] may need.
+pub const RESPONSE_MAX: usize = frame_len(1 + ConfResultResp::MAX_LEN);
+
+/// The `test_id` of every test that runs in the node, as CONF_LIST names
+/// them.
+pub const TESTS: [u8; 5] = [1, 2, 3, 7, 8];
 
 const CHUNK: usize = 256;
 
@@ -98,53 +119,157 @@ pub fn run<F: Flash>(
     Some(r.into())
 }
 
-/// Answers a CONF_RUN request frame; writes the response frame to `out`
-/// (at least [`RESPONSE_MAX`] bytes) and returns its length. `None` when the
-/// frame is not a CONF_RUN request: pass it on to the agent. `ceiling` is
-/// the most payload bytes the answer may have: the agent's
-/// (`dagon_agent::Agent::ceiling`), or a link's max payload for a
-/// requester that said nothing; a request whose answer would not fit it is
-/// refused with E_ARG and no test runs. `feed` feeds the watchdog during
-/// the test.
-pub fn handle_frame<F: Flash>(
-    request: &[u8],
-    ceiling: impl Into<Ceiling>,
-    flash: &mut F,
-    setup: &NodeSetup<'_>,
-    out: &mut [u8],
-    feed: &mut dyn FnMut(),
-) -> Option<usize> {
-    let ceiling = ceiling.into();
-    let (frame, _) = Frame::decode(request, usize::from(ceiling.link)).ok()?;
-    let row = handler::find(&TABLE, frame.cmd)?;
-    if frame.flags & (flags::RESP | flags::EVENT) != 0 {
-        return None;
+/// The last run of one test.
+#[derive(Clone, Copy, Debug)]
+struct Run {
+    id: u16,
+    /// `None` until the test has run.
+    outcome: Option<Outcome>,
+}
+
+/// A conformance session: the tests taken and their results.
+#[derive(Debug)]
+pub struct Session {
+    /// The number of the last run taken.
+    last: u16,
+    /// By position in [`TESTS`].
+    runs: [Option<Run>; TESTS.len()],
+    /// The test taken and not run.
+    pending: Option<ConfRunReq>,
+}
+
+impl Default for Session {
+    fn default() -> Self {
+        Session::new()
     }
-    let body = &mut out[HEADER_LEN + 1..];
-    let asked = row
-        .request(frame.payload, ceiling)
-        .and_then(|r| r.conf_run());
-    let (status, len) = match asked {
-        Err(s) => (s, 0),
-        Ok(req) => match run(flash, setup, req, feed) {
-            None => (Status::Unsupported, 0),
-            Some(o) => {
-                let resp = ConfRunResp {
-                    verdict: if o.pass { verdict::PASS } else { verdict::FAIL },
-                    measured: o.measured,
-                    detail: o.detail.as_bytes(),
-                };
-                (Status::Ok, resp.encode(body).ok()?)
+}
+
+impl Session {
+    pub const fn new() -> Self {
+        Session {
+            last: 0,
+            runs: [None; TESTS.len()],
+            pending: None,
+        }
+    }
+
+    /// A test is taken and waits for [`Session::run_pending`].
+    pub fn pending(&self) -> bool {
+        self.pending.is_some()
+    }
+
+    /// Runs the test CONF_RUN took, if any, and keeps its result. `feed`
+    /// feeds the watchdog during the test.
+    pub fn run_pending<F: Flash>(
+        &mut self,
+        flash: &mut F,
+        setup: &NodeSetup<'_>,
+        feed: &mut dyn FnMut(),
+    ) {
+        let Some(req) = self.pending.take() else {
+            return;
+        };
+        let outcome = run(flash, setup, req, feed);
+        if let Some(r) = slot(req.test_id).and_then(|i| self.runs[i].as_mut()) {
+            r.outcome = outcome;
+        }
+    }
+
+    /// Answers a CONF_LIST, CONF_RUN or CONF_RESULT request frame; writes
+    /// the response frame to `out` (at least [`RESPONSE_MAX`] bytes) and
+    /// returns its length. `None` when the frame is none of them: pass it
+    /// on to the agent. `ceiling` is the most payload bytes the answer may
+    /// have: the agent's (`dagon_agent::Agent::ceiling`), or a link's max
+    /// payload for a requester that said nothing; a request whose answer
+    /// would not fit it is refused with E_ARG and nothing is taken.
+    pub fn handle_frame(
+        &mut self,
+        request: &[u8],
+        ceiling: impl Into<Ceiling>,
+        out: &mut [u8],
+    ) -> Option<usize> {
+        let ceiling = ceiling.into();
+        let (frame, _) = Frame::decode(request, usize::from(ceiling.link)).ok()?;
+        let row = handler::find(&TABLE, frame.cmd)?;
+        if frame.flags & (flags::RESP | flags::EVENT) != 0 {
+            return None;
+        }
+        let body = &mut out[HEADER_LEN + 1..];
+        let answer = row
+            .request(frame.payload, ceiling)
+            .and_then(|r| self.answer(r, body));
+        let len = match answer {
+            Ok(len) => {
+                out[HEADER_LEN] = Status::Ok as u8;
+                1 + len
             }
-        },
-    };
-    let len = if status == Status::Ok {
-        out[HEADER_LEN] = status as u8;
-        1 + len
-    } else {
-        dagon_proto::payload::put_refusal(&mut out[HEADER_LEN..], status, frame.cmd, frame.payload)
-    };
-    dagon_proto::finish(out, flags::RESP, frame.seq, frame.cmd, len).ok()
+            Err(status) => dagon_proto::payload::put_refusal(
+                &mut out[HEADER_LEN..],
+                status,
+                frame.cmd,
+                frame.payload,
+            ),
+        };
+        dagon_proto::finish(out, flags::RESP, frame.seq, frame.cmd, len).ok()
+    }
+
+    /// The OK body of `req` in `body`; its length.
+    fn answer(&mut self, req: Req<'_>, body: &mut [u8]) -> Result<usize, Status> {
+        let encoded = match req {
+            Req::ConfList(()) => {
+                *self = Session::new();
+                ConfListResp { tests: &TESTS }.encode(body)
+            }
+            Req::ConfRun(run) => {
+                let i = slot(run.test_id).ok_or(Status::Unsupported)?;
+                if self.pending.is_some() {
+                    return Err(Status::State);
+                }
+                // 0 is never a run's number: a reader takes it as left out.
+                self.last = self.last.checked_add(1).unwrap_or(1);
+                self.runs[i] = Some(Run {
+                    id: self.last,
+                    outcome: None,
+                });
+                self.pending = Some(run);
+                ConfRunResp {
+                    verdict: verdict::PENDING,
+                    run_id: self.last,
+                    measured: 0,
+                    detail: &[],
+                }
+                .encode(body)
+            }
+            Req::ConfResult(test_id) => {
+                let i = slot(test_id).ok_or(Status::Unsupported)?;
+                let none = Detail::new();
+                let (state, run_id, outcome) = match &self.runs[i] {
+                    None => (conf_state::NONE, 0, None),
+                    Some(r) if r.outcome.is_none() => (conf_state::RUNNING, r.id, None),
+                    Some(r) => (conf_state::DONE, r.id, r.outcome.as_ref()),
+                };
+                ConfResultResp {
+                    state,
+                    run_id,
+                    verdict: match outcome {
+                        None => verdict::PENDING,
+                        Some(o) if o.pass => verdict::PASS,
+                        Some(_) => verdict::FAIL,
+                    },
+                    measured: outcome.map_or(0, |o| o.measured),
+                    detail: outcome.map_or(&none, |o| &o.detail).as_bytes(),
+                }
+                .encode(body)
+            }
+            _ => return Err(Status::Unsupported),
+        };
+        encoded.map_err(|_| Status::Arg)
+    }
+}
+
+/// The position of `test_id` in [`TESTS`].
+fn slot(test_id: u8) -> Option<usize> {
+    TESTS.iter().position(|t| *t == test_id)
 }
 
 fn ct01_geometry<F: Flash>(flash: &mut F, setup: &NodeSetup<'_>) -> TestResult {

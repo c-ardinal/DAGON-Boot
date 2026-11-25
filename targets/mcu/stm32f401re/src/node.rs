@@ -289,6 +289,7 @@ async fn serve(
         task,
         flash,
         started: Instant::now(),
+        session: conform::Session::new(),
         out: [0; conform::OUT_MAX],
     };
     loop {
@@ -304,6 +305,7 @@ struct Host {
     task: usize,
     flash: SharedFlash,
     started: Instant,
+    session: conform::Session,
     out: [u8; conform::OUT_MAX],
 }
 
@@ -325,6 +327,7 @@ impl ServeHost<Store, NodeChain, Ed25519Compact> for Host {
     }
     fn intercept(&mut self, agent: &mut AppAgent, request: &[u8]) -> Option<&[u8]> {
         let n = conform::serve(
+            &mut self.session,
             &mut self.flash,
             agent.ceiling(),
             request,
@@ -349,12 +352,14 @@ impl ServeHost<Store, NodeChain, Ed25519Compact> for Host {
     }
 }
 
-/// Conformance build (`conform`): CONF_RUN runs dagon-conform's node-side
-/// tests in front of the agent.
+/// Conformance build (`conform`): dagon-conform's session answers
+/// CONF_LIST, CONF_RUN and CONF_RESULT in front of the agent and runs the
+/// node-side tests.
 #[cfg(feature = "conform")]
 mod conform {
     use super::*;
-    use dagon_conform::node::{handle_frame, NodeSetup, RESPONSE_MAX};
+    pub use dagon_conform::node::Session;
+    use dagon_conform::node::{NodeSetup, RESPONSE_MAX};
 
     /// IWDG timeout for this build. The HAL assumes a 32 kHz LSI; the F401's
     /// LSI may run at up to 47 kHz, which shortens this to about 8.2 s, still
@@ -366,8 +371,13 @@ mod conform {
     );
     pub const OUT_MAX: usize = RESPONSE_MAX;
 
-    /// Answers a CONF_RUN request into `out`; `None` for any other frame.
+    /// Answers a conformance request into `out`; `None` for any other
+    /// frame. The test CONF_RUN took runs first, when the next request
+    /// arrives: an I2C answer waits in the mailbox until the hub reads it,
+    /// which the serving loop does between requests, so CONF_RUN's answer
+    /// has left by then.
     pub fn serve(
+        session: &mut Session,
         flash: &mut SharedFlash,
         ceiling: dagon_proto::handler::Ceiling,
         request: &[u8],
@@ -382,7 +392,8 @@ mod conform {
         let ceiling = ceiling.within(max_payload::I2C);
         // Long tests feed through this hook and count as progress.
         let mut feed = || watch.progress(task);
-        handle_frame(request, ceiling, flash, &setup, out, &mut feed)
+        session.run_pending(flash, &setup, &mut feed);
+        session.handle_frame(request, ceiling, out)
     }
 }
 
@@ -393,7 +404,16 @@ mod conform {
     pub const WDT_MS: u32 = 0;
     pub const OUT_MAX: usize = 0;
 
+    pub struct Session;
+
+    impl Session {
+        pub const fn new() -> Self {
+            Session
+        }
+    }
+
     pub fn serve(
+        _: &mut Session,
         _: &mut SharedFlash,
         _: dagon_proto::handler::Ceiling,
         _: &[u8],

@@ -96,8 +96,14 @@ commands! {
     SubCtl = 0x60, idempotent: false, req: msg(0, &subctl::REQ, false), resp: NONE;
     /// Not resent: a raw transaction acts on the ROM loader every time.
     I2cRaw = 0x61, idempotent: false, req: msg(0, &i2c_raw::REQ, true), resp: msg(0, &[], true);
+    /// Starts a conformance session: the node forgets the results it
+    /// holds and names the tests it runs (`payload::ConfListResp`).
+    ConfList = 0x70, idempotent: true, req: NONE, resp: msg(0, &conf_list::RESP, false);
     /// Not resent: a conformance step acts on the node every time it runs.
     ConfRun = 0x71, idempotent: false, req: msg(1, &conf_run::REQ, false), resp: msg(1, &conf_run::RESP, false);
+    /// The state and result of the node's last run of one test
+    /// (`payload::ConfResultResp`).
+    ConfResult = 0x72, idempotent: true, req: msg(1, &[], false), resp: msg(1, &conf_result::RESP, false);
 }
 
 /// HELLO. Core of both: `proto_ver u32`, `max_payload u16`.
@@ -300,7 +306,17 @@ pub mod i2c_raw {
     pub const REQ: [FieldSpec; 3] = [READ_LEN, LINK, ROM_ADDR];
 }
 
-/// CONF_RUN. Request core: `test_id u8`; response core: `verdict u8`.
+/// CONF_LIST. No core.
+pub mod conf_list {
+    use super::FieldSpec;
+    /// The `test_id` of every test the node runs, one byte each.
+    pub const TESTS: FieldSpec = FieldSpec::opt(1, 0, 32);
+    pub const RESP: [FieldSpec; 1] = [TESTS];
+}
+
+/// CONF_RUN. Request core: `test_id u8`; response core: `verdict u8`
+/// (`payload::verdict::PENDING` for a test the node took and runs after
+/// this answer).
 pub mod conf_run {
     use super::FieldSpec;
     /// Left out: 0.
@@ -308,7 +324,21 @@ pub mod conf_run {
     pub const REQ: [FieldSpec; 1] = [PARAM];
     pub const MEASURED: FieldSpec = FieldSpec::opt(1, 4, 4);
     pub const DETAIL: FieldSpec = FieldSpec::opt(2, 0, 64);
-    pub const RESP: [FieldSpec; 2] = [MEASURED, DETAIL];
+    /// The number of this run, which CONF_RESULT repeats.
+    pub const RUN_ID: FieldSpec = FieldSpec::opt(3, 2, 2);
+    pub const RESP: [FieldSpec; 3] = [MEASURED, DETAIL, RUN_ID];
+}
+
+/// CONF_RESULT. Request core: `test_id u8`; response core: `state u8`
+/// (`payload::conf_state`).
+pub mod conf_result {
+    use super::FieldSpec;
+    pub const RUN_ID: FieldSpec = FieldSpec::opt(1, 2, 2);
+    /// With state DONE.
+    pub const VERDICT: FieldSpec = FieldSpec::opt(2, 1, 1);
+    pub const MEASURED: FieldSpec = FieldSpec::opt(3, 4, 4);
+    pub const DETAIL: FieldSpec = FieldSpec::opt(4, 0, 64);
+    pub const RESP: [FieldSpec; 4] = [RUN_ID, VERDICT, MEASURED, DETAIL];
 }
 
 /// Fields of a non-OK response (`status || field*`).

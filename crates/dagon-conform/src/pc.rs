@@ -6,7 +6,7 @@
 //!
 //! | Test | Procedure | Passes when |
 //! |---|---|---|
-//! | CT-01..03, 07, 08 | CONF_RUN `test_id` (param 0) | verdict PASS |
+//! | CT-01..03, 07, 08 | CONF_LIST once, then CONF_RUN `test_id` (param 0) and CONF_RESULT every [`timeout::CONF_POLL_MS`] | the run is done with verdict PASS within [`NodeTimings::conf_deadline_s`] |
 //! | CT-04 | XFER_BEGIN to the running slot (and the confirmed slot if different) | each answers E_STATE |
 //! | CT-20 | header re-signed with another `mcu_id`, then another `target_tag`, sent as XFER_BEGIN + XFER_HDR to the idle slot | the last XFER_HDR answers E_COMPAT, each time |
 //! | CT-09 | 20 HELLO, then `good` to the idle slot with full-size XFER_DATA | all OK, XFER_END digest matches, within [`timeout::transfer_ms`] |
@@ -23,8 +23,8 @@ use dagon_format::{sha256, Version};
 use dagon_port::timeout::{self, EraseLayout, EraseRegion, NodeTimings, SlotLayout};
 use dagon_port::LinkKind;
 use dagon_proto::payload::{
-    self, reboot_mode, role, target, ConfRunReq, ConfRunResp, HelloReq, HelloResp, SetPending,
-    SlotState, StatusResp, XferBegin, XferChunk, IMAGE_HDR_LEN,
+    self, reboot_mode, role, target, ConfListResp, ConfResultResp, ConfRunReq, ConfRunResp,
+    HelloReq, HelloResp, SetPending, SlotState, StatusResp, XferBegin, XferChunk, IMAGE_HDR_LEN,
 };
 use dagon_proto::{split_status, Cmd, Status};
 
@@ -194,7 +194,12 @@ pub struct Runner<'a, 's, C: Channel> {
     hello: HelloResp,
     after_ct11: Option<Result<u32, Detail>>,
     after_ct12: Option<Expected>,
+    /// The tests the node named in this run's CONF_LIST, and how many.
+    listed: Option<([u8; LISTED_MAX], usize)>,
 }
+
+/// The most tests a CONF_LIST answer names.
+const LISTED_MAX: usize = dagon_proto::table::conf_list::TESTS.max as usize;
 
 type Step<T> = Result<T, Detail>;
 
@@ -250,6 +255,7 @@ impl<'a, 's, C: Channel> Runner<'a, 's, C> {
             hello,
             after_ct11: None,
             after_ct12: None,
+            listed: None,
         })
     }
 
@@ -345,7 +351,39 @@ impl<'a, 's, C: Channel> Runner<'a, 's, C> {
         StatusResp::parse(r.body()).map_err(|_| detail!("STATUS: bad body"))
     }
 
+    /// CONF_LIST, once a run: the node forgets its results and names the
+    /// tests it runs.
+    fn conf_list(&mut self) -> Step<()> {
+        if self.listed.is_none() {
+            let r = self.ok(Cmd::ConfList, &[], timeout::REQUEST_MS)?;
+            let l = ConfListResp::parse(r.body()).map_err(|_| detail!("CONF_LIST: bad body"))?;
+            let mut tests = [0u8; LISTED_MAX];
+            let n = l.tests.len().min(LISTED_MAX);
+            tests[..n].copy_from_slice(&l.tests[..n]);
+            self.listed = Some((tests, n));
+        }
+        Ok(())
+    }
+
+    /// One node-side test: CONF_RUN, which the node answers before it runs
+    /// the test, then CONF_RESULT every [`timeout::CONF_POLL_MS`] until the
+    /// run is done or its deadline ([`NodeTimings::conf_deadline_s`]) has
+    /// passed. A poll the node does not answer (it is running the test) is
+    /// not a failure before the deadline. The last poll that can pass the
+    /// test leaves at the deadline, not a poll interval past it: a run
+    /// done by the deadline passes, a later one does not. After a missed
+    /// deadline the node has the same time again to answer a poll, so the
+    /// next test starts on a node that listens.
     fn conf_run(&mut self, id: u8) -> Step<(u32, Detail)> {
+        self.conf_list()?;
+        let listed = self.listed.is_some_and(|(t, n)| t[..n].contains(&id));
+        if !listed {
+            return Err(detail!("the node does not list this test"));
+        }
+        let deadline_s = self
+            .timings
+            .conf_deadline_s(id, self.limits)
+            .ok_or_else(|| detail!("no deadline"))?;
         let mut p = [0u8; REQ_MAX];
         let n = ConfRunReq {
             test_id: id,
@@ -353,13 +391,60 @@ impl<'a, 's, C: Channel> Runner<'a, 's, C> {
         }
         .encode(&mut p)
         .map_err(|_| detail!("encode"))?;
-        let r = self.ok(Cmd::ConfRun, &p[..n], timeout::CONF_RUN_MS)?;
-        let c = ConfRunResp::parse(r.body()).map_err(|_| detail!("CONF_RUN: bad body"))?;
-        let d = Detail::from_bytes(c.detail);
-        match c.verdict {
-            payload::verdict::PASS => Ok((c.measured, d)),
-            payload::verdict::FAIL => Err(d),
-            v => Err(detail!("CONF_RUN: verdict {}", v)),
+        let t0 = self.ch.now_ms();
+        let r = self.ok(Cmd::ConfRun, &p[..n], timeout::REQUEST_MS)?;
+        let taken = ConfRunResp::parse(r.body()).map_err(|_| detail!("CONF_RUN: bad body"))?;
+        if taken.verdict != payload::verdict::PENDING || taken.run_id == 0 {
+            return Err(detail!("CONF_RUN: verdict {}, no run", taken.verdict));
+        }
+        let n = payload::encode_conf_result(id, &mut p).map_err(|_| detail!("encode"))?;
+        let span = u64::from(deadline_s) * 1000;
+        let end = t0 + span;
+        // Set once the poll at the deadline went unanswered: the run has
+        // failed, and the node is given the same time again to answer.
+        let mut late = false;
+        loop {
+            let asked = self.ch.now_ms();
+            let answer = self.call(Cmd::ConfResult, &p[..n], timeout::REQUEST_MS);
+            let miss = detail!("no result in {} s", deadline_s);
+            if late {
+                if answer.is_ok() || asked >= end + span {
+                    return Err(miss);
+                }
+            } else {
+                let answered = answer.is_ok();
+                if let Ok(r) = answer {
+                    match r.status {
+                        Status::Ok => {
+                            let c = ConfResultResp::parse(r.body())
+                                .map_err(|_| detail!("CONF_RESULT: bad body"))?;
+                            if c.run_id != taken.run_id {
+                                return Err(detail!("run {} lost (the node reset)", taken.run_id));
+                            }
+                            if c.state == payload::conf_state::DONE {
+                                let d = Detail::from_bytes(c.detail);
+                                return match c.verdict {
+                                    payload::verdict::PASS => Ok((c.measured, d)),
+                                    payload::verdict::FAIL => Err(d),
+                                    v => Err(detail!("CONF_RESULT: verdict {}", v)),
+                                };
+                            }
+                        }
+                        Status::Timeout => {}
+                        s => return Err(detail!("CONF_RESULT: {:?}", s)),
+                    }
+                }
+                if asked >= end {
+                    if answered {
+                        return Err(miss);
+                    }
+                    late = true;
+                }
+            }
+            let stop = if late { end + span } else { end };
+            let left = stop.saturating_sub(self.ch.now_ms());
+            self.ch
+                .sleep_ms(timeout::CONF_POLL_MS.min(left.try_into().unwrap_or(u32::MAX)));
         }
     }
 

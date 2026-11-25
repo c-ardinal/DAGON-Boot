@@ -25,7 +25,8 @@ hal = ["dep:embassy-stm32", "dep:embassy-time", "dep:cortex-m"]
 # Node start-up and the I2C target serving loop (logs through defmt: the
 # app links a defmt logger, e.g. defmt-rtt).
 node = ["hal", "embassy-stm32?/defmt", "dep:embassy-futures", "dep:embassy-executor", "dep:defmt", "dep:static_cell", "dep:dagon-ed25519", "dep:ed25519-compact"]
-# Conformance build: CONF_RUN runs dagon-conform's node-side tests.
+# Conformance build: dagon-conform's session answers CONF_LIST, CONF_RUN and
+# CONF_RESULT and runs the node-side tests.
 conform = ["node", "dep:dagon-conform"]
 # The final binary's memory.x comes from this package: an APP slot body
 # (slot A, or B with `slot-b`) unless it is a boot image; the boot core

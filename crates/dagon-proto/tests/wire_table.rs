@@ -513,6 +513,30 @@ fn typed(cmd: Cmd, resp: bool) -> Typed {
                 Box::new(|b| dbg(I2cRaw::parse(b))),
             )
         }
+        (Cmd::ConfList, true) => {
+            let m = ConfListResp { tests: &[1, 2, 7] };
+            (
+                enc(|b| m.encode(b).unwrap()),
+                Box::new(|b| dbg(ConfListResp::parse(b))),
+            )
+        }
+        (Cmd::ConfResult, false) => (
+            enc(|b| encode_conf_result(7, b).unwrap()),
+            Box::new(|b| dbg(parse_conf_result(b))),
+        ),
+        (Cmd::ConfResult, true) => {
+            let m = ConfResultResp {
+                state: conf_state::DONE,
+                run_id: 3,
+                verdict: verdict::PASS,
+                measured: 12,
+                detail: b"ok",
+            };
+            (
+                enc(|b| m.encode(b).unwrap()),
+                Box::new(|b| dbg(ConfResultResp::parse(b))),
+            )
+        }
         (Cmd::ConfRun, false) => {
             let m = ConfRunReq {
                 test_id: 4,
@@ -525,9 +549,10 @@ fn typed(cmd: Cmd, resp: bool) -> Typed {
         }
         (Cmd::ConfRun, true) => {
             let m = ConfRunResp {
-                verdict: verdict::PASS,
-                measured: 12,
-                detail: b"ok",
+                verdict: verdict::PENDING,
+                run_id: 3,
+                measured: 0,
+                detail: b"",
             };
             (
                 enc(|b| m.encode(b).unwrap()),
@@ -543,7 +568,8 @@ fn typed(cmd: Cmd, resp: bool) -> Typed {
             | Cmd::Confirm
             | Cmd::EnterRom
             | Cmd::Show
-            | Cmd::SubCtl,
+            | Cmd::SubCtl
+            | Cmd::ConfList,
             _,
         ) => empty(),
     }
@@ -641,8 +667,12 @@ fn golden_cores_and_samples() {
         (Cmd::SubCtl, true, 0, ""),
         (Cmd::I2cRaw, false, 0, "03020300 00 00FF"),
         (Cmd::I2cRaw, true, 0, "00 00DA6F"),
+        (Cmd::ConfList, false, 0, ""),
+        (Cmd::ConfList, true, 0, "0203010207"),
         (Cmd::ConfRun, false, 1, "04 03044D000000"),
-        (Cmd::ConfRun, true, 1, "01 02040C000000 04026F6B"),
+        (Cmd::ConfRun, true, 1, "00 06020300"),
+        (Cmd::ConfResult, false, 1, "07"),
+        (Cmd::ConfResult, true, 1, "02 02020300 040101 06040C000000 08026F6B"),
     ];
     let listed: Vec<(Cmd, bool)> = golden.iter().map(|g| (g.0, g.1)).collect();
     let all: Vec<(Cmd, bool)> = messages().iter().map(|m| (m.0, m.1)).collect();

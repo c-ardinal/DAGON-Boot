@@ -7,7 +7,7 @@
 //! | plain request (HELLO, STATUS, XFER_BEGIN, XFER_DATA, non-final XFER_HDR, REBOOT) | [`REQUEST_MS`] |
 //! | the request the node erases on (final XFER_HDR, or XFER_BEGIN without header) | [`NodeTimings::erase_limit_ms`]: the planned erase ([`plan_erase`]) + [`ERASE_MARGIN_MS`]; [`ERASE_FALLBACK_MS`] without an erase layout |
 //! | XFER_END, SET_PENDING, CONFIRM (verify or write state) | [`VERIFY_MS`] |
-//! | CONF_RUN (one node-side test) | [`CONF_RUN_MS`] |
+//! | a node-side conformance test, from CONF_RUN to its result | [`NodeTimings::conf_deadline_s`], asked for every [`CONF_POLL_MS`] |
 //! | whole image transfer | [`transfer_ms`]: size / link floor ([`link_limits`]) + [`TRANSFER_MARGIN_MS`] |
 //! | REBOOT until the expected HELLO (also covers a full rollback) | [`REBOOT_WAIT_MS`] |
 //!
@@ -23,7 +23,14 @@ pub const REQUEST_MS: u32 = 300;
 /// timeout: the plain-response wait.
 pub const RELAY_WAIT_MS: u16 = REQUEST_MS as u16;
 pub const VERIFY_MS: u32 = 5_000;
-pub const CONF_RUN_MS: u32 = 30_000;
+/// Pause between CONF_RESULT polls while a node-side test runs.
+pub const CONF_POLL_MS: u32 = 1_000;
+/// Added to every conformance deadline.
+pub const CONF_MARGIN_S: u32 = 10;
+/// One flash write of a node-side test (at most 256 bytes).
+pub const CONF_WRITE_MS: u32 = 500;
+/// The signature checks of CT-07 in software on the slowest MCU.
+pub const CONF_SIGN_MS: u32 = 20_000;
 pub const REBOOT_WAIT_MS: u32 = 30_000;
 pub const TRANSFER_MARGIN_MS: u32 = 30_000;
 /// Lowest accepted effective transfer speed on I2C, bytes per second.
@@ -400,6 +407,44 @@ impl<R: AsRef<[EraseRegion]>, S: AsRef<[SlotLayout]>> NodeTimings<EraseLayout<R,
             .map_or(ERASE_FALLBACK_MS, erase_limit_ms)
     }
 
+    /// The slowest single erase operation of the node, with
+    /// [`ERASE_MARGIN_MS`]; [`ERASE_FALLBACK_MS`] without a layout.
+    fn erase_unit_ms(&self) -> u32 {
+        self.erase
+            .as_ref()
+            .and_then(|l| l.regions.as_ref().iter().map(|r| r.unit_max_ms).max())
+            .map_or(ERASE_FALLBACK_MS, |ms| ms.saturating_add(ERASE_MARGIN_MS))
+    }
+
+    /// Seconds from CONF_RUN until node-side test `test_id` has its result,
+    /// asked for over a link with `limits`: the test's own work (the table
+    /// below), its last answer on the link (the longest frame at the
+    /// link's floor speed plus one plain round trip), rounded up to
+    /// seconds, plus [`CONF_MARGIN_S`]. Saturates at `u16::MAX`. `None`
+    /// for a test that does not run in the node.
+    ///
+    /// | Test | Work |
+    /// |---|---|
+    /// | CT-01, CT-08 | none that counts |
+    /// | CT-02 | two erases of one unit and one write |
+    /// | CT-03 | two erases of one unit and two writes |
+    /// | CT-07 | [`CONF_SIGN_MS`] |
+    pub fn conf_deadline_s(&self, test_id: u8, limits: LinkLimits) -> Option<u16> {
+        let erase = u64::from(self.erase_unit_ms());
+        let write = u64::from(CONF_WRITE_MS);
+        let work = match test_id {
+            1 | 8 => 0,
+            2 => 2 * erase + write,
+            3 => 2 * erase + 2 * write,
+            7 => u64::from(CONF_SIGN_MS),
+            _ => return None,
+        };
+        let frame = dagon_proto::frame_len(limits.max_payload) as u64;
+        let link = frame * 1000 / u64::from(limits.floor_bps.max(1)) + u64::from(REQUEST_MS);
+        let s = (work + link).div_ceil(1000) + u64::from(CONF_MARGIN_S);
+        Some(s.min(u64::from(u16::MAX)) as u16)
+    }
+
     /// The same timings, borrowed.
     pub fn borrowed(&self) -> NodeTimings<EraseLayout<&[EraseRegion], &[SlotLayout]>> {
         NodeTimings {
@@ -413,6 +458,56 @@ impl<R: AsRef<[EraseRegion]>, S: AsRef<[SlotLayout]>> NodeTimings<EraseLayout<R,
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn erasing(unit_max_ms: u32) -> NodeTimings<EraseLayout<[EraseRegion; 1], [SlotLayout; 0]>> {
+        NodeTimings {
+            erase: Some(EraseLayout {
+                regions: EraseRegion::table([(0, 1 << 20, 4096, unit_max_ms)]),
+                slots: [],
+            }),
+            trial_ms: 8_000,
+            trial_attempts: 3,
+        }
+    }
+
+    #[test]
+    fn a_conformance_deadline_is_the_tests_work_the_link_and_the_margin() {
+        let usb = link_limits(LinkKind::UsbCdc).unwrap();
+        let i2c = link_limits(LinkKind::I2c).unwrap();
+        let t = erasing(400);
+        // USB: a 1,100-byte frame at 5,000 B/s is 220 ms, plus 300 ms.
+        assert_eq!(t.conf_deadline_s(1, usb), Some(1 + 10));
+        assert_eq!(t.conf_deadline_s(8, usb), Some(1 + 10));
+        // Two erases of 400 + 1,000 ms and one write of 500 ms: 3,300 ms.
+        assert_eq!(t.conf_deadline_s(2, usb), Some(4 + 10));
+        assert_eq!(t.conf_deadline_s(3, usb), Some(5 + 10));
+        assert_eq!(t.conf_deadline_s(7, usb), Some(21 + 10));
+        // I2C: a 268-byte frame at 10,000 B/s is 26 ms.
+        assert_eq!(t.conf_deadline_s(2, i2c), Some(4 + 10));
+        assert_eq!(t.conf_deadline_s(4, usb), None, "CT-04 runs from the PC");
+        // Without a layout the erase is the fallback.
+        let none = NodeTimings::<EraseLayout<[EraseRegion; 0], [SlotLayout; 0]>>::FALLBACK;
+        assert_eq!(none.conf_deadline_s(2, usb), Some(62 + 10));
+    }
+
+    /// The largest declared times and the slowest link: every formula is
+    /// computed without overflow and saturates at `u16::MAX` seconds.
+    #[test]
+    fn conformance_deadlines_saturate() {
+        let slow = LinkLimits {
+            max_payload: usize::from(u16::MAX),
+            floor_bps: 1,
+        };
+        for id in [1, 2, 3, 7, 8] {
+            let s = erasing(u32::MAX).conf_deadline_s(id, slow).unwrap();
+            assert_eq!(s, u16::MAX, "CT-{id:02}");
+        }
+        let none = LinkLimits {
+            max_payload: 256,
+            floor_bps: 0,
+        };
+        assert!(erasing(0).conf_deadline_s(1, none).is_some());
+    }
 
     #[test]
     fn transfer_limit_follows_link_floor() {

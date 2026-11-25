@@ -1341,7 +1341,7 @@ definition's.
 
 | Work | Runs in | Priority |
 |---|---|---|
-| Serving the I2C target link (the agent, CONF_RUN), flash erase and program | DAGON's interrupt executor (the USART6 vector) | P6, above thread mode |
+| Serving the I2C target link (the agent, the conformance session), flash erase and program | DAGON's interrupt executor (the USART6 vector) | P6, above thread mode |
 | The link's I2C and DMA transfers | the I2C driver's interrupts | the HAL's default |
 | Timers (`embassy-time`) | its timer interrupt | the HAL's default |
 | Watchdog feeding | the app's feeder task, gated by the guard | thread mode |

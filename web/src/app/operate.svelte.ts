@@ -197,9 +197,11 @@ export class Operate extends OperateLink {
         this.progress[id] = { stage: 'silent', percent: 0 };
         this.live[id] = { ...(this.live[id] ?? UNKNOWN), responding: false };
       }
-      // A confirmed node runs the new version now, also when a later node stops the run.
+      // A confirmed node runs the new version now, also when a later node stops the run; one dagon-host took back
+      // for a compatibility constraint (realigned) runs the version it had, confirmed.
       const hello = id ? this.live[id]?.hello : null;
-      if (id && hello && r.outcome === 'done' && r.version !== null) {
+      const settled = r.outcome === 'done' || r.outcome === 'realigned' || r.outcome === 'incompatible';
+      if (id && hello && settled && r.version !== null) {
         this.live[id] = { ...this.live[id]!, hello: { ...hello, activeVersion: r.version, trial: false } };
       }
     }

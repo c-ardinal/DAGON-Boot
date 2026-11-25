@@ -154,6 +154,15 @@ struct Faults {
     drop_resp_every: Option<(u8, usize)>,
     /// The response to the next request with this command is lost.
     drop_resp_first: Option<u8>,
+    /// (command, n): the response to every such request after the first n
+    /// is lost.
+    drop_resp_after: Option<(u8, usize)>,
+    /// (command, n): every such request after the first n never reaches the
+    /// hub.
+    drop_req_after: Option<(u8, usize)>,
+    /// The response to every request with this command to the hub itself
+    /// (not relayed) is lost.
+    drop_local_resp: Option<u8>,
     /// The node holds NRST low during the next RELAY (it NACKs), then is
     /// released.
     nack_once: bool,
@@ -221,6 +230,10 @@ impl Transport for Sim {
             d.1 -= 1;
             return Ok(());
         }
+        let sent = f.seen.iter().filter(|s| s.0 == cmd).count();
+        if f.drop_req_after.is_some_and(|(c, k)| c == cmd && sent > k) {
+            return Ok(());
+        }
         let mut hub = self.relay.borrow_mut();
         if cmd == Cmd::XferEnd as u8 {
             let seg = hub
@@ -244,7 +257,9 @@ impl Transport for Sim {
         if first {
             f.drop_resp_first = None;
         }
-        if every || first {
+        let after = f.drop_resp_after.is_some_and(|(c, k)| c == cmd && n > k);
+        let local = bytes[5] != Cmd::Relay as u8 && f.drop_local_resp == Some(cmd);
+        if every || first || after || local {
             hub.usb_read();
         }
         Ok(())
@@ -2517,4 +2532,193 @@ fn wire(enc: impl FnOnce(&mut [u8]) -> Result<usize, dagon_proto::FrameError>) -
     let n = enc(&mut b).unwrap();
     b.truncate(n);
     b
+}
+
+// Compatibility constraints after a node stayed off the release's version.
+
+/// Applies release 1.1.0 built for the sim topology plus `constraints`,
+/// with the hub's images tampered (the hub refuses them), the host-side
+/// checks off. The seg is written first and confirms.
+fn apply_with_a_refused_hub(constraints: &str) -> (Host<Sim, Sim>, Vec<NodeOutcome<()>>) {
+    refused_hub(constraints, Faults::default())
+}
+
+/// [`apply_with_a_refused_hub`] over a link with `faults`.
+fn refused_hub(constraints: &str, faults: Faults) -> (Host<Sim, Sim>, Vec<NodeOutcome<()>>) {
+    use dagon_format::bundle::{dest, BundleView};
+    let yaml = format!("{}{constraints}", yaml());
+    let t = dagon_topology::parse_str(&yaml).unwrap();
+    let v = Version::new(1, 1, 0);
+    let images = [seg_img(0, v), seg_img(1, v), hub_img(0, v), hub_img(1, v)];
+    let reg = dagon_topology::defs::Registry::builtin();
+    let mut b = dagon_sign::release::build(reg, &t, &topology(&yaml), &images, "r1.1", &key())
+        .unwrap()
+        .bundle;
+    let hub_items: Vec<usize> = {
+        let view = BundleView::parse(&b).unwrap();
+        (0..view.item_count())
+            .map(|i| view.item(i))
+            .filter(|it| it.dest != dest::SUB_STORE)
+            .map(|it| it.offset as usize)
+            .collect()
+    };
+    for off in hub_items {
+        b[off + 0x18] ^= 1;
+    }
+    let s = sim();
+    *s.faults.borrow_mut() = faults;
+    let mut h = host(&s);
+    let out = block_on(h.apply_unverified(&b, &topology(&yaml), None, &mut |_| {})).unwrap();
+    *s.faults.borrow_mut() = Faults::default();
+    (h, out)
+}
+
+#[test]
+fn a_node_in_lockstep_with_one_that_stayed_goes_back_to_its_version() {
+    let (mut h, out) = apply_with_a_refused_hub("constraints:\n  - lockstep: [hub, seg]\n");
+    let old = Version::new(1, 0, 0);
+    assert!(
+        matches!(out[0].outcome, Outcome::Realigned(v) if v == old),
+        "{out:?}"
+    );
+    assert!(matches!(out[1].outcome, Outcome::Failed(_)), "{out:?}");
+    let st = block_on(h.status(seg_at())).unwrap();
+    assert_eq!(
+        (st.hello.active_version, st.hello.trial, st.status.confirmed),
+        (old, false, 0),
+        "the seg runs its earlier version, confirmed"
+    );
+    assert_eq!(
+        block_on(h.status(Target::Local))
+            .unwrap()
+            .hello
+            .active_version,
+        old
+    );
+}
+
+#[test]
+fn a_node_no_constraint_ties_to_the_one_that_stayed_keeps_the_new_version() {
+    let new = Version::new(1, 1, 0);
+    for constraints in [
+        "",
+        "constraints:\n  - requires: { node: hub, needs: seg, min: 1.1.0 }\n",
+    ] {
+        let (mut h, out) = apply_with_a_refused_hub(constraints);
+        assert!(
+            matches!(out[0].outcome, Outcome::Done(v) if v == new),
+            "{constraints}: {out:?}"
+        );
+        assert!(matches!(out[1].outcome, Outcome::Failed(_)), "{out:?}");
+        let st = block_on(h.status(seg_at())).unwrap();
+        assert_eq!(st.hello.active_version, new);
+    }
+}
+
+#[test]
+fn a_node_that_needs_the_one_that_stayed_goes_back() {
+    let (_h, out) = apply_with_a_refused_hub(
+        "constraints:\n  - requires: { node: seg, needs: hub, min: 1.1.0 }\n",
+    );
+    assert!(
+        matches!(out[0].outcome, Outcome::Realigned(v) if v == Version::new(1, 0, 0)),
+        "{out:?}"
+    );
+}
+
+const LOCKSTEP: &str = "constraints:\n  - lockstep: [hub, seg]\n";
+
+/// The seg confirmed the new version but no CONFIRM reply reached the host:
+/// it failed for the host, and the hub was not started. It goes back as a
+/// node that is done would, and keeps its failure as its result.
+#[test]
+fn a_failed_node_that_confirmed_the_new_version_goes_back_too() {
+    let faults = Faults {
+        drop_resp_every: Some((Cmd::Confirm as u8, 1)),
+        ..Default::default()
+    };
+    let (mut h, out) = refused_hub(LOCKSTEP, faults);
+    assert!(matches!(out[0].outcome, Outcome::Failed(_)), "{out:?}");
+    assert!(matches!(out[1].outcome, Outcome::NotStarted), "{out:?}");
+    let st = block_on(h.status(seg_at())).unwrap();
+    assert_eq!(
+        (st.hello.active_version, st.hello.trial, st.status.confirmed),
+        (Version::new(1, 0, 0), false, 0)
+    );
+}
+
+/// The seg goes back, but the replies to that CONFIRM are lost: the host
+/// reads what the seg runs and reports that, not the version it left.
+#[test]
+fn a_node_whose_way_back_lost_its_replies_is_reported_as_it_runs() {
+    let faults = Faults {
+        drop_resp_after: Some((Cmd::Confirm as u8, 1)),
+        ..Default::default()
+    };
+    let (_h, out) = refused_hub(LOCKSTEP, faults);
+    assert!(
+        matches!(out[0].outcome, Outcome::Realigned(v) if v == Version::new(1, 0, 0)),
+        "{out:?}"
+    );
+}
+
+/// The seg goes back, but no CONFIRM of that reaches it: it stays on trial,
+/// so no version of it is settled and the result is a failure.
+#[test]
+fn a_node_left_on_trial_on_its_way_back_is_a_failure() {
+    let faults = Faults {
+        drop_req_after: Some((Cmd::Confirm as u8, 1)),
+        ..Default::default()
+    };
+    let (mut h, out) = refused_hub(LOCKSTEP, faults);
+    assert!(matches!(out[0].outcome, Outcome::Failed(_)), "{out:?}");
+    assert!(block_on(h.status(seg_at())).unwrap().hello.trial);
+}
+
+/// The hub's STATUS replies are lost, so the host sends it nothing and has
+/// no state of it from its turn. It still answers HELLO on its earlier
+/// version: the seg goes back to stay in lockstep with it.
+#[test]
+fn a_node_whose_state_could_not_be_read_still_counts_for_a_constraint() {
+    let faults = Faults {
+        drop_local_resp: Some(Cmd::Status as u8),
+        ..Default::default()
+    };
+    let (_h, out) = refused_hub(LOCKSTEP, faults);
+    assert!(
+        matches!(out[0].outcome, Outcome::Realigned(v) if v == Version::new(1, 0, 0)),
+        "{out:?}"
+    );
+    assert!(matches!(out[1].outcome, Outcome::Failed(_)), "{out:?}");
+}
+
+/// The hub already runs 1.1.0 on trial over its confirmed 1.0.0 when the
+/// release is applied: the seg takes 1.1.0, the hub fails. The hub keeps
+/// 1.0.0 unless its trial is confirmed, so the seg goes back to stay in
+/// lockstep with it.
+#[test]
+fn a_node_already_on_trial_counts_as_on_its_confirmed_version() {
+    let yaml = format!("{}{LOCKSTEP}", yaml());
+    let t = dagon_topology::parse_str(&yaml).unwrap();
+    let v = Version::new(1, 1, 0);
+    let images = [seg_img(0, v), seg_img(1, v), hub_img(0, v), hub_img(1, v)];
+    let reg = dagon_topology::defs::Registry::builtin();
+    let b = dagon_sign::release::build(reg, &t, &topology(&yaml), &images, "r1.1", &key())
+        .unwrap()
+        .bundle;
+    let s = sim();
+    s.relay.borrow_mut().node.trial_app = TrialApp::NeverConfirms;
+    let mut h = host(&s);
+    let hub_only =
+        block_on(h.apply(&b, &topology(&yaml), &key().pk, Some(&[0]), &mut |_| {})).unwrap();
+    assert!(matches!(hub_only[0].outcome, Outcome::Failed(_)));
+    let hello = block_on(h.hello(Target::Local)).unwrap();
+    assert_eq!((hello.active_version, hello.trial), (v, true));
+
+    let out = block_on(h.apply(&b, &topology(&yaml), &key().pk, None, &mut |_| {})).unwrap();
+    assert!(
+        matches!(out[0].outcome, Outcome::Realigned(v) if v == Version::new(1, 0, 0)),
+        "{out:?}"
+    );
+    assert!(matches!(out[1].outcome, Outcome::Failed(_)), "{out:?}");
 }

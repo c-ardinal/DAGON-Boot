@@ -485,6 +485,8 @@ fn outcome_js(r: &NodeOutcome<JsValue>) -> JsValue {
         Outcome::Failed(e) => ("failed", JsValue::NULL, failure_js(e)),
         Outcome::NotStarted => ("notStarted", JsValue::NULL, JsValue::NULL),
         Outcome::NeedsFirstWrite => ("needsFirstWrite", JsValue::NULL, JsValue::NULL),
+        Outcome::Realigned(v) => ("realigned", JsValue::from(v.raw()), JsValue::NULL),
+        Outcome::Incompatible(v) => ("incompatible", JsValue::from(v.raw()), JsValue::NULL),
         // A result this build does not name: the page shows the node unconfirmed.
         _ => ("unknown", JsValue::NULL, JsValue::NULL),
     };

@@ -5,7 +5,7 @@
 
 use crate::defs::with_registry;
 use crate::kinds::code;
-use dagon_topology::schema::{ControlKind, RomEntry, UartIface};
+use dagon_topology::schema::{ControlKind, UartIface};
 use js_sys::{Array, Object, Reflect};
 use wasm_bindgen::prelude::*;
 use yaml_serde::Value;
@@ -156,10 +156,6 @@ fn control_kind(k: ControlKind) -> &'static str {
     }
 }
 
-fn rom_entry(r: RomEntry) -> &'static str {
-    r.name()
-}
-
 fn iface(i: UartIface) -> &'static str {
     match i {
         UartIface::HwUart0 => "hw-uart0",
@@ -208,7 +204,7 @@ fn board_template_in(reg: &dagon_topology::defs::Registry, id: &str) -> JsValue 
         })
         .collect();
     set(&o, "i2cPairs", pairs.into());
-    let link = b.default_link.map_or(JsValue::NULL, |l| {
+    let link = b.default_link.as_ref().map_or(JsValue::NULL, |l| {
         let x = Object::new();
         set(&x, "kind", code(l.kind).into());
         set(
@@ -222,7 +218,9 @@ fn board_template_in(reg: &dagon_topology::defs::Registry, id: &str) -> JsValue 
         set(
             &x,
             "romEntry",
-            l.rom_entry.map_or(JsValue::NULL, |r| rom_entry(r).into()),
+            l.rom_entry
+                .as_ref()
+                .map_or(JsValue::NULL, |r| r.name().into()),
         );
         x.into()
     });

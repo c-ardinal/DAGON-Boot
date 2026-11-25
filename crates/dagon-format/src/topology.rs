@@ -62,11 +62,14 @@ pub mod control {
     pub const COOPERATIVE: u8 = 2;
 }
 
+/// How a node is put into its ROM loader over a link: [`NONE`](rom_entry::NONE),
+/// the coordinator reaching the node's ROM I2C loader on the bus
+/// ([`I2C_LOADER`](rom_entry::I2C_LOADER)), or any other value: the
+/// ENTER_ROM method the node is asked for, which its MCU definition or
+/// board definition names (`[[rom_entry]]`).
 pub mod rom_entry {
     pub const NONE: u8 = 0;
-    pub const FORCE_DOWNLOAD_BOOT: u8 = 1;
-    pub const M5PM1: u8 = 2;
-    pub const STM32_I2C_ROM: u8 = 3;
+    pub const I2C_LOADER: u8 = 3;
 }
 
 /// Pin, I2C address or bus id meaning "not used".
@@ -159,9 +162,9 @@ pub struct TopoLink {
 
 impl TopoLink {
     /// Whether the link reaches a node's vendor ROM I2C loader: an I2C bus
-    /// link whose ROM entry is [`rom_entry::STM32_I2C_ROM`].
+    /// link whose ROM entry is [`rom_entry::I2C_LOADER`].
     pub fn reaches_rom_i2c(&self) -> bool {
-        self.iface == iface::I2C_BUS && self.rom_entry == rom_entry::STM32_I2C_ROM
+        self.iface == iface::I2C_BUS && self.rom_entry == rom_entry::I2C_LOADER
     }
 
     /// The end at `node`, if the link has one there.

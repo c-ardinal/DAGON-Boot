@@ -104,6 +104,12 @@ up = ["uart", "usb-cdc"]
 listen_window_ms = 50
 kinds = { uart = true, usb-cdc = false }
 
+# ENTER_ROM method 1 (FORCE_DOWNLOAD_BOOT, then a software reset); a
+# topology link asks for it as `rom_entry: force-download-boot`.
+[[rom_entry]]
+name = "force-download-boot"
+method = 1
+
 # The interfaces a topology link end names (ESP32-S3 technical reference:
 # USB Serial/JTAG, UART0/1/2, I2C0/1, TWAI).
 

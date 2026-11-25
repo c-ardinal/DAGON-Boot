@@ -47,8 +47,8 @@ fn tier_name(t: u8) -> Option<&'static str> {
     }
 }
 
-fn rom_entry_name(r: u8) -> Option<&'static str> {
-    dagon_topology::schema::RomEntry::from_wire(r).map(|e| e.name())
+fn rom_entry_name(r: u8) -> Option<String> {
+    crate::defs::with_registry(|reg| reg.rom_entry_name(r).map(str::to_owned))
 }
 
 fn tag_text(t: &[u8; 16]) -> String {
@@ -173,7 +173,7 @@ fn link_value(
     };
     let mut c = vec![("kind", s(kind))];
     if let Some(r) = rom_entry_name(l.rom_entry) {
-        c.push(("rom_entry", s(r)));
+        c.push(("rom_entry", s(&r)));
     }
     m.push(("control", map(c)));
     Ok(map(m))

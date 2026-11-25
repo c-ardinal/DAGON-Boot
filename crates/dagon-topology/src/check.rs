@@ -392,6 +392,19 @@ impl<'a> Ctx<'a> {
                 format!("schema version must be {SCHEMA_VERSION}, got {}", t.dagon),
             );
         }
+        // A ROM entry is a name a definition gives, said as a name the
+        // schema itself does not have is.
+        let known: Vec<&str> = self.reg.rom_entries().into_iter().map(|(n, _)| n).collect();
+        for (i, l) in t.links.iter().enumerate() {
+            let entry = l.control.rom_entry.as_ref();
+            if let Some(r) = entry.filter(|r| !known.contains(&r.name())) {
+                self.err(
+                    "V-01",
+                    format!("{}.control.rom_entry", link_path(i)),
+                    crate::schema::unknown_name("ROM entry", r.name(), &known),
+                );
+            }
+        }
         for (i, n) in t.nodes.iter().enumerate() {
             if n.tag.is_empty() || n.tag.len() > MAX_TAG_LEN {
                 self.err(

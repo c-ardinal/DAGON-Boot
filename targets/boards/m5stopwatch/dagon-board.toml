@@ -22,6 +22,12 @@ baud = 115_200
 control = "cooperative"
 rom_entry = "force-download-boot"
 
+# ENTER_ROM method 2 (the M5PM1 restarts the MCU in download mode); a
+# topology link asks for it as `rom_entry: m5pm1`.
+[[rom_entry]]
+name = "m5pm1"
+method = 2
+
 # DAGON's link: UART0 on the rear pins MUX_IO_1/2 (the expander's PYG1
 # low routes them to UART0), at the topology link's baud (dagon gives it to
 # the build; default_link.baud otherwise).

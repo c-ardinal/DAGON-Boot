@@ -129,7 +129,7 @@ type FormerLink = (
     Option<u8>,
     Option<u32>,
     ControlKind,
-    Option<RomEntry>,
+    Option<&'static str>,
 );
 
 /// One board as the former table held it.
@@ -200,7 +200,7 @@ const FORMER_BOARDS: [Former; 3] = [
             Some(0x42),
             None,
             ControlKind::Full,
-            Some(RomEntry::Stm32I2cRom),
+            Some("stm32-i2c-rom"),
         )),
         drawing: "nucleo-64",
     },
@@ -220,7 +220,7 @@ const FORMER_BOARDS: [Former; 3] = [
             None,
             Some(115_200),
             ControlKind::Cooperative,
-            Some(RomEntry::ForceDownloadBoot),
+            Some("force-download-boot"),
         )),
         drawing: "stopwatch",
     },
@@ -250,9 +250,10 @@ fn boards_match_the_table_field_for_field() {
         assert_eq!(b.i2c_target, t.i2c_target);
         assert_eq!(b.flash_bytes, t.flash_bytes);
         assert_eq!(b.drawing, t.drawing);
-        let link = b
-            .default_link
-            .map(|l| (l.kind, l.iface, l.addr, l.baud, l.control, l.rom_entry));
+        let link = b.default_link.as_ref().map(|l| {
+            let entry = l.rom_entry.as_ref().map(RomEntry::name);
+            (l.kind, l.iface, l.addr, l.baud, l.control, entry)
+        });
         assert_eq!(link, t.default_link, "{}", t.id);
         // The first board of an MCU is its default (one each here).
         assert_eq!(reg().default_board(t.mcu).map(|b| &b.id[..]), Some(t.id));
@@ -407,9 +408,24 @@ fn fake_registry(name: &str, max_hz: u32) -> Registry {
 
 /// The fake MCU with a ROM loader capped at `max_hz`, and `extra` TOML after it.
 fn fake_registry_with(name: &str, max_hz: u32, extra: &str) -> Registry {
+    fake_load(name, max_hz, extra).unwrap()
+}
+
+/// [`fake_registry_with`], or why the definitions do not load.
+fn fake_load(name: &str, max_hz: u32, extra: &str) -> Result<Registry, DefError> {
+    fake_load_board(name, max_hz, extra, FAKE_BOARD)
+}
+
+/// [`fake_load`] with `board` as the fake board's definition.
+fn fake_load_board(
+    name: &str,
+    max_hz: u32,
+    extra: &str,
+    board: &str,
+) -> Result<Registry, DefError> {
     let dir = scratch(name);
     let rom = format!(
-        "\n[rom_i2c]\nname = \"Fake ROM loader\"\naddr = 0x3A\nmax_hz = {max_hz}\n\
+        "\n[rom_i2c]\nentry = \"stm32-i2c-rom\"\nname = \"Fake ROM loader\"\naddr = 0x3A\nmax_hz = {max_hz}\n\
          pairs = [{{ controller = \"i2c0\", sda = \"GPIO2\", scl = \"GPIO3\" }}]\n\
          \n[[link_port]]\nindex = 0\nname = \"i2c0\"\nkind = \"i2c\"\n"
     );
@@ -418,14 +434,69 @@ fn fake_registry_with(name: &str, max_hz: u32, extra: &str) -> Registry {
         &format!("{FAKE_MCU}{rom}{extra}"),
     );
     std::fs::create_dir_all(dir.join("m/bootcore")).unwrap();
-    let board = FAKE_BOARD.replace("product", "[board.fake-board]\nproduct");
+    let board = board.replace("product", "[board.fake-board]\nproduct");
     write(
         &dir.join("dagon.toml"),
         &format!("mcu_files = [\"m/dagon-mcu.toml\"]\n{board}"),
     );
-    let r = Registry::load(&[Source::Project(&dir.join("dagon.toml"))]).unwrap();
+    let r = Registry::load(&[Source::Project(&dir.join("dagon.toml"))]);
     std::fs::remove_dir_all(dir).unwrap();
     r
+}
+
+/// A ROM entry a project's definition names is checked and compiled with no
+/// list of names in the code: the link carries the method the definition gives.
+#[test]
+fn a_rom_entry_a_definition_names_is_checked_and_compiled() {
+    let entry =
+        |name: &str, method: u8| format!("\n[[rom_entry]]\nname = \"{name}\"\nmethod = {method}\n");
+    let reg = fake_registry_with("rom-entry", 400_000, &entry("fake-loader", 7));
+    assert_eq!(reg.rom_entry_code("fake-loader"), Some(7));
+    assert_eq!(reg.rom_entry_name(7), Some("fake-loader"));
+    let mut t = fake_sample("0x42");
+    let at = t
+        .links
+        .iter()
+        .position(|l| l.control.rom_entry.is_some())
+        .unwrap();
+    t.links[at].control.rom_entry = Some(crate::schema::RomEntry("fake-loader".into()));
+    assert_eq!(rules(&crate::check_with(&reg, &t)), Vec::<&str>::new());
+    let bin = crate::compile_with(&reg, &t).unwrap();
+    let compiled = dagon_format::topology::TopologyView::parse(&bin).unwrap();
+    assert!((0..compiled.link_count()).any(|i| compiled.link(i).rom_entry == 7));
+    // Definitions that do not name it refuse the link.
+    let without = fake_registry("rom-entry-without", 400_000);
+    assert_eq!(rules(&crate::check_with(&without, &t)), ["V-01"]);
+    assert!(crate::compile_with(&without, &t).is_err());
+
+    let refused = |name: &str, extra: &str| fake_load(name, 400_000, extra).unwrap_err().msg;
+    let m = refused("rom-entry-none", &entry("fake-loader", 0));
+    assert!(m.contains("method 0 is taken"), "{m}");
+    let m = refused("rom-entry-loader", &entry("fake-loader", 3));
+    assert!(m.contains("method 3 is taken"), "{m}");
+    // A builtin definition names this one as method 1.
+    let m = refused("rom-entry-twice", &entry("force-download-boot", 9));
+    assert!(m.contains("a name has one code"), "{m}");
+    // A project's names reach check messages and the page: plain words only.
+    let m = refused("rom-entry-markup", &entry("<b>x</b>", 7));
+    assert!(m.contains("rom_entry.name must be"), "{m}");
+    let named = format!("{FAKE_BOARD}rom_entry = [{{ name = \"C:/x\", method = 7 }}]\n");
+    let m = fake_load_board("rom-entry-board-markup", 400_000, "", &named)
+        .unwrap_err()
+        .msg;
+    assert!(m.contains("rom_entry.name must be"), "{m}");
+    // A board's default link names an entry a definition has.
+    let board = FAKE_BOARD.replace(
+        "control = \"full\"",
+        "control = \"full\", rom_entry = \"absent\"",
+    );
+    let m = fake_load_board("rom-entry-default", 400_000, "", &board)
+        .unwrap_err()
+        .msg;
+    assert!(
+        m.contains("no definition names the ROM entry 'absent'"),
+        "{m}"
+    );
 }
 
 fn rules(r: &crate::Report) -> Vec<&'static str> {
@@ -539,6 +610,7 @@ product",
 fn a_projects_words_are_made_safe_on_load_for_every_consumer() {
     let rom = "
 [rom_i2c]
+entry = \"stm32-i2c-rom\"
 name = \"<b>Loader</b> at C:/Users/me\"
 addr = 0x3A
 max_hz = 400_000
@@ -618,7 +690,7 @@ fn fake_mcu_and_board_load_from_a_project_without_code_changes() {
     );
     let b = r.default_board("fake-m0").unwrap();
     assert_eq!(b.id, "fake-board");
-    assert_eq!(b.default_link.unwrap().kind, LinkKind::I2c);
+    assert_eq!(b.default_link.as_ref().unwrap().kind, LinkKind::I2c);
     // The builtin set is still there.
     assert!(r.board("nucleo-f401re").is_some());
     std::fs::remove_dir_all(dir).unwrap();

@@ -136,8 +136,10 @@ sub = "stage0"
 name = "bootcore"
 sub = "bootcore"
 
-# The system-memory I2C bootloader (ROM entry kind stm32-i2c-rom).
+# The system-memory I2C bootloader; a topology link reaches it as
+# `rom_entry: stm32-i2c-rom`.
 [rom_i2c]
+entry = "stm32-i2c-rom"
 name = "STM32 ROM bootloader"
 addr = 0x39
 max_hz = 400_000

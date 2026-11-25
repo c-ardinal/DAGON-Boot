@@ -193,7 +193,7 @@ pub struct Link {
     /// A UART link's bit rate; 115200 when left out (V-26).
     pub baud: Option<u32>,
     /// How a node is put into its ROM loader over this link: `kind` (`full`, `cooperative`) and
-    /// `rom_entry` (`force-download-boot`, `m5pm1`, `stm32-i2c-rom`). An I2C or UART link needs
+    /// `rom_entry` (a name a MCU or board definition gives a ROM entry). An I2C or UART link needs
     /// `rom_entry` when it is cooperative, the default (V-11).
     #[serde(default)]
     pub control: Control,
@@ -348,32 +348,17 @@ fn cooperative() -> ControlKind {
     ControlKind::Cooperative
 }
 
-named! {
-    /// How a node is put into its ROM loader over a link.
-    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    "ROM entry"
-    pub enum RomEntry {
-        ForceDownloadBoot = "force-download-boot",
-        M5pm1 = "m5pm1",
-        Stm32I2cRom = "stm32-i2c-rom",
-    }
-}
+/// How a node is put into its ROM loader over a link: a name a MCU or
+/// board definition gives a ROM entry (`[rom_i2c] entry`, `[[rom_entry]]`).
+/// The check refuses a name no definition has (V-01).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(transparent)]
+pub struct RomEntry(pub String);
 
 impl RomEntry {
-    /// The code a compiled topology carries (`dagon_format::topology::rom_entry`).
-    pub fn wire(self) -> u8 {
-        use dagon_format::topology::rom_entry as code;
-        match self {
-            RomEntry::ForceDownloadBoot => code::FORCE_DOWNLOAD_BOOT,
-            RomEntry::M5pm1 => code::M5PM1,
-            RomEntry::Stm32I2cRom => code::STM32_I2C_ROM,
-        }
-    }
-
-    /// The entry a compiled topology carries as `code`; `NONE` and a code
-    /// this DAGON does not know: none.
-    pub fn from_wire(code: u8) -> Option<Self> {
-        Self::ALL.iter().copied().find(|r| r.wire() == code)
+    /// The name a file writes.
+    pub fn name(&self) -> &str {
+        &self.0
     }
 }
 

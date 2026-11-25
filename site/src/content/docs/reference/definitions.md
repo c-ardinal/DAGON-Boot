@@ -33,7 +33,8 @@ description: "dagon-mcu.tomlとdagon-board.toml: DAGONが把握するマイコ�
 | `[coordinator]` | テーブル | 任意 | コーディネータに指定可能なマイコン専用: `pio_state_machines`、`pio_uart_state_machines`（リンクごと）、`uart0_tx`、`uart0_rx`。構成がそのマイコンをコーディネータに指定可能なのは、`[coordinator]`が定義済の場合だけです（V-25）。 |
 | `[link_uart]` | テーブル | 任意 | マイコンの定義のコードがDAGONのUARTリンクに使用するUARTの、ビットレートの算出方法。HALの計算と同一です: そのクロックを、`clocks_per_bit`と`frac_bits`ビットの小数部付きの分周比との積で除算します。端数処理は切捨です。クロックは`clock_hz`（クロック設定に依存しない周波数）か`clock = "app"`（ノードの`[[app.clock]]`設定のコアクロック。V-26はノードごとにこの値を使用します。`tolerance_ppm`が不在のinternalの設定で動作するノードは、UARTリンクを使用しません）のどちらか1つです。`bauds`は、そのコードがリンクに使用するビットレートの一覧です。`fast_ppm`と`slow_ppm`（必須）は、リンクの`baud`に対するビットレートの上側と下側の許容誤差で、クロックの許容誤差を加算した値です（`slow_ppm`は1000000以下）。構成の確認（V-26）は、どちらかの端の一覧に不在か、どちらかの端で許容範囲外の誤差を生じるリンクの`baud`を拒否します。DAGON Consoleは両端の一覧にある速度だけを選択肢に表示します。`[links]`に`uart`があるマイコンでは必須です。この項目が不在の場合、そのマイコンのファームウェアが使用する全部のUARTリンクを拒否します。動作が判明している速度が不在のためです。 |
 | `[link_i2c]` | テーブル | 任意 | マイコンの定義のファームウェアが、コントローラとしてもターゲットとしても、DAGONのI2Cリンクに使用するバスの速度の一覧: `hzs`。構成の確認（V-20）は、バス上のいずれかのノードの一覧に不在のバスの`speed_hz`を拒否します。DAGON Consoleは、バス上の全ノードの一覧にある速度だけを選択肢に表示します。`[links]`に`i2c`があるマイコンでは必須です。この項目が不在の場合、そのマイコンのファームウェアが接続する全部のI2Cバスを拒否します。動作が判明している速度が不在のためです。`[link_i2c.controller]`は、ノードがバスを駆動する場合のSCLの生成方法で、HALの計算と同一です: そのクロックを、バスの速度の周期を最近接の整数のサイクル数に丸めた値で除算します。HALは`min_period`サイクル未満の周期を拒否します。クロックは`[link_uart]`と同様に`clock_hz`か`clock = "app"`のどちらか1つです。`fast_ppm`と`slow_ppm`は、`speed_hz`に対するSCLの上側と下側の許容誤差で、クロックの許容誤差を加算した値です。構成の確認（V-20）は、バスのコントローラ（ターゲットがアドレスで到達しない側の端）が、ノードのクロックで許容範囲外のSCLを生成するか、その速度を生成不可能か、`tolerance_ppm`が不在のinternalの設定で動作するバスを拒否します。`[link_i2c.controller]`が不在のマイコンのノードが駆動するバスも拒否します。 |
-| `[rom_i2c]` | テーブル | 任意 | ROMのI2Cブートローダ（`stm32-i2c-rom`）: `name`（確認のメッセージでの名称）、`addr`、`max_hz`、`erase_sectors`（`execution.erase_regions`の消去単位の番号。先頭の領域を起点に計数します。ホストは各単位の`unit_max_ms`に余裕時間を加算して待機します）、待受対象の`pairs = [{ controller, sda, scl }]`。 |
+| `[rom_i2c]` | テーブル | 任意 | ROMのI2Cブートローダ: `entry`（構成のリンクが`control.rom_entry`に記述する名称。`stm32-i2c-rom`）、`name`（確認のメッセージでの名称）、`addr`、`max_hz`、`erase_sectors`（`execution.erase_regions`の消去単位の番号。先頭の領域を起点に計数します。ホストは各単位の`unit_max_ms`に余裕時間を加算して待機します）、待受対象の`pairs = [{ controller, sda, scl }]`。 |
+| `[[rom_entry]]` | テーブルの配列 | 任意 | `[[rom_entry]]`: このマイコンのファームウェアがENTER_ROMで受理するROM進入方式。`name`（構成のリンクが`control.rom_entry`に記述する名称）と`method`（ENTER_ROMの方式番号。0と3は使用不可）。 |
 | `[links]` | テーブル | 任意 | マイコンの定義のファームウェアが実装するリンクの種類（`up`と`down`）。パッケージはこの値だけから`LINK_KINDS`を生成します。 |
 | `[boot_receive]` | テーブル | 任意 | アプリを書込するブート段階（`[writers] app`が`app`以外の種類を指定する場合）が、アプリの無応答時に受信する方法（省略時は、どのリンクの種類も待受時間に参加せず、ブート段階は書込モードか復旧モードでのみ受信します）: `listen_window_ms`（0から200。省略時は50。0は待受時間を開始しません）は、起動からブートまでにSTAYを待機する時間です。`kinds = { <link kind> = true \| false, ... }`は、リンクの種類ごとの待受時間への参加の有無です（記述しない種類は不参加）。対向側が先行して列挙する種類（`usb-cdc`）は参加不可です。ブート段階は`[links]`の種類の全リンクで受信し、リンク間の優先順位はありません。参加する種類では起動直後から、他の種類では書込モードか復旧モードで受信します。プロジェクトは`[mcu_override.<id>.boot_receive]`で待受時間を変更します。 |
 | `[[link_port]]` | テーブルの配列 | 任意 | 構成のリンクの端が名称で指定する、マイコンのリンクのインタフェース: `index`（0から255）、`name`（`a-z`、`0-9`、`-`）、`kind`（リンクの種類: `i2c`、`uart`、`can`、`ethernet`、`usb-cdc`、`ble`、`wifi-tcp`）。`index`と`name`はそれぞれ重複しません。リンクの端の`port`はリンクの種類に該当するこれらの名称のいずれかです（構成の確認V-27）。コンパイル済の構成はその`index`を保持します。 |
@@ -104,7 +105,8 @@ description: "dagon-mcu.tomlとdagon-board.toml: DAGONが把握するマイコ�
 | `default` | 真偽値 | 任意 | `true`: マイコンだけを指定したノードの確認に使用するボード（既定のボードが設定済の組込のマイコンについて、プロジェクトはその既定を置換不可です。マークを付与したボードが2つあると読込しません）。マイコンごとに、この指定が可能なボードは最大1つです。マイコンの唯一のボードは、この指定が不在でも既定です。ボードが複数でマークが不在のマイコンには既定がありません（そのマイコンだけを指定したノードは、V-06がエラーにします）。定義の順番で決定することはありません。 |
 | `[[header]]` | テーブルの配列 | 任意 | `[{ pin, label }]`。ボード上で確認実績のない`label`は省略します。構成がこのボードで指定可能なピンの全部です（コーディネータ側の`pins`・`control`・バスの`sda`/`scl`。ノード側の`node_pins`は`i2c`から選択します）。構成の確認（V-07）はそれ以外を拒否し、DAGON Consoleはこれらのピンだけを選択肢に表示します。 |
 | `[[i2c]]` | テーブルの配列 | 任意 | ヘッダから使用可能な`[{ controller, sda, scl }]`の組。 |
-| `[default_link]` | テーブル | 任意 | 構成で別途指定しない場合の、ノードのボードの配線: `kind`（`i2c`、`uart`、`can`、`ethernet`）、`iface`（`hw-uart0`、`pio-uart`）、`addr`、`baud`、`control`（`full`、`cooperative`）、`rom_entry`（`force-download-boot`、`m5pm1`、`stm32-i2c-rom`）。コーディネータでは省略します。 |
+| `[default_link]` | テーブル | 任意 | 構成で別途指定しない場合の、ノードのボードの配線: `kind`（`i2c`、`uart`、`can`、`ethernet`）、`iface`（`hw-uart0`、`pio-uart`）、`addr`、`baud`、`control`（`full`、`cooperative`）、`rom_entry`（定義がROM進入方式に付与した名称）。コーディネータでは省略します。 |
+| `[[rom_entry]]` | テーブルの配列 | 任意 | `[[rom_entry]]`: このボードのファームウェアがENTER_ROMで受理するROM進入方式。マイコン定義の同名項目と同一形式です。 |
 | `[[part]]` | テーブルの配列 | 任意 | ボードの定義自体からビルドする部品（`name`、`sub`、`bin`）。 |
 | `[boot]` | テーブル | 任意 | ブート段階のボードの値: `led`（`[[pin]]`）、`led_active`（`high`、`low`）、`halt = { pattern, period_ms }`（`blink`、`code`、`off`。DAGONのstage0があるマイコンで`led`がある場合は、stage0が周期の10分の1単位でコードを点滅させるため、`blink`の周期は10 ms以上です）、`power_hold = { pin, level }`。ブートのアクションプログラムは`[[boot.action]]`です。ブートのアクションプログラム（`boot-program`形式1）: `on`（イベントのカタログがアクション対応と明示するブートイベント）と`ops`: `{ op = "led", state }`（`on`、`off`、`toggle`）、`{ op = "gpio", pin, level }`（`boot = true`の`[[pin]]`。電源保持のピンは保持のレベルのみ）、`{ op = "delay", ms }`（1から20）、`{ op = "bus_write", device, reg, bytes }`（`writable`の一覧にある`[[device]]`のレジスタ、1から8バイト。`boot_capabilities = ["i2c"]`のマイコンのみ）。イベントごとに最大32の操作と50 msで、バスの書込は5 msとして計算します。 |
 | `[[pin]]` | テーブルの配列 | 任意 | ボードのピン: `pin`、`name`（ボードの定義のコードが参照する名称、`a-z 0-9 _`）、`boot`（ブートプログラムが駆動可能）、`levels`（許可するレベル。省略時は全部）。 |
@@ -228,6 +230,7 @@ size = 0x30_0000
 | マイコン | `peripheral.privileged_why` | 記述すると全体を置換 |
 | マイコン | `core` | キー（`id`）でエントリ全体を追加か削除。`dagon-order`で順番を指定可能 |
 | マイコン | `rom_i2c.pairs` | キー（`sda`、`scl`）でエントリごとに合成 |
+| マイコン | `rom_entry` | キー（`name`）でエントリごとに合成 |
 | マイコン | `link_port` | キー（`name`）でエントリごとに合成 |
 | マイコン | `relay_link` | キー（`port`）でエントリごとに合成 |
 | マイコン | `relay_link.addressing` | 記述すると全体を置換 |
@@ -256,6 +259,7 @@ size = 0x30_0000
 | ボード | `header` | キー（`pin`）でエントリごとに合成 |
 | ボード | `i2c` | キー（`sda`、`scl`）でエントリごとに合成 |
 | ボード | `part` | キー（`name`）でエントリ全体を追加か削除 |
+| ボード | `rom_entry` | キー（`name`）でエントリごとに合成 |
 | ボード | `pin` | キー（`pin`）でエントリごとに合成 |
 | ボード | `bus` | キー（`id`）でエントリごとに合成 |
 | ボード | `peripheral` | キー（`id`）でエントリごとに合成 |

@@ -355,7 +355,9 @@ dependencies = [
  "heapless 0.9.3",
  "panic-halt",
  "portable-atomic",
+ "rp-pac",
  "static_cell",
+ "toml",
 ]
 
 [[package]]

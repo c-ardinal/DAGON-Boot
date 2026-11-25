@@ -61,6 +61,13 @@ dagon-mcu-build = { path = "../build" }
 dagon-agent = { path = "../../../crates/dagon-agent", features = ["store-tests"] }
 ed25519-compact = { version = "2.6", default-features = false }
 
+# tests/peripheral_map.rs: the definition's register blocks against the
+# chip data esp-hal builds on (the esp32s3 PAC, generated from Espressif's
+# SVD). Host tests only: the PAC is esp-hal's own dependency on the target.
+[target.'cfg(not(target_arch = "xtensa"))'.dev-dependencies]
+esp32s3 = { version = "0.36", default-features = false }
+toml = { version = "0.8", default-features = false, features = ["parse"] }
+
 [target.'cfg(target_arch = "xtensa")'.dependencies]
 esp-hal = { version = "1.2.2", features = ["esp32s3", "unstable"], optional = true }
 esp-bootloader-esp-idf = { version = "0.6.0", features = ["esp32s3"], optional = true }

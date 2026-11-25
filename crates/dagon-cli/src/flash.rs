@@ -1131,7 +1131,10 @@ mod tests {
             base,
             ..Config::default()
         };
-        for (id, package) in [("hub", "targets/rp2040-hub"), ("seg", "samples/f401-app")] {
+        for (id, package) in [
+            ("hub", "samples/rp2040-round-lcd/app"),
+            ("seg", "samples/f401-app"),
+        ] {
             cfg.build.insert(
                 id.into(),
                 BuildInputs {
@@ -1251,7 +1254,7 @@ mod tests {
             "{plan}"
         );
         assert!(
-            plan.contains("stage0") && plan.contains("targets/rp2040-hub"),
+            plan.contains("stage0") && plan.contains("samples/rp2040-round-lcd/app"),
             "{plan}"
         );
         assert!(plan.contains("(tag hub-rp2040-lcd)"), "{plan}");
@@ -1768,7 +1771,7 @@ mod tests {
         assert!(package_in_source(&cfg, "seg", &root));
         assert!(
             !package_in_source(&cfg, "hub", &root),
-            "targets/rp2040-hub is in the project"
+            "the hub's package is in the project"
         );
         let _ = std::fs::remove_dir_all(&cfg.base);
     }

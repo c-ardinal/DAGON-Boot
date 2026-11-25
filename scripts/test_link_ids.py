@@ -239,7 +239,7 @@ class LinkIds(unittest.TestCase):
             "static S: [LinkedNode; 1] = [named(1, \"seg\", 1, 0x42)];\n",
         ):
             with self.subTest(code=code):
-                self.assertTrue(self.planted("targets/rp2040-hub/src/main.rs", code))
+                self.assertTrue(self.planted("targets/mcu/rp2040/src/relay.rs", code))
 
     def test_a_kind_to_id_match_in_production_fails(self):
         for code in (

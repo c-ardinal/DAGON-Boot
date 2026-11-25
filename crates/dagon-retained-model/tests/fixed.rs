@@ -132,3 +132,53 @@ fn regression_trial_cell_check_cut_after_its_probe() {
     ];
     ok::<TrialWorld>(&c, &ops);
 }
+
+// --- Codecs --------------------------------------------------------------
+
+/// K3: a decoder that accepts bytes its encoder would not write (here the
+/// node's reserved bytes) is caught, and the case shrinks to one fault.
+#[test]
+fn a_decoder_that_ignores_reserved_bytes_is_caught() {
+    use dagon_format::topology::{TopoNode, NODE_SIZE};
+    use dagon_retained_model::codec::{Codec, CodecWorld, Damage, TopologyCodec};
+    use dagon_retained_model::harness::run_many;
+
+    struct BareNode;
+    impl Codec for BareNode {
+        type Value = TopoNode;
+        const CANONICAL: bool = true;
+        fn generate(rng: &mut dagon_retained_model::rng::Rng) -> TopoNode {
+            TopologyCodec::generate(rng).nodes[0]
+        }
+        fn encode(v: &TopoNode) -> Vec<u8> {
+            v.to_bytes().to_vec()
+        }
+        fn decode(bytes: &[u8]) -> Option<TopoNode> {
+            (bytes.len() == NODE_SIZE).then(|| TopoNode::parse(bytes))
+        }
+    }
+    let f = run_many::<CodecWorld<BareNode>>(SEED, 10_000).expect_err("K3");
+    assert_eq!(f.violation.property, "K3");
+    assert!(matches!(f.ops[..], [Damage::Set { .. }]), "{:?}", f.ops);
+}
+
+/// P12: an implementation whose identity reply is not the low 16 bits of
+/// the specified identity is caught with no probe at all.
+#[test]
+fn an_identity_reply_from_other_bits_is_caught() {
+    use dagon_retained_model::harness::run_many;
+    use dagon_retained_model::identity::{Identity, IdentityWorld};
+
+    struct HighReply;
+    impl Identity for HighReply {
+        fn derive(id: &str) -> u64 {
+            identity(id)
+        }
+        fn reply(id: &str) -> u16 {
+            (identity(id) >> 48) as u16
+        }
+    }
+    let f = run_many::<IdentityWorld<HighReply>>(SEED, 100).expect_err("P12");
+    assert_eq!(f.violation.property, "P12");
+    assert!(f.ops.is_empty(), "{:?}", f.ops);
+}

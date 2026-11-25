@@ -13,10 +13,12 @@ topology's node layout. It also specifies the boot loader trial cell
 shape here is the one `crates/dagon-retained-model` proves; a change to a
 shape is a change to the model first, and the model's tests decide.
 
-The model is host-only and not released. Each format's codec is a trait in
-the model (`BodyCodec`), proven on the host. By design,
-a firmware codec implements the same trait and is tested under the same
-harness.
+The model is host-only and not released. A format's codec is a trait in
+the model (`codec::Codec`, and `identity::Identity` for the MCU identity).
+The shipped codecs implement those traits and run under the model's
+harness: `dagon_format::topology` for the compiled topology,
+`dagon_core::bootcore` for the trial cell and
+`dagon_format::header::McuId` for the identity.
 
 ```
 cargo test -p dagon-retained-model                       # 10^4 scenarios per world, fixed cases
@@ -97,6 +99,14 @@ fixed cases in `tests/fixed.rs` name the property they guard.
 | Id | Property |
 |---|---|
 | P12 | Identity is a pure function of the id; collisions refused at every carrier width; unknown never matched. |
+| K1 | A codec decodes what it encoded to the same value. |
+| K2 | Bytes that decode, whatever fault produced them, decode to the same value once encoded again. |
+| K3 | For a canonical codec (the compiled topology), bytes that decode are exactly the encoding of their value: damaged bytes are refused or are another whole value. |
+
+K1 to K3 run on the shipped codecs. The faults are a foreign byte at any
+position, a cut at any length and bytes appended. The trial cell is not
+canonical: a cell cut between its two stores holds one old word and
+counts (section 5).
 
 ## 5. Boot loader trial cell
 

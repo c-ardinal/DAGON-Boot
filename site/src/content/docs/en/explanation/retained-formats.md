@@ -229,7 +229,7 @@ The log is two faces used in turn. A face is a 32-byte face header followed by 3
 
 | Offset | Size | Field |
 |---|---|---|
-| 0 | 1 | Kind: `0x01` to `0x7F` a slot record, `0x80` to `0xFE` reserved, `0xFF` erased |
+| 0 | 1 | Kind: `0x01` to `0x7F` a slot record or a node-wide record (6.1), `0x80` to `0xFE` reserved, `0xFF` erased |
 | 1 | 3 | Fields of the kind |
 | 4 | 4 | `seq`: sequence number, little-endian. No fold uses it |
 | 8 | 20 | Fields of the kind |
@@ -238,3 +238,23 @@ The log is two faces used in turn. A face is a 32-byte face header followed by 3
 A record is appended into the first erased record of the active face, after a check that all its 32 bytes are erased. When the face is full, ends in a record that fails its CRC, or fails that check, the append compacts first: it erases the other face, writes the fold there and writes that face's header with the generation plus 1 last. The copy keeps every field of the fold (the confirmed image, the pending one and its attempts, the rolled-back image, the last rollback's reason): the copied records fold to the state they were made from (`LogState::carry`; the exhaustive test `carry_is_exact` and the Kani proof `compaction_carries_the_whole_state` check it). Until that header is whole the old face stays the valid one. A reader skips a record whose kind it does not know.
 
 When neither face header is valid (both faces corrupt), the boot loader rebuilds the log from the slots (`dagon_core::boot::rebuild`, `Log::create`). It runs the boot checks on the image of each APP slot and records the ones that pass. With two of different versions, the older one takes PROVISION and the newer one SLOT_PENDING: the newer one starts on trial and falls back to the older one. With two of the same version, slot A alone takes PROVISION. With one, it takes SLOT_PENDING alone: an image no log confirmed starts only on trial, and a failed trial ends in recovery mode. With none, nothing is written. The rebuild erases face 0, writes the records and writes the face header (generation 1) last; a cut before that header leaves both faces invalid, and the next start rebuilds the log again. Where the boot loader's records share the faces (F401), both faces corrupt lose the boot loader's records too, stage0 starts no boot loader, and the ROM loader recovers the node.
+
+### 6.1 Records of peers that answered
+
+A node that relays records in its state log, for each node it relays to, that an exchange with it succeeded at least once. The host reads these records and tells a node that does not answer apart as lost, never reached or history unknown ([section 1.5 of Lifecycle events and extensions](/en/explanation/lifecycle-events/#15-host-operations)). The node that starts the exchange holds the records; the host keeps none. A record states only that an exchange succeeded: there are no status bits, no failure counts and no clearing.
+
+| Kind | Name | Fields of the kind | Meaning |
+|---|---|---|---|
+| `0x0B` | PEERS_KEPT | none | This log has kept every record of a peer since the first write |
+| `0x0C` | PEER_SEEN | offset 12: `link` (the `id` of a `[[relay_link]]`), offset 13: `addr` (the address on that link) | This peer answered with a valid response frame at least once |
+
+In both kinds offset 2 is `0xFF` (no slot) and the other fields of the kind are 0.
+
+- **When it is written**: when a peer answers a request forwarded by RELAY with a frame that passes its checks. There is one record for each peer, and a peer already recorded gets no second one. What the answer says (a refusal included) does not matter.
+- **How it is appended**: the app appends it only while the room for a trial (`trial_room`) stays; without that room it compacts first. A failed append does not change the relayed answer; the next answer appends again.
+- **Limit**: a log holds 16 PEER_SEEN records (`MAX_PEERS`). A log at the limit states nothing about a peer it has no record of.
+- **Where PEERS_KEPT comes from**: only the app state log a first write makes (`dagon flash`) holds PEERS_KEPT. No code of a node appends it. A rebuilt log (`rebuild`, `Log::load_or_create` in recovery mode), the log a recovery through the ROM loader writes, and a log made before these records existed hold none.
+- **Compaction**: copies PEERS_KEPT and every PEER_SEEN. The compaction of an older version, which skips these records as unknown kinds, does not copy PEERS_KEPT either. Losing records always loses PEERS_KEPT with them, so lost records are never read as "never reached".
+- **Budget**: at most 17 records (544 bytes). For an MCU that defines relay links (`[[relay_link]]`), the definition check makes sure a face of the app state log holds the copy of the fold, the room for a trial and these 17 records together.
+
+The records of a log are complete only when it holds PEERS_KEPT and fewer PEER_SEEN records than the limit. A peer without a PEER_SEEN in a complete log has not answered once since the first write.

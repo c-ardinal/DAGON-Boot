@@ -280,6 +280,8 @@ extension may relay UDS as well as DAGON frames).
 | `relay.relay_request` | a request to relay admitted | `link`, `addr`, `cmd` |
 | `relay.child_control` / `relay.child_raw` | a child's control lines driven / raw bus access to its ROM loader | `link`, `nrst`, `boot0` / `addr`, `len`, `read_len` |
 
+The relay records in its own state log which of the nodes it relays to have answered ([section 6.1 of Retained and persistent formats](/en/explanation/retained-formats/#61-records-of-peers-that-answered)). When such a node first answers with a frame that passes its checks, the relay appends one record for it. PEERS reads the records, a page at a time: the request names the page, and the answer holds whether the records are complete, how many there are, and the `(link, addr)` pairs of that page (8 a page). Only a relay answers PEERS; the HELLO of any other node does not name it.
+
 ### 1.5 Host operations
 
 The host notifies the progress of each operation (`apply`, `rollback`,
@@ -296,7 +298,7 @@ build runner are ports (2.1).
 | `host.node.discovered` | discovery | `target`, identity |
 | `host.node.step` | every phase for a node (TRANSFER, VERIFY, REBOOT, CONFIRM, REJECTED, FAILED, ROM) | `node`, `target`, `phase`, `percent`, `version` |
 | `host.node.reconnecting` | waiting for the version after reboot | `node`, `elapsed_ms`, `other_version?` |
-| `host.node.result` | | `node`, `Done(v) \| Failed(reason, status?) \| NotStarted \| NeedsFirstWrite \| Realigned(v) \| Incompatible(v)` (`NeedsFirstWrite`: the relaying node reported that the node did not answer; nothing was sent to it and the other nodes are written; it takes its first write directly. `Realigned`: written and confirmed, then taken back to `v` for a compatibility constraint with a node that stayed off the package's version. `Incompatible`: such a constraint does not hold and the node could not go back; see [Keeping node versions compatible](/en/how-to/constraints/)) |
+| `host.node.result` | | `node`, `Done(v) \| Failed(reason, status?) \| NotStarted \| NeedsFirstWrite \| Realigned(v) \| Incompatible(v)` (`NeedsFirstWrite`: the node does not answer and was never reached; nothing was sent to it and the other nodes are written; it takes its first write directly. `Realigned`: written and confirmed, then taken back to `v` for a compatibility constraint with a node that stayed off the package's version. `Incompatible`: such a constraint does not hold and the node could not go back; see [Keeping node versions compatible](/en/how-to/constraints/)) |
 | `host.confirm.result` | | `Confirmed \| NotOnTrial \| NeedsChoice` |
 | `host.rollback.*`, `host.recover.*` | same shape as deploy | |
 | `host.provision.started` / `host.provision.recorded` | first install through the ROM; the installed boot image identity recorded | `node`, `boot_sha256` |
@@ -304,6 +306,20 @@ build runner are ports (2.1).
 | `host.agent.linked` / `host.agent.unlinked` | consent recorded / withdrawn | `agent`, `way` |
 | `host.version.read` | VERSION answered or Unsupported | `target`, `VersionResp?` |
 | `host.job.*`, `host.device.*` | serve job and device messages | |
+
+#### A node that does not answer
+
+`apply` tells a node that does not answer a relayed HELLO apart by the records of peers read from the node on the PC. The CLI, wasm and DAGON Console name the three cases the same way.
+
+| Case | When | The write | `host.node.result` |
+|---|---|---|---|
+| Lost | A record of the node exists (it answered before) | Stops | `Failed(LOST)` |
+| Never reached | The records are complete and none is of the node (a node added to the topology and not yet written) | Skips the node, goes on, and points to its first, direct write | `NeedsFirstWrite` |
+| History unknown | The records cannot be checked: the node on the PC does not serve PEERS, the read failed, or the records are not complete (no PEERS_KEPT, or the limit reached) | Stops | `Failed(HISTORY UNKNOWN)` |
+
+- Only a node the node on the PC reported as not answering (RELAY `E_TIMEOUT`) is told apart. A node on the PC that does not answer is a failed connection: the host starts that exchange, and the host keeps no records.
+- Only the records on the node decide. Whether the node answered earlier in the session does not.
+- Once a node with unknown history answers again, nothing has to be told apart. A node never written takes its first write directly. Only a first write of the node on the PC makes its records complete.
 
 ### 1.6 Persistent state and its machines
 

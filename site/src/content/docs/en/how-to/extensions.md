@@ -99,14 +99,15 @@ pub fn dagon() -> App {
 
 | Method | When DAGON asks | Answers | Without an answer |
 |---|---|---|---|
-| `accept_update` | An update request passed every guard of DAGON, before the slot is erased | `Accept::Yes`, `Accept::No` | The update starts |
+| `accept_update` | An update request passed DAGON's guards on the offer (target, slot, size), before the slot is erased and before the image arrives | `Accept::Yes`, `Accept::No` | The update starts |
 | `allow_reboot_now` | DAGON accepted a reboot | `Delay::Now`, `Delay::After(ms)` | The reboot happens now |
 | `self_check` | The host asks to confirm a version on trial | `Health::Healthy`, `Health::Unhealthy`, `Health::Pending` | `self_check()` of `src/app.rs` answers |
 
 - DAGON asks the board's extension first, then yours in the order of `extensions![..]`. The first answer stands.
 - `self_check()` of `src/app.rs` is asked last and always answers, so an extension that returns `None` leaves the decision to it.
 - An answer has to come within `DECISION_BOUND_MS` (50 ms). A later answer is ignored, and `app.extension_overran` names the extension. Do not wait or block in a method: keep the state ready and return.
-- `Accept::No` cannot be overruled by a later extension, and no answer makes DAGON accept what its own guards refused: an image with a wrong signature, target or digest never reaches `accept_update`.
+- `Accept::No` cannot be overruled by a later extension, and no answer makes DAGON accept what its own guards refuse.
+- `accept_update` is asked before the image arrives: DAGON checks the header's signature and compatibility and the body's digest after it. An offer that reaches `accept_update` is not an authenticated image, so do nothing there that relies on one. An image that fails those checks is refused whatever the extension answered.
 - `Delay::After` is capped by the watchdog period of the node.
 - `Health::Pending` keeps the version on trial, and the host asks again. A version on trial that is never confirmed is rolled back.
 

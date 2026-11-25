@@ -104,6 +104,29 @@ pub(crate) fn layout(mcu: &McuDef) -> Result<Layout, String> {
     })
 }
 
+/// Where a first write leaves a copy of the agent's header for an agent
+/// image of `payload` bytes on `board`: the last erase unit of the agent's
+/// partition (`header_copy_at`), where the node finds it with the header
+/// partition erased. `None` when the image reaches that unit.
+pub(crate) fn agent_header_copy_at(
+    mcu: &McuDef,
+    board: Option<&dagon_topology::defs::BoardDef>,
+    payload: u32,
+) -> Option<u32> {
+    let agent = mcu
+        .slot_defs
+        .iter()
+        .zip(&mcu.slots)
+        .find(|(d, _)| d.image == ImageKind::Agent)?
+        .1;
+    let unit = mcu
+        .erase_regions_on(board)?
+        .iter()
+        .find(|r| agent.start >= r.start && agent.start - r.start < r.len)?
+        .unit;
+    dagon_format::header::header_copy_at(agent.start, agent.size, unit, payload)
+}
+
 /// The bundled 2nd stage at `bootloader`, only when its SHA-256 is the one
 /// `sums` lists for its file name (the unmodified ESP-IDF build).
 pub(crate) fn checked_bootloader(bootloader: &Path, sums: &Path) -> Result<Vec<u8>, String> {

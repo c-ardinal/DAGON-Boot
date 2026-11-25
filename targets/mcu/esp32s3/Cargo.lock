@@ -267,7 +267,9 @@ dependencies = [
  "esp-bootloader-esp-idf",
  "esp-hal",
  "esp-rtos",
+ "esp32s3",
  "static_cell",
+ "toml",
 ]
 
 [[package]]

@@ -95,6 +95,10 @@ required-features = ["relay"]
 [target.'cfg(not(target_os = "none"))'.dev-dependencies]
 dagon-sim = { path = "../../../crates/dagon-sim" }
 dagon-topology = { path = "../../../crates/dagon-topology" }
+# tests/peripheral_map.rs: the definition's register blocks against the
+# chip data embassy-rp builds on (rp-pac, generated from the RP2040's SVD).
+rp-pac = { version = "7", features = ["rp2040"] }
+toml = { version = "0.8", default-features = false, features = ["parse"] }
 
 [target.'cfg(target_os = "none")'.dev-dependencies]
 embassy-rp = { version = "0.10.0", features = ["rp2040", "time-driver", "critical-section-impl"] }

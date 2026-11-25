@@ -945,6 +945,15 @@ fn a_node_side_test_has_until_its_deadline() {
     let timings = NodeTimings::<dagon_port::timeout::EraseLayout>::FALLBACK;
     assert_eq!(timings.conf_deadline_s(1, limits), Some(11));
     assert_all_pass(&slow(9_000));
+    // Done just inside the deadline, whatever the phase of the polls.
+    for ms in [10_100, 10_400, 10_700, 10_950] {
+        assert_all_pass(&slow(ms));
+    }
+    // Done just past it: the last poll leaves at the deadline.
+    let ct01 = |ms| slow(ms).results.iter().find(|c| c.id == 1).unwrap().verdict;
+    for ms in [11_100, 11_400, 11_900] {
+        assert_eq!(ct01(ms), Verdict::Fail, "{ms} ms");
+    }
     let r = slow(12_000);
     for id in [1, 2, 3, 7, 8] {
         let ct = r.results.iter().find(|c| c.id == id).unwrap();

@@ -369,7 +369,11 @@ impl<'a, 's, C: Channel> Runner<'a, 's, C> {
     /// the test, then CONF_RESULT every [`timeout::CONF_POLL_MS`] until the
     /// run is done or its deadline ([`NodeTimings::conf_deadline_s`]) has
     /// passed. A poll the node does not answer (it is running the test) is
-    /// not a failure before the deadline.
+    /// not a failure before the deadline. The last poll that can pass the
+    /// test leaves at the deadline, not a poll interval past it: a run
+    /// done by the deadline passes, a later one does not. After a missed
+    /// deadline the node has the same time again to answer a poll, so the
+    /// next test starts on a node that listens.
     fn conf_run(&mut self, id: u8) -> Step<(u32, Detail)> {
         self.conf_list()?;
         let listed = self.listed.is_some_and(|(t, n)| t[..n].contains(&id));
@@ -394,32 +398,53 @@ impl<'a, 's, C: Channel> Runner<'a, 's, C> {
             return Err(detail!("CONF_RUN: verdict {}, no run", taken.verdict));
         }
         let n = payload::encode_conf_result(id, &mut p).map_err(|_| detail!("encode"))?;
+        let span = u64::from(deadline_s) * 1000;
+        let end = t0 + span;
+        // Set once the poll at the deadline went unanswered: the run has
+        // failed, and the node is given the same time again to answer.
+        let mut late = false;
         loop {
-            if let Ok(r) = self.call(Cmd::ConfResult, &p[..n], timeout::REQUEST_MS) {
-                match r.status {
-                    Status::Ok => {
-                        let c = ConfResultResp::parse(r.body())
-                            .map_err(|_| detail!("CONF_RESULT: bad body"))?;
-                        if c.run_id != taken.run_id {
-                            return Err(detail!("run {} lost (the node reset)", taken.run_id));
+            let asked = self.ch.now_ms();
+            let answer = self.call(Cmd::ConfResult, &p[..n], timeout::REQUEST_MS);
+            let miss = detail!("no result in {} s", deadline_s);
+            if late {
+                if answer.is_ok() || asked >= end + span {
+                    return Err(miss);
+                }
+            } else {
+                let answered = answer.is_ok();
+                if let Ok(r) = answer {
+                    match r.status {
+                        Status::Ok => {
+                            let c = ConfResultResp::parse(r.body())
+                                .map_err(|_| detail!("CONF_RESULT: bad body"))?;
+                            if c.run_id != taken.run_id {
+                                return Err(detail!("run {} lost (the node reset)", taken.run_id));
+                            }
+                            if c.state == payload::conf_state::DONE {
+                                let d = Detail::from_bytes(c.detail);
+                                return match c.verdict {
+                                    payload::verdict::PASS => Ok((c.measured, d)),
+                                    payload::verdict::FAIL => Err(d),
+                                    v => Err(detail!("CONF_RESULT: verdict {}", v)),
+                                };
+                            }
                         }
-                        if c.state == payload::conf_state::DONE {
-                            let d = Detail::from_bytes(c.detail);
-                            return match c.verdict {
-                                payload::verdict::PASS => Ok((c.measured, d)),
-                                payload::verdict::FAIL => Err(d),
-                                v => Err(detail!("CONF_RESULT: verdict {}", v)),
-                            };
-                        }
+                        Status::Timeout => {}
+                        s => return Err(detail!("CONF_RESULT: {:?}", s)),
                     }
-                    Status::Timeout => {}
-                    s => return Err(detail!("CONF_RESULT: {:?}", s)),
+                }
+                if asked >= end {
+                    if answered {
+                        return Err(miss);
+                    }
+                    late = true;
                 }
             }
-            if self.ch.now_ms() - t0 >= u64::from(deadline_s) * 1000 {
-                return Err(detail!("no result in {} s", deadline_s));
-            }
-            self.ch.sleep_ms(timeout::CONF_POLL_MS);
+            let stop = if late { end + span } else { end };
+            let left = stop.saturating_sub(self.ch.now_ms());
+            self.ch
+                .sleep_ms(timeout::CONF_POLL_MS.min(left.try_into().unwrap_or(u32::MAX)));
         }
     }
 

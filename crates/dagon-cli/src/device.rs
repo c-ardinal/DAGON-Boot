@@ -637,6 +637,12 @@ where
                 let node = name(r.node);
                 format!("does not answer, nothing sent; write it directly: dagon flash {node}")
             }
+            Outcome::Realigned(v) => format!(
+                "back on {v}: a compatibility constraint ties it to a node that stayed off the package's version"
+            ),
+            Outcome::Incompatible(v) => format!(
+                "on {v}, against a compatibility constraint with a node that stayed off the package's version; it could not go back"
+            ),
             other => {
                 ok = false;
                 format!("not confirmed: {other:?}")

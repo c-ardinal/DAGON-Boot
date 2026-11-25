@@ -2518,3 +2518,88 @@ fn wire(enc: impl FnOnce(&mut [u8]) -> Result<usize, dagon_proto::FrameError>) -
     b.truncate(n);
     b
 }
+
+// Compatibility constraints after a node stayed off the release's version.
+
+/// Applies release 1.1.0 built for the sim topology plus `constraints`,
+/// with the hub's images tampered (the hub refuses them), the host-side
+/// checks off. The seg is written first and confirms.
+fn apply_with_a_refused_hub(constraints: &str) -> (Host<Sim, Sim>, Vec<NodeOutcome<()>>) {
+    use dagon_format::bundle::{dest, BundleView};
+    let yaml = format!("{}{constraints}", yaml());
+    let t = dagon_topology::parse_str(&yaml).unwrap();
+    let v = Version::new(1, 1, 0);
+    let images = [seg_img(0, v), seg_img(1, v), hub_img(0, v), hub_img(1, v)];
+    let reg = dagon_topology::defs::Registry::builtin();
+    let mut b = dagon_sign::release::build(reg, &t, &topology(&yaml), &images, "r1.1", &key())
+        .unwrap()
+        .bundle;
+    let hub_items: Vec<usize> = {
+        let view = BundleView::parse(&b).unwrap();
+        (0..view.item_count())
+            .map(|i| view.item(i))
+            .filter(|it| it.dest != dest::SUB_STORE)
+            .map(|it| it.offset as usize)
+            .collect()
+    };
+    for off in hub_items {
+        b[off + 0x18] ^= 1;
+    }
+    let s = sim();
+    let mut h = host(&s);
+    let out = block_on(h.apply_unverified(&b, &topology(&yaml), None, &mut |_| {})).unwrap();
+    (h, out)
+}
+
+#[test]
+fn a_node_in_lockstep_with_one_that_stayed_goes_back_to_its_version() {
+    let (mut h, out) = apply_with_a_refused_hub("constraints:\n  - lockstep: [hub, seg]\n");
+    let old = Version::new(1, 0, 0);
+    assert!(
+        matches!(out[0].outcome, Outcome::Realigned(v) if v == old),
+        "{out:?}"
+    );
+    assert!(matches!(out[1].outcome, Outcome::Failed(_)), "{out:?}");
+    let st = block_on(h.status(seg_at())).unwrap();
+    assert_eq!(
+        (st.hello.active_version, st.hello.trial, st.status.confirmed),
+        (old, false, 0),
+        "the seg runs its earlier version, confirmed"
+    );
+    assert_eq!(
+        block_on(h.status(Target::Local))
+            .unwrap()
+            .hello
+            .active_version,
+        old
+    );
+}
+
+#[test]
+fn a_node_no_constraint_ties_to_the_one_that_stayed_keeps_the_new_version() {
+    let new = Version::new(1, 1, 0);
+    for constraints in [
+        "",
+        "constraints:\n  - requires: { node: hub, needs: seg, min: 1.1.0 }\n",
+    ] {
+        let (mut h, out) = apply_with_a_refused_hub(constraints);
+        assert!(
+            matches!(out[0].outcome, Outcome::Done(v) if v == new),
+            "{constraints}: {out:?}"
+        );
+        assert!(matches!(out[1].outcome, Outcome::Failed(_)), "{out:?}");
+        let st = block_on(h.status(seg_at())).unwrap();
+        assert_eq!(st.hello.active_version, new);
+    }
+}
+
+#[test]
+fn a_node_that_needs_the_one_that_stayed_goes_back() {
+    let (_h, out) = apply_with_a_refused_hub(
+        "constraints:\n  - requires: { node: seg, needs: hub, min: 1.1.0 }\n",
+    );
+    assert!(
+        matches!(out[0].outcome, Outcome::Realigned(v) if v == Version::new(1, 0, 0)),
+        "{out:?}"
+    );
+}

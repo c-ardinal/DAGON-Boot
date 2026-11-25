@@ -15,6 +15,7 @@ mod ops;
 mod percent;
 pub mod ports;
 mod progress;
+pub mod realign;
 pub mod rom;
 mod routes;
 mod timings;

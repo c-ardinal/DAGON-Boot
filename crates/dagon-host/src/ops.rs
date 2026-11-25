@@ -70,6 +70,15 @@ pub enum Outcome<E> {
     /// takes its first write directly (the factory write, or the ROM path
     /// where its MCU and link have one: [`Host::write_path`]).
     NeedsFirstWrite,
+    /// Written and confirmed on the release's version, then taken back to
+    /// this one (the version it ran before): another node of the run stayed
+    /// off the release's version, and a compatibility constraint of the
+    /// release ties the two ([`crate::realign`]).
+    Realigned(Version),
+    /// Runs this version, and a compatibility constraint of the release
+    /// with a node that stayed off the release's version does not hold: it
+    /// could not be taken back.
+    Incompatible(Version),
 }
 
 #[derive(Debug)]
@@ -206,21 +215,94 @@ impl<T: Transport, C: HostClock> Host<T, C> {
             .map_err(Error::Route)?;
 
         let mut out = Vec::new();
+        let mut before = Vec::new();
         let mut failed = false;
         for (node, target) in planned {
-            let outcome = if failed {
-                Outcome::NotStarted
+            let (was, outcome) = if failed {
+                (None, Outcome::NotStarted)
             } else {
                 self.apply_node(&b, node, target, on_event).await
             };
             failed |= matches!(outcome, Outcome::Failed(_));
+            before.push(was);
             out.push(NodeOutcome {
                 node,
                 target,
                 outcome,
             });
         }
+        if failed {
+            self.realign(&b, &mut out, &before, on_event).await;
+        }
         Ok(out)
+    }
+
+    /// After a run that stopped at a node: takes the nodes written before it
+    /// back to the version they ran, where a compatibility constraint of the
+    /// release no longer holds with a node that stayed off the release's
+    /// version ([`crate::realign::realign`]). `before` is the app version
+    /// each node of `out` ran when its turn came.
+    async fn realign(
+        &mut self,
+        b: &BundleView<'_>,
+        out: &mut [NodeOutcome<T::Error>],
+        before: &[Option<Version>],
+        on_event: &mut dyn FnMut(Event),
+    ) {
+        let m = b.manifest();
+        let constraints: Vec<_> = (0..m.constraint_count()).map(|i| m.constraint(i)).collect();
+        if constraints.is_empty() {
+            return;
+        }
+        let mut nodes = Vec::new();
+        for (r, was) in out.iter().zip(before) {
+            let release = app_version(b, r.node);
+            let (before, running) = match (&r.outcome, *was) {
+                (Outcome::Done(v), Some(was)) => (was, release.unwrap_or(*v)),
+                (Outcome::Failed(_), Some(was)) => match self.hello(r.target).await {
+                    // Left on trial, the release's version is not kept: the
+                    // node goes back by itself.
+                    Ok(h) if h.trial => (was, was),
+                    Ok(h) => (was, h.active_version),
+                    Err(_) => continue,
+                },
+                (Outcome::NotStarted, _) => match self.hello(r.target).await {
+                    Ok(h) => (h.active_version, h.active_version),
+                    Err(_) => continue,
+                },
+                _ => continue,
+            };
+            nodes.push(crate::realign::Node {
+                index: r.node,
+                release: release.unwrap_or(running),
+                before,
+                running,
+            });
+        }
+        let plan = crate::realign::realign(&constraints, &nodes);
+        for r in out.iter_mut() {
+            let Outcome::Done(v) = r.outcome else {
+                continue;
+            };
+            if plan.stuck.contains(&r.node) {
+                r.outcome = Outcome::Incompatible(v);
+            }
+            if !plan.back.contains(&r.node) {
+                continue;
+            }
+            let slots = slots_of(b, r.node, image_kind::APP);
+            r.outcome = match self.rollback(r.target, r.node, &slots, on_event).await {
+                Ok(was) => Outcome::Realigned(was),
+                Err(e) => {
+                    self.note(&format!(
+                        "{:?}: could not go back from {v}: {}",
+                        r.target,
+                        reason(&e)
+                    ));
+                    Outcome::Incompatible(v)
+                }
+            };
+        }
     }
 
     /// One planned node of an apply: [`Outcome::NeedsFirstWrite`] when the
@@ -233,18 +315,19 @@ impl<T: Transport, C: HostClock> Host<T, C> {
         node: u8,
         to: Target,
         on_event: &mut dyn FnMut(Event),
-    ) -> Outcome<T::Error> {
+    ) -> (Option<Version>, Outcome<T::Error>) {
         let st = match self.status(to).await {
             Ok(st) => st,
             Err(e) if is_silent(&e) && !self.opened.contains(&to) => {
-                return Outcome::NeedsFirstWrite
+                return (None, Outcome::NeedsFirstWrite)
             }
-            Err(e) => return Outcome::Failed(e),
+            Err(e) => return (None, Outcome::Failed(e)),
         };
-        match self.update_with(b, node, to, &st, false, on_event).await {
+        let outcome = match self.update_with(b, node, to, &st, false, on_event).await {
             Ok(v) => Outcome::Done(v),
             Err(e) => Outcome::Failed(e),
-        }
+        };
+        (Some(st.hello.active_version), outcome)
     }
 
     async fn update_node(
@@ -1333,6 +1416,16 @@ fn image_of<'a>(b: &BundleView<'a>, node: u8, kind: u8, slot: u8) -> Option<&'a 
             && (e.slot_binding == slot || e.slot_binding == slot_binding::ANY);
         fits.then(|| b.item_bytes(i))
     })
+}
+
+/// The newest app version the release gives `node`.
+fn app_version(b: &BundleView<'_>, node: u8) -> Option<Version> {
+    let m = b.manifest();
+    (0..m.entry_count())
+        .map(|i| m.entry(i))
+        .filter(|e| e.node_index == node && e.image_kind == image_kind::APP)
+        .map(|e| e.version)
+        .max()
 }
 
 /// The release has an image of `kind` for `node`.

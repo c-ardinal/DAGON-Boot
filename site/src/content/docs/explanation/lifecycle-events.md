@@ -146,7 +146,7 @@ len, next }`です。プロトコルのリクエストは例外なく遷移で�
 | `host.node.discovered` | 検出 | `target`、識別 |
 | `host.node.step` | ノードの各段階（TRANSFER、VERIFY、REBOOT、CONFIRM、REJECTED、FAILED、ROM） | `node`、`target`、`phase`、`percent`、`version` |
 | `host.node.reconnecting` | 再起動後のバージョンを待機中 | `node`、`elapsed_ms`、`other_version?` |
-| `host.node.result` | | `node`、`Done(v) \| Failed(reason, status?) \| NotStarted \| NeedsFirstWrite`（`NeedsFirstWrite`: PC接続のノードの報告で無応答のノードです。このノードへの送信はなく、他ノードの書込は継続します。このノードには直接の書込が必要です） |
+| `host.node.result` | | `node`、`Done(v) \| Failed(reason, status?) \| NotStarted \| NeedsFirstWrite \| Realigned(v) \| Incompatible(v)`（`NeedsFirstWrite`: PC接続のノードの報告で無応答のノードです。このノードへの送信はなく、他ノードの書込は継続します。このノードには直接の書込が必要です。`Realigned`: 書込と確定の後、パッケージのバージョン以外に残留したノードとの互換制約を維持する目的で`v`へ復帰したノードです。`Incompatible`: 該当の制約が不成立で、復帰不能だったノードです。[ノード間のバージョンの整合](/how-to/constraints/)を参照） |
 | `host.confirm.result` | | `Confirmed \| NotOnTrial \| NeedsChoice` |
 | `host.rollback.*`、`host.recover.*` | deployと同一の形式 | |
 | `host.provision.started` / `host.provision.recorded` | ROM経由の初回インストール。インストールしたブートイメージの識別を記録した | `node`、`boot_sha256` |

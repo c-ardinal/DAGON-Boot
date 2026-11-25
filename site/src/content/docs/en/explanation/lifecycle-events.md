@@ -296,7 +296,7 @@ build runner are ports (2.1).
 | `host.node.discovered` | discovery | `target`, identity |
 | `host.node.step` | every phase for a node (TRANSFER, VERIFY, REBOOT, CONFIRM, REJECTED, FAILED, ROM) | `node`, `target`, `phase`, `percent`, `version` |
 | `host.node.reconnecting` | waiting for the version after reboot | `node`, `elapsed_ms`, `other_version?` |
-| `host.node.result` | | `node`, `Done(v) \| Failed(reason, status?) \| NotStarted \| NeedsFirstWrite` (`NeedsFirstWrite`: the relaying node reported that the node did not answer; nothing was sent to it and the other nodes are written; it takes its first write directly) |
+| `host.node.result` | | `node`, `Done(v) \| Failed(reason, status?) \| NotStarted \| NeedsFirstWrite \| Realigned(v) \| Incompatible(v)` (`NeedsFirstWrite`: the relaying node reported that the node did not answer; nothing was sent to it and the other nodes are written; it takes its first write directly. `Realigned`: written and confirmed, then taken back to `v` for a compatibility constraint with a node that stayed off the package's version. `Incompatible`: such a constraint does not hold and the node could not go back; see [Keeping node versions compatible](/en/how-to/constraints/)) |
 | `host.confirm.result` | | `Confirmed \| NotOnTrial \| NeedsChoice` |
 | `host.rollback.*`, `host.recover.*` | same shape as deploy | |
 | `host.provision.started` / `host.provision.recorded` | first install through the ROM; the installed boot image identity recorded | `node`, `boot_sha256` |

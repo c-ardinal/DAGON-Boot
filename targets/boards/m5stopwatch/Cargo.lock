@@ -244,10 +244,6 @@ dependencies = [
 name = "dagon-mcu-common"
 version = "0.1.0"
 dependencies = [
- "critical-section",
- "dagon-agent",
- "dagon-core",
- "dagon-events",
  "dagon-format",
  "dagon-port",
  "dagon-proto",
@@ -264,6 +260,7 @@ dependencies = [
  "dagon-format",
  "dagon-mcu-build",
  "dagon-mcu-common",
+ "dagon-node",
  "dagon-port",
  "dagon-proto",
  "embassy-executor",
@@ -274,6 +271,20 @@ dependencies = [
  "esp-hal",
  "esp-rtos",
  "static_cell",
+]
+
+[[package]]
+name = "dagon-node"
+version = "0.1.0"
+dependencies = [
+ "critical-section",
+ "dagon-agent",
+ "dagon-core",
+ "dagon-events",
+ "dagon-format",
+ "dagon-mcu-common",
+ "dagon-port",
+ "dagon-proto",
 ]
 
 [[package]]

@@ -925,6 +925,7 @@ size = 98304
 
 [rom_i2c]
 addr = 57
+entry = "stm32-i2c-rom"
 erase_sectors = [0, 1, 2, 4, 5]
 max_hz = 400000
 name = "STM32 ROM bootloader"

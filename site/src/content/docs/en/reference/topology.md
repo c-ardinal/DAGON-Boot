@@ -22,7 +22,9 @@ A link's `kind`, its `control.rom_entry` and a coordinator's `uplink.host` are
 strings. A name this DAGON does not have is refused by name with the names it
 has (V-01: ``this DAGON does not know the link kind `lora` ``), so a 構成
 written for a DAGON with more kinds is told apart from a malformed one. A new
-name changes no format number: `dagon: 2` stays.
+name changes no format number: `dagon: 2` stays. The names of `control.rom_entry` are not listed in the code: the MCU and
+board definitions give them (`[rom_i2c] entry`, `[[rom_entry]]`), so a
+definition alone adds one.
 
 ```yaml
 links:
@@ -46,7 +48,7 @@ links:
 | `bus` | string | no | An I2C link's bus: an `id` of `buses` (V-01). |
 | `iface` | string | no | A UART link's UART: `hw-uart0` or `pio-uart` (V-01). |
 | `baud` | integer | no | A UART link's bit rate; 115200 when left out (V-26). |
-| `control` | table | no | How a node is put into its ROM loader over this link: `kind` (`full`, `cooperative`) and `rom_entry` (`force-download-boot`, `m5pm1`, `stm32-i2c-rom`). An I2C or UART link needs `rom_entry` when it is cooperative, the default (V-11). |
+| `control` | table | no | How a node is put into its ROM loader over this link: `kind` (`full`, `cooperative`) and `rom_entry` (a name a MCU or board definition gives a ROM entry). An I2C or UART link needs `rom_entry` when it is cooperative, the default (V-11). |
 <!-- end of generated table -->
 
 ## End

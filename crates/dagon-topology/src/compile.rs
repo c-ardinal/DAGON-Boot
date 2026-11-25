@@ -17,9 +17,7 @@ use dagon_format::topology::{self as tp, TopoEnd, TopoLink, TopoNode};
 use dagon_format::Version;
 
 use crate::defs::{PortKind, Registry};
-use crate::schema::{
-    Constraint, ControlKind, End, Link, LinkKind, Role, RomEntry, Tier, UartIface,
-};
+use crate::schema::{Constraint, ControlKind, End, Link, LinkKind, Role, Tier, UartIface};
 use crate::{check_with, effective_tiers, Report, Topology};
 
 const DEFAULT_MAX_ATTEMPTS: u8 = 3;
@@ -279,10 +277,15 @@ fn link(reg: &Registry, t: &Topology, l: &Link) -> Result<TopoLink, CompileError
         nrst_pin: pin(gpios.and_then(|e| e.nrst)),
         boot_pin: pin(gpios.and_then(|e| e.boot)),
         baud,
-        rom_entry: l
-            .control
-            .rom_entry
-            .map_or(tp::rom_entry::NONE, RomEntry::wire),
+        rom_entry: match &l.control.rom_entry {
+            None => tp::rom_entry::NONE,
+            Some(r) => reg.rom_entry_code(r.name()).ok_or_else(|| {
+                bad(format!(
+                    "link {named}: no definition names the ROM entry '{}' (V-01)",
+                    r.name()
+                ))
+            })?,
+        },
         bus_id,
         gpio_end,
     })

@@ -50,7 +50,7 @@ fn unparseable_document_is_v01() {
 /// by name, with the names it has, apart from a malformed document.
 #[test]
 fn a_kind_this_dagon_does_not_know_is_named() {
-    use dagon_topology::schema::{LinkKind, RomEntry, UplinkHost};
+    use dagon_topology::schema::{LinkKind, UplinkHost};
     let said = |yaml: String| {
         let report = check_str(&yaml);
         let issues: Vec<_> = report.errors().collect();
@@ -71,7 +71,17 @@ fn a_kind_this_dagon_does_not_know_is_named() {
         m.contains("this DAGON does not know the ROM entry `swd-probe`"),
         "{m}"
     );
-    for name in RomEntry::NAMES {
+    // The names are the definitions': no list of them is in the code.
+    let names = dagon_topology::defs::Registry::builtin().rom_entries();
+    assert_eq!(
+        names,
+        [
+            ("stm32-i2c-rom", 3),
+            ("force-download-boot", 1),
+            ("m5pm1", 2)
+        ]
+    );
+    for (name, _) in names {
         assert!(m.contains(&format!("`{name}`")), "{name}: {m}");
     }
     let m = said(mutate(
@@ -97,9 +107,11 @@ fn every_name_reads_as_its_own_value() {
         assert_eq!(yaml_serde::from_str::<LinkKind>(k.name()).unwrap(), *k);
     }
     assert_eq!(LinkKind::NAMES.len(), LinkKind::ALL.len());
-    for r in RomEntry::ALL {
-        assert_eq!(RomEntry::from_name(r.name()), Some(*r));
-        assert_eq!(yaml_serde::from_str::<RomEntry>(r.name()).unwrap(), *r);
+    let reg = dagon_topology::defs::Registry::builtin();
+    for (name, code) in reg.rom_entries() {
+        assert_eq!(reg.rom_entry_code(name), Some(code));
+        assert_eq!(reg.rom_entry_name(code), Some(name));
+        assert_eq!(yaml_serde::from_str::<RomEntry>(name).unwrap().name(), name);
     }
     for h in UplinkHost::ALL {
         assert_eq!(UplinkHost::from_name(h.name()), Some(*h));

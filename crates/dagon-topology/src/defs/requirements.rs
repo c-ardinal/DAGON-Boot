@@ -280,6 +280,12 @@ pub const MCU: &[Requirement<McuCheck>] = &[
         check: rom_i2c,
     },
     Requirement {
+        engine: "compiled topology (a link's ROM entry), ENTER_ROM",
+        fields: &["rom_entry[].method"],
+        rule: "name not empty; method not 0 (no entry) and not 3 (the ROM I2C loader's)",
+        check: |m| rom_entries(&m.rom_entries),
+    },
+    Requirement {
         engine: "protection map generator (kind record)",
         fields: &[
             "isolation.ext_ram_max",
@@ -380,6 +386,12 @@ pub const BOARD: &[Requirement<BoardCheck>] = &[
         check: |_, _| Ok(()),
     },
     Requirement {
+        engine: "compiled topology (a link's ROM entry), ENTER_ROM",
+        fields: &["rom_entry[].method"],
+        rule: "name not empty; method not 0 (no entry) and not 3 (the ROM I2C loader's)",
+        check: |b, _| rom_entries(&b.rom_entries),
+    },
+    Requirement {
         engine: "stage0 clock choice (its build)",
         fields: &["clock.source.crystal_hz", "clock.source.external_hz"],
         rule: "above 0; a source no stage0.clock setup of the MCU matches runs stage0 on the internal setup",
@@ -418,7 +430,7 @@ pub const BOARD: &[Requirement<BoardCheck>] = &[
         fields: &["default_link.addr", "default_link.baud"],
         rule: "addr in 0x08..=0x77; baud one of the MCU's link_uart.bauds",
         check: |b, m| {
-            let Some(l) = b.default_link else {
+            let Some(l) = &b.default_link else {
                 return Ok(());
             };
             fail(l.addr.is_some_and(|a| !I2C_ADDRS.contains(&a)), || {
@@ -1028,6 +1040,19 @@ fn hub_pins(b: &BoardDef, m: &McuDef) -> Result<(), String> {
         )),
         None => Ok(()),
     }
+}
+
+fn rom_entries(entries: &[super::RomEntryDef]) -> Result<(), String> {
+    use dagon_format::topology::rom_entry::{I2C_LOADER, NONE};
+    entries.iter().try_for_each(|e| {
+        fail(e.name.is_empty(), || "rom_entry: name is empty".into())?;
+        fail(e.method == NONE || e.method == I2C_LOADER, || {
+            format!(
+                "rom_entry '{}': method {} is taken (0: no entry, 3: the ROM I2C loader)",
+                e.name, e.method
+            )
+        })
+    })
 }
 
 fn rom_i2c(m: &McuDef) -> Result<(), String> {

@@ -6,14 +6,9 @@
 //! may be committed. `dagon ai link` / `dagon ai unlink` and serve's
 //! /v1/agent share this.
 
-use std::io::BufRead;
 use std::path::{Path, PathBuf};
 
 use serde_json::{json, Value};
-
-use crate::agents::{AgentDef, Agents, Transport, WayDef};
-use crate::cli::AgentWay;
-use crate::keystore::Keys;
 
 /// What a linked DAGON sends and never sends; the page and the terminal
 /// show these same words when asking for consent.
@@ -24,8 +19,7 @@ pub const SENDS: [&str; 3] = [
 ];
 pub const NEVER_SENDS: [&str; 3] = ["キー", "コマンドとその出力の全文", "ファイルのパス"];
 
-/// Code of the refusal every AI route gives until DAGON is linked.
-pub const NOT_LINKED_CODE: &str = crate::agents::codes::NOT_LINKED;
+/// The refusal every AI route gives until DAGON is linked.
 pub const NOT_LINKED: &str =
     "DAGON is not linked to an agent; link it first (consent is asked once)";
 
@@ -59,7 +53,7 @@ pub fn consent(home: &Path) -> Option<Consent> {
     }
     let id = |k: &str| {
         v[k].as_str()
-            .filter(|s| crate::agents::plain_id(s))
+            .filter(|s| crate::values::plain_id(s))
             .map(str::to_string)
     };
     Some(Consent {
@@ -232,63 +226,6 @@ pub fn hold(home: &Path) -> Result<Held, String> {
     })
 }
 
-type LinkedWay<'a> = (Consent, &'a AgentDef, &'a WayDef);
-
-/// The consent when its agent and way are still defined.
-pub fn linked<'a>(home: &Path, agents: &'a Agents) -> Option<LinkedWay<'a>> {
-    let c = consent(home)?;
-    let (a, w) = agents.way(&c.agent, &c.way)?;
-    Some((c.clone(), a, w))
-}
-
-/// GET /v1/agent: the agents and ways (with whether each can be used here:
-/// program on PATH, key registered; never a key, path or command), the
-/// consent, and what linking sends. A way that takes a key also says
-/// whether one is registered (`key`). `available` and `provider` describe
-/// the linked way, or the default one before linking.
-pub fn status(home: Option<&Path>, agents: &Agents, keys: &Keys) -> Value {
-    let linked = home.and_then(|h| linked(h, agents));
-    let (a, w) = linked
-        .as_ref()
-        .map(|(_, a, w)| (*a, *w))
-        .unwrap_or_else(|| agents.default_way());
-    let list: Vec<Value> = agents
-        .list
-        .iter()
-        .map(|a| {
-            let ways: Vec<Value> = a
-                .ways
-                .iter()
-                .map(|w| {
-                    let key = w.transport.takes_key().then(|| keys.is_set(&a.id, &w.id));
-                    json!({
-                        "id": w.id,
-                        "name": w.name,
-                        "kind": w.transport.kind(),
-                        "available": w.available(&a.id, keys),
-                        "key": key,
-                    })
-                })
-                .collect();
-            json!({ "id": a.id, "name": a.name, "provider": a.provider, "ways": ways })
-        })
-        .collect();
-    let (da, dw) = agents.default_way();
-    json!({
-        "available": w.available(&a.id, keys),
-        "linked": linked.is_some(),
-        "provider": { "id": a.id, "name": a.label() },
-        "consent": linked.map(|(c, _, _)| json!({ "agent": c.agent, "way": c.way, "at": c.at })),
-        "agents": list,
-        "default": { "agent": da.id, "way": dw.id },
-        "errors": agents.errors,
-        // A consent file this dagon does not read: why (link again).
-        "consent_error": home.and_then(unknown_version),
-        "sends": SENDS,
-        "never_sends": NEVER_SENDS,
-    })
-}
-
 /// The one place the user's home folder is found: agent.json, recent.json,
 /// the agents' definitions and the signing keys all live under it.
 pub fn home() -> Result<PathBuf, String> {
@@ -296,134 +233,6 @@ pub fn home() -> Result<PathBuf, String> {
         .or_else(|| std::env::var_os("HOME"))
         .map(PathBuf::from)
         .ok_or_else(|| "cannot find the home folder".into())
-}
-
-/// The error `dagon ai topology` and `ask` give before linking.
-pub fn require_linked(home: &Path) -> Result<(), String> {
-    if linked(home, &Agents::load(Some(home))).is_some() {
-        Ok(())
-    } else if let Some(e) = unknown_version(home) {
-        Err(e)
-    } else {
-        Err(
-            "DAGON is not linked to an agent; run dagon ai link first (consent is asked once)"
-                .into(),
-        )
-    }
-}
-
-/// The consent text of the terminal: the page's linking dialog, worded for
-/// the CLI.
-fn consent_text(a: &AgentDef, w: &WayDef) -> String {
-    let list = |l: &[&str]| l.join("、");
-    let key = match &w.transport {
-        Transport::Command(c) => format!(
-            "キー: {}の設定とログインを使用します。DAGONはキーを参照しません",
-            c.program
-        ),
-        Transport::MessagesHttp(_) => format!(
-            "キー: OSの資格情報ストアに保管します（dagon ai key set --agent {} --way {}）。\
-             キーは画面にも送信テキストにも出力しません",
-            a.id, w.id
-        ),
-    };
-    format!(
-        "DAGONとの連携\n\n\
-         DAGONは連携したエージェントへ構成について照会して回答します。\
-         送信への同意は、この連携の際に1度だけ取得します。\
-         連携後の質問は確認なしで送信します。\n\n\
-         送信先: {}　接続方式: {}\n\
-         {key}\n\
-         送信内容: {}\n\
-         送信対象外: {}\n\n\
-         連携はdagon ai unlinkで随時解除可能です。解除すると同意も撤回します。",
-        a.label(),
-        w.name,
-        list(&SENDS),
-        list(&NEVER_SENDS),
-    )
-}
-
-/// The agent and way `--agent` / `--way` name (default: the first agent,
-/// its first way `default_way` accepts, else its first way).
-pub(crate) fn chosen<'a>(
-    agents: &'a Agents,
-    sel: &AgentWay,
-    default_way: impl Fn(&WayDef) -> bool,
-) -> Result<(&'a AgentDef, &'a WayDef), String> {
-    let (agent, way) = (sel.agent.as_deref(), sel.way.as_deref());
-    let a = match agent {
-        Some(id) => agents.list.iter().find(|a| a.id == id),
-        None => agents.list.first(),
-    }
-    .ok_or_else(|| format!("no agent {}", agent.unwrap_or_default()))?;
-    let w = match way {
-        Some(id) => a.ways.iter().find(|w| w.id == id),
-        None => a.ways.iter().find(|w| default_way(w)).or(a.ways.first()),
-    }
-    .ok_or_else(|| format!("{} has no way {}", a.id, way.unwrap_or_default()))?;
-    Ok((a, w))
-}
-
-/// `dagon ai link`: shows what is sent and to
-/// whom, and records consent on "y".
-pub fn link_command(sel: &AgentWay) -> Result<(), String> {
-    let home = home()?;
-    let agents = Agents::load(Some(&home));
-    for e in &agents.errors {
-        eprintln!("warning: ~/.dagon/agents/{e}");
-    }
-    let (a, w) = chosen(&agents, sel, |_| true)?;
-    if let Some((c, _, _)) = linked(&home, &agents) {
-        if c.agent == a.id && c.way == w.id {
-            println!("DAGONは連携済です。同意は{}に記録しました", c.at);
-            return Ok(());
-        }
-    }
-    eprintln!("{}\n", consent_text(a, w));
-    eprint!("同意して連携しますか？ [y/N] ");
-    let mut line = String::new();
-    let _ = std::io::stdin().lock().read_line(&mut line);
-    if !matches!(line.trim(), "y" | "Y" | "yes") {
-        println!("連携しませんでした");
-        return Ok(());
-    }
-    let c = link(&home, &a.id, &w.id)?;
-    println!(
-        "DAGONと連携しました。送信先{}（{}）と送信内容への同意を{}に記録しました",
-        a.label(),
-        w.name,
-        c.at
-    );
-    if !w.available(&a.id, &Keys::system()) {
-        println!(
-            "この接続方式は現時点で使用不可です。{}",
-            unavailable_hint(a, w)
-        );
-    }
-    Ok(())
-}
-
-fn unavailable_hint(a: &AgentDef, w: &WayDef) -> String {
-    match &w.transport {
-        Transport::Command(c) => format!("{}をPATHから実行可能にしてください", c.program),
-        Transport::MessagesHttp(_) => format!(
-            "dagon ai key set --agent {} --way {}でキーを登録してください",
-            a.id, w.id
-        ),
-    }
-}
-
-/// `dagon ai unlink`: removes the consent.
-pub fn unlink_command() -> Result<(), String> {
-    if unlink(&home()?)? {
-        println!(
-            "DAGONとの連携を解除し、同意を撤回しました。キーやログインはエージェント側で削除してください"
-        );
-    } else {
-        println!("DAGONは未連携です");
-    }
-    Ok(())
 }
 
 /// `YYYY-MM-DDTHH:MM:SSZ` with a real month, day and time of day.
@@ -493,6 +302,9 @@ fn rfc3339(secs: u64) -> String {
 #[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
+    use crate::agents::Agents;
+    use crate::ailink::{linked, require_linked, status};
+    use crate::keystore::Keys;
 
     fn tmp_home(name: &str) -> PathBuf {
         let d = std::env::temp_dir().join(format!("dagon-agent-{name}-{}", std::process::id()));
@@ -707,37 +519,5 @@ mod tests {
         }
         // The words shown are not part of the recorded consent: its format does not move with them.
         assert_eq!(FILE_VERSION, 1);
-    }
-
-    #[test]
-    fn the_terminal_shows_the_same_lists_as_the_page() {
-        let agents = Agents::load(None);
-        let (a, cc) = agents.way("claude", "claude-code").unwrap();
-        let (_, api) = agents.way("claude", "api").unwrap();
-        let api_key = "dagon ai key set --agent claude --way api";
-        for (w, key) in [(cc, "claudeの設定とログイン"), (api, api_key)] {
-            let t = consent_text(a, w);
-            for s in SENDS.iter().chain(&NEVER_SENDS) {
-                assert!(t.contains(s), "{s}");
-            }
-            assert!(t.contains("Claude (Anthropic)") && t.contains(&w.name) && t.contains(key));
-        }
-        let any = |_: &WayDef| true;
-        let pick = |agent: Option<&str>, way: Option<&str>| AgentWay {
-            agent: agent.map(String::from),
-            way: way.map(String::from),
-        };
-        assert_eq!(
-            chosen(&agents, &pick(None, None), any).unwrap().1.id,
-            "claude-code"
-        );
-        let key = |w: &WayDef| w.transport.takes_key();
-        assert_eq!(chosen(&agents, &pick(None, None), key).unwrap().1.id, "api");
-        assert_eq!(
-            chosen(&agents, &pick(None, Some("api")), any).unwrap().1.id,
-            "api"
-        );
-        assert!(chosen(&agents, &pick(Some("other"), None), any).is_err());
-        assert!(chosen(&agents, &pick(None, Some("nope")), any).is_err());
     }
 }

@@ -505,7 +505,7 @@ fn line_diff(old: &str, new: &str) -> String {
 pub fn command(words: &[String]) -> Result<(), String> {
     let q = parse(&json!({ "question": words.join(" ") }))?;
     let home = crate::consent::home()?;
-    crate::consent::require_linked(&home)?;
+    crate::ailink::require_linked(&home)?;
     let keys = crate::keystore::Keys::system();
     crate::agents::ready(&home, &keys)?;
     let cfg = crate::config::Config::load(None)?;
@@ -526,7 +526,7 @@ pub fn command(words: &[String]) -> Result<(), String> {
     };
     let r = ask(&q, &facts, &mut api)?;
     // Unlinked (elsewhere) while the answer was on its way: not shown.
-    crate::consent::require_linked(&home)?;
+    crate::ailink::require_linked(&home)?;
     println!("{}", r.answer);
     if let Some((diff, _)) = r.proposal {
         println!(

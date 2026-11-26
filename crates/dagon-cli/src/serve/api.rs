@@ -328,7 +328,7 @@ fn not_linked() -> Response {
     coded(
         409,
         crate::consent::NOT_LINKED,
-        crate::consent::NOT_LINKED_CODE,
+        crate::agents::codes::NOT_LINKED,
     )
 }
 
@@ -417,14 +417,14 @@ fn agents_of(server: &Server) -> crate::agents::Agents {
 
 fn agent_linked(server: &Server) -> bool {
     super::project::home(server)
-        .is_ok_and(|h| crate::consent::linked(&h, &agents_of(server)).is_some())
+        .is_ok_and(|h| crate::ailink::linked(&h, &agents_of(server)).is_some())
 }
 
 /// GET /v1/agent: the agents and their ways (whether each can be used
 /// here; never a key, path or command), the consent, what linking sends.
 fn agent_get(server: &Server) -> Response {
     let home = super::project::home(server).ok();
-    json_ok(crate::consent::status(
+    json_ok(crate::ailink::status(
         home.as_deref(),
         &agents_of(server),
         server.keys(),

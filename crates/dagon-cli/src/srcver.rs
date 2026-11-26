@@ -173,6 +173,22 @@ pub(crate) fn agreed(source: Version, given: Option<&str>, what: &str) -> Result
     Ok(source)
 }
 
+/// Node `node`'s app version: its crate's Cargo.toml `version`; `given`
+/// (`--version`) must be the same.
+pub(crate) fn app_version(
+    cfg: &crate::config::Config,
+    node: &str,
+    given: Option<&str>,
+) -> Result<Version, String> {
+    let b = cfg
+        .build
+        .get(node)
+        .ok_or_else(|| format!("no [build.{node}] in dagon.toml"))?;
+    let what = b.package.join("Cargo.toml").display().to_string();
+    let source = crate_version(&cfg.base.join(&b.package))?;
+    agreed(source, given, &what)
+}
+
 #[cfg(test)]
 // Tests set up and inspect their own scratch folders directly.
 #[allow(clippy::disallowed_methods)]

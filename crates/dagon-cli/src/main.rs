@@ -2,6 +2,7 @@
 
 mod agents;
 mod ai;
+mod ailink;
 mod ask;
 mod childenv;
 mod cli;
@@ -38,6 +39,7 @@ mod simfault;
 mod simrun;
 mod simworld;
 mod srcver;
+mod templates;
 mod values;
 mod versions;
 
@@ -102,9 +104,9 @@ fn main() -> ExitCode {
         Command::Doctor(a) => run(doctor::command(&a)),
         Command::Serve(a) => run(serve::command(&a)),
         Command::Sim(a) => run(simworld::command(&a)),
-        Command::Ai(AiCmd::Link(a)) => run(consent::link_command(&a)),
-        Command::Ai(AiCmd::Unlink) => run(consent::unlink_command()),
-        Command::Ai(AiCmd::Key(k)) => run(keystore::command(&k)),
+        Command::Ai(AiCmd::Link(a)) => run(ailink::link_command(&a)),
+        Command::Ai(AiCmd::Unlink) => run(ailink::unlink_command()),
+        Command::Ai(AiCmd::Key(k)) => run(ailink::key_command(&k)),
         Command::Ai(AiCmd::Ask(a)) => run(ask::command(&a.question)),
         Command::Ai(AiCmd::Topology(a)) => run(ai::topology(&a)),
         Command::Ai(AiCmd::Port(a)) => run(ai::port::command(&a)),

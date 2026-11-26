@@ -39,7 +39,7 @@ const GENERATED: &str = "dagon";
 /// The project folder holding each node's boot crate (`boot/<id>/`), only
 /// what `dagon gen` writes there.
 pub(crate) const BOOT_CRATES: &str = "boot";
-use crate::scaffold::{write, Written};
+use crate::templates::{write, Written};
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -215,7 +215,7 @@ fn boot_crate(
     mine: &DeveloperFields,
 ) -> Result<Files, String> {
     let root = crate::dagonsrc::root(p.src, p.base)?;
-    let template = crate::scaffold::boot_template(&root, &n.mcu)
+    let template = crate::templates::boot_template(&root, &n.mcu)
         .ok_or_else(|| format!("the DAGON source has no boot core template for {}", n.mcu))?;
     let up = "../../";
     let mut deps = Vec::new();
@@ -250,7 +250,7 @@ fn boot_crate(
     template
         .into_iter()
         .map(|(rel, text)| {
-            let text = crate::scaffold::render_deps(&text, p.src, p.base)?
+            let text = crate::templates::render_deps(&text, p.src, p.base)?
                 .replace("{{boot_extensions}}", &deps.join("\n"))
                 .replace("{{boot_metadata}}", meta.trim_end())
                 .replace("{{node}}", &n.id)

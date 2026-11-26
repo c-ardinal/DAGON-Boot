@@ -442,6 +442,21 @@ pub struct DagonSource {
     pub path: Option<PathBuf>,
 }
 
+/// The key the firmware embeds: the build key of dagon.toml or
+/// DAGON_PUBKEY ([`build_pubkey`]), else the signing key's
+/// public half. A build key other than the signing key is refused: the
+/// boards would reject every image signed here.
+pub(crate) fn firmware_key(cfg: &Config, key: &KeyPair) -> Result<[u8; 32], String> {
+    match build_pubkey(cfg)? {
+        Some(k) if k != *key.pk => Err(
+            "the build key (pubkey in dagon.toml or DAGON_PUBKEY) is not the signing key's \
+             public half"
+                .into(),
+        ),
+        _ => Ok(*key.pk),
+    }
+}
+
 #[cfg(test)]
 // Tests set up and inspect their own scratch folders directly.
 #[allow(clippy::disallowed_methods)]

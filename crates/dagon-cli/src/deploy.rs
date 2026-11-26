@@ -16,10 +16,11 @@ use ed25519_compact::KeyPair;
 
 use crate::cli::DeployArgs;
 use crate::commands::{image_for_node, SignOpts};
-use crate::config::{load_key, Config};
+use crate::config::{firmware_key, load_key, Config};
 use crate::defs::read_topology;
 use crate::nodebuild::{self, SlotElfs};
 use crate::prompt::confirm;
+use crate::srcver::app_version;
 use crate::values::has_slot_b_link;
 
 /// Release `apply` takes by default when dagon.toml names none.
@@ -87,22 +88,6 @@ pub(crate) fn release_versions(
         Err(e) => return Err(format!("cannot read {}: {e}", path.display())),
     };
     crate::kept::versions_of(t, &bytes, pubkey).map_err(|e| format!("{}: {e}", path.display()))
-}
-
-/// Node `node`'s app version: its crate's Cargo.toml `version`; `given`
-/// (`--version`) must be the same.
-pub(crate) fn app_version(
-    cfg: &Config,
-    node: &str,
-    given: Option<&str>,
-) -> Result<Version, String> {
-    let b = cfg
-        .build
-        .get(node)
-        .ok_or_else(|| format!("no [build.{node}] in dagon.toml"))?;
-    let what = b.package.join("Cargo.toml").display().to_string();
-    let source = crate::srcver::crate_version(&cfg.base.join(&b.package))?;
-    crate::srcver::agreed(source, given, &what)
 }
 
 /// `pos`, else every `[build.<id>]` node, ordered as the topology updates
@@ -241,21 +226,6 @@ fn answer(yes: bool, question: &str, input: &mut dyn BufRead) -> bool {
         return true;
     }
     confirm(question, input)
-}
-
-/// The key the firmware embeds: the build key of dagon.toml or
-/// DAGON_PUBKEY ([`crate::config::build_pubkey`]), else the signing key's
-/// public half. A build key other than the signing key is refused: the
-/// boards would reject every image signed here.
-pub(crate) fn firmware_key(cfg: &Config, key: &KeyPair) -> Result<[u8; 32], String> {
-    match crate::config::build_pubkey(cfg)? {
-        Some(k) if k != *key.pk => Err(
-            "the build key (pubkey in dagon.toml or DAGON_PUBKEY) is not the signing key's \
-             public half"
-                .into(),
-        ),
-        _ => Ok(*key.pk),
-    }
 }
 
 /// `dagon deploy` (each node's boot core goes in too, from its boot crate,

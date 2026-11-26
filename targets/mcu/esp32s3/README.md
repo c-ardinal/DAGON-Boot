@@ -169,13 +169,21 @@ The slots DAGON receives into, as flash offsets in `partitions.csv`
   erased before the body and written last.
 - SET_PENDING: an otadata trial entry (state New) for the slot, including the
   slot of the previously confirmed version (going back needs no transfer).
+  The slot's earlier entries are erased first, and the new entry replaces a
+  New entry of the other slot: a selection the host replaced before a reset
+  is never tried.
 - CONFIRM: the running otadata entry becomes Valid (read back).
 - STATUS from otadata: New = 2 pending, PendingVerify while running = 3
   trying, Valid / running = 4 confirmed, Aborted / Invalid = 5 reverted with
   last reason TRIAL_EXHAUSTED. On trial, `confirmed` is the slot the 2nd stage
   falls back to (factory when there is none). The 2nd stage tries once.
-- Known limit: otadata keeps no image digest, so a slot re-received after a
-  rollback keeps showing 5 until it is set pending again.
+  An aborted trial keeps showing 5 after the other slot is selected, until
+  its slot is erased or set pending again.
+- otadata keeps no image digest, so an erase first takes the slot out of
+  the selection: a slot re-received after a rollback shows 1 written.
+- `src/tests_fold.rs` checks the agent's image machines against this STATUS
+  for every sequence of transfers, SET_PENDING, CONFIRM and resets up to
+  six steps (host test).
 
 ## Factory recovery agent
 

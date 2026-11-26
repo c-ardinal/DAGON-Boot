@@ -153,3 +153,5 @@ mod tests_app_image;
 mod tests_factory;
 #[cfg(test)]
 mod tests_flash_board;
+#[cfg(test)]
+mod tests_fold;

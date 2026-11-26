@@ -1,0 +1,18 @@
+# The most this sample app may take (scripts/sample_size.py, CT-16). The
+# app slot of the MCU definition is the hard limit; these show the sample
+# that grew. Each is the measured size plus an eighth (the image in
+# 1,024-byte steps, the RAM in 256-byte steps), and no more than the slot.
+# Measured at most 556,632 bytes (a partition image: an upper bound) and
+# 26,296 bytes of RAM when set.
+
+mcu = "esp32s3"
+
+[image]
+max_bytes = 626688
+
+[ram]
+# Static RAM (allocated, writable sections); the stack is not counted.
+max_bytes = 29696
+# The link script gives the stack (the RAM the image leaves) and two
+# placeholders that only move the location counter sections of their own.
+skip = [".stack", ".rwdata_dummy", ".rotext_dummy"]

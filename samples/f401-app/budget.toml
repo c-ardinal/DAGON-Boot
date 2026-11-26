@@ -1,0 +1,15 @@
+# The most this sample app may take (scripts/sample_size.py, CT-16). The
+# app slot of the MCU definition is the hard limit; these show the sample
+# that grew. Each is the measured size plus an eighth (the image in
+# 1,024-byte steps, the RAM in 256-byte steps), and no more than the slot.
+# Measured 121,072 bytes (the slot holds 130,560) and 6,600 bytes of RAM
+# when set.
+
+mcu = "stm32f401re"
+
+[image]
+max_bytes = 130560
+
+[ram]
+# Static RAM (allocated, writable sections); the stack is not counted.
+max_bytes = 7680

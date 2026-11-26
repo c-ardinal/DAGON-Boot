@@ -109,11 +109,20 @@ impl Counted {
 /// Seq and CRC follow ESP-IDF's `esp_rewrite_ota_data` (the 2nd stage boots
 /// ota_((seq - 1) % 2) from the highest counted seq), with two differences
 /// that keep the fallback alive: the seq is always above every counted seq,
-/// and an entry the 2nd stage could still boot is only overwritten when the
-/// other one is not bootable anyway. When both are bootable, a New entry
-/// (selected but never booted) goes first, then the one not selecting
-/// `running` (the booted slot, 2 = factory), so the running app's own entry
-/// survives repeated calls without a reboot.
+/// and the sector overwritten is the one that loses least, in this order:
+///
+/// 1. a New entry (selected but never booted): left in place it would be
+///    selected again once the new entry is withdrawn or aborted, a trial of
+///    an image the host has replaced;
+/// 2. a sector whose entry does not count (erased, bad CRC);
+/// 3. an entry the 2nd stage no longer boots (Aborted, Invalid): the record
+///    of a rollback, which STATUS reports while it lasts;
+/// 4. a bootable entry not selecting `running` (the booted slot, 2 =
+///    factory);
+/// 5. the running app's own entry, which so survives repeated calls
+///    without a reboot.
+///
+/// Of two alike, the older one.
 ///
 /// `None` when no seq above the counted ones is left (`u32::MAX` means
 /// "erased" to the 2nd stage).
@@ -124,22 +133,16 @@ pub fn trial_entry(
 ) -> Option<(usize, [u8; ENTRY_LEN])> {
     let id = u32::from(ota_index);
     let seqs = [valid_seq(&current[0]), valid_seq(&current[1])];
-    let boot = [&current[0], &current[1]].map(|e| Counted::of(e).filter(Counted::bootable));
-    let sector = match boot {
-        [Some(a), Some(b)] => {
-            let new = [a.state == raw::NEW, b.state == raw::NEW];
-            let other = [a.slot != running, b.slot != running];
-            if new[0] != new[1] {
-                usize::from(new[1])
-            } else if other[0] != other[1] {
-                usize::from(other[1])
-            } else {
-                usize::from(a.seq > b.seq) // the older one
-            }
-        }
-        [Some(_), None] => 1,
-        _ => 0,
-    };
+    // What is lost by overwriting each sector, least first; the older
+    // entry of two alike.
+    let cost = [&current[0], &current[1]].map(|e| match Counted::of(e) {
+        Some(c) if c.state == raw::NEW => (0, c.seq),
+        None => (1, 0),
+        Some(c) if !c.bootable() => (2, c.seq),
+        Some(c) if c.slot != running => (3, c.seq),
+        Some(c) => (4, c.seq),
+    });
+    let sector = usize::from(cost[1] < cost[0]);
     let seq = match seqs[0].max(seqs[1]) {
         None => id + 1,
         // Smallest seq above `top` that maps to `id`.

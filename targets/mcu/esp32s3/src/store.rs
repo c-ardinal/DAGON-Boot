@@ -5,8 +5,10 @@
 //!   capacity, detached header): the body from the start, only what it
 //!   covers erased; the 512-byte header in its own erase unit of the dagon
 //!   partition.
-//! - SET_PENDING writes an otadata trial entry; CONFIRM marks the running
-//!   entry Valid. No DAGON state log is kept: STATUS maps otadata.
+//! - SET_PENDING withdraws what otadata says of the slot's earlier
+//!   selections, then writes a trial entry; CONFIRM marks the running
+//!   entry Valid. No DAGON state log is kept: STATUS maps otadata (the
+//!   selected entry, and a trial aborted before the selection moved on).
 //! - Otadata keeps no digest, so an erase first takes the slot out of the
 //!   selection: a new image there is only written (not pending, not
 //!   reverted) until its own SET_PENDING.
@@ -248,6 +250,21 @@ impl<F: Flash, O: Otadata, W: Watchdog> SlotStore for EspStore<F, O, W> {
                 st.last_reason = r;
             }
         }
+        // A trial aborted before the selection moved on: its entry stays
+        // until the slot is erased or selected again.
+        for c in counted.iter().flatten() {
+            let moved_on = selected.is_some_and(|s| s.slot != c.slot);
+            let reverted = selected_view(running, c.slot, Some(c.state))
+                .filter(|v| v.state == SlotState::Reverted);
+            let Some(v) = reverted else { continue };
+            if moved_on && c.slot != running && present[c.slot as usize] {
+                st.slots[c.slot as usize].state = SlotState::Reverted;
+                // The selection now made has rolled nothing back.
+                if let Some(r) = v.reason {
+                    st.last_reason = r;
+                }
+            }
+        }
         if let Some(info) = st.slots.get_mut(running as usize) {
             info.state = if trying {
                 SlotState::Trying
@@ -412,6 +429,14 @@ impl<F: Flash, O: Otadata, W: Watchdog> SlotStore for EspStore<F, O, W> {
         _: &Transition,
     ) -> Result<(), StoreError> {
         self.place(target::APP, slot)?;
+        // What otadata still says of the slot's earlier selections (an
+        // aborted trial) is of no selection made now: left in place it
+        // would show the slot rolled back once this one moves on.
+        if slot != self.ota.running() {
+            self.wdt.feed();
+            self.ota.withdraw(slot)?;
+            self.wdt.feed();
+        }
         self.ota.set_next(slot)
     }
 

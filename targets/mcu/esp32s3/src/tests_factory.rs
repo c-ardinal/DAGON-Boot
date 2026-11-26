@@ -16,13 +16,13 @@ use dagon_proto::{flags, split_status, Cmd, Frame, Status};
 use ed25519_compact::{KeyPair, Seed};
 
 const MAX: usize = 1024;
-const TAG: &str = "node-s3x";
+pub(crate) const TAG: &str = "node-s3x";
 
-fn keypair() -> KeyPair {
+pub(crate) fn keypair() -> KeyPair {
     KeyPair::from_seed(Seed::new([0x42; 32]))
 }
 
-fn image(minor: u8, body: &[u8], kp: &KeyPair) -> Vec<u8> {
+pub(crate) fn image(minor: u8, body: &[u8], kp: &KeyPair) -> Vec<u8> {
     let mut h = ImageHeader {
         image_kind: image_kind::APP,
         port_kind: port_kind::VENDOR_STAGE2,
@@ -47,10 +47,10 @@ fn image(minor: u8, body: &[u8], kp: &KeyPair) -> Vec<u8> {
     [&h.to_bytes()[..], body].concat()
 }
 
-type Chain = Composed<&'static Published<(), 4>, Nop, Nop, fn() -> u64>;
+pub(crate) type Chain = Composed<&'static Published<(), 4>, Nop, Nop, fn() -> u64>;
 
 /// The app layer's chain of one start (no extensions).
-fn chain() -> Chain {
+pub(crate) fn chain() -> Chain {
     let events: &'static mut Published<(), 4> = Box::leak(Box::new(Published::new()));
     let now: fn() -> u64 = || 0;
     compose(
@@ -529,7 +529,9 @@ fn a_re_transfer_into_the_pending_slot_is_only_written() {
 
 /// The request payload `enc` writes.
 #[allow(dead_code)]
-fn wire(enc: impl FnOnce(&mut [u8]) -> Result<usize, dagon_proto::FrameError>) -> Vec<u8> {
+pub(crate) fn wire(
+    enc: impl FnOnce(&mut [u8]) -> Result<usize, dagon_proto::FrameError>,
+) -> Vec<u8> {
     let mut b = vec![0u8; 1100];
     let n = enc(&mut b).unwrap();
     b.truncate(n);

@@ -35,7 +35,7 @@ For application developers, extension authors and DAGON contributors. The last s
 
 The hub and the boot:
 
-- The relay (`dagon-relay`) does not depend on the MCU, and the `[coordinator]` section of an MCU definition decides whether that MCU may relay. A node relays over the links its MCU definition lists in `[[relay_link]]`, and the topology routes each node to one of them. The RP2040 is the only MCU with both that section and the code that runs the relay.
+- The relay (`dagon-relay`) does not depend on the MCU, and the `[coordinator]` section of an MCU definition decides whether that MCU may relay. A node relays over the links its MCU definition lists in `[[relay_link]]`, and the topology routes each node to one of them. The RP2040 is the only MCU with both that section and the code that runs the relay. The RP2040 relays over up to four links, I2C0, I2C1 and a PIO UART on each of PIO0 and PIO1, and uses the ones its board wires.
 - DAGON writes the hub and the children beyond it. Nothing beyond a child can be written.
 - Updating reaches the first coordinator and the nodes linked to it over I2C or UART. It skips a second coordinator and the nodes beyond it, and nodes linked by any other kind of link. The 構成 check tells them as information (◇).
 - A node takes links from several nodes, so a star and a ring can be defined. One link joins a pair of nodes. Updating uses only the links that join the coordinator straight to each node. A link between two nodes it already reaches (a link that closes a ring) carries no update, and the 構成 check lists it as information (◇).

@@ -430,7 +430,7 @@ fn with(name: &str, overrides: &str) -> Registry {
 fn a_projects_override_of_the_table_is_what_routes() {
     let reg = with(
         "override",
-        "[[mcu_override.rp2040.relay_link]]\nport = \"i2c0\"\nid = 3\n\
+        "[[mcu_override.rp2040.relay_link]]\nport = \"i2c0\"\nid = 9\n\
          addressing = \"seven-bit\"\nmax_payload = 64\n",
     );
     let got = node_targets(&reg, &sample(false), "hub").unwrap();

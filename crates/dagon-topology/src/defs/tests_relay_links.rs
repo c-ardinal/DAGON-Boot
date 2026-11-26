@@ -167,7 +167,7 @@ fn max_payload_is_1_up_to_the_kinds_protocol_maximum() {
 }
 
 #[test]
-fn the_rp2040_relays_over_i2c0_as_link_1_and_the_pio_uart_as_link_2() {
+fn the_rp2040_relays_over_both_i2c_buses_and_both_pio_uarts() {
     let m = Registry::builtin().mcu("rp2040").unwrap();
     let got: Vec<(u8, &str)> = m
         .relay_link_defs()
@@ -177,7 +177,10 @@ fn the_rp2040_relays_over_i2c0_as_link_1_and_the_pio_uart_as_link_2() {
             (l.id, name.name.as_str())
         })
         .collect();
-    assert_eq!(got, [(1, "i2c0"), (2, "pio-uart")]);
+    assert_eq!(
+        got,
+        [(1, "i2c0"), (2, "pio-uart"), (3, "i2c1"), (4, "pio-uart1")]
+    );
     // MCUs of nodes that relay over nothing have none.
     for id in ["stm32f401re", "esp32s3"] {
         assert!(

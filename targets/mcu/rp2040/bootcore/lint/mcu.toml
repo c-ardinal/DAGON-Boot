@@ -173,6 +173,11 @@ index = 5
 kind = "uart"
 name = "pio-uart"
 
+[[link_port]]
+index = 6
+kind = "uart"
+name = "pio-uart1"
+
 [link_uart]
 bauds = [115200, 230400]
 clock = "app"
@@ -427,7 +432,7 @@ at = 536870912
 size = 262144
 
 [relay]
-ram_bytes = 19456
+ram_bytes = 28672
 
 [[relay_link]]
 addressing = "seven-bit"
@@ -439,6 +444,20 @@ port = "i2c0"
 id = 2
 max_payload = 1024
 port = "pio-uart"
+
+[relay_link.addressing]
+fixed = 255
+
+[[relay_link]]
+addressing = "seven-bit"
+id = 3
+max_payload = 256
+port = "i2c1"
+
+[[relay_link]]
+id = 4
+max_payload = 1024
+port = "pio-uart1"
 
 [relay_link.addressing]
 fixed = 255

@@ -207,6 +207,57 @@ fn a_ring_is_updated_over_the_links_from_the_connected_node() {
     );
 }
 
+/// A connected node with two I2C buses (a project's board that brings both
+/// controllers to its header): each bus is a relay link of its own, and
+/// the node on each is written and recovers over its bus.
+#[test]
+fn nodes_on_two_i2c_buses_are_each_updated_over_their_own_bus() {
+    let reg = project(
+        "format = 1\n\n\
+         [board_override.\"waveshare-rp2040-touch-lcd-1.28\"]\n\
+         header = [{ pin = \"GPIO16\" }, { pin = \"GPIO17\" }, { pin = \"GPIO18\" }, { pin = \"GPIO26\" }, \
+         { pin = \"GPIO27\" }, { pin = \"GPIO28\" }, { pin = \"GPIO6\" }, { pin = \"GPIO7\" }]\n\
+         i2c = [{ controller = \"i2c0\", sda = \"GPIO16\", scl = \"GPIO17\" }, \
+         { controller = \"i2c1\", sda = \"GPIO6\", scl = \"GPIO7\" }]\n",
+    );
+    let two = pair_with(1)
+        .replace(
+            "buses:\n",
+            "buses:\n  - id: i2c-aux\n    kind: i2c\n    controller: i2c1\n    sda: 6\n    scl: 7\n    speed_hz: 400000\n    pullups: external\n",
+        )
+        .replace(
+            "  - kind: i2c\n    bus: i2c-main\n    ends:\n      - { node: hub, port: i2c0 }\n      - { node: seg2,",
+            "  - kind: i2c\n    bus: i2c-aux\n    ends:\n      - { node: hub, port: i2c1 }\n      - { node: seg2,",
+        );
+    assert!(two.contains("{ node: hub, port: i2c1 }"), "{two}");
+    let rp = reg.mcu("rp2040").unwrap();
+    let id = |port: &str| {
+        let at = rp.port(port).unwrap().index;
+        rp.relay_link_defs()
+            .iter()
+            .find(|l| l.port == at)
+            .unwrap()
+            .id
+    };
+    assert_ne!(id("i2c0"), id("i2c1"));
+    let (r, lines) = sim(
+        &reg,
+        &two,
+        &["seg=power-cut", "seg2=power-cut", "seg2=no-confirm"],
+    );
+    assert_eq!(r, Ok(()), "{lines:#?}");
+    assert!(
+        lines[0].contains(&format!(
+            "seg (stm32f401re, link {} address 0x42)",
+            id("i2c0")
+        )) && lines[0].contains(&format!(
+            "seg2 (stm32f401re, link {} address 0x43)",
+            id("i2c1")
+        )),
+        "{lines:#?}"
+    );
+}
+
 /// What the simulator has no model for is refused by name.
 #[test]
 fn a_topology_past_what_the_simulator_models_is_refused_by_name() {

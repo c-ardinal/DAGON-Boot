@@ -1159,6 +1159,11 @@ def selftest_rom():
              (15200, "seg: rewritten through the ROM loader, 2.0.18")]
     f = rom_figures(lines, "seg", "2.0.18", limits)
     assert f["verdict"] == "PASS" and f["write_ms"] == 15100 and f["stats"]["frames"] == 812, f
+    # A session that failed before the one that wrote: the CLI names its error at the end.
+    again = [(t, l.replace("attempts 1", "attempts 2") + ", last error Busy" if "ROM loader:" in l else l)
+             for t, l in lines]
+    f = rom_figures(again, "seg", "2.0.18", limits)
+    assert f["verdict"] == "PASS" and f["stats"]["attempts"] == 2 and f["stats"]["elapsed_ms"] == 14900, f
     slow = [(t, l.replace("41 ms", "500 ms").replace("attempts 1", "attempts 4")) for t, l in lines]
     f = rom_figures(slow, "seg", "2.0.18", limits)
     assert f["verdict"] == "FAIL" and "FRAME_TIMEOUT_MS" in f["why"] and "attempts 4" in f["why"], f

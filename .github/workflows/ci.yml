@@ -260,6 +260,37 @@ jobs:
           for t in $(python scripts/bootcore_size.py --targets); do rustup target add "$t"; done
           python scripts/bootcore_size.py
 
+  # Each sample app (a package under samples/ with a budget.toml) built
+  # in release and measured against the smallest app slot its MCU
+  # definition gives (`[[slot_layout]]` target "app", `capacity`) and, in
+  # image bytes and static RAM, against its budget.toml (CT-16).
+  sample-size:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Rust from rust-toolchain.toml
+        shell: bash
+        run: |
+          rustup toolchain install
+          rustup default "$(sed -n 's/^channel = "\([^"]*\)".*/\1/p' rust-toolchain.toml)"
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+      # The ESP32-S3 sample app builds with Espressif's Xtensa toolchain
+      # (its rust-toolchain.toml names `esp`).
+      - name: Xtensa toolchain
+        uses: esp-rs/xtensa-toolchain@ec6d36527049a7f4fb2cb0c1a644668c1bb8a2a4 # v1.7.0
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        with:
+          default: false
+          buildtargets: esp32s3
+          ldproxy: false
+      - name: Build and measure
+        run: |
+          for t in $(python scripts/sample_size.py --targets); do rustup target add "$t"; done
+          python scripts/sample_size.py
+
   # Each MCU package's relay firmware (`examples/relay.rs`, every relay
   # link wired) built in release, its static RAM (.bss + .data) measured
   # against the budget its MCU definition gives (`[relay] ram_bytes`).

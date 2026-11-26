@@ -1,0 +1,15 @@
+# The most this sample app may take (scripts/sample_size.py, CT-16). The
+# app slot of the MCU definition is the hard limit; these show the sample
+# that grew. Each is the measured size plus an eighth (the image in
+# 1,024-byte steps, the RAM in 256-byte steps), and no more than the slot.
+# Measured 184,056 bytes and 134,288 bytes of RAM (the frame buffer is
+# most of it) when set.
+
+mcu = "rp2040"
+
+[image]
+max_bytes = 207872
+
+[ram]
+# Static RAM (allocated, writable sections); the stack is not counted.
+max_bytes = 151296

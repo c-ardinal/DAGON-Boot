@@ -224,17 +224,17 @@ impl<T: Transport, C: HostClock> Host<T, C> {
     /// unchecked is [`Silence::HistoryUnknown`]. Only a transport error is
     /// an error.
     pub async fn silence(&mut self, to: Target) -> Result<Silence, T::Error> {
-        let Target::Linked { link, addr, .. } = to else {
+        let Some((relay, hop)) = to.parent() else {
             return Ok(Silence::HistoryUnknown);
         };
-        let node = Peer { link, addr };
+        let node = Peer {
+            link: hop.link,
+            addr: hop.addr,
+        };
         let mut read = 0usize;
         for page in 0..=u8::MAX {
             let asked = request(|b| payload::encode_peers(page, b));
-            let body = match self
-                .call(Target::Local, Cmd::Peers, &asked, REQUEST_MS)
-                .await
-            {
+            let body = match self.call(relay, Cmd::Peers, &asked, REQUEST_MS).await {
                 Ok(b) => b,
                 Err(Error::Transport(e)) => return Err(Error::Transport(e)),
                 Err(_) => return Ok(Silence::HistoryUnknown),
@@ -970,13 +970,7 @@ impl<T: Transport, C: HostClock> Host<T, C> {
         };
         self.report(on_event, node, phase::ROM, 0, v);
         let stats = {
-            // The relay tells its recovery targets apart by the link the
-            // node is on: the one RELAY reaches it over.
-            let via = match to {
-                Target::Linked { link, .. } => Some(link),
-                _ => None,
-            };
-            let mut link = crate::rom::HubRom::new(self, on_event, node, map.addr, via, v);
+            let mut link = crate::rom::HubRom::new(self, on_event, node, map.addr, to, v);
             dagon_romlink::RomLoader::flash(&map.loader, &mut link, &plan).await
         };
         let stats = match stats {

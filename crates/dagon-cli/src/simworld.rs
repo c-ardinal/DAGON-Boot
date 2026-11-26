@@ -169,6 +169,8 @@ fn node_at(relay: &mut SimRelay, to: Target) -> Option<&mut SimNode> {
     match to {
         Target::Local => Some(&mut relay.node),
         Target::Linked { link, addr, .. } => relay.node_behind_mut(link, addr),
+        // The simulated relaying node has no relaying node behind it.
+        Target::Deep(_) => None,
     }
 }
 
@@ -220,6 +222,14 @@ impl<'a> World<'a> {
                 Target::Local => format!("{} ({}, connected to the PC)", n.id, n.mcu),
                 Target::Linked { link, addr, .. } => {
                     format!("{} ({}, link {link} address {addr:#04x})", n.id, n.mcu)
+                }
+                Target::Deep(route) => {
+                    let hops: Vec<String> = route
+                        .hops()
+                        .iter()
+                        .map(|h| format!("link {} address {:#04x}", h.link, h.addr))
+                        .collect();
+                    format!("{} ({}, {})", n.id, n.mcu, hops.join(", then "))
                 }
             })
             .collect();

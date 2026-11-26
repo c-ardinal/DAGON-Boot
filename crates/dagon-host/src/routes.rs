@@ -10,6 +10,33 @@ use core::fmt;
 use dagon_format::topology::{TopoLink, NONE};
 use dagon_port::{Addressing, RelayLinkDef};
 
+/// One RELAY: the link id and the address the relaying node names the next
+/// node by, and the largest payload that link carries.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Hop {
+    pub link: u8,
+    pub addr: u8,
+    pub max_payload: u16,
+}
+
+/// The most RELAYs between the PC and a node: each one takes its frame and
+/// fields out of what the next may carry and adds its own wait.
+pub const MAX_HOPS: usize = 4;
+
+/// The hops to a node behind another relaying node, nearest first: two to
+/// [`MAX_HOPS`]. Equal routes are equal values.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Route {
+    hops: [Hop; MAX_HOPS],
+    len: u8,
+}
+
+impl Route {
+    pub fn hops(&self) -> &[Hop] {
+        &self.hops[..usize::from(self.len)]
+    }
+}
+
 /// Where a request goes: the node the PC is connected to, or a node RELAY
 /// reaches over one of its links.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -23,6 +50,62 @@ pub enum Target {
         addr: u8,
         max_payload: u16,
     },
+    /// A node behind a linked node that relays: a RELAY inside a RELAY for
+    /// each hop ([`Target::through`]).
+    Deep(Route),
+}
+
+impl Target {
+    /// The target `hops` lead to, nearest first: none is [`Target::Local`],
+    /// one [`Target::Linked`]. `None` past [`MAX_HOPS`].
+    pub fn through(hops: &[Hop]) -> Option<Target> {
+        match *hops {
+            [] => Some(Target::Local),
+            [Hop {
+                link,
+                addr,
+                max_payload,
+            }] => Some(Target::Linked {
+                link,
+                addr,
+                max_payload,
+            }),
+            _ if hops.len() <= MAX_HOPS => {
+                let mut all = [Hop::default(); MAX_HOPS];
+                all[..hops.len()].copy_from_slice(hops);
+                Some(Target::Deep(Route {
+                    hops: all,
+                    len: hops.len() as u8,
+                }))
+            }
+            _ => None,
+        }
+    }
+
+    /// The hops to this target, nearest first (none for [`Target::Local`]).
+    pub fn hops(&self) -> Vec<Hop> {
+        match *self {
+            Target::Local => Vec::new(),
+            Target::Linked {
+                link,
+                addr,
+                max_payload,
+            } => alloc::vec![Hop {
+                link,
+                addr,
+                max_payload,
+            }],
+            Target::Deep(r) => r.hops().to_vec(),
+        }
+    }
+
+    /// The relaying node that reaches this target and the hop it takes:
+    /// who knows the target as a peer. `None` for [`Target::Local`].
+    pub fn parent(&self) -> Option<(Target, Hop)> {
+        let hops = self.hops();
+        let (last, before) = hops.split_last()?;
+        Some((Target::through(before)?, *last))
+    }
 }
 
 /// Each node by id with its target, or why it has none.

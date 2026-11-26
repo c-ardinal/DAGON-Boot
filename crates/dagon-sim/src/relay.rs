@@ -119,6 +119,8 @@ impl SimStream {
         let arrived = now + d;
         let (resp, took) = match self.relaying.as_mut() {
             None => (self.node.handle_frame(&f, arrived), 0),
+            // A node that is held, off or silent relays nothing either.
+            Some(_) if !self.node.answers_at(arrived) => (None, 0),
             Some(r) => {
                 r.bus.advance_ms(arrived.saturating_sub(r.bus.now_ms));
                 let resp = Serving {

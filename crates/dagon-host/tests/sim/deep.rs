@@ -94,6 +94,24 @@ fn a_silent_deep_node_is_told_apart_by_the_records_of_the_node_it_is_linked_to()
     assert_eq!(block_on(h.silence(seg_at)).unwrap(), Silence::Lost);
 }
 
+#[test]
+fn a_relaying_node_held_in_reset_relays_nothing() {
+    let (sim, mid_at, seg_at) = chain();
+    let mut h = Host::new(sim.clone(), sim.clone());
+    block_on(h.hello(seg_at)).unwrap();
+    let hold_mid = |low: bool| {
+        let at: Vec<(u8, u8)> = mid_at.hops().iter().map(|h| (h.link, h.addr)).collect();
+        let mut relay = sim.relay.borrow_mut();
+        let now = relay.now_ms();
+        relay.node_through(&at).unwrap().set_nrst_low(low, now);
+    };
+    hold_mid(true);
+    assert!(block_on(h.hello(mid_at)).is_err());
+    assert!(block_on(h.hello(seg_at)).is_err());
+    hold_mid(false);
+    block_on(h.hello(seg_at)).unwrap();
+}
+
 /// hub - mid - leaf, the links a 構成 gives; the RP2040 relays as a node in
 /// the definitions returned.
 fn described() -> (dagon_topology::defs::Registry, dagon_topology::Topology) {

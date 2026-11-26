@@ -351,6 +351,15 @@ impl Model {
                 "slot {s} after {path:?}: {st:?}"
             );
         }
+        // A slot shown rolled back comes with why: the agent's event of
+        // it at the next start carries this reason.
+        if st.slots[..2].iter().any(|s| s.state == SlotState::Reverted) {
+            assert_eq!(
+                st.last_reason,
+                dagon_format::statelog::reason::TRIAL_EXHAUSTED,
+                "after {path:?}: {st:?}"
+            );
+        }
         if let Some(active) = st.slots.get(usize::from(st.active)) {
             assert_ne!(
                 active.state,

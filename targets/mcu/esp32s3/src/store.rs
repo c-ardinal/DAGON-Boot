@@ -255,9 +255,14 @@ impl<F: Flash, O: Otadata, W: Watchdog> SlotStore for EspStore<F, O, W> {
         for c in counted.iter().flatten() {
             let moved_on = selected.is_some_and(|s| s.slot != c.slot);
             let reverted = selected_view(running, c.slot, Some(c.state))
-                .is_some_and(|v| v.state == SlotState::Reverted);
-            if moved_on && reverted && c.slot != running && present[c.slot as usize] {
+                .filter(|v| v.state == SlotState::Reverted);
+            let Some(v) = reverted else { continue };
+            if moved_on && c.slot != running && present[c.slot as usize] {
                 st.slots[c.slot as usize].state = SlotState::Reverted;
+                // The selection now made has rolled nothing back.
+                if let Some(r) = v.reason {
+                    st.last_reason = r;
+                }
             }
         }
         if let Some(info) = st.slots.get_mut(running as usize) {

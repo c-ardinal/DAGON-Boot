@@ -122,6 +122,15 @@ class Stated(unittest.TestCase):
         )
         self.assertEqual(b["pin"], [{"pin": "GPIO16", "name": "led0"}])
 
+    def test_a_pin_written_in_hexadecimal_is_that_pin(self):
+        b = self.board(
+            "/ { leds { compatible = \"gpio-leds\"; led0: led_0 { gpios = <&gpio0 0x10 0>; }; };\n"
+            "    c: connector { gpio-map = <0x0 0 &gpio0 0x1c 0>;	/* GP28 */ }; };\n"
+            "&flash0 { reg = <0 0x1000>; };\n"
+        )
+        self.assertEqual(b["pin"], [{"pin": "GPIO16", "name": "led0"}])
+        self.assertEqual(b["header"], [{"pin": "GPIO28", "label": "GP28"}])
+
     def test_a_later_declaration_of_flash0_gives_its_size(self):
         b = self.board(
             "/ { soc { flash0: flash@0 { compatible = \"soc-nv-flash\"; }; }; };\n"
@@ -148,6 +157,11 @@ class Refused(unittest.TestCase):
     def test_a_gpio_node_named_another_way(self):
         dts = "/ { leds { compatible = \"gpio-leds\"; a: a { gpios = <&porta 1 0>; }; }; };"
         with self.assertRaisesRegex(imp.ImportError_, "porta"):
+            self.convert(dts)
+
+    def test_a_pin_that_is_not_a_number(self):
+        dts = "/ { leds { compatible = \"gpio-leds\"; a: a { gpios = <&gpio0 LED_PIN 0>; }; }; };"
+        with self.assertRaisesRegex(imp.ImportError_, "LED_PIN"):
             self.convert(dts)
 
     def test_a_board_whose_flash_size_is_in_no_file_read(self):

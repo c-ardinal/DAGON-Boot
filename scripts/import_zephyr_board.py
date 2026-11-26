@@ -29,10 +29,10 @@ BLOCK_COMMENT = re.compile(r"/\*.*?\*/", re.S)
 # One row of a connector's `gpio-map`, with the printed name Zephyr keeps in
 # the comment after it.
 MAP_ROW = re.compile(
-    r"<\s*\d+\s+\d+\s+&(\w+)\s+(\d+)\s+\d+\s*>\s*[,;]?[ \t]*(?:/\*\s*(.*?)\s*\*/)?"
+    r"<\s*\w+\s+\w+\s+&(\w+)\s+(\w+)\s+\w+\s*>\s*[,;]?[ \t]*(?:/\*\s*(.*?)\s*\*/)?"
 )
 OVERLAY = re.compile(r"&(\w+)\s*\{")
-GPIOS = re.compile(r"gpios\s*=\s*<\s*&(\w+)\s+(\d+)")
+GPIOS = re.compile(r"gpios\s*=\s*<\s*&(\w+)\s+([^\s>]+)")
 # RP2040 pin control macro: I2C0_SDA_P4.
 RP_MUX = re.compile(r"\b[A-Z][A-Z0-9]*_([A-Z0-9]+)_P(\d+)\b")
 # STM32 pin control node: i2c1_scl_pb8.
@@ -48,7 +48,12 @@ class ImportError_(Exception):
 
 
 def pin_name(port, number):
-    """DAGON's name of pin `number` of Zephyr GPIO node `port`."""
+    """DAGON's name of pin `number` (a cell as written, decimal or
+    hexadecimal) of Zephyr GPIO node `port`."""
+    try:
+        number = int(str(number), 0)
+    except ValueError:
+        raise ImportError_(f"pin {number} of {port} is not a number") from None
     if port == "gpio0":
         return f"GPIO{number}"
     m = re.fullmatch(r"gpio([a-k])", port)

@@ -9,7 +9,7 @@ use dagon_mcu_rp2040::{
 };
 use dagon_port::timeout::link_limits;
 use dagon_proto::payload::link::UART_ADDR;
-use dagon_proto::payload::{boot0, nrst, I2cRaw, Relay, RomTarget, Show, SubCtl};
+use dagon_proto::payload::{boot0, nrst, I2cRaw, Relay, RomTarget, Show, SubCtl, UartRaw};
 use dagon_proto::{finish, frame_len, max_payload, split_status, Cmd, Frame, Status};
 use dagon_relay::cmd;
 use dagon_sim::{demo_hub, SimRelay};
@@ -113,6 +113,43 @@ fn relay_rules_match_the_sim() {
     let t0 = h.now_ms();
     assert_eq!(relay(&mut h, I2C, 0x55, &frame(12)).0, Status::Timeout);
     assert!(h.now_ms() - t0 <= 20 + 2 + 2, "{} ms", h.now_ms() - t0);
+}
+
+/// UART_RAW: what the rules refuse, the sim refuses with E_ARG (a link
+/// the node does not have included); what they accept reaches the port.
+#[test]
+fn uart_raw_rules_match_the_sim() {
+    let mut h = demo_hub([0; 32], 3);
+    let ids = RELAY_LINKS.iter().map(|l| l.id).chain([9]);
+    for id in ids {
+        let link = RELAY_LINKS.iter().find(|l| l.id == id);
+        let limit = link.map_or(64, |l| l.buffer_len());
+        for (read_max, len) in [
+            (0, 0),
+            (limit, 0),
+            (limit + 1, 0),
+            (0, limit),
+            (0, limit + 1),
+        ] {
+            let data = vec![0u8; len];
+            let raw = UartRaw {
+                link: id,
+                read_max: read_max as u16,
+                wait_ms: 5,
+                data: &data,
+            };
+            let rule = link.map_or(Err(Status::Arg), |l| cmd::uart_raw(&raw, l));
+            let mut p = vec![0u8; UartRaw::OVERHEAD_MAX + len];
+            let n = raw.encode(&mut p).unwrap();
+            let got = ask(&mut h, Cmd::UartRaw, &p[..n]);
+            let what = format!("link {id} read {read_max} write {len}");
+            match rule {
+                Err(e) => assert_eq!(got, e, "{what}"),
+                // A port the sample wires nothing to is E_UNSUPPORTED.
+                Ok(()) => assert!(matches!(got, Status::Ok | Status::Unsupported), "{what}"),
+            }
+        }
+    }
 }
 
 #[test]

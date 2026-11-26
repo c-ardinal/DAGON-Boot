@@ -184,6 +184,15 @@ The slots DAGON receives into, as flash offsets in `partitions.csv`
 - `src/tests_fold.rs` checks the agent's image machines against this STATUS
   for every sequence of transfers, SET_PENDING, CONFIRM and resets up to
   six steps (host test).
+- `src/tests_cut.rs` cuts the power at every flash operation of those
+  sequences (each slot's header erase, body erase, body and header; each
+  otadata sector's erase and entry), not landed or half landed, and checks
+  that what starts is a whole image, that STATUS names what the next reset
+  starts, and that the host can still update to a confirmed image (host
+  test; with the folder in `DAGON_POWERCUT_REPORT` it writes the cuts per
+  flash operation). The otadata steps it cuts are the functions of
+  `otadata` (`select_trial`, `confirm_running`, `withdraw_slot`) that
+  `boot` runs on the flash.
 
 ## Factory recovery agent
 

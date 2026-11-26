@@ -151,6 +151,34 @@ class Stated(unittest.TestCase):
             b["header"], [{"pin": "GPIO2", "label": "GP2"}, {"pin": "GPIO4", "label": "GP4"}]
         )
 
+    def test_an_overlay_of_a_connector_replaces_its_rows(self):
+        b = self.board(
+            "&flash0 { reg = <0 0x1000>; };\n"
+            "/ { c: connector { gpio-map = <0 0 &gpio0 0 0>;	/* GP0 */ }; };\n"
+            "&c { gpio-map = <0 0 &gpio0 16 0>;	/* GP16 */ };\n"
+        )
+        self.assertEqual(b["header"], [{"pin": "GPIO16", "label": "GP16"}])
+
+    def test_a_node_stated_again_by_its_path_is_merged(self):
+        b = self.board(
+            "&flash0 { reg = <0 0x1000>; };\n"
+            "/ { leds { compatible = \"gpio-leds\"; led0: led_0 { gpios = <&gpio0 25 0>; }; }; };\n"
+            "/ { leds { led_0 { gpios = <&gpio0 7 0>; }; led_1 { gpios = <&gpio0 8 0>; }; }; };\n"
+        )
+        self.assertEqual(
+            b["pin"], [{"pin": "GPIO7", "name": "led0"}, {"pin": "GPIO8", "name": "led_1"}]
+        )
+
+    def test_a_deleted_property_and_node_are_gone(self):
+        b = self.board(
+            "&flash0 { reg = <0 0x1000>; };\n"
+            "/ { leds { compatible = \"gpio-leds\";\n"
+            "    led0: led_0 { gpios = <&gpio0 25 0>; }; led1: led_1 { gpios = <&gpio0 8 0>; }; }; };\n"
+            "&led0 { /delete-property/ gpios; };\n"
+            "/ { leds { /delete-node/ led_1; }; };\n"
+        )
+        self.assertNotIn("pin", b)
+
     def test_an_overlay_of_a_pin_control_group_moves_the_bus(self):
         b = self.board(
             "&pinctrl { uart0_default: uart0_default {\n"
@@ -195,6 +223,10 @@ class Refused(unittest.TestCase):
         dts = "/ { leds { compatible = \"gpio-leds\"; a: a { gpios = <&gpio0 LED_PIN 0>; }; }; };"
         with self.assertRaisesRegex(imp.ImportError_, "LED_PIN"):
             self.convert(dts)
+
+    def test_a_node_that_is_never_closed(self):
+        with self.assertRaisesRegex(imp.ImportError_, "never closed"):
+            self.convert("/ { leds { ")
 
     def test_a_board_whose_flash_size_is_in_no_file_read(self):
         with self.assertRaisesRegex(imp.ImportError_, "flash0"):

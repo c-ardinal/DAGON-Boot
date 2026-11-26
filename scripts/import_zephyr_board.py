@@ -14,8 +14,11 @@ link, the slots, the writer, the boot LED and its halt pattern, and which
 bus carries DAGON's own link. Those stay with whoever adds the board.
 
 The text is read as it stands, without the C preprocessor: `#include` lines
-are followed when the file is in the tree, and the pin names come from the
-names Zephyr gives its pin control nodes (`I2C0_SDA_P4`, `i2c1_scl_pb8`).
+are followed when the file is in the tree, the nodes are merged as the
+devicetree compiler merges them (a later statement of a node, by its path or
+its label, adds to the earlier and replaces its properties), and the pin
+names come from the names Zephyr gives its pin control nodes (`I2C0_SDA_P4`,
+`i2c1_scl_pb8`).
 A board whose pins are named another way is refused, not guessed.
 """
 import argparse
@@ -33,8 +36,13 @@ LINE_COMMENT = re.compile(r'"(?:\\.|[^"\\\n])*"|/\*.*?\*/|(//[^\n]*)', re.S)
 MAP_ROW = re.compile(
     r"<\s*\w+\s+\w+\s+&(\w+)\s+(\w+)\s+\w+\s*>\s*[,;]?[ \t]*(?:\x01(.*?)\x02)?"
 )
-OVERLAY = re.compile(r"&(\w+)\s*\{")
-GPIOS = re.compile(r"gpios\s*=\s*<\s*&(\w+)\s+([^\s>]+)")
+# A printed name [`labelled`] kept.
+NAME = re.compile(r"\x01[^\x02]*\x02")
+# A preprocessor line left in the text: it states no node.
+PREPROCESSOR = re.compile(
+    r"^[ \t]*#[ \t]*(?:include|define|undef|if|ifdef|ifndef|elif|else|endif)\b.*$", re.M
+)
+GPIOS = re.compile(r"<\s*&(\w+)\s+([^\s>]+)")
 # RP2040 pin control macro: I2C0_SDA_P4.
 RP_MUX = re.compile(r"\b[A-Z][A-Z0-9]*_([A-Z0-9]+)_P(\d+)\b")
 # STM32 pin control node: i2c1_scl_pb8.
@@ -114,55 +122,122 @@ def without_line_comments(text):
     return LINE_COMMENT.sub(lambda m: "" if m.group(1) else m.group(0), text)
 
 
-def children(body):
-    """`[(name, body)]` of the child nodes written straight in `body`."""
-    out, depth, i = [], 0, 0
-    while i < len(body):
-        ch = body[i]
-        if ch == "{":
-            if depth == 0:
-                name = re.search(r"([\w@,-]+)\s*$", body[:i])
-                inner = body_at(body, i)
-                out.append((name.group(1) if name else "", inner))
-                i += len(inner) + 2
-                continue
+class Node:
+    """One devicetree node as the files leave it: every statement of it,
+    wherever it is written, merged in source order."""
+
+    def __init__(self):
+        self.props = {}
+        self.children = {}
+        self.labels = []
+
+    def prop(self, name):
+        """The value of property `name` as written, or None."""
+        value = self.props.get(name)
+        return None if value is None else NAME.sub("", value).strip()
+
+    def walk(self):
+        yield self
+        for child in self.children.values():
+            yield from child.walk()
+
+
+class Tree:
+    """The devicetree of the files read. A node the files only refer to
+    (`&uart0 { ... }` with its declaration in a file not read) is kept
+    beside the root, under its label."""
+
+    def __init__(self):
+        self.root = Node()
+        self.labels = {}
+        self.loose = []
+
+    def nodes(self):
+        yield from self.root.walk()
+        for node in self.loose:
+            yield from node.walk()
+
+    def referred(self, label):
+        if label not in self.labels:
+            node = Node()
+            self.loose.append(node)
+            self.labels[label] = node
+        return self.labels[label]
+
+
+def statement_end(text, i):
+    """The index of the `;` or `{` that ends the statement at `i`, outside
+    strings, cell lists and expressions; of the `}` that ends the node; or
+    the end of `text`."""
+    depth, quoted = 0, False
+    while i < len(text):
+        ch = text[i]
+        if quoted:
+            if ch == "\\":
+                i += 1
+            elif ch == '"':
+                quoted = False
+        elif ch == '"':
+            quoted = True
+        elif ch in "<([":
             depth += 1
-        elif ch == "}":
+        elif ch in ">)]":
             depth -= 1
+        elif depth <= 0 and ch in ";{}":
+            return i
         i += 1
-    return out
+    return i
 
 
-def body_at(text, brace):
-    """The text between the `{` at `brace` and its `}`."""
-    depth = 0
-    for i in range(brace, len(text)):
-        if text[i] == "{":
-            depth += 1
-        elif text[i] == "}":
-            depth -= 1
-            if depth == 0:
-                return text[brace + 1 : i]
-    raise ImportError_("a `{` is never closed")
+def fill(tree, node, text, i):
+    """Reads the statements of `node` (None: the top of a file) from `i`;
+    returns the index after its `}`."""
+    while True:
+        end = statement_end(text, i)
+        head = text[i:end].strip()
+        if end >= len(text):
+            if node is not None:
+                raise ImportError_("a `{` is never closed")
+            return end
+        if text[end] == "}":
+            if node is None:
+                raise ImportError_("a `}` closes nothing")
+            return end + 1
+        if text[end] == "{":
+            *labels, name = [w for w in re.split(r"\s*:\s*|\s+", head) if w] or [""]
+            if name == "/":
+                target = tree.root
+            elif name.startswith("&"):
+                target = tree.referred(name[1:])
+            elif node is None:
+                raise ImportError_(f"node {name} is in no node")
+            else:
+                target = node.children.setdefault(name, Node())
+            for label in labels:
+                tree.labels[label] = target
+                target.labels.append(label)
+            i = fill(tree, target, text, end + 1)
+            continue
+        # A printed name after the `;` belongs to the row before it.
+        after = re.match(r"[ \t]*\x01[^\x02]*\x02", text[end + 1 :])
+        i = end + 1 + (after.end() if after else 0)
+        if node is None or not head:
+            continue
+        if head.startswith("/delete-property/"):
+            node.props.pop(head.split("/", 2)[2].strip(), None)
+        elif head.startswith("/delete-node/"):
+            gone = head.split("/", 2)[2].strip()
+            node.children.pop(gone, None)
+        elif not head.startswith("/"):
+            name, _, value = head.partition("=")
+            node.props[name.split(":")[-1].strip()] = value + (after.group(0) if after else "")
 
 
-def own(body):
-    """`body` without its child nodes: the node's own properties."""
-    out, depth = [], 0
-    for ch in body:
-        if ch == "{":
-            depth += 1
-        elif ch == "}":
-            depth -= 1
-        elif depth == 0:
-            out.append(ch)
-    return "".join(out)
-
-
-def prop(body, name):
-    """The value of property `name` in `body`, as written."""
-    m = re.search(rf"(?<![\w-]){re.escape(name)}\s*=\s*([^;]*);", body)
-    return m.group(1).strip() if m else None
+def parse(text):
+    """The [`Tree`] of `text` (the text of [`labelled`])."""
+    tree = Tree()
+    fill(tree, None, PREPROCESSOR.sub("", text), 0)
+    return tree
 
 
 def number(text):
@@ -177,22 +252,7 @@ def number(text):
         return None
 
 
-def overlays(text):
-    """`{label: own properties}` of every `&label { ... }`, the later text
-    of one label after the earlier."""
-    found = {}
-    for m in OVERLAY.finditer(text):
-        found.setdefault(m.group(1), []).append(own(body_at(text, m.end() - 1)))
-    return {k: "\n".join(v) for k, v in found.items()}
-
-
-def last_prop(body, name):
-    """The last value given to `name` in `body`: a later overlay wins."""
-    all_ = re.findall(rf"(?<![\w-]){re.escape(name)}\s*=\s*([^;]*);", body)
-    return all_[-1].strip() if all_ else None
-
-
-def signals(text, refs):
+def signals(tree, refs):
     """`{signal: pin}` of the pin control nodes `refs` name."""
     out = {}
     for ref in refs:
@@ -200,17 +260,10 @@ def signals(text, refs):
         if st:
             out[st.group(1)] = pin_name(f"gpio{st.group(2)}", st.group(3))
             continue
-        if not re.search(rf"\b{re.escape(ref)}\s*:\s*[\w-]+\s*\{{", text):
+        node = tree.labels.get(ref)
+        if node is None:
             raise ImportError_(f"pin control node {ref} is not in the files read")
-        # Each group's last `pinmux`, the node's declaration and its
-        # overlays (`&ref { group1 { ... }; }`) in source order.
-        groups = {}
-        for body in bodies(text, ref):
-            for name, group in [("", own(body))] + children(body):
-                mux = last_prop(own(group), "pinmux")
-                if mux is not None:
-                    groups[name] = mux
-        muxes = RP_MUX.findall(" ".join(groups.values()))
+        muxes = RP_MUX.findall(" ".join(n.prop("pinmux") or "" for n in node.walk()))
         if not muxes:
             raise ImportError_(f"pin control node {ref} names no pin this importer reads")
         for signal, pin in muxes:
@@ -218,33 +271,18 @@ def signals(text, refs):
     return out
 
 
-def bodies(text, label):
-    """The bodies of node `label` wherever the files state it, in source
-    order: its declarations (`label: name { ... }`) and its overlays
-    (`&label { ... }`)."""
-    found = re.finditer(rf"(?:\b{re.escape(label)}\s*:\s*[\w@-]+|&{re.escape(label)})\s*\{{", text)
-    return [body_at(text, m.end() - 1) for m in found]
-
-
-def stated(text, label):
-    """The own properties of node `label` from all of [`bodies`]: a later
-    one wins."""
-    return "\n".join(own(b) for b in bodies(text, label))
-
-
-def flash_bytes(text):
-    """The size of `flash0`: the last `reg` the files give it."""
-    reg = last_prop(stated(text, "flash0"), "reg")
-    cells = re.fullmatch(r"<\s*(\S+)\s+(.+?)\s*>", reg or "")
+def flash_bytes(tree):
+    """The size of `flash0`, from its `reg`."""
+    node = tree.labels.get("flash0")
+    cells = re.fullmatch(r"<\s*(\S+)\s+(.+?)\s*>", (node.prop("reg") if node else None) or "")
     return (number(cells.group(2)) if cells else None) or None
 
 
-def header(raw):
-    """`[(pin, label)]` of every connector row, a pin once (`raw`: the text
-    of [`labelled`])."""
+def header(tree):
+    """`[(pin, label)]` of every connector row, a pin once."""
     rows, seen = [], set()
-    for m in re.finditer(r"gpio-map\s*=\s*(.*?>\s*;[ \t]*(?:\x01.*?\x02)?)", raw, re.S):
-        for port, num, label in MAP_ROW.findall(m.group(1)):
+    for node in tree.nodes():
+        for port, num, label in MAP_ROW.findall(node.props.get("gpio-map", "")):
             pin = pin_name(port, num)
             if pin not in seen:
                 seen.add(pin)
@@ -252,17 +290,18 @@ def header(raw):
     return rows
 
 
-def named_pins(text, compatible):
-    """`[(node label, pin)]` of the children of every `compatible` node."""
+def named_pins(tree, compatible):
+    """`[(name, pin)]` of the children of every `compatible` node, each by
+    its label (its node name without one)."""
     out = []
-    for m in re.finditer(rf'compatible\s*=\s*"{compatible}"\s*;', text):
-        start = text.rfind("{", 0, m.start())
-        for child in re.finditer(r"(\w+)\s*:\s*[\w-]+\s*\{", body_at(text, start)):
-            # An overlay of the child (`&led0 { gpios = ... }`) rewires it.
-            given = last_prop(stated(text, child.group(1)), "gpios")
-            g = GPIOS.search(f"gpios = {given}") if given else None
+    for node in tree.nodes():
+        if f'"{compatible}"' not in (node.prop("compatible") or ""):
+            continue
+        for name, child in node.children.items():
+            g = GPIOS.match(child.prop("gpios") or "")
             if g:
-                out.append((child.group(1).lower(), pin_name(g.group(1), g.group(2))))
+                name = re.sub(r"\W", "_", (child.labels or [name])[0].lower())
+                out.append((name, pin_name(g.group(1), g.group(2))))
     return out
 
 
@@ -288,31 +327,30 @@ def convert(root, start, board_id, mcu, tag):
     """The `[board.<id>]` text of the board file `start` in the tree `root`."""
     root, start = Path(root), Path(start)
     raw, files, missing = read_tree(root, start)
-    raw = labelled(without_line_comments(raw))
-    text = re.sub(r"\x01.*?\x02", "", raw)
-    nodes = overlays(text)
+    tree = parse(labelled(without_line_comments(raw)))
     product, yml = full_name(root, start)
     if yml:
         files.append(yml)
 
     pairs, buses = [], []
-    for label in sorted(nodes):
-        refs = re.findall(r"&(\w+)", last_prop(nodes[label], "pinctrl-0") or "")
+    for label in sorted(tree.labels):
+        node = tree.labels[label]
+        refs = re.findall(r"&(\w+)", node.prop("pinctrl-0") or "")
         if not refs:
             continue
         if I2C.match(label):
-            s = signals(text, refs)
+            s = signals(tree, refs)
             if "sda" in s and "scl" in s:
                 pairs.append((label, s["sda"], s["scl"]))
-        elif UART.match(label) and last_prop(nodes[label], "status") == '"okay"':
-            s = signals(text, refs)
-            baud = number((last_prop(nodes[label], "current-speed") or "").strip("<> "))
+        elif UART.match(label) and node.prop("status") == '"okay"':
+            s = signals(tree, refs)
+            baud = number((node.prop("current-speed") or "").strip("<> "))
             if "tx" in s or "rx" in s:
                 buses.append((label, s.get("tx"), s.get("rx"), baud))
 
-    pins = named_pins(text, "gpio-leds") + named_pins(text, "gpio-keys")
-    size = flash_bytes(text)
-    rows = header(raw)
+    pins = named_pins(tree, "gpio-leds") + named_pins(tree, "gpio-keys")
+    size = flash_bytes(tree)
+    rows = header(tree)
     table = f"board.{board_id}" if re.fullmatch(r"[A-Za-z0-9_-]+", board_id) else f"board.{quote(board_id)}"
 
     out = [

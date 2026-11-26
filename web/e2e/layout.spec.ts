@@ -7,6 +7,8 @@ const WIDTHS = [1024, 1099, 1100, 1280, 1366, 1440, 1920, 2020, 2400, 2559, 2560
 const HEIGHTS = [600, 700, 800, 1080, 1347, 1440];
 
 /** The windows swept: each width at its low and tall ends, every height at a common width, and the matrix's own presets. */
+/** From this window height up, the sample's first view shows full cards at every width (the matrix's 768 presets). */
+const FULL_FROM = 768;
 const SIZES = [...WIDTHS.flatMap((w) => [[w, 700], [w, 1080]]), ...HEIGHTS.map((h) => [1920, h]), [1366, 768], [2560, 1440], [1024, 768]] as const;
 
 /** The view toggle: in the header, or at a narrow bar in the menu's 構成 group. */
@@ -68,12 +70,22 @@ test('sweep: no overflow, overlap, clipped text or clipped focus ring at any win
     }
   }
   // The mode toggle and the mark stand still across modes at every width.
+  const first: { at: string; room: number; compact: boolean }[] = [];
   for (const [w, h] of SIZES) {
     await page.setViewportSize({ width: w, height: h });
     await page.waitForTimeout(260);
     const prep = await boxes(page);
-    // The first view at this window, in both modes: full cards, never compact (the sample is small).
-    const compact = async (mode: string) => { await page.locator('#canvas').focus(); await page.keyboard.press('f'); await page.waitForTimeout(400); if (await page.locator('.node.compact').count()) faults.push(`${w}x${h} ${mode}: the first view has compact cards`); };
+    // The first view at this window, in both modes: full cards from FULL_FROM of window height up (the sample is small); a lower window may hold compact ones (web/README.md, "Window sizes").
+    const compact = async (mode: string) => {
+      await page.locator('#canvas').focus();
+      await page.keyboard.press('f');
+      await page.waitForTimeout(400);
+      // The class is the canvas's: one view is compact or it is not.
+      const is = (await page.locator('.canvas.compact').count()) > 0;
+      const room = await page.locator('.canvas').evaluate((c) => Math.round(c.parentElement!.getBoundingClientRect().height));
+      first.push({ at: `${w}x${h} ${mode}`, room, compact: is });
+      if (is && h >= FULL_FROM) faults.push(`${w}x${h} ${mode}: the first view has compact cards`);
+    };
     await compact('準備');
     await page.getByRole('radio', { name: '書込' }).click();
     await page.waitForTimeout(300);
@@ -83,6 +95,12 @@ test('sweep: no overflow, overlap, clipped text or clipped focus ring at any win
     await page.getByRole('radio', { name: '準備' }).click();
     await page.waitForTimeout(300);
   }
+  // Only the canvas's height turns the first view compact: every compact view has less of it than every full one. And the check sees both kinds, so a selector that matches nothing cannot pass.
+  const low = first.filter((f) => f.compact);
+  const full = first.filter((f) => !f.compact);
+  const most = Math.max(...low.map((f) => f.room));
+  for (const f of full) if (f.room <= most) faults.push(`${f.at}: full cards in ${f.room} px, while a view with ${most} px is compact`);
+  if (!low.length) faults.push('no window of the sweep has compact cards: the low windows no longer check them');
   await page.setViewportSize({ width: 1920, height: 1080 });
   await page.getByRole('radio', { name: '書込' }).click();
   await settled(page);

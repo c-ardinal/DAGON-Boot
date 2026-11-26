@@ -99,6 +99,11 @@ The page meets the principle in two tiers. The boundary between them is 1024 px 
 
 - **1024 px and wider:** the canvas fills the window under the bar, the columns float over it, and the page never
   scrolls. `e2e/layout.spec.ts` sweeps the viewport matrix from 1024 to 2560 px wide.
+  The first view fits the whole graph and never shows a name under 13 px. Where the canvas is too low for that with
+  full cards, the cards turn compact (name, version and state) and the rest is in each node's sheet. The sample's
+  first view shows full cards from a window height of 768 px at every width; of the swept windows, 1920 × 600 and
+  2560 × 700 (the wide theme's taller bar) show compact ones. The sweep checks both, and that only the canvas's
+  height decides.
 - **Under 1024 px** (a 1280 window at 200 % zoom and more): the narrow tier. The bar wraps onto more rows, and the
   brand keeps only its mark. The canvas keeps a height of its own (`--h-canvas-narrow`). The columns, the DAGON mark
   and its bubble, and the drawer stack under the canvas, and the page scrolls down. Menus and dialogs fit the window's

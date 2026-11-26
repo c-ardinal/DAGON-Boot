@@ -7,8 +7,8 @@
 use alloc::collections::VecDeque;
 use alloc::vec::Vec;
 use dagon_ed25519::Ed25519Compact;
-use dagon_format::header::{self, image_kind, ImageHeader, McuId, HEADER_SIZE};
-use dagon_format::topology::{iface, rom_entry, TopologyView};
+use dagon_format::header::{self, image_kind, slot_binding, ImageHeader, McuId, HEADER_SIZE};
+use dagon_format::topology::{iface, rom_entry, TopoNode, TopologyView};
 use dagon_format::{sha256, FormatError};
 use dagon_port::{BusError, StreamPort};
 use dagon_proto::payload::{self, phase, UartRaw};
@@ -19,8 +19,8 @@ use dagon_romlink::{HostClock, Region};
 use crate::rom::RomSlot;
 use crate::{Error, Event, Hop, Host, Target, Transport};
 
-/// The most bytes one UART_RAW sends or reads: within a UART link's
-/// buffer and what the connected node's uplink carries around it.
+/// The most bytes one UART_RAW sends or reads, where the UART link's
+/// buffer and the way to the relaying node carry that many.
 pub const RAW_CHUNK: usize = 1000;
 /// The longest one UART_RAW waits for the first byte; a longer wait of
 /// the loader's client is several of them.
@@ -68,12 +68,16 @@ pub fn serial_rom_maps(reg: &dagon_topology::defs::Registry) -> Vec<SerialRomMap
         .collect()
 }
 
-/// Checks a signed recovery agent image for `map`'s MCU: signature under
-/// `pubkey`, kind, MCU, payload digest and size (it must fit its slot).
+/// Checks a signed recovery agent image for topology node `node`, whose
+/// MCU `map` is for: signature under `pubkey`, kind, payload digest and
+/// size (it must fit its slot), and what the node's own agent checks of
+/// an image it is sent: MCU, port, target tag, the capability rule and
+/// the slot (the first one).
 pub fn check_agent(
     img: &[u8],
     pubkey: &[u8; 32],
     map: &SerialRomMap,
+    node: &TopoNode,
 ) -> Result<ImageHeader, FormatError> {
     let raw: &[u8; HEADER_SIZE] = img
         .get(..HEADER_SIZE)
@@ -82,7 +86,13 @@ pub fn check_agent(
     let h = header::verify_header(raw, &Ed25519Compact::new(*pubkey))?;
     let body = &img[HEADER_SIZE..];
     let fits = body.len() as u64 <= u64::from(map.agent.max_payload);
-    if h.image_kind != image_kind::AGENT || h.mcu_id != map.mcu_id || !fits {
+    let for_node = h.mcu_id == map.mcu_id
+        && h.mcu_id == node.mcu_id
+        && h.port_kind == node.port_kind
+        && h.target_tag == node.target_tag
+        && header::capabilities_ok(h.image_kind, h.build_flags, h.capabilities)
+        && matches!(h.slot_binding, slot_binding::A | slot_binding::ANY);
+    if h.image_kind != image_kind::AGENT || !for_node || !fits {
         return Err(FormatError::BadField);
     }
     if h.payload_size as usize != body.len() || sha256(body) != h.payload_sha256 {
@@ -126,7 +136,10 @@ pub(crate) struct HubSerial<'h, T: Transport, C: HostClock> {
     node: u8,
     relay: Target,
     link: u8,
+    /// The most bytes one UART_RAW sends.
     chunk: usize,
+    /// The most bytes one UART_RAW reads.
+    read: usize,
     version: dagon_format::Version,
     shown: u8,
     out: Vec<u8>,
@@ -143,13 +156,19 @@ impl<'h, T: Transport, C: HostClock> HubSerial<'h, T, C> {
         version: dagon_format::Version,
     ) -> Self {
         let buffer = dagon_proto::frame_len(usize::from(hop.max_payload));
+        // What a request to the relaying node and its response carry
+        // around the bytes: the request's fields, the response's status
+        // and bulk mark.
+        let way = host.link_max(relay);
+        let most = |around: usize| RAW_CHUNK.min(buffer).min(way.saturating_sub(around)).max(1);
         HubSerial {
             host,
             on_event,
             node,
             relay,
             link: hop.link,
-            chunk: RAW_CHUNK.min(buffer),
+            chunk: most(UartRaw::OVERHEAD_MAX),
+            read: most(1 + payload::BULK_RESP_AT),
             version,
             shown: 0,
             out: Vec::new(),
@@ -193,7 +212,7 @@ impl<T: Transport, C: HostClock> StreamPort for HubSerial<'_, T, C> {
                 return Err(BusError::Timeout);
             }
             let wait = (left as u32).min(RAW_WAIT_MAX_MS);
-            self.raw(&out[last..], self.chunk, wait).await?;
+            self.raw(&out[last..], self.read, wait).await?;
         }
         let n = buf.len().min(self.got.len());
         for (b, g) in buf.iter_mut().zip(self.got.drain(..n)) {

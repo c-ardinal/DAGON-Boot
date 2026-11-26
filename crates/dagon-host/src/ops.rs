@@ -1019,7 +1019,8 @@ impl<T: Transport, C: HostClock> Host<T, C> {
         let Some(method) = serial_rom::enter_method(&topo, node) else {
             return Err(unreachable);
         };
-        let v = serial_rom::check_agent(a.agent, a.pubkey, map)?.version;
+        let v =
+            serial_rom::check_agent(a.agent, a.pubkey, map, &topo.node(usize::from(node)))?.version;
         if !a.confirmed {
             return Err(Error::RomNotConfirmed { node });
         }

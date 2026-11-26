@@ -42,6 +42,11 @@ fn sim_map() -> SerialRomMap {
 
 /// A signed recovery agent for the watch, `len` bytes of body.
 fn agent(v: Version, len: usize) -> Vec<u8> {
+    agent_for("watch-s3", v, len)
+}
+
+/// The same for a board of target tag `tag`.
+fn agent_for(tag: &str, v: Version, len: usize) -> Vec<u8> {
     let (flags, caps) = image::default_bits(image_kind::AGENT);
     let spec = ImageSpec {
         image_kind: image_kind::AGENT,
@@ -52,7 +57,7 @@ fn agent(v: Version, len: usize) -> Vec<u8> {
         build_flags: flags,
         release_seq: 1,
         min_bootcore_version: Version::new(1, 0, 0),
-        target_tag: target_tag("watch-s3"),
+        target_tag: target_tag(tag),
         proto_version: 1,
         capabilities: caps,
     };
@@ -141,6 +146,10 @@ fn nothing_is_touched_before_the_confirmation_or_with_a_wrong_image() {
     let app = dagon_sim::sample::WATCH_1_0_0;
     let r = block_on(h.rewrite_agent(WATCH, &assets(app, &topo, &maps), &mut |_| {}));
     assert!(matches!(r, Err(Error::Format(_))), "{r:?}");
+    // A signed agent of the same MCU for another board is not this node's.
+    let other = agent_for("other-s3", V2, 4000);
+    let r = block_on(h.rewrite_agent(WATCH, &assets(&other, &topo, &maps), &mut |_| {}));
+    assert!(matches!(r, Err(Error::Format(_))), "{r:?}");
     // The seg has no ROM serial loader, the hub no relaying node before it.
     for node in [SEG, 0] {
         let r = block_on(h.rewrite_agent(node, &assets(&img, &topo, &maps), &mut |_| {}));
@@ -151,6 +160,28 @@ fn nothing_is_touched_before_the_confirmation_or_with_a_wrong_image() {
     assert_eq!(count(&s, Cmd::UartRaw), 0);
     assert_eq!(factory(&s, img.len()), before);
     assert!(!with_watch(&s, |w| w.in_download()));
+}
+
+/// An uplink that carries less than a UART link's buffer (the relaying
+/// node behind I2C): every UART_RAW stays within it, and the same agent
+/// is written.
+#[test]
+fn a_narrow_way_to_the_relaying_node_carries_smaller_pieces() {
+    let mut s = sim_of(sample_hub(7));
+    s.max = dagon_proto::max_payload::I2C;
+    let mut h = Host::new(s.clone(), s.clone());
+    let parsed = dagon_topology::parse_str(SAMPLE).unwrap();
+    let reg = dagon_topology::defs::Registry::builtin();
+    h.timings = dagon_host::node_timings(reg, &parsed).unwrap();
+    h.local = dagon_host::local_node(reg, &parsed, "hub");
+    let (topo, maps) = (topology(SAMPLE), [sim_map()]);
+    let img = agent(V2, 9000);
+
+    block_on(h.rewrite_agent(WATCH, &assets(&img, &topo, &maps), &mut |_| {})).unwrap();
+
+    assert_eq!(factory(&s, img.len()), img);
+    let most = *s.largest.borrow();
+    assert!(most <= s.max, "{most} > {}", s.max);
 }
 
 /// A watch whose firmware does not answer cannot switch by itself: with
@@ -220,7 +251,10 @@ fn the_definitions_map_writes_the_header_last() {
         (esp, 0x100_0000, 0x1_0000, 0x71_2000)
     );
     let img = agent(V2, 5000);
-    assert!(serial_rom::check_agent(&img, &dagon_sim::sample::PUBKEY, &map).is_ok());
+    let topo = topology(SAMPLE);
+    let view = dagon_format::topology::TopologyView::parse(&topo).unwrap();
+    let watch = view.node(usize::from(WATCH));
+    assert!(serial_rom::check_agent(&img, &dagon_sim::sample::PUBKEY, &map, &watch).is_ok());
     let regions = serial_rom::regions(&img, &map);
     let at: Vec<(u32, usize)> = regions.iter().map(|r| (r.addr, r.data.len())).collect();
     assert_eq!(at, [(0x1_0000, 5000), (0x71_2000, HEADER_SIZE)]);
@@ -232,8 +266,6 @@ fn the_definitions_map_writes_the_header_last() {
     );
 
     // The link to the watch names the method; no link to the seg does.
-    let topo = topology(SAMPLE);
-    let view = dagon_format::topology::TopologyView::parse(&topo).unwrap();
     assert_eq!(serial_rom::enter_method(&view, WATCH), Some(1));
     assert_eq!(serial_rom::enter_method(&view, SEG), None);
 }

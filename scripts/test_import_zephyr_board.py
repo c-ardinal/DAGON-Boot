@@ -269,6 +269,17 @@ class Stated(unittest.TestCase):
             b = tomllib.loads(imp.convert(d, path, "x", "rp2040", TAG))["board"]["x"]
         self.assertEqual(b["pin"], [{"pin": "GPIO25", "name": "led0"}])
 
+    def test_rows_of_a_connector_in_one_cell_list_are_each_a_row(self):
+        b = self.board(
+            "&flash0 { reg = <0 0x1000>; };\n"
+            "/ { c: connector { gpio-map = <0 0 &gpio0 1 0 1 0 &gpio0 2 (A | B)\n"
+            "    2 0 &gpio0 3 0>;	/* GP3 */ }; };\n"
+        )
+        self.assertEqual(
+            b["header"],
+            [{"pin": "GPIO1"}, {"pin": "GPIO2"}, {"pin": "GPIO3", "label": "GP3"}],
+        )
+
     def test_an_include_inside_a_block_comment_is_not_read(self):
         with tempfile.TemporaryDirectory() as d:
             path = Path(d) / "boards/x/x.dts"

@@ -35,10 +35,12 @@ INCLUDE = re.compile(
 BLOCK_COMMENT = re.compile(r"/\*.*?\*/", re.S)
 # A string or a block comment (kept as they are), or a line comment.
 LINE_COMMENT = re.compile(r'"(?:\\.|[^"\\\n])*"|/\*.*?\*/|(//[^\n]*)', re.S)
-# One row of a connector's `gpio-map`, with the printed name Zephyr keeps in
-# the comment after it.
+# One row of a connector's `gpio-map` (`child child &port pin flags`, found
+# by its reference: rows may share one cell list), with the printed name
+# Zephyr keeps in the comment after the list it ends.
 MAP_ROW = re.compile(
-    r"<\s*\w+\s+\w+\s+&(\w+)\s+(\w+)\s+\w+\s*>\s*[,;]?[ \t]*(?:\x01(.*?)\x02)?"
+    r"&(\w+)\s+([^\s<>,()]+)\s+(?:\([^)]*\)|[^\s<>,]+)"
+    r"(?:\s*>\s*[,;]?[ \t]*(?:\x01(.*?)\x02)?)?"
 )
 # A printed name [`labelled`] kept.
 NAME = re.compile(r"\x01[^\x02]*\x02")

@@ -104,6 +104,7 @@ fn main() -> ExitCode {
         Command::Ai(AiCmd::Key(k)) => run(keystore::command(&k)),
         Command::Ai(AiCmd::Ask(a)) => run(ask::command(&a.question)),
         Command::Ai(AiCmd::Topology(a)) => run(ai::topology(&a)),
+        Command::Ai(AiCmd::Port(a)) => run(ai::port::command(&a)),
     }
 }
 

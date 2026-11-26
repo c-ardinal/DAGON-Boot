@@ -190,6 +190,7 @@ fn lock_file(home: &Path) -> Result<std::fs::File, String> {
 /// dropped, unlink waits.
 pub struct Held {
     consent: Consent,
+    home: std::path::PathBuf,
     _file: std::fs::File,
 }
 
@@ -201,6 +202,12 @@ impl Drop for Held {
 }
 
 impl Held {
+    /// Whether the consent is still given: `false` once an unlink removed
+    /// it and waits for this call to end.
+    pub fn stands(&self) -> bool {
+        is_linked(&self.home)
+    }
+
     /// The agent and way the held consent is for.
     pub fn consent(&self) -> &Consent {
         &self.consent
@@ -220,6 +227,7 @@ pub fn hold(home: &Path) -> Result<Held, String> {
     let consent = consent(home).ok_or_else(|| refusal(home))?;
     Ok(Held {
         consent,
+        home: home.to_path_buf(),
         _file: file,
     })
 }

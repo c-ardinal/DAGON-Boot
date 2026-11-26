@@ -228,6 +228,18 @@ fn todays_invocations() -> Vec<(&'static str, Command)> {
             }),
         ),
         (
+            "ai port esp32s3 m5stopwatch --kind V --max-hours 3 --rerun --yes",
+            C::Ai(AiCmd::Port(AiPortArgs {
+                mcu: "esp32s3".into(),
+                board: "m5stopwatch".into(),
+                kind: "V".into(),
+                max_hours: Some(3),
+                rerun: true,
+                yes: true,
+                ..Default::default()
+            })),
+        ),
+        (
             "new my-fleet",
             C::New(NewArgs {
                 dir: "my-fleet".into(),
@@ -564,6 +576,10 @@ fn bad_command_lines_are_usage_errors() {
         ("rescue hub", ErrorKind::InvalidSubcommand),
         ("rollback", ErrorKind::MissingRequiredArgument),
         ("recover --node watch", ErrorKind::MissingRequiredArgument),
+        (
+            "ai port esp32s3 m5stopwatch",
+            ErrorKind::MissingRequiredArgument,
+        ),
         ("flash", ErrorKind::MissingRequiredArgument),
         ("new", ErrorKind::MissingRequiredArgument),
         ("sim now", ErrorKind::InvalidValue),

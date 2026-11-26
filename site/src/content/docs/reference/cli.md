@@ -749,6 +749,7 @@ Commands:
   key       Manage an agent's API key in the OS credential store
   ask       Ask DAGON about the topology of ./dagon.toml
   topology  Turn a board description into topology YAML
+  port      Have the agent port DAGON to a board, in the DAGON clone
   help      Print this message or the help of the given subcommand(s)
 
 Options:
@@ -894,6 +895,51 @@ Options:
 
       --model <ID>
           Model id to ask [default: the agent's]
+
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+## dagon ai port
+
+```text
+Have the agent port DAGON to a board, in the DAGON clone
+
+Starts the clone's tools/agent-sdk (Node.js, Claude Agent SDK), which runs the plugin's porting skill until the conformance tests pass or its limits are reached. The agent edits files and runs commands in the clone without asking; dagon tells you so and asks first. Needs DAGON linked to the Claude API with a key, and a project that builds with a local clone.
+
+Usage: dagon ai port [OPTIONS] --kind <S|V> <MCU> <BOARD>
+
+Arguments:
+  <MCU>
+          MCU id (the MCU package is targets/mcu/<MCU>)
+
+  <BOARD>
+          Board id (the board package is targets/boards/<BOARD>)
+
+Options:
+      --kind <S|V>
+          Port kind: S (DAGON's own boot loader) or V (the vendor's 2nd stage)
+
+      --in <FILE>
+          Board description file given to the agent
+
+      --max-hours <N>
+          Hours the run may take [default: 6, or 3 with --rerun]
+
+      --max-iterations <N>
+          Iterations the run may take [default: 30]
+
+      --rerun
+          Repeat an earlier successful port
+
+      --model <ID>
+          Model id to ask [default: the Agent SDK's]
+
+      --yes
+          Start without asking
+
+      --config <FILE>
+          Project file the defaults come from [default: ./dagon.toml]
 
   -h, --help
           Print help (see a summary with '-h')

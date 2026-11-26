@@ -703,6 +703,15 @@ pub enum AiCmd {
     /// The description comes from --in or stdin; the YAML is checked to 0
     /// errors. Needs `dagon ai link` first.
     Topology(AiTopologyArgs),
+    /// Have the agent port DAGON to a board, in the DAGON clone
+    ///
+    /// Starts the clone's tools/agent-sdk (Node.js, Claude Agent SDK), which
+    /// runs the plugin's porting skill until the conformance tests pass or
+    /// its limits are reached. The agent edits files and runs commands in
+    /// the clone without asking; dagon tells you so and asks first. Needs
+    /// DAGON linked to the Claude API with a key, and a project that builds
+    /// with a local clone.
+    Port(AiPortArgs),
 }
 
 #[derive(Debug, Default, PartialEq, Args)]
@@ -743,6 +752,39 @@ pub struct AiTopologyArgs {
     /// Model id to ask [default: the agent's]
     #[arg(long, value_name = "ID")]
     pub model: Option<String>,
+}
+
+#[derive(Debug, Default, PartialEq, Args)]
+pub struct AiPortArgs {
+    /// MCU id (the MCU package is targets/mcu/<MCU>)
+    #[arg(value_name = "MCU")]
+    pub mcu: String,
+    /// Board id (the board package is targets/boards/<BOARD>)
+    #[arg(value_name = "BOARD")]
+    pub board: String,
+    /// Port kind: S (DAGON's own boot loader) or V (the vendor's 2nd stage)
+    #[arg(long, value_name = "S|V")]
+    pub kind: String,
+    /// Board description file given to the agent
+    #[arg(long = "in", value_name = "FILE")]
+    pub input: Option<String>,
+    /// Hours the run may take [default: 6, or 3 with --rerun]
+    #[arg(long, value_name = "N")]
+    pub max_hours: Option<u32>,
+    /// Iterations the run may take [default: 30]
+    #[arg(long, value_name = "N")]
+    pub max_iterations: Option<u32>,
+    /// Repeat an earlier successful port
+    #[arg(long)]
+    pub rerun: bool,
+    /// Model id to ask [default: the Agent SDK's]
+    #[arg(long, value_name = "ID")]
+    pub model: Option<String>,
+    /// Start without asking
+    #[arg(long)]
+    pub yes: bool,
+    #[arg(long, value_name = "FILE", help = CONFIG)]
+    pub config: Option<String>,
 }
 
 /// The text printed for a command-line parse error. Under `ai key` none of

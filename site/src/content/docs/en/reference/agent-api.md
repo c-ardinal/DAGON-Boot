@@ -87,7 +87,7 @@ Withdraws the consent (also fine when none was recorded).
   answers 200 only when no call is in flight. The wait is at most one call:
   up to about 120 s for a question, up to 600 s for a round of a topology
   draft. The page should show a waiting state until DELETE answers.
-- No call passes the check after that: running `ai_topology` jobs are
+- No call passes the check after that: running `ai_topology` and `ai_port` jobs are
   cancelled, a question being answered makes no further call and answers 409
   `AGENT_NOT_LINKED` instead of its answer (`dagon ai ask` does not print it
   either).
@@ -250,6 +250,29 @@ too.
 
 The 192 KiB cap is measured on the system and user texts together before every
 call, whatever the way.
+
+## POST /v1/ai/port
+
+Unlike every other AI route, this one starts an agent that acts.
+`{mcu, board, kind, description?, max_hours?, max_iterations?, rerun?, accept}`
+starts a job (`ai_port`) that runs `tools/agent-sdk` of the project's DAGON
+clone with Node.js: the Claude Agent SDK loads the clone's `plugin/` and runs
+its `dagon-port` skill. `dagon ai port` starts the same run.
+
+- The agent reads and edits files and runs commands in the clone, with the
+  user's permissions and without asking. What it reads there goes to the
+  Claude API. The lists under "What linking sends" do not bound this route.
+- `accept` must be `true` (400 otherwise). The CLI shows the same notice and
+  asks before it starts (`--yes` skips the question).
+- The linked way must post to the Claude API with a key. The key is set for
+  that program alone (as `ANTHROPIC_API_KEY`) and never printed: a line of
+  the program that holds it shows `[API key]` instead.
+- The project must build with a local clone that has `plugin/` and
+  `tools/agent-sdk` with its packages installed (`npm ci` in that folder).
+- The job's log lines are the agent's steps; its result is
+  `{ok, text, turns, cost_usd}`. Unlinking or cancelling the job stops the
+  program and all it started. dagon stops a run 15 minutes past its hour
+  limit (6 h, or 3 h with `rerun`, unless `max_hours` says otherwise).
 
 ## Agent definitions
 

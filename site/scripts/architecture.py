@@ -167,8 +167,11 @@ ABSENT = ("コードに存在しません。", "Not in the code.")
 # limitations page lists. A port's gap is in its dagon_events::PORTS record; a component that is part of such a
 # record names it here instead, and a port is not listed here at all.
 NOT_IN_TREE = {
-    "AI Agent Link": ("`dagon serve`にボード移植の作業は存在しません。`POST /v1/ai/port`の応答は501です。",
-                      "`dagon serve` has no job that ports DAGON to a board: `POST /v1/ai/port` answers 501."),
+    "AI Agent Link": ("DAGON Consoleにボード移植の開始画面は存在しません。開始方法はCLIの`dagon ai port`と`POST /v1/ai/port`です。"
+                      "移植の実行は模擬プログラムとの試験と、実機なしの起動確認だけで、実機での完走は未確認です。",
+                      "DAGON Console has no screen that starts a port: it starts from the CLI (`dagon ai port`) or "
+                      "`POST /v1/ai/port`. The run is tested against a stand-in program and by starting it without "
+                      "hardware; a port run to its end on hardware is to be confirmed."),
     "ROM Loader Client": ("ESP32-S3のROMシリアルローダー経由の書込（`dagon recover`）は、模擬ローダーとの試験だけです。"
                           "実機では、ENTER_ROM後にローダーがリンクのUARTで受信すること、中継ノードのUARTがローダーの応答を欠落なく受信することが未確認です。",
                           "The write through the ESP32-S3's ROM serial loader (`dagon recover`) is tested against the simulated "

@@ -11,7 +11,7 @@
 //! - The signing key and an agent's key stay in this process: the API
 //!   reports only whether they exist (and the signing key's id).
 
-mod api;
+pub(crate) mod api;
 mod devjobs;
 mod http;
 mod jobs;

@@ -1091,7 +1091,7 @@ export const CLI_LINK = {
 export const JOBS = {
   heading: '作業',
   cols: ['種類', '対象', '状態', '経過', '結果'],
-  kinds: { build: 'ビルド', sign: '署名', release: 'リリース', gen: 'テンプレート', flash: '書込', conform: '適合試験', doctor: '環境診断', ai_topology: '構成の案' } as Record<string, string>,
+  kinds: { build: 'ビルド', sign: '署名', release: 'リリース', gen: 'テンプレート', flash: '書込', conform: '適合試験', doctor: '環境診断', ai_topology: '構成の案', ai_port: 'ボード移植' } as Record<string, string>,
   states: { queued: '待機', running: '実行中', question: '質問あり', succeeded: '成功', failed: '失敗', cancelled: '中止', unknown: '不明' } as Record<string, string>,
   none: '作業 なし',
   started: '開始時刻',

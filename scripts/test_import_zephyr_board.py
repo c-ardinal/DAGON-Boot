@@ -159,6 +159,27 @@ class Stated(unittest.TestCase):
         )
         self.assertEqual(b["header"], [{"pin": "GPIO16", "label": "GP16"}])
 
+    def test_an_overlay_that_only_enables_a_bus_keeps_what_its_declaration_gives(self):
+        b = self.board(
+            "&flash0 { reg = <0 0x1000>; };\n"
+            "/ { soc { usart2: serial@40004400 { current-speed = <115200>;"
+            " pinctrl-0 = <&usart2_tx_pa2 &usart2_rx_pa3>; status = \"disabled\"; }; }; };\n"
+            "&usart2 { status = \"okay\"; };\n"
+        )
+        self.assertEqual(
+            b["bus"],
+            [
+                {
+                    "id": "usart2",
+                    "kind": "uart",
+                    "controller": "usart2",
+                    "tx": "PA2",
+                    "rx": "PA3",
+                    "baud": 115200,
+                }
+            ],
+        )
+
     def test_a_node_stated_again_by_its_path_is_merged(self):
         b = self.board(
             "&flash0 { reg = <0 0x1000>; };\n"

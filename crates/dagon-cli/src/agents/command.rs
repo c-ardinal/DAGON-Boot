@@ -317,7 +317,10 @@ pub(crate) fn stream(
             let mut line = Vec::new();
             match (&mut r).take(MAX_LINE).read_until(b'\n', &mut line) {
                 Ok(n) if n > 0 => {
-                    if tx.send(String::from_utf8_lossy(&line).into_owned()).is_err() {
+                    if tx
+                        .send(String::from_utf8_lossy(&line).into_owned())
+                        .is_err()
+                    {
                         break;
                     }
                 }

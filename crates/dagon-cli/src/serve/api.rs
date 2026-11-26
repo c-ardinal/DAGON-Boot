@@ -1479,7 +1479,7 @@ fn ai_port_start(server: &Arc<Server>, req: &Request) -> Res {
             .ok_or_else(|| Response::error(400, &format!("{k} must be a whole number"))),
     };
     let text = |k: &str| v[k].as_str().unwrap_or("").to_string();
-    let r = crate::aiport::Request {
+    let r = crate::ai::port::Request {
         mcu: text("mcu"),
         board: text("board"),
         kind: text("kind"),
@@ -1510,13 +1510,13 @@ fn job_ai_port(
     job: &mut Job,
     s: &Server,
     cfg: &Config,
-    r: &crate::aiport::Request,
+    r: &crate::ai::port::Request,
 ) -> Result<Value, String> {
     let home = super::project::home(s).map_err(|_| crate::consent::NOT_LINKED.to_string())?;
-    let clone = crate::aiport::clone_of(cfg)?;
+    let clone = crate::ai::port::clone_of(cfg)?;
     let cancel = job.cancel_flag();
     job.progress("port", None);
-    let out = crate::aiport::run(&home, s.keys(), &clone, r, &cancel, &mut |step| {
+    let out = crate::ai::port::run(&home, s.keys(), &clone, r, &cancel, &mut |step| {
         job.log(&step.line())
     })?;
     job.flush();

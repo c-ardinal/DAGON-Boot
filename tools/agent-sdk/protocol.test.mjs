@@ -66,8 +66,8 @@ test("SDK messages become lines", () => {
   ]);
 
   assert.deepEqual(
-    lines({ type: "result", subtype: "success", is_error: false, result: "12/12", num_turns: 40, total_cost_usd: 1.5 }),
-    [{ event: "result", ok: true, text: "12/12", turns: 40, cost_usd: 1.5 }],
+    lines({ type: "result", subtype: "success", is_error: false, result: "ported", num_turns: 40, total_cost_usd: 1.5 }),
+    [{ event: "result", ok: true, text: "ported", turns: 40, cost_usd: 1.5 }],
   );
   assert.deepEqual(lines({ type: "result", subtype: "error_max_turns" }), [
     { event: "result", ok: false, text: "the run ended: error_max_turns", turns: 0, cost_usd: null },

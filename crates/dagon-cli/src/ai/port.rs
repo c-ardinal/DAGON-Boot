@@ -90,7 +90,11 @@ impl Request {
         if !within(self.max_iterations, MAX_ITERATIONS) {
             return Err(format!("the iterations must be from 1 to {MAX_ITERATIONS}"));
         }
-        if self.description.as_ref().is_some_and(|d| d.len() > MAX_DESCRIPTION) {
+        if self
+            .description
+            .as_ref()
+            .is_some_and(|d| d.len() > MAX_DESCRIPTION)
+        {
             return Err("the board description is longer than 32 KiB".into());
         }
         Ok(())
@@ -368,7 +372,11 @@ mod tests {
 
     /// Runs the clone's program as dagon does, linked to the Claude API
     /// with key `sk-test`.
-    fn run_in(clone: &Path, r: &Request, cancel: &AtomicBool) -> (Result<Outcome, String>, Vec<Step>) {
+    fn run_in(
+        clone: &Path,
+        r: &Request,
+        cancel: &AtomicBool,
+    ) -> (Result<Outcome, String>, Vec<Step>) {
         let home = clone.join("home");
         std::fs::create_dir_all(&home).unwrap();
         crate::consent::link(&home, "claude", "api").unwrap();
@@ -403,7 +411,7 @@ process.stdin.on("end", () => {
   say({ event: "tool", name: "Bash", detail: `key ${process.env.ANTHROPIC_API_KEY}` });
   say({ event: "tool", name: "Read", detail: "" });
   say({ event: "text", text: `signing key ${process.env.DAGON_SIGNING_KEY ?? "unset"}` });
-  say({ event: "result", ok: true, text: `12/12 ${r.plugin.endsWith("plugin")}`, turns: 7, cost_usd: 1.25 });
+  say({ event: "result", ok: true, text: `ported ${r.plugin.endsWith("plugin")}`, turns: 7, cost_usd: 1.25 });
 });
 "#;
 
@@ -415,7 +423,7 @@ process.stdin.on("end", () => {
             out.unwrap(),
             Outcome {
                 ok: true,
-                text: "12/12 true".into(),
+                text: "ported true".into(),
                 turns: 7,
                 cost_usd: Some(1.25),
             }
@@ -442,7 +450,10 @@ process.stdin.on("end", () => {
 
         let silent = clone_with("silent", "");
         let (out, _) = run_in(&silent, &req(), &AtomicBool::new(false));
-        assert_eq!(out.unwrap_err(), "the porting program ended without a result");
+        assert_eq!(
+            out.unwrap_err(),
+            "the porting program ended without a result"
+        );
 
         let crashing = clone_with("crash", "process.exit(3);");
         let (out, _) = run_in(&crashing, &req(), &AtomicBool::new(false));
@@ -461,19 +472,43 @@ process.stdin.on("end", () => {
     #[test]
     fn a_request_that_is_not_plain_is_never_sent() {
         for bad in [
-            Request { mcu: "esp32s3 --rerun".into(), ..req() },
-            Request { board: "../x".into(), ..req() },
-            Request { kind: "X".into(), ..req() },
-            Request { max_hours: Some(0), ..req() },
-            Request { max_hours: Some(MAX_HOURS + 1), ..req() },
-            Request { max_iterations: Some(MAX_ITERATIONS + 1), ..req() },
-            Request { description: Some("x".repeat(MAX_DESCRIPTION + 1)), ..req() },
+            Request {
+                mcu: "esp32s3 --rerun".into(),
+                ..req()
+            },
+            Request {
+                board: "../x".into(),
+                ..req()
+            },
+            Request {
+                kind: "X".into(),
+                ..req()
+            },
+            Request {
+                max_hours: Some(0),
+                ..req()
+            },
+            Request {
+                max_hours: Some(MAX_HOURS + 1),
+                ..req()
+            },
+            Request {
+                max_iterations: Some(MAX_ITERATIONS + 1),
+                ..req()
+            },
+            Request {
+                description: Some("x".repeat(MAX_DESCRIPTION + 1)),
+                ..req()
+            },
         ] {
             assert!(bad.check().is_err(), "{bad:?}");
         }
         assert!(req().check().is_ok());
         assert_eq!(req().timeout(), Duration::from_secs(6 * 3600 + 900));
-        let rerun = Request { rerun: true, ..req() };
+        let rerun = Request {
+            rerun: true,
+            ..req()
+        };
         assert_eq!(rerun.timeout(), Duration::from_secs(3 * 3600 + 900));
     }
 

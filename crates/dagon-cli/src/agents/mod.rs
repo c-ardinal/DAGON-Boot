@@ -370,7 +370,7 @@ fn user_files(home: &Path) -> Vec<(String, Result<String, String>)> {
 const NEVER_PASSED: [&str; 1] = ["ANTHROPIC_API_KEY"];
 
 /// The variable the Claude Agent SDK reads its key from. dagon reads it
-/// nowhere: [`crate::aiport`] sets it, from the OS credential store, for
+/// nowhere: [`crate::ai::port`] sets it, from the OS credential store, for
 /// the porting program alone.
 pub(crate) const CLAUDE_KEY_ENV: &str = NEVER_PASSED[0];
 
@@ -458,7 +458,7 @@ pub(crate) fn call(
 const CLAUDE_API: &str = "https://api.anthropic.com/";
 
 /// The consent, held until the returned value is dropped, and the linked
-/// way's Claude API key: what [`crate::aiport`] runs with. Err when the
+/// way's Claude API key: what [`crate::ai::port`] runs with. Err when the
 /// linked way is not one that posts to the Claude API with a key.
 pub(crate) fn claude_api_key(home: &Path, keys: &Keys) -> Result<(Cleared, String), String> {
     let cleared = Cleared {

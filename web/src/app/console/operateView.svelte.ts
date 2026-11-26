@@ -67,6 +67,8 @@ export class OperateView {
       responding: op.responding,
       unwritten: Object.values(op.progress).filter((p) => p.stage === 'unwritten').length,
       stopped: op.failed ? op.progress[op.failed]?.stage : undefined,
+      realigned: op.realign.realigned,
+      incompatible: op.realign.incompatible,
       rest: op.rest && op.state === 'fileReady',
       finish: op.finished,
       refused: op.returnRefused?.kind,

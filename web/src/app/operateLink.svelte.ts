@@ -130,6 +130,8 @@ export class OperateLink {
   protected wrote = new Set<string>();
   /** Nodes of the last update that were never reached and were sent nothing (dagon-host's needsFirstWrite). */
   protected firstWrite = 0;
+  /** Nodes the last run took back for a compatibility constraint (realigned), and nodes left breaking one (incompatible). */
+  realign = $state({ realigned: 0, incompatible: 0 });
   /** The run hubRestarting / reconnectNeeded belong to, so done says what it did. */
   protected running: 'update' | 'recover' | 'rollback' = 'update';
 

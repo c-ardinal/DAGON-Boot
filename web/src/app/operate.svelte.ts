@@ -119,6 +119,7 @@ export class Operate extends OperateLink {
     this.coreSent = {};
     this.wrote = new Set();
     this.firstWrite = 0;
+    this.realign = { realigned: 0, incompatible: 0 };
     this.progress = Object.fromEntries(this.targets.map((id) => [id, { stage: 'waiting', percent: 0 }]));
     this.track = Object.fromEntries(this.targets.map((id) => [id, { ...NO_TRACK }]));
     // topology node index = position in reach (true for the sample, which follows its YAML).
@@ -206,6 +207,8 @@ export class Operate extends OperateLink {
       }
     }
     this.firstWrite = results.filter((r) => r.outcome === 'needsFirstWrite').length;
+    const count = (o: NodeResult['outcome']) => results.filter((r) => r.outcome === o).length;
+    this.realign = { realigned: count('realigned'), incompatible: count('incompatible') };
     const stop = results.find((r) => r.outcome === 'failed' || r.outcome === 'unknown');
     if (!stop) return this.done();
     const n = reach[stop.node];

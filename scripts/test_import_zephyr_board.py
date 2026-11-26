@@ -200,6 +200,32 @@ class Stated(unittest.TestCase):
         )
         self.assertNotIn("pin", b)
 
+    def test_a_deleted_node_gives_no_bus(self):
+        b = self.board(
+            "&flash0 { reg = <0 0x1000>; };\n"
+            "/ { soc { usart2: serial@40004400 { current-speed = <115200>;"
+            " pinctrl-0 = <&usart2_tx_pa2 &usart2_rx_pa3>; status = \"okay\"; }; }; };\n"
+            "/ { soc { /delete-node/ serial@40004400; }; };\n"
+        )
+        self.assertNotIn("bus", b)
+
+    def test_an_include_inside_a_block_comment_is_not_read(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / "boards/x/x.dts"
+            path.parent.mkdir(parents=True)
+            (path.parent / "leds.dtsi").write_text(
+                "/ { leds { compatible = \"gpio-leds\"; led0: led_0 { gpios = <&gpio0 25 0>; }; }; };\n",
+                encoding="utf-8",
+            )
+            path.write_text(
+                "/*\n#include \"leds.dtsi\"\n*/\n"
+                "#include \"leds.dtsi\"\n"
+                "&flash0 { reg = <0 0x1000>; };\n",
+                encoding="utf-8",
+            )
+            b = tomllib.loads(imp.convert(d, path, "x", "rp2040", TAG))["board"]["x"]
+        self.assertEqual(b["pin"], [{"pin": "GPIO25", "name": "led0"}])
+
     def test_an_overlay_of_a_pin_control_group_moves_the_bus(self):
         b = self.board(
             "&pinctrl { uart0_default: uart0_default {\n"

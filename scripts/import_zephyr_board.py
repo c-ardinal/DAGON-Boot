@@ -83,8 +83,15 @@ def read_tree(root, start):
             return ""
         read.append(rel)
         text = path.read_text(encoding="utf-8")
+        # An include inside a block comment states nothing: it stays as
+        # written, and goes with its comment.
+        commented = [
+            m.span() for m in LINE_COMMENT.finditer(text) if m.group(0).startswith("/*")
+        ]
 
         def put(m):
+            if any(a <= m.start() < b for a, b in commented):
+                return m.group(0)
             quoted, angled = m.group(1), m.group(2)
             if quoted:
                 found = [path.parent / quoted]
@@ -227,7 +234,10 @@ def fill(tree, node, text, i):
             node.props.pop(head.split("/", 2)[2].strip(), None)
         elif head.startswith("/delete-node/"):
             gone = head.split("/", 2)[2].strip()
-            node.children.pop(gone, None)
+            for dropped in (n for c in [node.children.pop(gone, None)] if c for n in c.walk()):
+                for label in dropped.labels:
+                    if tree.labels.get(label) is dropped:
+                        del tree.labels[label]
         elif not head.startswith("/"):
             name, _, value = head.partition("=")
             node.props[name.split(":")[-1].strip()] = value + (after.group(0) if after else "")

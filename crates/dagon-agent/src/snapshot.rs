@@ -93,3 +93,8 @@ impl Snapshot for AppSnapshot {
         }
     }
 }
+
+/// What the published state copies with interrupts masked (one `Watch`
+/// operation each: the execution model's rule 2) is one of these; its size
+/// bounds that section.
+const _: () = assert!(core::mem::size_of::<dagon_events::Latest<AppSnapshot>>() <= 64);

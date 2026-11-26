@@ -15,6 +15,12 @@ const MASKING: &[&str] = &[
     "cortex_m::interrupt::free",
     "cortex_m::interrupt::disable",
     "embassy_sync::blocking_mutex::Mutex::lock",
+    // A `Watch` runs these closures inside its own critical section.
+    "embassy_sync::watch::Snd::send_modify",
+    "embassy_sync::watch::Snd::send_if_modified",
+    "embassy_sync::watch::Snd::try_get_and",
+    "embassy_sync::watch::Watch::try_get_and",
+    "embassy_sync::watch::Rcv::try_get_and",
 ];
 
 /// Attributes that would lift the lint (itself, or a group holding it).
@@ -28,8 +34,9 @@ const LIFTS: &[&str] = &[
 ];
 
 /// The directories (from the repository root) whose code runs inside the
-/// MCU packages, each with its clippy.toml.
-const SCANNED: &[&str] = &["targets/mcu", "crates/dagon-relay"];
+/// MCU packages and masks or could (the relay, the published events), each
+/// with its clippy.toml.
+const SCANNED: &[&str] = &["targets/mcu", "crates/dagon-relay", "crates/dagon-events"];
 
 /// The functions allowed to mask, by file: each says why on itself.
 const EXEMPT: &[(&str, &str)] = &[("targets/mcu/node/src/guard.rs", "fn with_state")];

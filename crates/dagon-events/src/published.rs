@@ -1,10 +1,16 @@
 //! Waitable published state for async display and log tasks. The
 //! layer's composed chain ([`crate::compose`]) is its only writer.
+//!
+//! Interrupt masking (the execution model's rule 2): nothing here masks
+//! by itself (`clippy.toml` refuses it). The `Channel` and `Watch` of
+//! embassy-sync mask for each of their operations, to copy one
+//! [`EventRecord`] or one [`Latest`] in or out; no closure and no
+//! [`Snapshot::apply`] runs inside one. The counters beside them are
+//! atomics written by the one writer.
 
-use core::cell::Cell;
+use core::sync::atomic::{AtomicU32, Ordering};
 
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex as Cs;
-use embassy_sync::blocking_mutex::Mutex;
 use embassy_sync::channel::Channel;
 use embassy_sync::watch::{Receiver, Watch};
 
@@ -34,11 +40,13 @@ pub const WATCHERS: usize = 4;
 /// ring drops its oldest record; the records pushed after it report the
 /// loss in `dropped`, up to 255 each, carrying the rest to the next ones,
 /// so the `dropped` values a reader sees add up to every record lost.
-/// The producer never waits.
+/// The producer never waits. A count of lost records beyond `u32::MAX`
+/// stays there.
 pub struct Recent<const N: usize> {
     ring: Channel<Cs, EventRecord, N>,
-    /// Records lost and not yet reported.
-    unreported: Mutex<Cs, Cell<u64>>,
+    /// Records lost and not yet reported. The one producer (the layer's
+    /// composed chain) is its only writer, so a load and a store suffice.
+    unreported: AtomicU32,
 }
 
 impl<const N: usize> Recent<N> {
@@ -49,28 +57,28 @@ impl<const N: usize> Recent<N> {
         let () = Self::NOT_EMPTY;
         Recent {
             ring: Channel::new(),
-            unreported: Mutex::new(Cell::new(0)),
+            unreported: AtomicU32::new(0),
         }
     }
 
+    /// Each ring operation masks for one record; a reader that takes a
+    /// record between two of them only makes room.
     pub(crate) fn push(&self, mut rec: EventRecord) {
-        self.unreported.lock(|u| {
-            let mut lost = u.get();
-            if self.ring.is_full() {
-                if let Ok(oldest) = self.ring.try_receive() {
-                    // The dropped record's own report is lost with it.
-                    lost = lost.saturating_add(1 + u64::from(oldest.dropped));
-                }
+        let mut lost = self.unreported.load(Ordering::Relaxed);
+        if self.ring.is_full() {
+            if let Ok(oldest) = self.ring.try_receive() {
+                // The dropped record's own report is lost with it.
+                lost = lost.saturating_add(1 + u32::from(oldest.dropped));
             }
-            let report = lost.min(u64::from(u8::MAX));
-            rec.dropped = report as u8;
-            if self.ring.try_send(rec).is_ok() {
-                lost -= report;
-            } else {
-                lost = lost.saturating_add(1);
-            }
-            u.set(lost);
-        });
+        }
+        let report = lost.min(u32::from(u8::MAX));
+        rec.dropped = report as u8;
+        if self.ring.try_send(rec).is_ok() {
+            lost -= report;
+        } else {
+            lost = lost.saturating_add(1);
+        }
+        self.unreported.store(lost, Ordering::Relaxed);
     }
 
     /// The oldest record, if any.
@@ -118,7 +126,8 @@ impl<const N: usize> Default for Recent<N> {
 pub struct Published<S: Snapshot, const N: usize> {
     latest: Watch<Cs, Latest<S>, WATCHERS>,
     recent: Recent<N>,
-    seq: Mutex<Cs, Cell<u32>>,
+    /// Events published; the one writer's (see [`Recent`]).
+    seq: AtomicU32,
 }
 
 impl<S: Snapshot, const N: usize> Published<S, N> {
@@ -126,22 +135,21 @@ impl<S: Snapshot, const N: usize> Published<S, N> {
         Published {
             latest: Watch::new(),
             recent: Recent::new(),
-            seq: Mutex::new(Cell::new(0)),
+            seq: AtomicU32::new(0),
         }
     }
 
+    /// The snapshot is folded outside the watch: taken out (a copy),
+    /// applied, sent back (a move), so [`Snapshot::apply`] never runs with
+    /// interrupts masked. The one writer loses no update by it.
     pub(crate) fn publish(&self, e: &Event<'_>) {
-        let seq = self.seq.lock(|s| {
-            let n = s.get().wrapping_add(1);
-            s.set(n);
-            n
-        });
+        let seq = self.seq.load(Ordering::Relaxed).wrapping_add(1);
+        self.seq.store(seq, Ordering::Relaxed);
         let rec = e.record(seq);
-        self.latest.sender().send_modify(|v| {
-            let l = v.get_or_insert_with(Latest::default);
-            l.state.apply(e);
-            l.last = rec;
-        });
+        let mut l = self.latest.try_get().unwrap_or_default();
+        l.state.apply(e);
+        l.last = rec;
+        self.latest.sender().send(l);
         self.recent.push(rec);
     }
 }

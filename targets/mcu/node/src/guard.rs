@@ -281,8 +281,8 @@ impl<D: Dog, const N: usize> Guard<D, N> {
     }
 
     /// The guard's state, shared by DAGON's tasks and the app's. The only
-    /// place DAGON's own code masks interrupts: the closures above update a
-    /// few fields or feed the watchdog (a register write), well inside
+    /// place DAGON's own code masks interrupts by itself: the closures above
+    /// update a few fields or feed the watchdog (a register write), well inside
     /// `[execution] masked_max_us`; none reaches the flash. An app built
     /// with `masked-time` times each ([`crate::masked_time`]).
     #[allow(clippy::disallowed_methods)]

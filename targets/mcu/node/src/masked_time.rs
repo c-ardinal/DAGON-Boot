@@ -1,13 +1,19 @@
 //! How long DAGON's own code masks interrupts, measured on the node: an
 //! app built with feature `masked-time` times each critical section of the
 //! guard's state ([`crate::guard`], the only place DAGON's own code masks
-//! interrupts) and keeps the longest in [`DAGON_MASKED_MAX_US`], with the
-//! number timed in [`DAGON_MASKED_COUNT`], for a debug probe to read by
+//! interrupts by itself) and keeps the longest in [`DAGON_MASKED_MAX_US`],
+//! with the number timed in [`DAGON_MASKED_COUNT`], for a debug probe to read by
 //! symbol while the app runs. The timing covers the work inside each
 //! section, not masking, the guard's borrow and unmasking around it, and
 //! the clock counts whole microseconds: the definition's `[execution]
 //! masked_max_us` is the worst value plus a margin (samples/hardware-test
 //! measure.py gives it).
+//!
+//! Not timed: the embassy-sync `Channel` and `Watch` operations of the
+//! published events and the relay port, which mask to copy one bounded
+//! value each and run no closure (`clippy.toml` in `targets/mcu`,
+//! `crates/dagon-relay` and `crates/dagon-events` refuses the ones that
+//! would; `dagon-agent` bounds the size of the value copied).
 //!
 //! A board with no debug probe reads it off its `[boot] led` light
 //! instead: [`READOUT_AFTER_S`] after the start, the MCU package blinks

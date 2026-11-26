@@ -334,6 +334,7 @@ fn a_nodes_target_comes_from_the_connected_node_the_host_is_given() {
     no_entry.local = Ok(dagon_host::LocalNode {
         index: 0,
         links: Vec::new(),
+        relays: Vec::new(),
     });
     let r = block_on(no_entry.write_path(SEG, &topo, &[]));
     let Err(Error::Route(why)) = r else {
@@ -361,6 +362,7 @@ fn a_route_error_sends_nothing() {
         Ok(dagon_host::LocalNode {
             index: 0,
             links: Vec::new(),
+            relays: Vec::new(),
         }),
         Err(no_mcu),
         Err(dagon_host::RouteError::NoConfiguration),

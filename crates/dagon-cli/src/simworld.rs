@@ -166,12 +166,8 @@ fn apps(reg: &Registry, key: &KeyPair, n: &Node, v: Version) -> Result<Vec<Vec<u
 }
 
 fn node_at(relay: &mut SimRelay, to: Target) -> Option<&mut SimNode> {
-    match to {
-        Target::Local => Some(&mut relay.node),
-        Target::Linked { link, addr, .. } => relay.node_behind_mut(link, addr),
-        // The simulated relaying node has no relaying node behind it.
-        Target::Deep(_) => None,
-    }
+    let hops: Vec<(u8, u8)> = to.hops().iter().map(|h| (h.link, h.addr)).collect();
+    relay.node_through(&hops)
 }
 
 impl<'a> World<'a> {

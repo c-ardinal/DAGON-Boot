@@ -563,6 +563,7 @@ mod tests {
         host.local = Ok(dagon_host::LocalNode {
             index: 0,
             links: Vec::new(),
+            relays: Vec::new(),
         });
         let r = crate::device::write_silent_nodes(
             &mut host,
@@ -740,7 +741,11 @@ mod tests {
             let t = dagon_topology::parse_str(&yaml).unwrap();
             let sent = Rc::new(RefCell::new(Vec::new()));
             let mut host = Host::new(Recording(w.sim.clone(), sent.clone()), w.sim.clone());
-            host.local = Ok(dagon_host::LocalNode { index: 0, links });
+            host.local = Ok(dagon_host::LocalNode {
+                index: 0,
+                links,
+                relays: Vec::new(),
+            });
             let dir = provision_files(&w, &["seg"]);
             let r = crate::device::write_silent_nodes(
                 &mut host,

@@ -63,6 +63,78 @@ fn linked(def: RelayLinkDef, addr: u8) -> Target {
     }
 }
 
+/// 0 - 1 - 2 - 3 in a chain and 4 on node 0's other bus; nodes 1 and 2
+/// relay as nodes with this test's table, node 3 does not.
+fn chain() -> (Vec<TopoLink>, LocalNode) {
+    let links = vec![
+        link(end(0, STREAM.port, NONE), end(1, 0, NONE)),
+        link(end(2, 1, 0x21), end(1, BUS_A.port, NONE)),
+        link(end(2, BUS_B.port, NONE), end(3, 0, 0x33)),
+        link(end(0, BUS_A.port, NONE), end(4, 0, 0x44)),
+        link(end(3, BUS_A.port, NONE), end(5, 0, 0x55)),
+    ];
+    let me = LocalNode {
+        index: 0,
+        links: TABLE.to_vec(),
+        relays: vec![(1, TABLE.to_vec()), (2, TABLE.to_vec())],
+    };
+    (links, me)
+}
+
+fn hop(def: RelayLinkDef, addr: u8) -> dagon_host::Hop {
+    dagon_host::Hop {
+        link: def.id,
+        addr,
+        max_payload: def.max_payload,
+    }
+}
+
+#[test]
+fn a_node_behind_relaying_nodes_is_one_hop_per_link_from_each_nodes_own_table() {
+    let (links, me) = chain();
+    let to = |node| Target::of_node_through(links.clone(), &me, node);
+    assert_eq!(to(0), Ok(Target::Local));
+    assert_eq!(to(1), Ok(linked(STREAM, 0xEE)));
+    assert_eq!(to(4), Ok(linked(BUS_A, 0x44)));
+    assert_eq!(to(2).unwrap().hops(), [hop(STREAM, 0xEE), hop(BUS_A, 0x21)]);
+    assert_eq!(
+        to(3).unwrap().hops(),
+        [hop(STREAM, 0xEE), hop(BUS_A, 0x21), hop(BUS_B, 0x33)]
+    );
+}
+
+#[test]
+fn a_node_behind_one_that_does_not_relay_has_no_target() {
+    let (links, me) = chain();
+    assert_eq!(
+        Target::of_node_through(links.clone(), &me, 5),
+        Err(RouteError::NoLink { local: 0, node: 5 })
+    );
+    // With no relaying node the answer is the one of a single link.
+    let alone = LocalNode {
+        relays: Vec::new(),
+        ..me
+    };
+    assert_eq!(
+        Target::of_node_through(links, &alone, 2),
+        Err(RouteError::NoLink { local: 0, node: 2 })
+    );
+}
+
+#[test]
+fn a_hop_the_relaying_node_has_no_entry_for_names_that_node() {
+    let (links, mut me) = chain();
+    me.relays[1].1 = vec![BUS_A];
+    assert_eq!(
+        Target::of_node_through(links, &me, 3),
+        Err(RouteError::NoEntry {
+            local: 2,
+            node: 3,
+            port: BUS_B.port
+        })
+    );
+}
+
 #[test]
 fn the_connected_node_is_local_without_looking_at_links() {
     let never = std::iter::from_fn(|| -> Option<TopoLink> { panic!("links examined") });
@@ -384,6 +456,7 @@ fn discover_probes_every_entry_of_the_local_table() {
     h.local = Ok(LocalNode {
         index: 0,
         links: table.clone(),
+        relays: Vec::new(),
     });
     let d = block_on(h.discover(&[])).unwrap();
     let found: Vec<_> = d

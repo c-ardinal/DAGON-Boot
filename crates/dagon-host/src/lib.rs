@@ -328,7 +328,7 @@ impl<T: Transport, C: HostClock> Host<T, C> {
         node: u8,
     ) -> core::result::Result<Target, RouteError> {
         let me = self.local.as_ref().map_err(Clone::clone)?;
-        Target::of_node(routes::links_of(topo), me.index, node, &me.links)
+        Target::of_node_through(routes::links_of(topo), me, node)
     }
 
     /// The target of topology node `node` of the canonical binary

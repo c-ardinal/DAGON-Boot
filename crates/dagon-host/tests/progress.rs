@@ -337,6 +337,7 @@ impl World {
         h.local = Ok(LocalNode {
             index: CONNECTED,
             links: self.links.clone(),
+            relays: Vec::new(),
         });
         h
     }

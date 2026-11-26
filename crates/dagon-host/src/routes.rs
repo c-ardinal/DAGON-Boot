@@ -117,6 +117,9 @@ pub type NodeTargets = Vec<(String, Result<Target, RouteError>)>;
 pub struct LocalNode {
     pub index: u8,
     pub links: Vec<RelayLinkDef>,
+    /// The other nodes that relay as a node, by topology index, each with
+    /// the relay table of its MCU: the nodes a target may be behind.
+    pub relays: Vec<(u8, Vec<RelayLinkDef>)>,
 }
 
 /// Why a request to a node has no target; nothing was sent. Nodes are
@@ -199,41 +202,108 @@ impl Target {
         topology: impl IntoIterator<Item = TopoLink>,
         local: u8,
         node: u8,
-        links: &[RelayLinkDef],
+        links_of_local: &[RelayLinkDef],
     ) -> Result<Target, RouteError> {
         if local == node {
             return Ok(Target::Local);
         }
-        let joining: Vec<TopoLink> = topology
-            .into_iter()
-            .filter(|l| l.end(local).is_some() && l.end(node).is_some())
-            .collect();
-        let l = match joining.as_slice() {
-            [l] => l,
-            [] => return Err(RouteError::NoLink { local, node }),
-            _ => return Err(RouteError::SeveralLinks { local, node }),
-        };
-        let (near, far) = (l.end(local).expect("joins"), l.end(node).expect("joins"));
-        let def = links
-            .iter()
-            .find(|d| d.port == near.port)
-            .ok_or(RouteError::NoEntry {
-                local,
-                node,
-                port: near.port,
-            })?;
-        let addr = match def.addressing {
-            Addressing::SevenBit if far.addr != NONE => far.addr,
-            Addressing::SevenBit => return Err(RouteError::NoAddress { local, node }),
-            Addressing::Fixed(a) => a,
-            _ => return Err(RouteError::Addressing { local, node }),
-        };
-        Ok(Target::Linked {
-            link: def.id,
-            addr,
-            max_payload: def.max_payload,
-        })
+        let links: Vec<TopoLink> = topology.into_iter().collect();
+        let hop = hop(&links, local, node, links_of_local)?;
+        Ok(Target::through(&[hop]).expect("one hop"))
     }
+
+    /// The target of topology node `node` from `me`, the node the PC is
+    /// connected to: [`Target::of_node`] when a link joins the two, else
+    /// the shortest chain of links through the nodes of `me.relays`, one
+    /// hop per link, each from the relay table of the node it leaves.
+    pub fn of_node_through(
+        topology: impl IntoIterator<Item = TopoLink>,
+        me: &LocalNode,
+        node: u8,
+    ) -> Result<Target, RouteError> {
+        let local = me.index;
+        let links: Vec<TopoLink> = topology.into_iter().collect();
+        let joined = |a: u8, b: u8| {
+            links
+                .iter()
+                .any(|l| l.end(a).is_some() && l.end(b).is_some())
+        };
+        if local == node || joined(local, node) || me.relays.is_empty() {
+            return Target::of_node(links, local, node, &me.links);
+        }
+        let table = |at: u8| {
+            if at == local {
+                return Some(me.links.as_slice());
+            }
+            let (_, t) = me.relays.iter().find(|(i, _)| *i == at)?;
+            Some(t.as_slice())
+        };
+        // Each node reached, with the node before it on the way from `local`.
+        let mut before: Vec<(u8, u8)> = Vec::new();
+        let mut frontier = alloc::vec![local];
+        while !frontier.is_empty() && before.iter().all(|(n, _)| *n != node) {
+            let mut next = Vec::new();
+            for at in frontier.into_iter().filter(|at| table(*at).is_some()) {
+                for far in links.iter().filter_map(|l| l.other(at)).map(|e| e.node) {
+                    if far != local && before.iter().all(|(n, _)| *n != far) {
+                        before.push((far, at));
+                        next.push(far);
+                    }
+                }
+            }
+            frontier = next;
+        }
+        let mut hops = Vec::new();
+        let mut far = node;
+        while far != local {
+            let Some(&(_, near)) = before.iter().find(|(n, _)| *n == far) else {
+                return Err(RouteError::NoLink { local, node });
+            };
+            hops.push(hop(&links, near, far, table(near).expect("relays"))?);
+            far = near;
+        }
+        hops.reverse();
+        Target::through(&hops).ok_or(RouteError::NoLink { local, node })
+    }
+}
+
+/// The hop from node `local` to node `node` over the one link of `topology`
+/// joining them, `links` the relay table of `local`'s MCU.
+fn hop(
+    topology: &[TopoLink],
+    local: u8,
+    node: u8,
+    links: &[RelayLinkDef],
+) -> Result<Hop, RouteError> {
+    let joining: Vec<&TopoLink> = topology
+        .iter()
+        .filter(|l| l.end(local).is_some() && l.end(node).is_some())
+        .collect();
+    let l = match joining.as_slice() {
+        [l] => l,
+        [] => return Err(RouteError::NoLink { local, node }),
+        _ => return Err(RouteError::SeveralLinks { local, node }),
+    };
+    let (near, far) = (l.end(local).expect("joins"), l.end(node).expect("joins"));
+    let def = links
+        .iter()
+        .find(|d| d.port == near.port)
+        .ok_or(RouteError::NoEntry {
+            local,
+            node,
+            port: near.port,
+        })?;
+    let addr = match def.addressing {
+        Addressing::SevenBit if far.addr != NONE => far.addr,
+        Addressing::SevenBit => return Err(RouteError::NoAddress { local, node }),
+        Addressing::Fixed(a) => a,
+        _ => return Err(RouteError::Addressing { local, node }),
+    };
+    Ok(Hop {
+        link: def.id,
+        addr,
+        max_payload: def.max_payload,
+    })
 }
 
 /// The links of a compiled topology.
@@ -258,14 +328,26 @@ pub fn local_node(
         local: local.into(),
         mcu: n.mcu.clone(),
     })?;
-    let index = updatable_ids(reg, topo)?
+    let ids = updatable_ids(reg, topo)?;
+    let at = |id: &String| {
+        ids.iter()
+            .position(|i| i == id)
+            .and_then(|i| u8::try_from(i).ok())
+    };
+    let index = at(&n.id).ok_or_else(unknown)?;
+    let relays = topo
+        .nodes
         .iter()
-        .position(|id| id == local)
-        .and_then(|i| u8::try_from(i).ok())
-        .ok_or_else(unknown)?;
+        .filter(|other| other.id != n.id)
+        .filter_map(|other| {
+            let m = reg.mcu(&other.mcu).filter(|m| m.relays_as_node())?;
+            Some((at(&other.id)?, m.relay_link_defs()))
+        })
+        .collect();
     Ok(LocalNode {
         index,
         links: m.relay_link_defs(),
+        relays,
     })
 }
 
@@ -305,6 +387,6 @@ pub fn node_targets(
     Ok(updatable_ids(reg, topo)?
         .into_iter()
         .zip(0u8..)
-        .map(|(id, i)| (id, Target::of_node(links_of(&view), me.index, i, &me.links)))
+        .map(|(id, i)| (id, Target::of_node_through(links_of(&view), &me, i)))
         .collect())
 }

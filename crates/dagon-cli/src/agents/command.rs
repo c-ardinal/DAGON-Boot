@@ -711,7 +711,7 @@ mod tests {
         };
         let dir = super::super::temp_dir().unwrap();
         let args = vec!["/C".to_string(), format!("ping -n 30 {OWNER_MARKER}")];
-        let _group = spawn(&exe.program_path().unwrap(), &args, &dir, &[], &[]).unwrap();
+        let _group = spawn(&exe.program_path().unwrap(), &args, &dir, &[], &[], &[]).unwrap();
         println!("ready");
         std::thread::sleep(Duration::from_secs(60));
     }

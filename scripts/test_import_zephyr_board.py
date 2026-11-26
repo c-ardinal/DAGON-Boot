@@ -131,6 +131,26 @@ class Stated(unittest.TestCase):
         self.assertEqual(b["pin"], [{"pin": "GPIO16", "name": "led0"}])
         self.assertEqual(b["header"], [{"pin": "GPIO28", "label": "GP28"}])
 
+    def test_a_line_comment_states_nothing(self):
+        b = self.board(
+            "/ { leds { compatible = \"gpio-leds\"; led0: led_0 { gpios = <&gpio0 25 0>; }; }; };\n"
+            "&flash0 { reg = <0 0x1000>; }; /* see http://example.invalid/pico */\n"
+            "// &led0 { gpios = <&gpio0 16 0>; };\n"
+        )
+        self.assertEqual(b["pin"], [{"pin": "GPIO25", "name": "led0"}])
+
+    def test_an_overlay_of_a_pin_control_group_moves_the_bus(self):
+        b = self.board(
+            "&pinctrl { uart0_default: uart0_default {\n"
+            "    group1 { pinmux = <UART0_TX_P0>; };\n"
+            "    group2 { pinmux = <UART0_RX_P1>; input-enable; };\n"
+            "}; };\n"
+            "&flash0 { reg = <0 0x1000>; };\n"
+            "&uart0 { status = \"okay\"; pinctrl-0 = <&uart0_default>; };\n"
+            "&uart0_default { group1 { pinmux = <UART0_TX_P12>; }; };\n"
+        )
+        self.assertEqual((b["bus"][0]["tx"], b["bus"][0]["rx"]), ("GPIO12", "GPIO1"))
+
     def test_a_later_declaration_of_flash0_gives_its_size(self):
         b = self.board(
             "/ { soc { flash0: flash@0 { compatible = \"soc-nv-flash\"; }; }; };\n"

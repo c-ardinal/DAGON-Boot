@@ -26,6 +26,8 @@ from pathlib import Path
 
 INCLUDE = re.compile(r'^[ \t]*#include[ \t]+(?:"([^"]+)"|<([^>]+)>)[ \t]*$', re.M)
 BLOCK_COMMENT = re.compile(r"/\*.*?\*/", re.S)
+# A string or a block comment (kept as they are), or a line comment.
+LINE_COMMENT = re.compile(r'"(?:\\.|[^"\\\n])*"|/\*.*?\*/|(//[^\n]*)', re.S)
 # One row of a connector's `gpio-map`, with the printed name Zephyr keeps in
 # the comment after it.
 MAP_ROW = re.compile(
@@ -90,6 +92,30 @@ def read_tree(root, start):
 
     root = root.resolve()
     return load(start.resolve()), read, missing
+
+
+def without_line_comments(text):
+    """`text` without its `//` comments; strings and block comments stay."""
+    return LINE_COMMENT.sub(lambda m: "" if m.group(1) else m.group(0), text)
+
+
+def children(body):
+    """`[(name, body)]` of the child nodes written straight in `body`."""
+    out, depth, i = [], 0, 0
+    while i < len(body):
+        ch = body[i]
+        if ch == "{":
+            if depth == 0:
+                name = re.search(r"([\w@,-]+)\s*$", body[:i])
+                inner = body_at(body, i)
+                out.append((name.group(1) if name else "", inner))
+                i += len(inner) + 2
+                continue
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+        i += 1
+    return out
 
 
 def body_at(text, brace):
@@ -159,10 +185,17 @@ def signals(text, refs):
         if st:
             out[st.group(1)] = pin_name(f"gpio{st.group(2)}", st.group(3))
             continue
-        node = re.search(rf"\b{re.escape(ref)}\s*:\s*[\w-]+\s*\{{", text)
-        if not node:
+        if not re.search(rf"\b{re.escape(ref)}\s*:\s*[\w-]+\s*\{{", text):
             raise ImportError_(f"pin control node {ref} is not in the files read")
-        muxes = RP_MUX.findall(body_at(text, node.end() - 1))
+        # Each group's last `pinmux`, the node's declaration and its
+        # overlays (`&ref { group1 { ... }; }`) in source order.
+        groups = {}
+        for body in bodies(text, ref):
+            for name, group in [("", own(body))] + children(body):
+                mux = last_prop(own(group), "pinmux")
+                if mux is not None:
+                    groups[name] = mux
+        muxes = RP_MUX.findall(" ".join(groups.values()))
         if not muxes:
             raise ImportError_(f"pin control node {ref} names no pin this importer reads")
         for signal, pin in muxes:
@@ -170,12 +203,18 @@ def signals(text, refs):
     return out
 
 
-def stated(text, label):
-    """The own properties of node `label` wherever the files state them,
-    in source order: its declarations (`label: name { ... }`) and its
-    overlays (`&label { ... }`). A later one wins."""
+def bodies(text, label):
+    """The bodies of node `label` wherever the files state it, in source
+    order: its declarations (`label: name { ... }`) and its overlays
+    (`&label { ... }`)."""
     found = re.finditer(rf"(?:\b{re.escape(label)}\s*:\s*[\w@-]+|&{re.escape(label)})\s*\{{", text)
-    return "\n".join(own(body_at(text, m.end() - 1)) for m in found)
+    return [body_at(text, m.end() - 1) for m in found]
+
+
+def stated(text, label):
+    """The own properties of node `label` from all of [`bodies`]: a later
+    one wins."""
+    return "\n".join(own(b) for b in bodies(text, label))
 
 
 def flash_bytes(text):
@@ -233,6 +272,7 @@ def convert(root, start, board_id, mcu, tag):
     """The `[board.<id>]` text of the board file `start` in the tree `root`."""
     root, start = Path(root), Path(start)
     raw, files, missing = read_tree(root, start)
+    raw = without_line_comments(raw)
     text = BLOCK_COMMENT.sub("", raw)
     nodes = overlays(text)
     product, yml = full_name(root, start)

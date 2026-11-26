@@ -1,0 +1,67 @@
+# Imported from Zephyr v4.1.0 (Apache-2.0) by scripts/import_zephyr_board.py.
+# Files read (sha256):
+#   boards/st/nucleo_f401re/nucleo_f401re.dts 64862c16ab5cd78d71dca278ccf2fa8f76974c6a93c2c98ab47d23f91504f509
+#   dts/arm/st/f4/stm32f401Xe.dtsi 707e712d35c96ab243d7855b67639e5c427f5bf871accddf1029afb54965f885
+#   boards/st/nucleo_f401re/arduino_r3_connector.dtsi 77de75000e8c2f3b5c62128c60d354e6818cae97e88ecf2818bc7ce32f1272f0
+#   boards/st/nucleo_f401re/board.yml aa463d7667a71d12a89ae35b7f3aa921f04ecc0a23f1ce9ec907dd8fe4fd76e6
+# Includes not in the tree, not read: mem.h, st/f4/stm32f401.dtsi, st/f4/stm32f401r(d-e)tx-pinctrl.dtsi, st_morpho_connector.dtsi, zephyr/dt-bindings/input/input-event-codes.h
+# Not in the source, to add by hand where the board needs them: default_link,
+# [boot], [clock], [flash], `dagon = true` on the bus of DAGON's own link.
+[board.nucleo-f401re-zephyr]
+format = 4
+product = "Nucleo F401RE"
+mcu = "stm32f401re"
+flash_bytes = 0x8_0000
+drawing = "generic"
+header = [
+    { pin = "PA0", label = "A0" },
+    { pin = "PA1", label = "A1" },
+    { pin = "PA4", label = "A2" },
+    { pin = "PB0", label = "A3" },
+    { pin = "PC1", label = "A4" },
+    { pin = "PC0", label = "A5" },
+    { pin = "PA3", label = "D0" },
+    { pin = "PA2", label = "D1" },
+    { pin = "PA10", label = "D2" },
+    { pin = "PB3", label = "D3" },
+    { pin = "PB5", label = "D4" },
+    { pin = "PB4", label = "D5" },
+    { pin = "PB10", label = "D6" },
+    { pin = "PA8", label = "D7" },
+    { pin = "PA9", label = "D8" },
+    { pin = "PC7", label = "D9" },
+    { pin = "PB6", label = "D10" },
+    { pin = "PA7", label = "D11" },
+    { pin = "PA6", label = "D12" },
+    { pin = "PA5", label = "D13" },
+    { pin = "PB9", label = "D14" },
+    { pin = "PB8", label = "D15" },
+]
+i2c = [
+    { controller = "i2c1", sda = "PB9", scl = "PB8" },
+    { controller = "i2c3", sda = "PC9", scl = "PA8" },
+]
+
+[[board.nucleo-f401re-zephyr.pin]]
+pin = "PA5"
+name = "green_led_2"
+
+[[board.nucleo-f401re-zephyr.pin]]
+pin = "PC13"
+name = "user_button"
+
+[[board.nucleo-f401re-zephyr.bus]]
+id = "usart1"
+kind = "uart"
+controller = "usart1"
+tx = "PB6"
+rx = "PB7"
+baud = 115200
+
+[[board.nucleo-f401re-zephyr.bus]]
+id = "usart2"
+kind = "uart"
+controller = "usart2"
+tx = "PA2"
+rx = "PA3"
+baud = 115200

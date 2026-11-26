@@ -1,0 +1,61 @@
+# Imported from Zephyr v4.1.0 (Apache-2.0) by scripts/import_zephyr_board.py.
+# Files read (sha256):
+#   boards/raspberrypi/rpi_pico/rpi_pico.dts bb7b8441971e82d16cd62a3d4a09facbf4316a6386cf44a84ae804d88930e443
+#   boards/raspberrypi/rpi_pico/rpi_pico-common.dtsi 9d5b1759f045bd68d7d8b28b9d7a44c805e58af34a017917a303d835ade29d3f
+#   boards/raspberrypi/rpi_pico/rpi_pico-pinctrl.dtsi 23ccaece3e1ad9ae9ef2f98507cd5c6599d95a758bb4319843e14b5c0e161e7c
+#   boards/raspberrypi/common/rpi_pico-pinctrl-common.dtsi 8b0b74769483ccf0ac3206155da7c6210ae2c59c8efd55241f6884e044479282
+#   boards/raspberrypi/common/rpi_pico-led.dtsi 5f867a61446c4606b7be8d186924da88e2b64b89a6c851885b14a134ec404195
+#   boards/raspberrypi/rpi_pico/board.yml 08b1b4a44ed553514c192c949a86cbd0a557c4c12e50317583bd616e91982b39
+# Includes not in the tree, not read: freq.h, raspberrypi/rpi_pico/rp2040.dtsi, zephyr/dt-bindings/i2c/i2c.h, zephyr/dt-bindings/pinctrl/rpi-pico-rp2040-pinctrl.h, zephyr/dt-bindings/pwm/pwm.h
+# Not in the source, to add by hand where the board needs them: default_link,
+# [boot], [clock], [flash], `dagon = true` on the bus of DAGON's own link.
+[board.rpi-pico]
+format = 4
+product = "Raspberry Pi Pico"
+mcu = "rp2040"
+flash_bytes = 0x20_0000
+drawing = "generic"
+header = [
+    { pin = "GPIO0", label = "GP0" },
+    { pin = "GPIO1", label = "GP1" },
+    { pin = "GPIO2", label = "GP2" },
+    { pin = "GPIO3", label = "GP3" },
+    { pin = "GPIO4", label = "GP4" },
+    { pin = "GPIO5", label = "GP5" },
+    { pin = "GPIO6", label = "GP6" },
+    { pin = "GPIO7", label = "GP7" },
+    { pin = "GPIO8", label = "GP8" },
+    { pin = "GPIO9", label = "GP9" },
+    { pin = "GPIO10", label = "GP10" },
+    { pin = "GPIO11", label = "GP11" },
+    { pin = "GPIO12", label = "GP12" },
+    { pin = "GPIO13", label = "GP13" },
+    { pin = "GPIO14", label = "GP14" },
+    { pin = "GPIO15", label = "GP15" },
+    { pin = "GPIO16", label = "GP16" },
+    { pin = "GPIO17", label = "GP17" },
+    { pin = "GPIO18", label = "GP18" },
+    { pin = "GPIO19", label = "GP19" },
+    { pin = "GPIO20", label = "GP20" },
+    { pin = "GPIO21", label = "GP21" },
+    { pin = "GPIO22", label = "GP22" },
+    { pin = "GPIO26", label = "GP26" },
+    { pin = "GPIO27", label = "GP27" },
+    { pin = "GPIO28", label = "GP28" },
+]
+i2c = [
+    { controller = "i2c0", sda = "GPIO4", scl = "GPIO5" },
+    { controller = "i2c1", sda = "GPIO6", scl = "GPIO7" },
+]
+
+[[board.rpi-pico.pin]]
+pin = "GPIO25"
+name = "led0"
+
+[[board.rpi-pico.bus]]
+id = "uart0"
+kind = "uart"
+controller = "uart0"
+tx = "GPIO0"
+rx = "GPIO1"
+baud = 115200

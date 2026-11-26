@@ -40,6 +40,32 @@ i2c = [{ controller = "i2c3", sda = "PB4", scl = "PA8" }]
 
 Claude Codeと共同で作業する場合は`add-a-board-by-mcu`スキルを使用します。
 
+## Zephyrのボード定義からの取込
+
+ボードがZephyrのボード一覧にある場合は、`[board.<ボードのid>]`の初版をZephyrのdevicetreeから生成可能です。リリースのタグを指定して取得したZephyrのツリーと、ボードの`.dts`を指定します。
+
+```sh
+python3 scripts/import_zephyr_board.py <Zephyrのツリー> <Zephyrのツリー>/boards/raspberrypi/rpi_pico/rpi_pico.dts \
+    --id rpi-pico --mcu rp2040 --tag v4.1.0 >> dagon.toml
+```
+
+出力の先頭には、タグと、読込した全ファイルのSHA-256を記録します。同一のツリーからは同一の出力を生成します。
+
+| 取込する項目 | Zephyrでの出典 |
+|---|---|
+| 製品名（`product`） | `board.yml`の`full_name` |
+| フラッシュのサイズ（`flash_bytes`） | `flash0`の`reg` |
+| ヘッダのピンと印字名（`header`） | コネクタの`gpio-map`と、その行のコメント |
+| I2Cのピンの組（`i2c`） | I2Cコントローラの`pinctrl-0` |
+| UARTのバス（`[[bus]]`） | `status = "okay"`のUARTの`pinctrl-0`と`current-speed` |
+| LEDとボタン（`[[pin]]`） | `gpio-leds`と`gpio-keys`の`gpios` |
+
+DAGONだけが決定する項目は取込しません。既定のリンク（`default_link`）、ブートのLEDと停止のパターン（`[boot]`）、クロック（`[clock]`）、DAGON自身のリンクのバス（`dagon = true`）は、利用者が追記します。スロットの配置もZephyrにはありません。例えばRaspberry Pi Picoのフラッシュは2MiBで、組込のRP2040の配置（4MiB）は適合しないため、`[mcu_override.rp2040]`でフラッシュマップとアプリのスロットを縮小します。
+
+スクリプトはCのプリプロセッサを使用せず、ファイルの文面を直接解釈します。ピンは、ピン制御の名称（`I2C0_SDA_P4`、`i2c1_scl_pb8`）とGPIOノードの名称（`gpio0`、`gpioa`）から解釈します。対応する形式はRP2040とSTM32の2種類で、それ以外の形式のボードは推測せず拒否します。SPIのバスとシールドの定義は対象外です。
+
+ZephyrのファイルのライセンスはApache-2.0です。出力は事実（ピンの番号と名称）の一覧ですが、先頭のコメントは出典の記録であるため、削除せず保持します。
+
 ## 一覧のボードとの部分的な相違
 
 一覧のボードと一部だけ異なるボード（ピンの割当が異なる版など）は、ボードの定義を複製せずに、相違する欄だけを`dagon.toml`の`[board_override.<ボードのid>]`に記述します。記述しない欄は一覧のボードの定義のままです。上書きはプロジェクト全体に適用し、そのボードを使用する全ノードが対象です。一部のノードだけが異なる場合は、`[board.<ボードのid>]`で新規idのボードを定義します。

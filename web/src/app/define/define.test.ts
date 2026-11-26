@@ -94,22 +94,37 @@ describe('define session', () => {
     expect(d.importYaml(SAMPLE_YAML)).toBe(false);
     d.undo();
     expect(JSON.stringify(d.doc)).toBe(before);
-    // Seven edits asked (linking an already linked node changes nothing and needs no asking).
-    expect(asked).toBe(7);
+    // Eight edits asked: each path above is one, the port drag between two linked nodes (a ring) included.
+    expect(asked).toBe(8);
   });
 
-  test('a port drag links a node under another; a taken node and a loop are refused with why', () => {
+  test('a port drag links a node under another, and a node already linked to further nodes (a star, a ring); only a second link of one pair is refused', () => {
     const d = new Define();
     d.placeSample();
-    expect(d.linkRefusal('hub', 'seg')).toBe(LINK_WHY.taken);
+    expect(d.linkRefusal('hub', 'seg')).toBe(LINK_WHY.pair);
+    expect(d.linkRefusal('seg', 'hub')).toBe(LINK_WHY.pair);
     d.placeAt({ mcu: 'stm32f401re' }, 'ボード', null);
     const id = d.doc.topo.nodes[d.doc.topo.nodes.length - 1].id;
     expect(d.linkRefusal('seg', id)).toBeNull();
     d.link(id, 'seg');
-    expect(d.doc.topo.links?.map((l) => linkView(d.doc.topo, l)).some((l) => l.from === 'seg' && l.to === id)).toBe(true);
-    expect(d.linkRefusal(id, 'watch')).toBe(LINK_WHY.taken);
-    expect(d.linkRefusal(id, 'seg')).toBe(LINK_WHY.taken);
-    expect(d.linkRefusal(id, 'hub')).toBe(LINK_WHY.loop);
+    const views = () => (d.doc.topo.links ?? []).map((l) => linkView(d.doc.topo, l));
+    expect(views().some((l) => l.from === 'seg' && l.to === id)).toBe(true);
+    // A ring: the two nodes under the coordinator, joined to each other.
+    expect(d.linkRefusal('seg', 'watch')).toBeNull();
+    d.link('watch', 'seg');
+    expect(views().some((l) => l.from === 'seg' && l.to === 'watch')).toBe(true);
+    expect(d.linkRefusal('watch', 'seg')).toBe(LINK_WHY.pair);
+    // Each link has its own key: the link a node stands under, and the further one by both its nodes.
+    expect(d.config.links.map((l) => l.key)).toEqual(['link:seg', 'link:watch', `link:${id}`, 'link:watch~seg']);
+    // The ring's link is selected and deleted by itself; the link watch stands under stays.
+    d.removeSelected('link:watch~seg');
+    expect(d.config.links.map((l) => l.key)).toEqual(['link:seg', 'link:watch', `link:${id}`]);
+    // A link drawn from a node to the coordinator is the coordinator's link to that node, and the node then stands under it.
+    expect(d.linkRefusal(id, 'hub')).toBeNull();
+    d.link('hub', id);
+    expect(d.config.links.map((l) => [l.key, l.from])).toEqual([['link:seg', 'hub'], ['link:watch', 'hub'], [`link:${id}~seg`, 'seg'], [`link:${id}`, 'hub']]);
+    // Updating reaches every node over its link from the coordinator.
+    expect(d.config.reach).toEqual(['hub', 'seg', 'watch', id]);
   });
 
   test('the sample checks clean; placing, undo and redo walk the history', () => {

@@ -121,4 +121,13 @@ describe('bottom band', () => {
     expect(bandOf('stopped', { hasConfig: true }, { stuck: '7セグ', unwritten: 0 }).sentence).toBe(BAND.stopped.sentence);
     expect(bandOf('hubRestarting', { hasConfig: true }).sentence).toBe(BAND.hubRestarting.sentence);
   });
+
+  test('a stopped run says what it did for the compatibility constraints, before the next step', () => {
+    const at = (n: { realigned?: number; incompatible?: number }) => bandOf('stopped', { hasConfig: true }, { stuck: '7セグ', unwritten: 0, stopped: 'previous', ...n }).sentence;
+    expect(at({})).toBe(WRITE.rolled.next);
+    expect(at({ realigned: 0, incompatible: 0 })).toBe(WRITE.rolled.next);
+    expect(at({ realigned: 2 })).toBe(`互換制約を維持するため、書込済の2ノードを書込前のバージョンへ復帰しました。${WRITE.rolled.next}`);
+    // A node left breaking a constraint is the one to tell.
+    expect(at({ realigned: 1, incompatible: 1 })).toBe(`互換制約に違反した状態のノードが1個あります。${WRITE.rolled.next}`);
+  });
 });

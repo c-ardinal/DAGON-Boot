@@ -36,7 +36,7 @@
   }
 
   const node = $derived(selected?.startsWith('node:') ? config?.nodes.find((n) => `node:${n.id}` === selected) : undefined);
-  const link = $derived(selected?.startsWith('link:') ? config?.links.find((l) => `link:${l.to}` === selected) : undefined);
+  const link = $derived(selected?.startsWith('link:') ? config?.links.find((l) => l.key === selected) : undefined);
 
   const SHORT_HEX = 4;
 

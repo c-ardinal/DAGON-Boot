@@ -243,10 +243,12 @@ flag = { unverified = "register" }
 # runs; interrupts stay enabled and wait). DAGON erases one sector per
 # operation, and the sectors are unequal (RM0368 section 3.3: 16 KiB x4,
 # 64 KiB, 128 KiB x3). Each sector's maximum erase time is the
-# STM32F401xD/xE datasheet's (DS10086, flash memory programming
-# characteristics, sector erase time at x8 parallelism: 16 KiB 800 ms,
-# 64 KiB 2400 ms, 128 KiB 4000 ms), not yet checked against the document.
-# The masking budget of DAGON's own code is to be measured on the board.
+# STM32F401xD/xE datasheet's (DS10086 Rev 5, table 45 "Flash memory
+# programming", sector erase time, max, at x8 parallelism: 16 KiB 800 ms,
+# 64 KiB 2400 ms, 128 KiB 4 s). x8 is the slowest row of the table, so the
+# values hold at any PSIZE (x32, which embassy-stm32 sets: 500 ms, 1100 ms,
+# 2 s). The masking budget of DAGON's own code is to be measured on the
+# board.
 [execution]
 masked_max_us = "unmeasured"
 flash_op = "fetch-stall"
@@ -256,9 +258,9 @@ flash_op = "fetch-stall"
 write_unit = 4
 erased_value = 0xFF
 erase_regions = [
-    { start = 0x0800_0000, len = 0x1_0000, unit = 0x4000, unit_max_ms = { unverified = 800 } },
-    { start = 0x0801_0000, len = 0x1_0000, unit = 0x1_0000, unit_max_ms = { unverified = 2_400 } },
-    { start = 0x0802_0000, len = 0x6_0000, unit = 0x2_0000, unit_max_ms = { unverified = 4_000 } },
+    { start = 0x0800_0000, len = 0x1_0000, unit = 0x4000, unit_max_ms = 800 },
+    { start = 0x0801_0000, len = 0x1_0000, unit = 0x1_0000, unit_max_ms = 2_400 },
+    { start = 0x0802_0000, len = 0x6_0000, unit = 0x2_0000, unit_max_ms = 4_000 },
 ]
 
 # Sector 3 (16 KiB), used by no image or log.

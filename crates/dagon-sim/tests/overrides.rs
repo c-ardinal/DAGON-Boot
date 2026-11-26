@@ -272,7 +272,11 @@ fn i2c_raw_reaches_the_rom_loader_at_its_definitions_address() {
 /// link: I2C_RAW is unsupported there, as on the relay.
 #[test]
 fn i2c_raw_without_a_recovery_link_is_unsupported() {
-    let mut r = SimRelay::new(relaying_node());
+    let def = loaded(
+        "format = 1\n\n[[mcu_override.rp2040.relay_link]]\nport = \"i2c1\"\ndagon-remove = true\n",
+        "rp2040",
+    );
+    let mut r = SimRelay::with_definition(relaying_node(), &def);
     r.add_i2c("i2c1", f401(3, 100), true);
     let (s, _) = ask(
         &mut r,

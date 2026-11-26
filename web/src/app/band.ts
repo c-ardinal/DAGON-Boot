@@ -25,6 +25,10 @@ export interface Names {
   stopped?: Progress['stage'];
   /** Nodes after the stopped one that were not written (stopped). */
   unwritten?: number;
+  /** Nodes the stopped run took back to the version they had, for a compatibility constraint (stopped). */
+  realigned?: number;
+  /** Nodes the stopped run left breaking a compatibility constraint (stopped). */
+  incompatible?: number;
   /** The update covers the nodes left after a recovery. */
   rest?: boolean;
   /** There is a build to write: the main action writes it. */
@@ -90,9 +94,7 @@ function words(s: L, c: Ctx, n: Names): BandCopy {
     case 'reconnectNeeded':
       return BAND.reconnectNeeded;
     case 'stopped':
-      if (n.stopped === 'coreBack') return { sentence: WRITE.coreBack.next };
-      if (n.stopped === 'previous') return { sentence: WRITE.rolled.next };
-      return n.unwritten && n.stuck ? BAND_FOR.stoppedAt(n.stuck) : BAND.stopped;
+      return withConstraints(stopped(n), n);
     case 'done':
       return done(n.finish);
     case 'cliTurn':
@@ -111,6 +113,18 @@ function words(s: L, c: Ctx, n: Names): BandCopy {
     default:
       return {};
   }
+}
+
+function stopped(n: Names): BandCopy {
+  if (n.stopped === 'coreBack') return { sentence: WRITE.coreBack.next };
+  if (n.stopped === 'previous') return { sentence: WRITE.rolled.next };
+  return n.unwritten && n.stuck ? BAND_FOR.stoppedAt(n.stuck) : BAND.stopped;
+}
+
+/** A stopped run also says what it did for the release's compatibility constraints: nodes left breaking one first, else nodes taken back. */
+function withConstraints(b: BandCopy, n: Names): BandCopy {
+  const said = n.incompatible ? WRITE.constraints.incompatible(n.incompatible) : n.realigned ? WRITE.constraints.realigned(n.realigned) : null;
+  return said && b.sentence ? { ...b, sentence: `${said}${b.sentence}` } : b;
 }
 
 /** done says only what is true: all updated, the checked ones updated, some not (they did not answer), some or all already on it, or one node rolled back or recovered. */

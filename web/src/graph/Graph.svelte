@@ -38,7 +38,7 @@
   import { hubIn, isHub, type Config, type Node } from '../app/sample.ts';
   import { bundleOf } from './bundles.ts';
   import { CableField, FrameLoop, restPoints } from './cable.ts';
-  import { neighbour, pathD, verticalLink, type Bezier, type Pt } from './geometry.ts';
+  import { between, neighbour, pathD, sideLink, underLink, verticalLink, type Bezier, type Box, type Pt } from './geometry.ts';
   import { boundsOf, clampZoom, fitView, SIDE, ZOOM_LIMITS } from './fit.ts';
   import { treeLayout } from './layout.ts';
   import { untrack } from 'svelte';
@@ -202,7 +202,17 @@
         const to = at(l.to);
         const siblings = (config?.links ?? []).filter((x) => x.from === l.from);
         const slot = (siblings.indexOf(l) + 1) / (siblings.length + 1);
-        return [`link:${l.to}`, verticalLink({ x: from.x + NODE_W * slot, y: from.y + hOf(l.from) }, { x: to.x + NODE_W / 2, y: to.y })];
+        const out = { x: from.x + NODE_W * slot, y: from.y + hOf(l.from) };
+        // A node several links arrive at takes them side by side, as the node they leave does.
+        const arrivals = (config?.links ?? []).filter((x) => x.to === l.to);
+        const inSlot = (arrivals.indexOf(l) + 1) / (arrivals.length + 1);
+        if (to.y >= out.y) return [l.key, verticalLink(out, { x: to.x + NODE_W * inSlot, y: to.y })];
+        // A link to a card that does not stand below (a ring's): between the facing sides, or round below the cards between them.
+        const box = (id: string): Box => ({ ...at(id), w: NODE_W, h: hOf(id) });
+        const [a, b] = [box(l.from), box(l.to)];
+        const others = (config?.nodes ?? []).filter((n) => n.id !== l.from && n.id !== l.to).map((n) => box(n.id));
+        if (!between(a, b, others)) return [l.key, sideLink(a, b)];
+        return [l.key, underLink(out, { x: b.x + NODE_W * (b.x >= a.x ? 0.25 : 0.75), y: b.y + b.h })];
       }),
     ),
   );
@@ -347,8 +357,7 @@
 
   const drawn = $derived(
     (config?.links ?? []).map((l) => {
-      const key = `link:${l.to}`;
-      return bundleOf(l, config, routes[key], shapes[key] ?? restPoints(routes[key]), selected === key);
+      return bundleOf(l, config, routes[l.key], shapes[l.key] ?? restPoints(routes[l.key]), selected === l.key);
     }),
   );
 
@@ -623,9 +632,10 @@
           class="link-chip"
           class:selected={d.open}
           class:uns={d.skipped}
-          class:leftward={d.outward < 0}
-          style:left="{d.mid.x + d.outward * d.clear}px"
-          style:top="{d.mid.y}px"
+          class:leftward={!d.level && d.outward < 0}
+          class:level={d.level !== 0}
+          style:left="{d.mid.x + (d.level ? 0 : d.outward * d.clear)}px"
+          style:top="{d.mid.y + d.level * d.clear}px"
           data-key={d.key}
           tabindex={focusKey === d.key ? 0 : -1}
           aria-pressed={d.open}
@@ -847,6 +857,9 @@
   }
   .link-chip.leftward {
     transform: translate(-100%, -50%);
+  }
+  .link-chip.level {
+    transform: translate(-50%, -50%);
   }
   .link-chip.uns {
     border-style: dashed;

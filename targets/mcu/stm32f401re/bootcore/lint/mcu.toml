@@ -83,25 +83,19 @@ write_unit = 4
 len = 65536
 start = 134217728
 unit = 16384
-
-[execution.erase_regions.unit_max_ms]
-unverified = 800
+unit_max_ms = 800
 
 [[execution.erase_regions]]
 len = 65536
 start = 134283264
 unit = 65536
-
-[execution.erase_regions.unit_max_ms]
-unverified = 2400
+unit_max_ms = 2400
 
 [[execution.erase_regions]]
 len = 393216
 start = 134348800
 unit = 131072
-
-[execution.erase_regions.unit_max_ms]
-unverified = 4000
+unit_max_ms = 4000
 
 [[flash_map]]
 base = 134217728

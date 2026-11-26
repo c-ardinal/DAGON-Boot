@@ -70,9 +70,8 @@ export class AgentLink {
     const k = this.deps.selected();
     if (!k) return undefined;
     if (k.startsWith('node:')) return { node: k.slice(5) };
-    const to = k.slice(5);
-    const from = this.deps.d.config.links.find((l) => l.to === to)?.from;
-    return from ? { link: { ends: [from, to] } } : undefined;
+    const l = this.deps.d.config.links.find((x) => x.key === k);
+    return l ? { link: { ends: [l.from, l.to] } } : undefined;
   }
 
   ask(text: string, kind: AskKind, at: Element): void {

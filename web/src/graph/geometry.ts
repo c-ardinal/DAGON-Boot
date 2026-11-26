@@ -15,6 +15,36 @@ export function verticalLink(from: Pt, to: Pt): Bezier {
   return [from, { x: from.x, y: from.y + k }, { x: to.x, y: to.y - k }, to];
 }
 
+/** A card as it stands on the canvas. */
+export interface Box {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+/** Between two cards of one row: leaves the side of `from` that faces `to` level, and enters the facing side of `to` level. */
+export function sideLink(from: Box, to: Box): Bezier {
+  const right = to.x >= from.x;
+  const a = { x: from.x + (right ? from.w : 0), y: from.y + from.h / 2 };
+  const b = { x: to.x + (right ? 0 : to.w), y: to.y + to.h / 2 };
+  const k = Math.max(24, Math.abs(b.x - a.x) / 2) * (right ? 1 : -1);
+  return [a, { x: a.x + k, y: a.y }, { x: b.x - k, y: b.y }, b];
+}
+
+/** Between two lower edges, round below what stands between them: leaves `from` straight down and enters `to` from straight below. */
+export function underLink(from: Pt, to: Pt): Bezier {
+  const k = 48 + Math.abs(to.x - from.x) * 0.12;
+  return [from, { x: from.x, y: from.y + k }, { x: to.x, y: to.y + k }, to];
+}
+
+/** Whether a card of `others` stands in the gap between the facing sides of `from` and `to`, at their height. */
+export function between(from: Box, to: Box, others: readonly Box[]): boolean {
+  const [l, r] = to.x >= from.x ? [from.x + from.w, to.x] : [to.x + to.w, from.x];
+  const [top, bottom] = [Math.min(from.y, to.y), Math.max(from.y + from.h, to.y + to.h)];
+  return others.some((o) => o.x < r && o.x + o.w > l && o.y < bottom && o.y + o.h > top);
+}
+
 export function pointAt([p0, p1, p2, p3]: Bezier, t: number): Pt {
   const u = 1 - t;
   const a = u * u * u;

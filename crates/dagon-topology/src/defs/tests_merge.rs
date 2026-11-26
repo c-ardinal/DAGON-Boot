@@ -363,7 +363,7 @@ fn relay_links_merge_by_port() {
         "relay-links",
         "[[mcu_override.rp2040.relay_link]]\nport = \"pio-uart\"\nid = 7\naddressing = { fixed = 0x10 }\n\n\
          [[mcu_override.rp2040.relay_link]]\nport = \"i2c0\"\ndagon-remove = true\n\n\
-         [[mcu_override.rp2040.relay_link]]\nport = \"i2c1\"\nid = 3\naddressing = \"seven-bit\"\nmax_payload = 128\n",
+         [[mcu_override.rp2040.relay_link]]\nport = \"uart0\"\nid = 9\naddressing = { fixed = 0x11 }\nmax_payload = 128\n",
     )
     .unwrap();
     let got: Vec<_> = r
@@ -379,7 +379,14 @@ fn relay_links_merge_by_port() {
         got,
         [
             (7, at("pio-uart"), dagon_port::Addressing::Fixed(0x10), 1024),
-            (3, at("i2c1"), dagon_port::Addressing::SevenBit, 128),
+            (3, at("i2c1"), dagon_port::Addressing::SevenBit, 256),
+            (
+                4,
+                at("pio-uart1"),
+                dagon_port::Addressing::Fixed(0xFF),
+                1024
+            ),
+            (9, at("uart0"), dagon_port::Addressing::Fixed(0x11), 128),
         ]
     );
     // A merged entry still keeps the rules: its id once.

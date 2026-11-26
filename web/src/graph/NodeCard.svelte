@@ -22,7 +22,7 @@
 
   /** Links from the nearest coordinator above node `id` (1 for a node; a node no coordinator reaches counts as a node). */
   function belowHub(config: Config | null, id: string, seen = new Set<string>()): number {
-    const up = config?.links.find((l) => l.to === id)?.from;
+    const up = config?.links.find((l) => l.key === `link:${id}`)?.from;
     const p = config?.nodes.find((x) => x.id === up);
     if (!p || isHub(p) || seen.has(id)) return 1;
     seen.add(id);
@@ -31,7 +31,7 @@
 
   /** Whether the links above node `id` lead up to a coordinator (not to a node nobody links to, nor round a loop). */
   function underCoordinator(config: Config | null, id: string, seen = new Set<string>()): boolean {
-    const up = config?.links.find((l) => l.to === id)?.from;
+    const up = config?.links.find((l) => l.key === `link:${id}`)?.from;
     const p = config?.nodes.find((x) => x.id === up);
     if (!p || seen.has(id)) return false;
     if (isHub(p)) return true;

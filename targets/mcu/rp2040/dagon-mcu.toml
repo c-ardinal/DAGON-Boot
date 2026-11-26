@@ -217,7 +217,8 @@ listen_window_ms = 50
 kinds = { i2c = true, uart = true, usb-cdc = false }
 
 # The interfaces a topology link end names (RP2040 datasheet: USB, I2C0/1,
-# UART0/1; pio-uart is the PIO UART program src/links.rs runs).
+# UART0/1; pio-uart and pio-uart1 are the PIO UART program src/links.rs
+# runs, on PIO0 and on PIO1).
 
 [[link_port]]
 index = 0
@@ -249,10 +250,16 @@ index = 5
 name = "pio-uart"
 kind = "uart"
 
+[[link_port]]
+index = 6
+name = "pio-uart1"
+kind = "uart"
+
 # The links a node of this MCU relays over (src/relay.rs serves them): I2C0
-# with the DAGON mailbox, a node at its seven-bit address, and the PIO UART
-# to its one peer at the protocol's UART address. The ids are RELAY's link
-# byte on the wire.
+# and I2C1 with the DAGON mailbox, a node at its seven-bit address, and the
+# PIO UARTs of PIO0 and PIO1, each to its one peer at the protocol's UART
+# address. A board wires the ones it uses. The ids are RELAY's link byte on
+# the wire.
 [[relay_link]]
 id = 1
 port = "i2c0"
@@ -265,14 +272,27 @@ port = "pio-uart"
 addressing = { fixed = 0xFF }
 max_payload = 1024
 
-# Static RAM (.bss + .data) of the relay firmware (examples/relay.rs, both
-# links wired; scripts/relay_ram.py): 18_136 bytes measured with the pinned
+[[relay_link]]
+id = 3
+port = "i2c1"
+addressing = "seven-bit"
+max_payload = 256
+
+[[relay_link]]
+id = 4
+port = "pio-uart1"
+addressing = { fixed = 0xFF }
+max_payload = 1024
+
+# Static RAM (.bss + .data) of the relay firmware (examples/relay.rs, every
+# link wired; scripts/relay_ram.py): 26_824 bytes measured with the pinned
 # Rust, plus 1/16 of it (the margin the stage0 size check leaves), rounded up
 # to 256 bytes. The margin takes a toolchain's or a dependency's small
-# changes; the I2C link's port and worker grown back to the USB frame
-# (1_664 bytes more) do not fit.
+# changes. Each link's port and worker are static whether a board wires the
+# link or not: the second I2C bus and the second PIO UART are 8_688 bytes
+# of it.
 [relay]
-ram_bytes = 19_456
+ram_bytes = 28_672
 
 # What the wire codec (dagon_proto) may take in each image
 # (scripts/codec_budget.py): the largest figure of the images measured

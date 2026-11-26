@@ -54,11 +54,15 @@ export interface Wire {
 }
 
 export interface Link {
+  /** What the link is selected by: `link:<to>` for the link node `to` stands under, `link:<to>~<from>` for each other link shown under it. */
+  key: string;
   from: string;
   to: string;
   kind: Kind;
   /** Address value for the spoken name ("0x42"), empty for UART. */
   addr: string;
+  /** Baud rate of a UART link, for its label. */
+  baud?: number;
   wires: Wire[];
 }
 
@@ -90,6 +94,7 @@ export const SAMPLE_CONFIG: Config = {
   ],
   links: [
     {
+      key: 'link:seg',
       from: 'hub',
       to: 'seg',
       kind: LinkKind.I2c,
@@ -103,10 +108,12 @@ export const SAMPLE_CONFIG: Config = {
       ],
     },
     {
+      key: 'link:watch',
       from: 'hub',
       to: 'watch',
       kind: LinkKind.Uart,
       addr: '',
+      baud: 115200,
       wires: [
         { signal: 'TX → RX', hubPin: 'GPIO26', nodePin: 'G44', shared: false },
         { signal: 'RX ← TX', hubPin: 'GPIO27', nodePin: 'G43', shared: false },

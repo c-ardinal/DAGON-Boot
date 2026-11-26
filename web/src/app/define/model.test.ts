@@ -1,9 +1,10 @@
-import { RULE_FIX } from '../copy.ts';
+import { DIFF, RULE_FIX } from '../copy.ts';
 import { describe, expect, test } from 'vitest';
 import { supportedBoards, topo_check, topo_compile } from '../../wasm/dagon.ts';
 import { rom_i2c_addrs, schema_version, topo_parse } from '../../wasm/pkg/dagon_wasm.js';
 import { SAMPLE_CONFIG, SAMPLE_YAML } from '../sample.ts';
-import { canPlace, LinkKind, mcus, ownFlash, maxNodes, connect, emptyDoc, freeAddrs, fromYaml, hopAvailable, linkKinds, linkView, SCHEMA_VERSION, place, placeMcu, removeNode, setLink, setLinkKind, setNode, setUplink, toConfig, topoWithNames, toYaml, withDefaults, type Topo } from './model.ts';
+import { canPlace, type Doc, LinkKind, mcus, ownFlash, maxNodes, connect, emptyDoc, freeAddrs, fromYaml, hopAvailable, linkKinds, linkView, SCHEMA_VERSION, place, placeMcu, removeNode, setLink, setLinkKind, setNode, setUplink, toConfig, topoWithNames, toYaml, withDefaults, type Topo } from './model.ts';
+import { topoDiff } from './diff.ts';
 import { problemChip } from './problems.ts';
 import { problems } from './problems.ts';
 
@@ -119,6 +120,45 @@ describe('define document', () => {
 
   test('a node that names a board has no own flash line (the board definition holds it)', () => {
     expect(ownFlash(fromYaml(SAMPLE_YAML), 'hub')).toBeNull();
+  });
+
+  test('a ring: a link between two nodes under the coordinator has its own key, is edited by itself, and is listed as its own difference', () => {
+    const sample = fromYaml(SAMPLE_YAML);
+    const ring = connect(sample, 'watch', 'seg');
+    expect(ring.topo.links).toHaveLength(3);
+    const config = toConfig(ring, supportedBoards());
+    expect(config.links.map((l) => [l.key, l.from, l.to])).toEqual([['link:seg', 'hub', 'seg'], ['link:watch', 'hub', 'watch'], ['link:watch~seg', 'seg', 'watch']]);
+    // Each node stands under its link from the coordinator, and updating reaches it over that link.
+    expect(config.nodes.map((n) => n.depth)).toEqual([0, 1, 1]);
+    expect(config.reach).toEqual(['hub', 'seg', 'watch']);
+    expect(check(config.yaml).errors).toBe(0);
+    expect(problems(ring).filter((p) => p.severity === 'error')).toEqual([]);
+    // What the check says of the ring's link selects that link, not the link watch stands under.
+    expect(problems(ring).filter((p) => p.rule === 'V-23').map((p) => p.select)).toEqual(['link:watch~seg']);
+    // The same pair again changes nothing, from either end.
+    expect(connect(ring, 'seg', 'watch')).toBe(ring);
+    expect(connect(ring, 'watch', 'seg')).toBe(ring);
+    // Editing the ring's link leaves the link watch stands under as it was.
+    const edited = setLink(ring, 2, 'baud', 9600);
+    expect(edited.topo.links!.map((l) => l.baud)).toEqual([undefined, 115200, 9600]);
+    // Each link drawn carries its own speed for its label.
+    expect(toConfig(edited, supportedBoards()).links.map((l) => l.baud)).toEqual([undefined, 115200, 9600]);
+    expect(topoDiff(sample.topo, ring.topo, {})).toEqual([{ what: 'seg → watch', here: DIFF.none, file: expect.stringContaining('UART'), nodes: ['watch'] }]);
+    // A node under two nodes as near the coordinator: the link switched to another kind keeps its place, so the key that selects it goes on selecting it.
+    const placed = placeMcu(sample, 'rp2040').doc;
+    const leaf = placed.topo.nodes[placed.topo.nodes.length - 1].id;
+    const twin = connect(connect(placed, leaf, 'seg'), leaf, 'watch');
+    const pairs = (d: Doc) => toConfig(d, supportedBoards()).links.map((l) => [l.key, l.from, l.to]);
+    expect(pairs(twin).slice(2)).toEqual([[`link:${leaf}`, 'seg', leaf], [`link:${leaf}~watch`, 'watch', leaf]]);
+    const switched = setLinkKind(twin, 2, LinkKind.I2c);
+    expect(switched.topo.links![2].kind).toBe(LinkKind.I2c);
+    expect(pairs(switched)).toEqual(pairs(twin));
+    // A kind described only is put where the link stands: the links keep their places too.
+    const described = setLinkKind(twin, 2, LinkKind.Can);
+    expect(described.topo.links![2].kind).toBe(LinkKind.Can);
+    expect(pairs(described)).toEqual(pairs(twin));
+    // The file written and read back is the same ring.
+    expect(fromYaml(toYaml(ring.topo)).topo).toEqual(ring.topo);
   });
 
   test('any shape: a second coordinator over CAN and a node two links from the coordinator are drawn in rows and told as skipped by updating (V-23)', () => {

@@ -2,7 +2,7 @@
 // page — nodes only on one side, a different MCU, board or role, and links of
 // another kind, address or pins. Rows for the file check's table and the graph chips.
 import { DIFF, INSPECT } from '../copy.ts';
-import { kindLabel, LinkKind, linkIndexOf, sides, type TLink, type TNode, type Topo } from './model.ts';
+import { kindLabel, LinkKind, linkIndexOf, shownLinks, sides, type TLink, type TNode, type Topo } from './model.ts';
 
 export interface DiffRow {
   /** The node (表示名) or link ("メイン → 7セグ") the row is about. */
@@ -44,8 +44,8 @@ export function topoDiff(here: Topo, file: Topo, names: Record<string, string>):
     const b = nodeText(file.nodes.find((n) => n.id === id));
     if (a !== b) rows.push({ what: name(id), here: a, file: b, nodes: [id] });
   }
-  // A link by the node it is shown under, on each side.
-  const under = (topo: Topo) => (topo.links ?? []).map((l) => sides(topo, l).down.node);
+  // A node's primary link by the node it stands under, on each side.
+  const under = (topo: Topo) => shownLinks(topo).filter((x) => x.primary).map((x) => x.down.node);
   const to = [...new Set([...under(here), ...under(file)])];
   for (const t of to) {
     const la = (here.links ?? [])[linkIndexOf(here, t)];
@@ -56,6 +56,16 @@ export function topoDiff(here: Topo, file: Topo, names: Record<string, string>):
     const fb = lb && sides(file, lb).up.node;
     const from = fa ?? fb ?? '';
     if (a !== b || fa !== fb) rows.push({ what: `${name(from)} → ${name(t)}`, here: a, file: b, nodes: [t] });
+  }
+  // Each further link (a star's, a ring's) by the pair of nodes it joins.
+  const more = (topo: Topo) => shownLinks(topo).flatMap((x, i) => (x.primary ? [] : [{ at: `${x.up.node}\n${x.down.node}`, from: x.up.node, to: x.down.node, l: (topo.links ?? [])[i] }]));
+  const [ma, mb] = [more(here), more(file)];
+  for (const at of new Set([...ma, ...mb].map((x) => x.at))) {
+    const [xa, xb] = [ma.find((x) => x.at === at), mb.find((x) => x.at === at)];
+    const a = linkText(here, xa?.l);
+    const b = linkText(file, xb?.l);
+    const x = (xa ?? xb)!;
+    if (a !== b) rows.push({ what: `${name(x.from)} → ${name(x.to)}`, here: a, file: b, nodes: [x.to] });
   }
   return rows;
 }

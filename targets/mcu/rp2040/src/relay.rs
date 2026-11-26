@@ -1,6 +1,7 @@
-//! The relay ([`dagon_relay`]) on an RP2040: the PC link over USB CDC, an
-//! I2C bus (DAGON mailbox, and I2C_RAW to an STM32 ROM loader) and a PIO
-//! UART as its links, and the NRST / BOOT0 lines of an STM32 node. This
+//! The relay ([`dagon_relay`]) on an RP2040: the PC link over USB CDC, its
+//! I2C buses (DAGON mailbox, and I2C_RAW to an STM32 ROM loader) and PIO
+//! UARTs as its links, as many of them as the board wires, and the NRST /
+//! BOOT0 lines of an STM32 node. This
 //! module holds only what is RP2040 hardware: the [`Links`] built from its
 //! peripherals, [`start`], the embassy tasks that run the relay with these
 //! concrete types, and the embassy-time [`RelayClock`].
@@ -19,7 +20,7 @@ use dagon_relay::{
     run_link, serve, task, Config, LinkRoute, Liveness, OwnAgent, Port, Recovery, RelayClock,
 };
 use embassy_executor::Spawner;
-use embassy_rp::peripherals::{I2C0, PIO0, USB};
+use embassy_rp::peripherals::{I2C0, I2C1, PIO0, PIO1, USB};
 use embassy_rp::Peri;
 use embassy_time::{Instant, Timer};
 use static_cell::StaticCell;
@@ -30,7 +31,8 @@ use crate::sub::SubLines;
 use crate::uart::UartLink;
 use crate::watchdog::{feed_forever, now_ms, Guard, Level, Watch};
 use crate::{
-    RECOVERY_ROM_ADDR, RELAY_LINKS, RELAY_LINK_BUFFERS, RELAY_LINK_I2C0, RELAY_LINK_PIO_UART,
+    RECOVERY_ROM_ADDR, RELAY_LINKS, RELAY_LINK_BUFFERS, RELAY_LINK_I2C0, RELAY_LINK_I2C1,
+    RELAY_LINK_PIO_UART, RELAY_LINK_PIO_UART1,
 };
 
 const LINKS: usize = RELAY_LINKS.len();
@@ -44,13 +46,39 @@ pub const fn levels<const N: usize>() -> [Level; N] {
     crate::watchdog::levels::<N>(TASKS)
 }
 
-/// The links the board wires (any may be absent; requests for an absent
-/// one answer E_UNSUPPORTED).
+/// The links the board wires, one field per relay link of the MCU
+/// definition (any may be absent; requests for an absent one answer
+/// E_UNSUPPORTED). A board names the links it wires and takes the rest
+/// from [`Links::none`].
 pub struct Links {
+    /// Port `i2c0`.
     pub i2c: Option<I2cLink<RpI2c<'static, I2C0>>>,
+    /// Port `i2c1`.
+    pub i2c1: Option<I2cLink<RpI2c<'static, I2C1>>>,
+    /// Port `pio-uart`: PIO0's state machines 0 (TX) and 1 (RX).
     pub uart: Option<PioStream<'static, PIO0, 0, 1>>,
-    /// NRST / BOOT0 of an STM32 node on the I2C link (SUBCTL, I2C_RAW).
+    /// Port `pio-uart1`: PIO1's state machines 0 (TX) and 1 (RX).
+    pub uart1: Option<PioStream<'static, PIO1, 0, 1>>,
+    /// NRST / BOOT0 of an STM32 node on the link [`Links::lines_link`]
+    /// (SUBCTL, I2C_RAW).
     pub lines: Option<SubLines<'static>>,
+    /// The relay link the node on `lines` answers on, its ROM loader
+    /// included: the id of `i2c0` or of `i2c1`.
+    pub lines_link: u8,
+}
+
+impl Links {
+    /// No link wired.
+    pub const fn none() -> Self {
+        Links {
+            i2c: None,
+            i2c1: None,
+            uart: None,
+            uart1: None,
+            lines: None,
+            lines_link: RELAY_LINK_I2C0,
+        }
+    }
 }
 
 /// What the relay node is and how its relay runs.
@@ -78,14 +106,53 @@ const fn slot(id: u8) -> usize {
     panic!("not a relay link of this package")
 }
 
-/// The places of this package's links in [`RELAY_LINKS`].
-const I2C: usize = slot(RELAY_LINK_I2C0);
-const UART: usize = slot(RELAY_LINK_PIO_UART);
+type RpUart<P> = UartLink<PioStream<'static, P, 0, 1>, fn() -> u64>;
 
-/// Each link's request port, of its generated buffer size
-/// ([`RELAY_LINK_BUFFERS`]); a size that is not the link's stops the build.
-static I2C0_PORT: Port<[u8; RELAY_LINK_BUFFERS[I2C]]> = Port::new(&RELAY_LINKS[I2C]);
-static PIO_UART_PORT: Port<[u8; RELAY_LINK_BUFFERS[UART]]> = Port::new(&RELAY_LINKS[UART]);
+/// One relay link of this package: its place in [`RELAY_LINKS`] by the id
+/// the definition gives its port, its request port of the generated buffer
+/// size ([`RELAY_LINK_BUFFERS`]; a size that is not the link's stops the
+/// build), and the worker task that runs it under the guard task of that
+/// place.
+macro_rules! relay_link {
+    ($at:ident, $port:ident, $task:ident, $id:expr, $link:ty) => {
+        const $at: usize = slot($id);
+        static $port: Port<[u8; RELAY_LINK_BUFFERS[$at]]> = Port::new(&RELAY_LINKS[$at]);
+
+        #[embassy_executor::task]
+        async fn $task(mut link: $link, watch: RpWatch) -> ! {
+            run_link(&mut link, &$port, watch, task::link($at)).await
+        }
+    };
+}
+
+relay_link!(
+    I2C,
+    I2C0_PORT,
+    i2c0_task,
+    RELAY_LINK_I2C0,
+    I2cLink<RpI2c<'static, I2C0>>
+);
+relay_link!(
+    I2C_1,
+    I2C1_PORT,
+    i2c1_task,
+    RELAY_LINK_I2C1,
+    I2cLink<RpI2c<'static, I2C1>>
+);
+relay_link!(
+    UART,
+    PIO_UART_PORT,
+    pio_uart_task,
+    RELAY_LINK_PIO_UART,
+    RpUart<PIO0>
+);
+relay_link!(
+    UART_1,
+    PIO_UART1_PORT,
+    pio_uart1_task,
+    RELAY_LINK_PIO_UART1,
+    RpUart<PIO1>
+);
 
 /// Embassy time as the relay's clock.
 #[derive(Clone, Copy)]
@@ -182,7 +249,6 @@ impl OwnAgent for RpAgent {
 }
 
 type RpRelay = dagon_relay::Relay<'static, RpAgent, SubLines<'static>, RpWatch, RpClock>;
-type RpUart = UartLink<PioStream<'static, PIO0, 0, 1>, fn() -> u64>;
 
 /// Starts the relay: opens the store and the agent (taking over the
 /// watchdog, running the board's bring-up, see `node::open`), spawns the
@@ -210,21 +276,27 @@ pub fn start<B: BoardDef, const N: usize>(
         setup.app,
     );
     let watch = RpWatch(guard);
+    let lines_link = links.lines_link;
     let uart = links
         .uart
         .map(|s| UartLink::new(s, now_ms as fn() -> u64, RELAY_LINK_PIO_UART));
+    let uart1 = links
+        .uart1
+        .map(|s| UartLink::new(s, now_ms as fn() -> u64, RELAY_LINK_PIO_UART1));
     // One entry per link of this package; a port only where the board
     // wires the link.
     let mut ports: [Option<&'static Port>; LINKS] = [None; LINKS];
     ports[I2C] = links.i2c.is_some().then_some(&I2C0_PORT as &Port);
+    ports[I2C_1] = links.i2c1.is_some().then_some(&I2C1_PORT as &Port);
     ports[UART] = uart.is_some().then_some(&PIO_UART_PORT as &Port);
+    ports[UART_1] = uart1.is_some().then_some(&PIO_UART1_PORT as &Port);
     static ROUTES: StaticCell<[LinkRoute<'static>; LINKS]> = StaticCell::new();
     let routes = ROUTES.init(core::array::from_fn(|i| LinkRoute {
         link: RELAY_LINKS[i],
         port: ports[i],
     }));
-    // The ROM loader of the node on the recovery lines answers on the I2C
-    // link, at the address its MCU definition gives (generated); without
+    // The ROM loader of the node on the recovery lines answers on the
+    // link the board names for them, at the address its MCU definition gives (generated); without
     // one there is no recovery target.
     static RECOVERY: StaticCell<Option<Recovery<SubLines<'static>>>> = StaticCell::new();
     let recovery =
@@ -234,7 +306,7 @@ pub fn start<B: BoardDef, const N: usize>(
                 .zip(RECOVERY_ROM_ADDR)
                 .map(|(lines, rom_addr)| Recovery {
                     lines,
-                    link: RELAY_LINK_I2C0,
+                    link: lines_link,
                     rom_addr,
                 }),
         );
@@ -249,10 +321,16 @@ pub fn start<B: BoardDef, const N: usize>(
     let high = crate::exec::start();
     high.spawn(pc_task(parts.usb, setup.name, serial, relay).expect("task pool"));
     if let Some(i2c) = links.i2c {
-        high.spawn(i2c_task(i2c, watch).expect("task pool"));
+        high.spawn(i2c0_task(i2c, watch).expect("task pool"));
+    }
+    if let Some(i2c) = links.i2c1 {
+        high.spawn(i2c1_task(i2c, watch).expect("task pool"));
     }
     if let Some(uart) = uart {
-        high.spawn(uart_task(uart, watch).expect("task pool"));
+        high.spawn(pio_uart_task(uart, watch).expect("task pool"));
+    }
+    if let Some(uart) = uart1 {
+        high.spawn(pio_uart1_task(uart, watch).expect("task pool"));
     }
     spawner.spawn(feed(guard).expect("task pool"));
     #[cfg(feature = "masked-time")]
@@ -275,18 +353,6 @@ async fn pc_task(
     let spawner = unsafe { Spawner::for_current_executor() }.await;
     spawner.spawn(crate::usb::run(device).expect("task pool"));
     serve(relay, link).await
-}
-
-/// The worker of each link, with its port and its guard task by its place
-/// in [`RELAY_LINKS`].
-#[embassy_executor::task]
-async fn i2c_task(mut link: I2cLink<RpI2c<'static, I2C0>>, watch: RpWatch) -> ! {
-    run_link(&mut link, &I2C0_PORT, watch, task::link(I2C)).await
-}
-
-#[embassy_executor::task]
-async fn uart_task(mut link: RpUart, watch: RpWatch) -> ! {
-    run_link(&mut link, &PIO_UART_PORT, watch, task::link(UART)).await
 }
 
 #[embassy_executor::task]

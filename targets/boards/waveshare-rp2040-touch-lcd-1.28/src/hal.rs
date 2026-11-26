@@ -76,6 +76,7 @@ pub fn start<const N: usize>(
         lines: wants(Kind::I2c).then(|| io.sub_ctl.lines()),
         uart: wants(Kind::Uart).then(|| downlink_uart(io.sub_uart)),
         i2c: wants(Kind::I2c).then(|| downlink_i2c(io.sub_i2c)),
+        ..dagon_mcu_rp2040::relay::Links::none()
     };
     // The touch controller stays out of reset for the life of the app.
     core::mem::forget(hold_touch(io.touch_rst));

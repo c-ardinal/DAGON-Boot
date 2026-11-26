@@ -161,6 +161,103 @@ fn a_fault_that_does_not_stop_the_write_fails_its_run() {
     assert!(e.contains("did not stop at seg"), "{e}");
 }
 
+/// The sample closed into a ring by a link between its two nodes: each is
+/// still written over its own link from the node the PC is connected to,
+/// and the ring's link carries nothing.
+#[test]
+fn a_ring_is_updated_over_the_links_from_the_connected_node() {
+    let ring = SAMPLE.replace(
+        "\nrecovery:",
+        "  - kind: uart\n    iface: hw-uart0\n    ends:\n      - { node: seg, port: usart1, pins: { tx: 9, rx: 10 } }\n      - { node: watch, port: uart0 }\n    baud: 115200\n    control:\n      kind: cooperative\n      rom_entry: force-download-boot\n\nrecovery:",
+    );
+    assert_ne!(ring, SAMPLE);
+    let t = dagon_topology::parse_str(&ring).unwrap();
+    let cut = dagon_topology::cut_with(Registry::builtin(), &t);
+    assert_eq!(cut.reach, ["hub", "seg", "watch"]);
+    assert!(cut.skipped.is_empty(), "{:?}", cut.skipped);
+    let whole = dagon_topology::check_with(Registry::builtin(), &t);
+    assert!(whole.is_pushable(), "{:?}", whole.issues);
+    assert!(
+        whole
+            .issues
+            .iter()
+            .any(|i| i.rule == "V-23" && i.message.contains("does not use this one")),
+        "{:?}",
+        whole.issues
+    );
+    // `dagon sim` runs the part updating reaches, as every command does.
+    let part = cut.topology.expect("the part passes the checks");
+    // `dagon gen` builds each node for its link from the connected node:
+    // no firmware is asked to relay over the ring's link.
+    for n in &part.nodes {
+        crate::scaffold::hop_placeholders(Registry::builtin(), &part, n)
+            .unwrap_or_else(|e| panic!("{}: {e}", n.id));
+    }
+    let mut lines = Vec::new();
+    let r = run(
+        Registry::builtin(),
+        &part,
+        &inject(&["seg=power-cut", "watch=no-confirm"]),
+        &mut |l| lines.push(l),
+    );
+    assert_eq!(r, Ok(()), "{lines:#?}");
+    assert!(
+        lines[1].starts_with("update PASS: hub, seg, watch"),
+        "{lines:#?}"
+    );
+}
+
+/// A connected node with two I2C buses (a project's board that brings both
+/// controllers to its header): each bus is a relay link of its own, and
+/// the node on each is written and recovers over its bus.
+#[test]
+fn nodes_on_two_i2c_buses_are_each_updated_over_their_own_bus() {
+    let reg = project(
+        "format = 1\n\n\
+         [board_override.\"waveshare-rp2040-touch-lcd-1.28\"]\n\
+         header = [{ pin = \"GPIO16\" }, { pin = \"GPIO17\" }, { pin = \"GPIO18\" }, { pin = \"GPIO26\" }, \
+         { pin = \"GPIO27\" }, { pin = \"GPIO28\" }, { pin = \"GPIO6\" }, { pin = \"GPIO7\" }]\n\
+         i2c = [{ controller = \"i2c0\", sda = \"GPIO16\", scl = \"GPIO17\" }, \
+         { controller = \"i2c1\", sda = \"GPIO6\", scl = \"GPIO7\" }]\n",
+    );
+    let two = pair_with(1)
+        .replace(
+            "buses:\n",
+            "buses:\n  - id: i2c-aux\n    kind: i2c\n    controller: i2c1\n    sda: 6\n    scl: 7\n    speed_hz: 400000\n    pullups: external\n",
+        )
+        .replace(
+            "  - kind: i2c\n    bus: i2c-main\n    ends:\n      - { node: hub, port: i2c0 }\n      - { node: seg2,",
+            "  - kind: i2c\n    bus: i2c-aux\n    ends:\n      - { node: hub, port: i2c1 }\n      - { node: seg2,",
+        );
+    assert!(two.contains("{ node: hub, port: i2c1 }"), "{two}");
+    let rp = reg.mcu("rp2040").unwrap();
+    let id = |port: &str| {
+        let at = rp.port(port).unwrap().index;
+        rp.relay_link_defs()
+            .iter()
+            .find(|l| l.port == at)
+            .unwrap()
+            .id
+    };
+    assert_ne!(id("i2c0"), id("i2c1"));
+    let (r, lines) = sim(
+        &reg,
+        &two,
+        &["seg=power-cut", "seg2=power-cut", "seg2=no-confirm"],
+    );
+    assert_eq!(r, Ok(()), "{lines:#?}");
+    assert!(
+        lines[0].contains(&format!(
+            "seg (stm32f401re, link {} address 0x42)",
+            id("i2c0")
+        )) && lines[0].contains(&format!(
+            "seg2 (stm32f401re, link {} address 0x43)",
+            id("i2c1")
+        )),
+        "{lines:#?}"
+    );
+}
+
 /// What the simulator has no model for is refused by name.
 #[test]
 fn a_topology_past_what_the_simulator_models_is_refused_by_name() {

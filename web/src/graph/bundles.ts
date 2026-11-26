@@ -16,8 +16,8 @@ function clearOf(width: number, dir: Pt): number {
 }
 
 /** The bus and its value: the strands show their count, and the words for it are in the name and the sheet. */
-function bundleLabel(l: Link, config: Config | null): string {
-  const value = l.addr || config?.nodes.find((n) => n.id === l.to)?.via.split(' ')[1] || '';
+function bundleLabel(l: Link): string {
+  const value = l.addr || (l.baud !== undefined ? String(l.baud) : '');
   return [kindLabel(l.kind), value].filter(Boolean).join(' ');
 }
 
@@ -29,6 +29,8 @@ export interface Bundle {
   outward: 1 | -1;
   /** How far from the run its chip stands. */
   clear: number;
+  /** A run that lies level where its chip stands: the chip stands over it (-1) or, where the cable bows down, under it (1); 0 for a leaning run. */
+  level: 1 | -1 | 0;
   /** The link's end on the node nearer the PC. */
   start: Pt;
   strands: string[];
@@ -57,14 +59,17 @@ export function bundleOf(l: Link, config: Config | null, route: Bezier, points: 
         return { p, deg: (Math.atan2(dir.y, dir.x) * 180) / Math.PI - 90, len: width + 4 };
       });
   const { p: mid, dir: midDir } = along(points, lengths, total * 0.5);
-  const label = bundleLabel(l, config);
+  // A route between two sides leaves level (sideLink); one round below enters from below (underLink).
+  const level = route[1].y === route[0].y ? -1 : route[2].y > route[3].y ? 1 : 0;
+  const label = bundleLabel(l);
   const kind = kindLabel(l.kind);
   return {
     l,
-    key: `link:${l.to}`,
+    key: l.key,
     open,
     outward: route[3].x < route[0].x ? -1 : 1,
-    clear: clearOf(width, midDir),
+    clear: level ? width / 2 + CHIP_H / 2 + CHIP_CLEAR : clearOf(width, midDir),
+    level,
     start: route[0],
     strands: offsets.map((o) => strandPath(points, o)),
     ties,

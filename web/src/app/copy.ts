@@ -595,9 +595,7 @@ export const LINK = {
 
 /** Why a link drag is refused (a failure: red). */
 export const LINK_WHY = {
-  taken: 'このノードはPC側のノードと接続済です',
-  under: (name: string) => `このノードは${name}の接続先のノードです`,
-  loop: 'このノードの接続先のノードへの接続は不可です',
+  pair: 'このノードとは接続済です',
 } as const;
 
 /** Right column. */
@@ -1420,6 +1418,11 @@ export const WRITE = {
   rolled: {
     reason: '新バージョンでの起動継続に失敗し、前のバージョン{version}に復帰しました。ノードは動作中です。',
     next: 'アプリを修正してバージョンアップし、ビルド後に再度書込を実行してください。',
+  },
+  /** What a stopped run did for the release's compatibility constraints (ノード間のバージョンの整合). */
+  constraints: {
+    realigned: (k: number) => `互換制約を維持するため、書込済の${k}ノードを書込前のバージョンへ復帰しました。`,
+    incompatible: (k: number) => `互換制約に違反した状態のノードが${k}個あります。`,
   },
   /** The new boot core failed its check: the node runs its confirmed core, or with one boot core slot its confirmed app; the app was not written. */
   coreBack: {

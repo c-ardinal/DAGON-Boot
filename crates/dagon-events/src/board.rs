@@ -11,10 +11,16 @@
 //! bounded by the device's own maximum (its datasheet's, declared in the
 //! definition); `write` refuses a register the definition does not list
 //! as writable.
+//!
+//! A device the definition gives a `probe` may not be fitted (a lot, a
+//! unit or a revision carries another part, or none): the package has it
+//! as a [`Probed`], and its [`Device`] comes only from [`Probed::find`],
+//! once the part answered its probe on the bus. The candidates of one
+//! place (`place`) are told apart by [`fitted`].
 
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::mutex::Mutex;
-use embedded_hal::i2c::{I2c, Operation};
+use embedded_hal::i2c::{Error as _, ErrorKind, I2c, Operation};
 
 /// A board resource shared, not owned: put in once by the board package,
 /// then used by anyone through [`Shared::with`].
@@ -165,6 +171,76 @@ impl Device {
     }
 }
 
+/// A device that may not be fitted, as a `[[device]]` with a `probe`
+/// declares it: its [`Device`] is given only once the part answered the
+/// probe, so no code holds a device that is not there.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Probed {
+    device: Device,
+    reg: u8,
+    mask: u8,
+    value: Option<u8>,
+}
+
+impl Probed {
+    /// `device`, fitted when it answers a read of register `reg` and,
+    /// with a `value`, when the byte read is `value` under `mask`.
+    pub const fn new(device: Device, reg: u8, mask: u8, value: Option<u8>) -> Self {
+        if let Some(v) = value {
+            assert!(mask != 0 && v & !mask == 0, "a value its mask can show");
+        }
+        Probed {
+            device,
+            reg,
+            mask,
+            value,
+        }
+    }
+
+    /// 7-bit address the probe reads at.
+    pub const fn addr(&self) -> u8 {
+        self.device.addr
+    }
+
+    /// The device when it is fitted: `None` when nothing acknowledges
+    /// its address or register, or the register reads another value
+    /// (another part at the address). Any other failure of the bus is an
+    /// error: it does not tell whether the device is there.
+    pub fn find<B: I2c>(&self, bus: &Shared<B>) -> Result<Option<Device>, BusError<B::Error>> {
+        let mut byte = [0u8];
+        let read = bus
+            .with(|b| b.write_read(self.device.addr, &[self.reg], &mut byte))
+            .ok_or(BusError::Busy)?;
+        match read {
+            Ok(()) => Ok(match self.value {
+                Some(v) if byte[0] & self.mask != v => None,
+                _ => Some(self.device),
+            }),
+            Err(e) if matches!(e.kind(), ErrorKind::NoAcknowledge(_)) => Ok(None),
+            Err(e) => Err(BusError::Bus(e)),
+        }
+    }
+}
+
+/// One candidate for a place: its probe, and the place's variant for it.
+pub type Candidate<T> = (Probed, fn(Device) -> T);
+
+/// What is fitted at a place with several candidates: the first of
+/// `candidates` (a generated `CANDIDATES` table, in the definition's
+/// order) that answers its probe, as the place's type; `None` when none
+/// does.
+pub fn fitted<B: I2c, T>(
+    candidates: &[Candidate<T>],
+    bus: &Shared<B>,
+) -> Result<Option<T>, BusError<B::Error>> {
+    for (probe, part) in candidates {
+        if let Some(device) = probe.find(bus)? {
+            return Ok(Some(part(device)));
+        }
+    }
+    Ok(None)
+}
+
 /// The `BoardBringUp` port: the board's power, pins and buses at app
 /// start, before DAGON serves its link. The board package provides it; a
 /// user's own step is an extension later in the chain on `app.bring_up`.
@@ -228,6 +304,99 @@ mod tests {
         assert_eq!(
             log,
             [(0x4F, std::vec![0x05, 1, 2]), (0x4F, std::vec![0x03])]
+        );
+    }
+
+    /// The parts fitted on a bus: (address, register, the byte it reads).
+    /// Any other address or register is not acknowledged; `stuck` fails
+    /// every transfer.
+    struct Fitted {
+        parts: &'static [(u8, u8, u8)],
+        stuck: bool,
+    }
+
+    impl ErrorType for Fitted {
+        type Error = ErrorKind;
+    }
+
+    impl I2c for Fitted {
+        fn transaction(&mut self, addr: u8, ops: &mut [Operation<'_>]) -> Result<(), Self::Error> {
+            use embedded_hal::i2c::NoAcknowledgeSource::{Address, Data};
+            if self.stuck {
+                return Err(ErrorKind::Bus);
+            }
+            if !self.parts.iter().any(|p| p.0 == addr) {
+                return Err(ErrorKind::NoAcknowledge(Address));
+            }
+            let mut reg = None;
+            for op in ops {
+                match op {
+                    Operation::Write(b) => reg = b.first().copied(),
+                    Operation::Read(b) => {
+                        let part = self.parts.iter().find(|p| p.0 == addr && Some(p.1) == reg);
+                        b.fill(part.ok_or(ErrorKind::NoAcknowledge(Data))?.2);
+                    }
+                }
+            }
+            Ok(())
+        }
+    }
+
+    fn bus_with(parts: &'static [(u8, u8, u8)], stuck: bool) -> Shared<Fitted> {
+        let bus = Shared::new();
+        assert!(bus.put(Fitted { parts, stuck }).is_ok());
+        bus
+    }
+
+    // SAFETY: test devices standing in for generated ones.
+    #[allow(unsafe_code)]
+    const TOUCH_A: Device = unsafe { Device::from_definition(0x15, &[], 4) };
+    #[allow(unsafe_code)]
+    const TOUCH_B: Device = unsafe { Device::from_definition(0x15, &[0x01], 4) };
+    #[allow(unsafe_code)]
+    const SENSOR: Device = unsafe { Device::from_definition(0x40, &[], 2) };
+
+    #[test]
+    fn a_probed_device_is_given_only_when_its_part_answers() {
+        // The chip id of part A under the mask's bits.
+        let a = Probed::new(TOUCH_A, 0xA7, 0xF0, Some(0xB0));
+        let any = Probed::new(SENSOR, 0x00, 0xFF, None);
+        let fitted = bus_with(&[(0x15, 0xA7, 0xB5), (0x40, 0x00, 0x00)], false);
+        assert_eq!(a.find(&fitted), Ok(Some(TOUCH_A)));
+        assert_eq!(any.find(&fitted), Ok(Some(SENSOR)));
+        // Nothing at the address, no such register, another part's id.
+        assert_eq!(a.find(&bus_with(&[], false)), Ok(None));
+        assert_eq!(a.find(&bus_with(&[(0x15, 0x00, 0xB5)], false)), Ok(None));
+        assert_eq!(a.find(&bus_with(&[(0x15, 0xA7, 0x11)], false)), Ok(None));
+        // A bus that fails, or is not put in, tells nothing of the device.
+        assert_eq!(
+            a.find(&bus_with(&[(0x15, 0xA7, 0xB5)], true)),
+            Err(BusError::Bus(ErrorKind::Bus))
+        );
+        assert_eq!(a.find(&Shared::<Fitted>::new()), Err(BusError::Busy));
+    }
+
+    #[derive(Debug, PartialEq, Eq)]
+    enum Touch {
+        A(Device),
+        B(Device),
+    }
+
+    #[test]
+    fn the_part_fitted_at_a_place_is_the_candidate_that_answers() {
+        // Two parts for one place at one address, told apart by their id.
+        let candidates: [Candidate<Touch>; 2] = [
+            (Probed::new(TOUCH_A, 0xA7, 0xFF, Some(0xB5)), Touch::A),
+            (Probed::new(TOUCH_B, 0xA7, 0xFF, Some(0x11)), Touch::B),
+        ];
+        let find = |parts| fitted(&candidates, &bus_with(parts, false));
+        assert_eq!(find(&[(0x15, 0xA7, 0xB5)]), Ok(Some(Touch::A(TOUCH_A))));
+        assert_eq!(find(&[(0x15, 0xA7, 0x11)]), Ok(Some(Touch::B(TOUCH_B))));
+        assert_eq!(find(&[]), Ok(None));
+        assert_eq!(find(&[(0x15, 0xA7, 0x77)]), Ok(None));
+        assert_eq!(
+            fitted(&candidates, &bus_with(&[], true)),
+            Err(BusError::Bus(ErrorKind::Bus))
         );
     }
 

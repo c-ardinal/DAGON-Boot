@@ -138,6 +138,8 @@ pub const ROWS: &[Row] = &[
     row(Board, "device.regs", Keyed(&["name"])),
     // Register numbers or names.
     row(Board, "device.writable", Whole),
+    // How one part is found: its register, mask and value are one fact.
+    row(Board, "device.probe", Whole),
     row(Board, "boot.action", Whole),
     row(Board, "boot.action.ops", Whole),
     // A new part's erase timings are the part's, never the old part's.

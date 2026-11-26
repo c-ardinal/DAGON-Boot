@@ -9,7 +9,9 @@
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
-use super::board_boot::{code_ident, code_names, type_name as camel, Active, HaltPattern};
+use super::board_boot::{
+    code_ident, code_names, type_name as camel, Active, BoardDevice, HaltPattern,
+};
 use super::boot_folder::{self, BootFolder, BOOT_FOLDER_ENV};
 use super::execution::EraseRegionDef;
 use super::load::{self, BOARD_FILE, MCU_FILE};
@@ -268,15 +270,19 @@ pub fn board_rs(b: &BoardDef) -> String {
     }
     for d in &b.devices {
         let dev = code_ident(&d.id).to_uppercase();
-        let _ = writeln!(
-            o,
-            "/// Device `{}` on bus `{}`: its 7-bit address and the registers anyone outside DAGON may write.\n\
-             pub const DEVICE_{dev}_ADDR: u8 = {:#04x};\npub const DEVICE_{dev}_WRITABLE: &[u8] = &{:?};",
-            d.id,
-            d.bus,
-            d.addr,
-            d.writable_regs()
-        );
+        // A device that may not be fitted has no address here: code reaches
+        // it only through its probe (`devices_rs`).
+        if d.probe.is_none() {
+            let _ = writeln!(
+                o,
+                "/// Device `{}` on bus `{}`: its 7-bit address and the registers anyone outside DAGON may write.\n\
+                 pub const DEVICE_{dev}_ADDR: u8 = {:#04x};\npub const DEVICE_{dev}_WRITABLE: &[u8] = &{:?};",
+                d.id,
+                d.bus,
+                d.addr,
+                d.writable_regs()
+            );
+        }
         for r in &d.regs {
             let _ = writeln!(
                 o,
@@ -317,29 +323,100 @@ pub fn erase_regions_rs(regions: &[EraseRegionDef]) -> String {
     o
 }
 
+/// `d` as the expression of its `dagon_events::Device`.
+fn device_expr(d: &BoardDevice) -> String {
+    format!(
+        "unsafe {{\n    ::dagon_events::Device::from_definition({:#04x}, &{:?}, {})\n}}",
+        d.addr,
+        d.writable_regs(),
+        d.max_transfer
+    )
+}
+
+/// `d`, which has a probe, as the expression of its `dagon_events::Probed`.
+fn probed_expr(d: &BoardDevice) -> String {
+    let (reg, mask, value) = d.probe_regs().expect("a device with a probe");
+    let value = value.map_or("None".to_string(), |v| format!("Some({v:#04x})"));
+    format!(
+        "::dagon_events::Probed::new({}, {reg:#04x}, {mask:#04x}, {value})",
+        device_expr(d)
+    )
+}
+
 /// The board's devices as `dagon_events::Device` capabilities (the only
-/// way one is made), for a package that depends on `dagon-events`.
+/// way one is made), for a package that depends on `dagon-events`. A
+/// device with a `probe` is a `dagon_events::Probed`, which gives its
+/// `Device` once the part answered; the devices of one `place` are an
+/// enum named after it, with the `CANDIDATES` `dagon_events::fitted`
+/// probes in the definition's order. No constant holds a device that may
+/// not be there.
 pub fn devices_rs(b: &BoardDef) -> String {
+    const SEAL: &str = "// SAFETY: the address and writable registers of a device the\n\
+                        // definition loader accepted.\n\
+                        #[allow(unsafe_code)]";
     let mut o = format!(
         "// Written by the package's build script from board `{}`'s definition.\n\n",
         b.id
     );
-    for d in &b.devices {
+    for d in b.devices.iter().filter(|d| d.place.is_none()) {
         let dev = code_ident(&d.id).to_uppercase();
+        let _ = match d.probe {
+            None => writeln!(
+                o,
+                "/// `[[device]] {}` on bus `{}`.\n{SEAL}\n\
+                 pub const {dev}: ::dagon_events::Device = {};",
+                d.id,
+                d.bus,
+                device_expr(d)
+            ),
+            Some(_) => writeln!(
+                o,
+                "/// `[[device]] {}` on bus `{}`, which may not be fitted: its device\n\
+                 /// comes from `find` once the part answered its probe.\n{SEAL}\n\
+                 pub const {dev}: ::dagon_events::Probed = {};",
+                d.id,
+                d.bus,
+                probed_expr(d)
+            ),
+        };
+    }
+    for (place, candidates) in b.places() {
+        let ty = camel(&code_ident(place));
+        let variant = |d: &BoardDevice| camel(&code_ident(&d.id));
         let _ = writeln!(
             o,
-            "/// `[[device]] {}` on bus `{}`.\n\
-             // SAFETY: the address and writable registers of a device the\n\
-             // definition loader accepted.\n\
-             #[allow(unsafe_code)]\n\
-             pub const {dev}: ::dagon_events::Device = unsafe {{\n    \
-             ::dagon_events::Device::from_definition({:#04x}, &{:?}, {})\n}};",
-            d.id,
-            d.bus,
-            d.addr,
-            d.writable_regs(),
-            d.max_transfer
+            "/// The part fitted at `{place}` on bus `{}`: one of the definition's\n\
+             /// candidates, found by `::dagon_events::fitted(&{ty}::CANDIDATES, bus)`\n\
+             /// (`None` when none answers).\n\
+             #[derive(Clone, Copy, Debug, PartialEq, Eq)]\npub enum {ty} {{",
+            candidates[0].bus
         );
+        for d in &candidates {
+            let _ = writeln!(
+                o,
+                "    /// `[[device]] {}`.\n    {}(::dagon_events::Device),",
+                d.id,
+                variant(d)
+            );
+        }
+        let _ = writeln!(
+            o,
+            "}}\n\nimpl {ty} {{\n    \
+             /// The candidates with their probes, in the definition's order.\n    \
+             {}\n    \
+             pub const CANDIDATES: [::dagon_events::Candidate<Self>; {}] = [",
+            SEAL.replace('\n', "\n    "),
+            candidates.len()
+        );
+        for d in &candidates {
+            let _ = writeln!(
+                o,
+                "        ({}, Self::{}),",
+                probed_expr(d).replace('\n', "\n        "),
+                variant(d)
+            );
+        }
+        o += "    ];\n}\n";
     }
     o
 }

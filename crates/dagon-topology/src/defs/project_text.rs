@@ -117,6 +117,9 @@ pub(super) fn board(b: &mut BoardDef) -> Result<(), String> {
     for x in &b.devices {
         plain("device.id", &x.id)?;
         plain("device.bus", &x.bus)?;
+        if let Some(place) = &x.place {
+            plain("device.place", place)?;
+        }
     }
     for a in b.boot.iter().flat_map(|boot| &boot.actions) {
         plain("boot.action.on", &a.on)?;

@@ -885,3 +885,142 @@ fn the_watchdog_flag_is_a_stated_fact() {
         parse_mcu_text(&isolated("\"register\"", word), &[]).unwrap();
     }
 }
+
+/// Devices that may not be fitted, after `boot_board`'s own: an optional
+/// sensor found by its address alone, and two touch parts for one place
+/// at one address, told apart by a chip id.
+pub(super) const PROBED_DEVICES: &str = r#"
+[[device]]
+id = "sensor"
+bus = "sys"
+addr = 0x40
+max_transfer = 2
+probe = { reg = 0x00 }
+
+[[device]]
+id = "touch-a"
+place = "touch"
+bus = "sys"
+addr = 0x15
+max_transfer = 4
+regs = [{ name = "chip_id", reg = 0xA7 }]
+probe = { reg = "chip_id", value = 0xB0, mask = 0xF0 }
+
+[[device]]
+id = "touch-b"
+place = "touch"
+bus = "sys"
+addr = 0x15
+max_transfer = 4
+writable = [0x01]
+probe = { reg = 0xA7, value = 0x11 }
+"#;
+
+#[test]
+fn a_device_that_may_not_be_fitted_is_generated_behind_its_probe() {
+    let mut m = parse_mcu_text(&isolated_mcu(), &[]).unwrap();
+    m.boot_capabilities = vec![super::isolation::BootCapability::I2c];
+    let text = boot_board() + PROBED_DEVICES;
+    let b = board(&text);
+    requirements::check_board(&b, &m).unwrap();
+    assert_eq!(b.devices[1].probe_regs(), Some((0x00, 0xFF, None)));
+    assert_eq!(b.devices[2].probe_regs(), Some((0xA7, 0xF0, Some(0xB0))));
+    let places = b.places();
+    assert_eq!(places.len(), 1);
+    assert_eq!(places[0].0, "touch");
+    let ids: Vec<&str> = places[0].1.iter().map(|d| d.id.as_str()).collect();
+    assert_eq!(ids, ["touch-a", "touch-b"]);
+
+    let def = super::codegen::board_rs(&b);
+    let devices = super::codegen::devices_rs(&b);
+    // The fitted device as before; the others have no address constant and
+    // no `Device` constant: only their probe, or their place's candidates.
+    assert!(
+        def.contains("pub const DEVICE_PMIC_ADDR: u8 = 0x34;"),
+        "{def}"
+    );
+    assert!(
+        def.contains("pub const DEVICE_TOUCH_A_REG_CHIP_ID: u8 = 0xa7;"),
+        "{def}"
+    );
+    for absent in [
+        "DEVICE_SENSOR_ADDR",
+        "DEVICE_TOUCH_A_ADDR",
+        "DEVICE_TOUCH_B_WRITABLE",
+    ] {
+        assert!(!def.contains(absent), "{absent} in\n{def}");
+    }
+    for want in [
+        "pub const PMIC: ::dagon_events::Device = unsafe {",
+        "pub const SENSOR: ::dagon_events::Probed = ::dagon_events::Probed::new(unsafe {",
+        "::dagon_events::Device::from_definition(0x40, &[], 2)\n}, 0x00, 0xff, None);",
+        "pub enum Touch {",
+        "    TouchA(::dagon_events::Device),",
+        "    TouchB(::dagon_events::Device),",
+        "pub const CANDIDATES: [::dagon_events::Candidate<Self>; 2] = [",
+        "}, 0xa7, 0xf0, Some(0xb0)), Self::TouchA),",
+        "}, 0xa7, 0xff, Some(0x11)), Self::TouchB),",
+    ] {
+        assert!(devices.contains(want), "{want} in\n{devices}");
+    }
+    for absent in [
+        "pub const TOUCH_A",
+        "pub const TOUCH_B",
+        "SENSOR: ::dagon_events::Device",
+    ] {
+        assert!(!devices.contains(absent), "{absent} in\n{devices}");
+    }
+
+    for (t, want) in [
+        // A boot program runs before anything is probed.
+        (
+            text.replace("device = \"pmic\", reg = 0x10", "device = \"touch-b\", reg = 0x01"),
+            "may not be fitted",
+        ),
+        (
+            text.replace("probe = { reg = \"chip_id\", value", "probe = { reg = \"id\", value"),
+            "probe reg 'id' is not in its regs",
+        ),
+        (
+            text.replace("probe = { reg = 0x00 }", "probe = { reg = 0x00, mask = 0x0F }"),
+            "a probe mask needs a value",
+        ),
+        (
+            text.replace("value = 0xB0, mask = 0xF0", "value = 0xB5, mask = 0xF0"),
+            "bits its mask 0xf0 does not show",
+        ),
+        (
+            text.replace("place = \"touch\"\nbus = \"sys\"\naddr = 0x15\nmax_transfer = 4\nwritable = [0x01]\nprobe = { reg = 0xA7, value = 0x11 }", "place = \"touch\"\nbus = \"sys\"\naddr = 0x15\nmax_transfer = 4\n"),
+            "a candidate for place 'touch' needs a probe",
+        ),
+        // Two parts at one address answer the same read: only a value
+        // tells which one is there.
+        (
+            text.replace("probe = { reg = 0xA7, value = 0x11 }", "probe = { reg = 0xA7 }"),
+            "share addr 0x15, so each needs a probe value",
+        ),
+        (
+            text.replace("id = \"touch-b\"\nplace = \"touch\"", "id = \"touch-b\"\nplace = \"Touch\""),
+            "place 'Touch' must be",
+        ),
+        (
+            text.replace("id = \"touch-b\"\nplace = \"touch\"", "id = \"touch-b\"\nplace = \"type\""),
+            "is a Rust keyword",
+        ),
+    ] {
+        assert_ne!(t, text, "{want}");
+        let e = requirements::check_board(&board(&t), &m).unwrap_err();
+        assert!(e.contains(want), "{want}: {e}");
+    }
+    // The candidates of a place are on one bus, and a probe reads over I2C.
+    let second_bus = "\n[[bus]]\nid = \"aux\"\nkind = \"i2c\"\ncontroller = \"uart3\"\nsda = \"GPIO8\"\nscl = \"GPIO9\"\n";
+    let moved = text.replace(
+        "id = \"touch-b\"\nplace = \"touch\"\nbus = \"sys\"",
+        "id = \"touch-b\"\nplace = \"touch\"\nbus = \"aux\"",
+    ) + second_bus;
+    let e = requirements::check_board(&board(&moved), &m).unwrap_err();
+    assert!(
+        e.contains("place 'touch': 'touch-a' and 'touch-b' are on different buses"),
+        "{e}"
+    );
+}

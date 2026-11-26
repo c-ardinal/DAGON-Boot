@@ -218,6 +218,94 @@ pub fn confirm_entry(current: &[[u8; ENTRY_LEN]; 2], running: u8) -> ConfirmStep
     }
 }
 
+/// The otadata partition as the boot selection reads and writes it: two
+/// sectors, entry `i` at the start of sector `i`. Offsets are from the
+/// partition's start.
+pub trait Sectors {
+    fn read(&mut self, at: u32, buf: &mut [u8]) -> Result<(), SectorError>;
+    /// Erases the sector that starts at `at`.
+    fn erase(&mut self, at: u32) -> Result<(), SectorError>;
+    /// Programs erased bytes.
+    fn program(&mut self, at: u32, data: &[u8]) -> Result<(), SectorError>;
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SectorError {
+    /// The flash failed, or did not read back what was written.
+    Io,
+    /// CONFIRM of an entry that is Aborted, Invalid or unknown.
+    Refused,
+}
+
+/// Both raw entries (sector 0, sector 1).
+pub fn read_entries(s: &mut impl Sectors) -> Result<[[u8; ENTRY_LEN]; 2], SectorError> {
+    let mut current = [[0u8; ENTRY_LEN]; 2];
+    for (i, e) in current.iter_mut().enumerate() {
+        s.read(i as u32 * SECTOR_LEN, e)?;
+    }
+    Ok(current)
+}
+
+/// Erases sector `sector`, programs `entry` at its start in one write and
+/// reads it back.
+fn write_entry(
+    s: &mut impl Sectors,
+    sector: usize,
+    entry: &[u8; ENTRY_LEN],
+) -> Result<(), SectorError> {
+    let at = sector as u32 * SECTOR_LEN;
+    s.erase(at)?;
+    s.program(at, entry)?;
+    let mut back = [0u8; ENTRY_LEN];
+    s.read(at, &mut back)?;
+    if back == *entry {
+        Ok(())
+    } else {
+        Err(SectorError::Io)
+    }
+}
+
+/// Selects OTA slot `ota_index` for one trial boot ([`trial_entry`]: one
+/// erase plus one 32-byte program) and checks what the 2nd stage will
+/// pick, counted as it counts.
+pub fn select_trial(s: &mut impl Sectors, ota_index: u8, running: u8) -> Result<(), SectorError> {
+    let current = read_entries(s)?;
+    // `None`: the seq space is used up; otadata stays as it is.
+    let (sector, entry) = trial_entry(&current, ota_index, running).ok_or(SectorError::Io)?;
+    write_entry(s, sector, &entry)?;
+    if selects_trial(&read_entries(s)?, sector, ota_index) {
+        Ok(())
+    } else {
+        Err(SectorError::Io)
+    }
+}
+
+/// Marks the running OTA slot Valid ([`confirm_entry`]) and reads it back.
+pub fn confirm_running(s: &mut impl Sectors, running: u8) -> Result<(), SectorError> {
+    match confirm_entry(&read_entries(s)?, running) {
+        ConfirmStep::Done => Ok(()),
+        ConfirmStep::Refused => Err(SectorError::Refused),
+        ConfirmStep::Write(sector, entry) => write_entry(s, sector, &entry),
+    }
+}
+
+/// Erases every counted entry selecting OTA slot `ota_index`
+/// ([`selecting`]) and reads each sector back erased. A cut erase leaves an
+/// entry that does not count, as the 2nd stage reads it.
+pub fn withdraw_slot(s: &mut impl Sectors, ota_index: u8) -> Result<(), SectorError> {
+    let hit = selecting(&read_entries(s)?, ota_index);
+    for sector in (0..hit.len()).filter(|&i| hit[i]) {
+        let at = sector as u32 * SECTOR_LEN;
+        s.erase(at)?;
+        let mut back = [0u8; ENTRY_LEN];
+        s.read(at, &mut back)?;
+        if back != [crate::ERASED_VALUE; ENTRY_LEN] {
+            return Err(SectorError::Io);
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

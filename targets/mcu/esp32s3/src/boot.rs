@@ -124,15 +124,14 @@ impl<'a, 'd> EspBootSelect<'a, 'd> {
         })
     }
 
+    /// The otadata partition's sectors on the shared flash.
+    fn sectors(&self) -> Raw<'a, 'd> {
+        Raw(self.storage)
+    }
+
     /// Both raw otadata entries (sector 0, sector 1).
     pub fn entries(&self) -> Result<[[u8; otadata::ENTRY_LEN]; 2], BootSelectError> {
-        let mut fs = self.storage.borrow_mut();
-        let mut current = [[0u8; otadata::ENTRY_LEN]; 2];
-        for (i, e) in current.iter_mut().enumerate() {
-            fs.read(OTADATA.offset + i as u32 * otadata::SECTOR_LEN, e)
-                .map_err(|_| BootSelectError::Write)?;
-        }
-        Ok(current)
+        otadata::read_entries(&mut self.sectors()).map_err(error)
     }
 
     /// Marks the running OTA slot valid (ends its trial) and reads it back.
@@ -141,14 +140,10 @@ impl<'a, 'd> EspBootSelect<'a, 'd> {
     /// The entry is found from the raw entries ([`otadata::confirm_entry`]),
     /// so a corrupt other sector does not block it.
     pub fn confirm(&mut self) -> Result<(), BootSelectError> {
-        match otadata::confirm_entry(&self.entries()?, self.running) {
-            otadata::ConfirmStep::Done => Ok(()),
-            otadata::ConfirmStep::Refused => Err(BootSelectError::Slot),
-            otadata::ConfirmStep::Write(sector, entry) => self.write_entry(sector, &entry),
-        }
+        otadata::confirm_running(&mut self.sectors(), self.running).map_err(error)
     }
 
-    /// Takes OTA `slot` (not the running one) out of the selection: erases
+    /// Takes OTA `slot` (never the running one) out of the selection: erases
     /// every counted entry selecting it ([`otadata::selecting`]) and reads
     /// the sector back erased. A cut erase leaves an entry that does not
     /// count, as the 2nd stage reads it.
@@ -156,41 +151,39 @@ impl<'a, 'd> EspBootSelect<'a, 'd> {
         if slot == self.running {
             return Err(BootSelectError::Slot);
         }
-        let hit = otadata::selecting(&self.entries()?, slot);
-        for sector in (0..hit.len()).filter(|&i| hit[i]) {
-            let at = OTADATA.offset + sector as u32 * otadata::SECTOR_LEN;
-            let mut fs = self.storage.borrow_mut();
-            fs.erase(at, at + otadata::SECTOR_LEN)
-                .map_err(|_| BootSelectError::Write)?;
-            let mut back = [0u8; otadata::ENTRY_LEN];
-            fs.read(at, &mut back).map_err(|_| BootSelectError::Write)?;
-            if back != [crate::ERASED_VALUE; otadata::ENTRY_LEN] {
-                return Err(BootSelectError::Write);
-            }
-        }
-        Ok(())
+        otadata::withdraw_slot(&mut self.sectors(), slot).map_err(error)
     }
+}
 
-    /// Erases otadata sector `sector`, programs `entry` at its start in one
-    /// write and reads it back.
-    fn write_entry(
-        &mut self,
-        sector: usize,
-        entry: &[u8; otadata::ENTRY_LEN],
-    ) -> Result<(), BootSelectError> {
-        let at = OTADATA.offset + sector as u32 * otadata::SECTOR_LEN;
-        let mut fs = self.storage.borrow_mut();
-        fs.erase(at, at + otadata::SECTOR_LEN)
-            .map_err(|_| BootSelectError::Write)?;
-        fs.write_nor(at, entry)
-            .map_err(|_| BootSelectError::Write)?;
-        let mut readback = [0u8; otadata::ENTRY_LEN];
-        fs.read(at, &mut readback)
-            .map_err(|_| BootSelectError::Write)?;
-        if readback != *entry {
-            return Err(BootSelectError::Write);
-        }
-        Ok(())
+fn error(e: otadata::SectorError) -> BootSelectError {
+    match e {
+        otadata::SectorError::Io => BootSelectError::Write,
+        otadata::SectorError::Refused => BootSelectError::Slot,
+    }
+}
+
+/// The otadata partition on the shared `FlashStorage`.
+struct Raw<'a, 'd>(&'a RefCell<FlashStorage<'d>>);
+
+impl otadata::Sectors for Raw<'_, '_> {
+    fn read(&mut self, at: u32, buf: &mut [u8]) -> Result<(), otadata::SectorError> {
+        self.0
+            .borrow_mut()
+            .read(OTADATA.offset + at, buf)
+            .map_err(|_| otadata::SectorError::Io)
+    }
+    fn erase(&mut self, at: u32) -> Result<(), otadata::SectorError> {
+        let at = OTADATA.offset + at;
+        self.0
+            .borrow_mut()
+            .erase(at, at + otadata::SECTOR_LEN)
+            .map_err(|_| otadata::SectorError::Io)
+    }
+    fn program(&mut self, at: u32, data: &[u8]) -> Result<(), otadata::SectorError> {
+        self.0
+            .borrow_mut()
+            .write_nor(OTADATA.offset + at, data)
+            .map_err(|_| otadata::SectorError::Io)
     }
 }
 
@@ -208,18 +201,7 @@ impl BootSelectV for EspBootSelect<'_, '_> {
         if slot == SLOT_FACTORY {
             return self.select_factory();
         }
-        let current = self.entries()?;
-        // `None`: the seq space is used up; otadata stays as it is.
-        let (sector, entry) =
-            otadata::trial_entry(&current, slot, self.running).ok_or(BootSelectError::Write)?;
-        self.write_entry(sector, &entry)?;
-        // What the 2nd stage will pick. Counted as the 2nd stage does: the
-        // crate's reader refuses both entries when the other one is corrupt.
-        if otadata::selects_trial(&self.entries()?, sector, slot) {
-            Ok(())
-        } else {
-            Err(BootSelectError::Write)
-        }
+        otadata::select_trial(&mut self.sectors(), slot, self.running).map_err(error)
     }
 
     /// Blanks both otadata entries, so the 2nd stage boots factory.

@@ -150,6 +150,8 @@ mod tests;
 #[cfg(test)]
 mod tests_app_image;
 #[cfg(test)]
+mod tests_cut;
+#[cfg(test)]
 mod tests_factory;
 #[cfg(test)]
 mod tests_flash_board;

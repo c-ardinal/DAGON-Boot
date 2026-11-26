@@ -1744,7 +1744,28 @@ fn dagon_links_with_consent_once_and_ai_routes_wait_for_it() {
     // any model call, so no request leaves even with a key set).
     let (st, _) = post(&a, "/v1/ai/topology", serde_json::json!({}));
     assert_eq!(st, 202);
-    assert_eq!(post(&a, "/v1/ai/port", serde_json::json!({})).0, 501);
+    // A port is refused before any job unless the request is plain and
+    // accepts that the agent acts on its own.
+    let port = |more: serde_json::Value| {
+        let mut v = serde_json::json!({ "mcu": "esp32s3", "board": "m5stopwatch", "kind": "V" });
+        v.as_object_mut()
+            .unwrap()
+            .extend(more.as_object().unwrap().clone());
+        post(&a, "/v1/ai/port", v)
+    };
+    assert_eq!(post(&a, "/v1/ai/port", serde_json::json!({})).0, 400);
+    for bad in [
+        serde_json::json!({ "accept": true, "mcu": "esp32s3 --rerun" }),
+        serde_json::json!({ "accept": true, "kind": "X" }),
+        serde_json::json!({ "accept": true, "max_hours": "3" }),
+        serde_json::json!({ "accept": true, "max_hours": 0 }),
+        serde_json::json!({ "accept": "true" }),
+        serde_json::json!({}),
+    ] {
+        let (st, body) = port(bad.clone());
+        assert_eq!(st, 400, "{bad} {body}");
+    }
+    assert_eq!(port(serde_json::json!({ "accept": true })).0, 202);
 
     assert_eq!(http(&a, "DELETE", "/v1/agent/link", &ok, b"").0, 200);
     assert_eq!(agent(&a)["linked"], false);

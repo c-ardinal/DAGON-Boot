@@ -155,6 +155,17 @@ impl Command {
     }
 }
 
+/// The program `name` on PATH.
+pub(crate) fn on_path(name: &str) -> Option<PathBuf> {
+    Command {
+        program: name.into(),
+        args: Vec::new(),
+        system: SystemVia::default(),
+        pass_env: Vec::new(),
+    }
+    .program_path()
+}
+
 fn has_ext(p: &std::path::Path) -> bool {
     p.extension()
         .is_some_and(|e| e.eq_ignore_ascii_case("exe") || e.eq_ignore_ascii_case("com"))
@@ -201,7 +212,7 @@ fn run_in(
         }
     }
     let secrets = super::secret_env(crate::consent::home().ok().as_deref());
-    let mut group = spawn(exe, &args, dir, &cmd.pass_env, &secrets)?;
+    let mut group = spawn(exe, &args, dir, &cmd.pass_env, &secrets, &[])?;
     let child = group.child();
     let mut stdin = child.stdin.take().expect("piped");
     // A program that never reads stdin only loses this write. Neither
@@ -258,16 +269,124 @@ fn run_in(
     String::from_utf8(out).map_err(|_| "the agent's answer is not UTF-8 text".into())
 }
 
+/// One line of a streamed program kept at most; a longer one arrives in
+/// pieces.
+const MAX_LINE: u64 = 64 * 1024;
+
+/// A program that works for a long time and reports on stdout line by
+/// line ([`stream`]).
+pub(crate) struct Streamed<'a> {
+    pub exe: &'a std::path::Path,
+    pub args: &'a [String],
+    /// Its working folder.
+    pub dir: &'a std::path::Path,
+    /// Environment variables passed on besides [`BASE_ENV`] (names only).
+    pub pass_env: &'a [String],
+    /// Variables set for this program alone (the way's key).
+    pub set_env: &'a [(&'a str, &'a str)],
+    /// What it reads on stdin.
+    pub input: String,
+    pub timeout: Duration,
+}
+
+/// Runs `p` in its group under the consent held by `cleared`: `on_line`
+/// gets each stdout line as it arrives. Ends when the program ends, the
+/// time is over ([`TIMED_OUT`]), `cancel` is set or the consent is
+/// withdrawn (looked at every [`CONSENT_POLL`]: the unlink that waits for
+/// this call may be another process's); whatever the program started is
+/// stopped then, however much it is writing. Ok: the program's exit was a
+/// success.
+pub(crate) fn stream(
+    cleared: &Cleared,
+    p: Streamed<'_>,
+    cancel: &std::sync::atomic::AtomicBool,
+    on_line: &mut dyn FnMut(&str),
+) -> Result<bool, String> {
+    use std::io::BufRead;
+    use std::sync::mpsc::RecvTimeoutError;
+    let secrets = super::secret_env(crate::consent::home().ok().as_deref());
+    let mut group = spawn(p.exe, p.args, p.dir, p.pass_env, &secrets, p.set_env)?;
+    let child = group.child();
+    let mut stdin = child.stdin.take().expect("piped");
+    let input = p.input;
+    std::thread::spawn(move || {
+        let _ = stdin.write_all(input.as_bytes());
+    });
+    let stdout = child.stdout.take().expect("piped");
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let mut r = std::io::BufReader::new(stdout);
+        loop {
+            let mut line = Vec::new();
+            match (&mut r).take(MAX_LINE).read_until(b'\n', &mut line) {
+                Ok(n) if n > 0 => {
+                    if tx
+                        .send(String::from_utf8_lossy(&line).into_owned())
+                        .is_err()
+                    {
+                        break;
+                    }
+                }
+                _ => break,
+            }
+        }
+    });
+    let deadline = Instant::now() + p.timeout;
+    let mut status = None;
+    let mut consent_at = Instant::now() + CONSENT_POLL;
+    loop {
+        match rx.recv_timeout(POLL) {
+            Ok(line) => on_line(line.trim_end()),
+            // The program and all it started have closed stdout.
+            Err(RecvTimeoutError::Disconnected) if status.is_some() => break,
+            Err(_) => {}
+        }
+        if cancel.load(std::sync::atomic::Ordering::Relaxed) {
+            group.stop();
+            return Err(STOPPED.into());
+        }
+        if Instant::now() >= consent_at {
+            if !cleared.stands() {
+                group.stop();
+                return Err(crate::consent::NOT_LINKED.into());
+            }
+            consent_at = Instant::now() + CONSENT_POLL;
+        }
+        if Instant::now() >= deadline {
+            group.stop();
+            return Err(TIMED_OUT.into());
+        }
+        if status.is_none() {
+            status = group
+                .child()
+                .try_wait()
+                .map_err(|_| "the agent program could not be watched".to_string())?;
+            if status.is_some() {
+                // Whatever it left running is stopped, so stdout closes.
+                group.stop();
+            }
+        }
+    }
+    Ok(status.is_some_and(|s| s.success()))
+}
+
+/// How often a streamed program's consent is read again.
+const CONSENT_POLL: Duration = Duration::from_millis(500);
+
+/// The error of a streamed program stopped by its `cancel` flag.
+pub(crate) const STOPPED: &str = "stopped";
+
 /// The agent program and everything it starts.
 ///
 /// Windows: a job object, killed when closed, so also when dagon itself
-/// ends. Unix: a process group led by a small keeper process (`cat` reading
-/// a pipe only dagon holds) that the program joins. The keeper stays
-/// unreaped until the group has been signalled, so the group id can never
-/// belong to anyone else when dagon signals it, even after the program has
-/// ended and been reaped. When dagon itself is killed on Unix, the keeper
-/// ends (its pipe closes) but the program and what it started keep running
-/// until they end on their own: Unix has no kill-on-close for groups.
+/// ends. Unix: a process group led by a small keeper process ([`KEEPER`],
+/// a shell reading a pipe only dagon holds) that the program joins. The
+/// keeper stays unreaped until the group has been signalled, so the group
+/// id can never belong to anyone else when dagon signals it, even after
+/// the program has ended and been reaped. When dagon itself ends without
+/// stopping the group (killed, or interrupted from the terminal: the group
+/// is not the terminal's), the keeper's pipe closes and the keeper kills
+/// its group: nothing an agent call started outlives dagon.
 struct Group {
     #[cfg(windows)]
     inner: command_group::GroupChild,
@@ -318,6 +437,12 @@ impl Drop for Group {
     }
 }
 
+/// The keeper's script (Unix): reads its stdin until it closes, which is
+/// when dagon ended without stopping the group, then kills the group it
+/// leads. Shell built-ins only, so it needs no PATH.
+#[cfg(not(windows))]
+const KEEPER: &str = "while read -r _; do :; done; kill -s KILL -- -$$";
+
 /// Starts the program in its group with piped stdin/stdout, the
 /// allow-listed environment, in `dir`.
 fn spawn(
@@ -326,12 +451,14 @@ fn spawn(
     dir: &std::path::Path,
     pass_env: &[String],
     secrets: &[String],
+    set_env: &[(&str, &str)],
 ) -> Result<Group, String> {
     let mut c = std::process::Command::new(exe);
     c.args(args)
         .current_dir(dir)
         .env_clear()
         .envs(child_env(std::env::vars_os(), pass_env, secrets))
+        .envs(set_env.iter().copied())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
@@ -347,7 +474,8 @@ fn spawn(
     #[cfg(not(windows))]
     let group = {
         use std::os::unix::process::CommandExt;
-        let keeper = std::process::Command::new("cat")
+        let keeper = std::process::Command::new("/bin/sh")
+            .args(["-c", KEEPER])
             .current_dir(dir)
             .env_clear()
             .stdin(Stdio::piped())
@@ -486,7 +614,7 @@ mod tests {
     fn stopping_the_group_stops_the_whole_tree() {
         let (exe, args) = parent_of_a_sleeper();
         let dir = super::super::temp_dir().unwrap();
-        let mut group = spawn(&exe, &args, &dir, &[], &[]).unwrap();
+        let mut group = spawn(&exe, &args, &dir, &[], &[], &[]).unwrap();
         let mut out = group.child().stdout.take().unwrap();
         let (tx, rx) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
@@ -568,39 +696,42 @@ mod tests {
     }
 
     /// Set for the helper below when a test starts it as its own process.
-    #[cfg(windows)]
     const OWNER_ENV: &str = "DAGON_TEST_AGENT_OWNER";
-    #[cfg(windows)]
     const OWNER_MARKER: &str = "127.0.0.38";
 
     /// Not a test on its own: the owner process of the next test. It starts
-    /// a group whose program leaves a 30 s grandchild, says "ready", and
-    /// waits to be killed.
-    #[cfg(windows)]
+    /// a group whose program leaves a 30 s grandchild, says "ready" (and on
+    /// Unix the program's PID), and waits to be killed.
     #[test]
     #[ignore]
     fn owner_of_a_group() {
         if std::env::var_os(OWNER_ENV).is_none() {
             return;
         }
-        let exe = Command {
-            program: "cmd".into(),
-            args: Vec::new(),
-            system: SystemVia::Stdin,
-            pass_env: Vec::new(),
+        let (exe, args) = if cfg!(windows) {
+            let exe = Command {
+                program: "cmd".into(),
+                args: Vec::new(),
+                system: SystemVia::Stdin,
+                pass_env: Vec::new(),
+            };
+            (
+                exe.program_path().unwrap(),
+                vec!["/C".to_string(), format!("ping -n 30 {OWNER_MARKER}")],
+            )
+        } else {
+            parent_of_a_sleeper()
         };
         let dir = super::super::temp_dir().unwrap();
-        let args = vec!["/C".to_string(), format!("ping -n 30 {OWNER_MARKER}")];
-        let _group = spawn(&exe.program_path().unwrap(), &args, &dir, &[], &[]).unwrap();
-        println!("ready");
+        let mut group = spawn(&exe, &args, &dir, &[], &[], &[]).unwrap();
+        println!("ready {}", group.child().id());
         std::thread::sleep(Duration::from_secs(60));
     }
 
-    /// dagon itself is killed while an agent call runs: on Windows the job
-    /// closes with the process and takes every process in it along
-    /// (kill-on-close). Unix has no such guarantee for process groups (see
-    /// [`Group`]), so this runs on Windows only.
-    #[cfg(windows)]
+    /// dagon itself is killed while an agent call runs (or interrupted
+    /// from the terminal, which ends it the same way): on Windows the job
+    /// closes with the process and takes every process in it along; on
+    /// Unix the keeper sees its pipe close and kills its group.
     #[test]
     fn killing_the_owning_process_stops_the_agent_tree() {
         use std::io::BufRead;
@@ -620,16 +751,17 @@ mod tests {
         let ready = out
             .lines()
             .map_while(Result::ok)
-            .any(|l| l.contains("ready"));
-        assert!(ready, "the owner never started its group");
+            .find_map(|l| l.split("ready ").nth(1).map(|pid| pid.trim().to_string()));
+        let pid = ready.expect("the owner never started its group");
+        let marker = if cfg!(windows) { OWNER_MARKER } else { &pid };
         std::thread::sleep(Duration::from_millis(500));
-        assert!(alive(OWNER_MARKER), "the grandchild never started");
+        assert!(alive(marker), "the program never started");
         owner.kill().unwrap();
         let _ = owner.wait();
         let t0 = Instant::now();
-        while alive(OWNER_MARKER) && t0.elapsed() < Duration::from_secs(10) {
+        while alive(marker) && t0.elapsed() < Duration::from_secs(10) {
             std::thread::sleep(Duration::from_millis(200));
         }
-        assert!(!alive(OWNER_MARKER), "the grandchild outlived its owner");
+        assert!(!alive(marker), "the program outlived its owner");
     }
 }

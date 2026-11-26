@@ -78,7 +78,7 @@ Parts of the design the code lacks, in whole or in part:
 - `Sandbox`: There is no sandbox at run time (Service ABI, Entry Gate, Operation Cancellation, Fault Unwind, Lockup Fuse, Reset Cleanup, SandboxArch). Definitions are checked and protection maps are generated.
 <!-- end of generated list -->
 <!-- generated from site/scripts/architecture.py: python site/scripts/gen.py -->
-- AI Agent Link: `dagon serve` has no job that ports DAGON to a board: `POST /v1/ai/port` answers 501.
+- AI Agent Link: DAGON Console has no screen that starts a port: it starts from the CLI (`dagon ai port`) or `POST /v1/ai/port`. The run is tested against a stand-in program and by starting it without hardware; a port run to its end on hardware is to be confirmed.
 - Boot Action Interpreter: Not in the code.
 - Retained Codecs: The firmware has none of the retained codecs: the topology body is `dagon-format`'s (a 32-byte head, 40-byte nodes), as section 3.1 of [Retained and persistent formats](/en/explanation/retained-formats/) gives it. No node stores the topology: it stays in the host's package, and target 3 (where a node once stored it) stays a reserved number no node takes.
 - ROM Loader Client: The write through the ESP32-S3's ROM serial loader (`dagon recover`) is tested against the simulated loader only. On hardware it is to be confirmed that the loader listens on the link's UART after ENTER_ROM and that the relaying node's UART keeps up with the loader's answers.

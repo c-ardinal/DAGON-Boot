@@ -82,7 +82,10 @@ pub(crate) const GROUPS: &[(&str, &[&str])] = &[
         "Build a release",
         &["topo", "build", "image", "release", "provision"],
     ),
-    ("Write to a node", &["flash", "deploy", "apply", "rollback", "recover"]),
+    (
+        "Write to a node",
+        &["flash", "deploy", "apply", "rollback", "recover"],
+    ),
     ("Check a node", &["status", "conform"]),
     ("Tools", &["serve", "sim", "ai"]),
     ("Help", &["help"]),

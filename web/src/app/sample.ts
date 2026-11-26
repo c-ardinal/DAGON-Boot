@@ -61,6 +61,8 @@ export interface Link {
   kind: Kind;
   /** Address value for the spoken name ("0x42"), empty for UART. */
   addr: string;
+  /** Baud rate of a UART link, for its label. */
+  baud?: number;
   wires: Wire[];
 }
 
@@ -111,6 +113,7 @@ export const SAMPLE_CONFIG: Config = {
       to: 'watch',
       kind: LinkKind.Uart,
       addr: '',
+      baud: 115200,
       wires: [
         { signal: 'TX → RX', hubPin: 'GPIO26', nodePin: 'G44', shared: false },
         { signal: 'RX ← TX', hubPin: 'GPIO27', nodePin: 'G43', shared: false },

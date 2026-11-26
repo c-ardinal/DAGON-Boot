@@ -16,8 +16,8 @@ function clearOf(width: number, dir: Pt): number {
 }
 
 /** The bus and its value: the strands show their count, and the words for it are in the name and the sheet. */
-function bundleLabel(l: Link, config: Config | null): string {
-  const value = l.addr || config?.nodes.find((n) => n.id === l.to)?.via.split(' ')[1] || '';
+function bundleLabel(l: Link): string {
+  const value = l.addr || (l.baud !== undefined ? String(l.baud) : '');
   return [kindLabel(l.kind), value].filter(Boolean).join(' ');
 }
 
@@ -61,7 +61,7 @@ export function bundleOf(l: Link, config: Config | null, route: Bezier, points: 
   const { p: mid, dir: midDir } = along(points, lengths, total * 0.5);
   // A route between two sides leaves level (sideLink); one round below enters from below (underLink).
   const level = route[1].y === route[0].y ? -1 : route[2].y > route[3].y ? 1 : 0;
-  const label = bundleLabel(l, config);
+  const label = bundleLabel(l);
   const kind = kindLabel(l.kind);
   return {
     l,

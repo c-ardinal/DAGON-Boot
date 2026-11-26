@@ -141,6 +141,8 @@ describe('define document', () => {
     // Editing the ring's link leaves the link watch stands under as it was.
     const edited = setLink(ring, 2, 'baud', 9600);
     expect(edited.topo.links!.map((l) => l.baud)).toEqual([undefined, 115200, 9600]);
+    // Each link drawn carries its own speed for its label.
+    expect(toConfig(edited, supportedBoards()).links.map((l) => l.baud)).toEqual([undefined, 115200, 9600]);
     expect(topoDiff(sample.topo, ring.topo, {})).toEqual([{ what: 'seg → watch', here: DIFF.none, file: expect.stringContaining('UART'), nodes: ['watch'] }]);
     // The file written and read back is the same ring.
     expect(fromYaml(toYaml(ring.topo)).topo).toEqual(ring.topo);

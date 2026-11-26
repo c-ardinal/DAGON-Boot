@@ -724,7 +724,7 @@ export function toConfig(doc: Doc, boards: Board[]): Config {
             { signal: 'RX ← TX', hubPin: gpio(up.pins?.rx) ?? '', nodePin: '', shared: false },
             { signal: 'GND', hubPin: 'GND', nodePin: 'GND', shared: true },
           ];
-    return { key, from: up.node, to: down.node, kind: l.kind, addr: hex(down.addr), wires };
+    return { key, from: up.node, to: down.node, kind: l.kind, addr: hex(down.addr), ...(l.kind === LinkKind.Uart && l.baud !== undefined ? { baud: l.baud } : {}), wires };
   });
   return {
     name: t.name,

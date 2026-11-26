@@ -7,8 +7,8 @@ import { openSample, settled } from './console.ts';
 const WCAG = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22a', 'wcag22aa'];
 
 async function violations(page: Page, where: string, into: string[]): Promise<void> {
-  // Longer than the slowest leave (a chip fades out over --dur-settle, 480 ms): while one is leaving,
-  // the card still shows words its name no longer says.
+  // Entrance motion is over. A card's name follows what the card shows by itself, a chip that is
+  // fading out included (the test below checks it on every frame of a write).
   await settled(page);
   const r = await new AxeBuilder({ page }).withTags(WCAG).analyze();
   for (const v of r.violations) for (const n of v.nodes) into.push(`${where}: ${v.id} ${n.target.join(' ')}`);
@@ -192,4 +192,43 @@ test('text holds 4.5:1 where axe cannot see its ground: placeholders, and the ca
     const fg = await card.locator(sel).evaluate((e) => getComputedStyle(e).color);
     expect(await ratio(fg, water), sel).toBeGreaterThanOrEqual(4.5);
   }
+});
+
+test('a card\'s name holds the chip the card shows on every frame of a write and after it, a chip that is fading out included', async ({ page }) => {
+  await page.setViewportSize({ width: 1920, height: 1080 });
+  await page.goto('/?sim');
+  await page.waitForTimeout(700);
+  await openSample(page, 'sim&agent=linked');
+  await page.getByRole('radio', { name: '書込' }).click();
+  await settled(page);
+  // Watched from inside the page on every frame: a scan from outside meets a fade only by chance (WCAG 2.5.3).
+  await page.evaluate(() => {
+    const w = window as unknown as { chipMisses: string[]; chipsSeen: number };
+    w.chipMisses = [];
+    w.chipsSeen = 0;
+    const tick = () => {
+      for (const card of document.querySelectorAll<HTMLElement>('button.node')) {
+        const chip = card.querySelector<HTMLElement>('.chip')?.innerText;
+        if (!chip) continue;
+        w.chipsSeen++;
+        const name = card.getAttribute('aria-label') ?? '';
+        const miss = `${card.dataset.key}: shows "${chip}", named "${name}"`;
+        if (!name.includes(chip) && !w.chipMisses.includes(miss)) w.chipMisses.push(miss);
+      }
+      requestAnimationFrame(tick);
+    };
+    tick();
+  });
+  await page.locator('header').getByRole('button', { name: '接続' }).click();
+  await page.locator('.st-alive').first().waitFor({ timeout: 60_000 });
+  await expect(page.locator('.split .caret')).toHaveAttribute('aria-disabled', 'false', { timeout: 30_000 });
+  await page.locator('.check').nth(2).click();
+  await page.locator('.split .main').click();
+  await expect(page.locator('.node.st-busy').first()).toBeVisible({ timeout: 30_000 });
+  await expect(page.locator('.split .main')).toHaveAttribute('aria-disabled', 'false', { timeout: 240_000 });
+  // The chips of the written nodes leave after the write ends.
+  await expect(page.locator('button.node .chip')).toHaveCount(0, { timeout: 30_000 });
+  const seen = await page.evaluate(() => { const w = window as unknown as { chipMisses: string[]; chipsSeen: number }; return { misses: w.chipMisses, chips: w.chipsSeen }; });
+  expect(seen.chips).toBeGreaterThan(0);
+  expect(seen.misses).toEqual([]);
 });

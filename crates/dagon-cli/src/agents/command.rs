@@ -211,7 +211,7 @@ fn run_in(
             }
         }
     }
-    let secrets = super::secret_env(crate::consent::home().ok().as_deref());
+    let secrets = crate::childenv::secret_env();
     let mut group = spawn(exe, &args, dir, &cmd.pass_env, &secrets, &[])?;
     let child = group.child();
     let mut stdin = child.stdin.take().expect("piped");
@@ -304,7 +304,7 @@ pub(crate) fn stream(
 ) -> Result<bool, String> {
     use std::io::BufRead;
     use std::sync::mpsc::RecvTimeoutError;
-    let secrets = super::secret_env(crate::consent::home().ok().as_deref());
+    let secrets = crate::childenv::secret_env();
     let mut group = spawn(p.exe, p.args, p.dir, p.pass_env, &secrets, p.set_env)?;
     let child = group.child();
     let mut stdin = child.stdin.take().expect("piped");

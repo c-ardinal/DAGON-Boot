@@ -12,7 +12,8 @@ use std::process::Command;
 use dagon_topology::defs::{DoctorCheck, Expect, Origin, Registry};
 
 use crate::cli::DoctorArgs;
-use crate::config::{read_topology, Config};
+use crate::config::Config;
+use crate::defs::read_topology;
 
 const RUST_HINT: &str = "install Rust from https://rustup.rs";
 
@@ -267,7 +268,7 @@ pub fn command(a: &DoctorArgs) -> Result<(), String> {
     let mut io = Io {
         probe: &mut probe_cmd,
         install: &mut install_cmd,
-        consent: Some(&mut |q| crate::deploy::confirm(q, &mut std::io::stdin().lock())),
+        consent: Some(&mut |q| crate::prompt::confirm(q, &mut std::io::stdin().lock())),
         out: &mut |l| println!("{l}"),
     };
     let ok = doctor(&reg, &mcus, fix, &mut io);

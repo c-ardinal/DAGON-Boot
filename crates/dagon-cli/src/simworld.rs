@@ -37,7 +37,7 @@ pub fn command(a: &SimArgs) -> Result<(), String> {
     }
     let cfg = Config::load(a.config.as_deref())?;
     let path = cfg.topology_path(a.topology.as_deref())?;
-    let t = crate::config::read_topology(&cfg, &path)?;
+    let t = crate::defs::read_topology(&cfg, &path)?;
     let reg = crate::defs::registry(&cfg)?;
     run(&reg, &t, &a.fault, &mut |line| println!("{line}"))
 }

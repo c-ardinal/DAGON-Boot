@@ -238,7 +238,7 @@ fn boot_crate(
             .strip_prefix(&base)
             .or_else(|_| f.dir.strip_prefix(p.base))
             .map_err(|_| format!("{}: outside the project", f.dir.display()))?;
-        let rel = format!("{up}{}", crate::config::forward_path(rel));
+        let rel = format!("{up}{}", crate::paths::forward_path(rel));
         deps.push(format!("{} = {{ path = {rel:?} }}", f.package));
         meta.push_str(&format!(
             "\n[[package.metadata.dagon.boot.trusted]]\nid = {:?}\npath = {rel:?}\nsha256 = {:?}\n",
@@ -329,7 +329,7 @@ pub struct ProjectRef<'a> {
     pub base: &'a Path,
     /// dagon.toml's file name in `base`.
     pub config: &'a str,
-    pub src: &'a crate::scaffold::DagonSource,
+    pub src: &'a crate::config::DagonSource,
     /// Check each boot crate's dependency graph with cargo and write its
     /// stamp ([`boot_graph_stamp`]); off only in tests that do not run
     /// cargo.
@@ -355,10 +355,10 @@ fn boot_graph_stamp(p: &ProjectRef<'_>, id: &str, mcu: &str) -> Result<(String, 
     let f = BootFolder::read(&dir)?;
     crate::srcver::lock_own_version(&dir)?;
     let mut cmd = std::process::Command::new("cargo");
-    for k in crate::nodebuild::secret_env() {
+    for k in crate::childenv::secret_env() {
         cmd.env_remove(k);
     }
-    crate::nodebuild::plain_output(&mut cmd);
+    crate::childenv::plain_output(&mut cmd);
     cmd.args(["metadata", "--format-version", "1", "--all-features"])
         .arg("--manifest-path")
         .arg(dir.join("Cargo.toml"))
@@ -688,8 +688,8 @@ mod tests {
     }
 
     /// The DAGON source these tests take the boot core templates from.
-    fn dagon_src() -> crate::scaffold::DagonSource {
-        crate::scaffold::DagonSource {
+    fn dagon_src() -> crate::config::DagonSource {
+        crate::config::DagonSource {
             path: Some(Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")),
             ..Default::default()
         }

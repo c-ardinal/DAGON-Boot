@@ -82,7 +82,7 @@ fn under_home(home: &Path, path: &str) -> Result<PathBuf, String> {
 }
 
 fn shown(p: &Path) -> String {
-    crate::config::forward_path(p)
+    crate::paths::forward_path(p)
 }
 
 fn project_json(server: &Server) -> Value {

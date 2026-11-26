@@ -1,5 +1,6 @@
 //! `dagon.toml`, option parsing and signing-key loading shared by commands.
 
+use crate::paths::{lexical, plain_path};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
@@ -117,7 +118,7 @@ pub struct Config {
     /// Where DAGON comes from (`[dagon]`: git + tag, or path relative to
     /// the work area); flash builds the boot images from it.
     #[serde(default)]
-    pub dagon: crate::scaffold::DagonSource,
+    pub dagon: DagonSource,
 }
 
 impl Config {
@@ -185,24 +186,6 @@ impl Config {
     }
 }
 
-/// `p` with `.` dropped and each `..` taking away the name before it,
-/// without looking at the file system (links are not followed).
-pub(crate) fn lexical(p: &Path) -> PathBuf {
-    let mut out = PathBuf::new();
-    for c in p.components() {
-        match c {
-            std::path::Component::CurDir => {}
-            std::path::Component::ParentDir => {
-                if !out.pop() {
-                    out.push("..");
-                }
-            }
-            other => out.push(other.as_os_str()),
-        }
-    }
-    out
-}
-
 /// The work area of config file `path`: its directory as an absolute path,
 /// so paths joined to it never depend on (or repeat) the current
 /// directory. `dagon.toml` alone gives the current directory.
@@ -215,70 +198,6 @@ pub fn base_of(path: &Path) -> PathBuf {
         Ok(abs) => plain_path(abs),
         Err(_) => std::env::current_dir().map_or(dir.to_path_buf(), |c| c.join(dir)),
     }
-}
-
-/// Windows' extended-length path prefix, as `canonicalize` returns it.
-const VERBATIM: &str = concat!('\\', '\\', '?', '\\');
-
-/// Drops the extended-length prefix canonicalising adds on Windows, so the
-/// path prints and passes to other tools as usual: `\\?\C:\x` becomes
-/// `C:\x` and `\\?\UNC\server\share\x` becomes `\\server\share\x`.
-/// Other verbatim paths (volume GUIDs, devices) stay as they are.
-pub(crate) fn plain_path(p: PathBuf) -> PathBuf {
-    let s = p.to_string_lossy();
-    let Some(rest) = s.strip_prefix(VERBATIM) else {
-        return p;
-    };
-    if rest.as_bytes().get(1) == Some(&b':') {
-        return PathBuf::from(rest);
-    }
-    let unc = rest
-        .get(..4)
-        .filter(|h| h.eq_ignore_ascii_case(concat!("UNC", '\\')))
-        .map(|_| &rest[4..]);
-    match unc {
-        Some(share) if !share.is_empty() => {
-            PathBuf::from(format!("{}{share}", concat!('\\', '\\')))
-        }
-        _ => p,
-    }
-}
-
-/// `p` without the extended-length prefix, with forward slashes (for
-/// TOML, the page and messages): `C:/x`, `//server/share/x`.
-pub(crate) fn forward_path(p: &Path) -> String {
-    plain_path(p.to_path_buf())
-        .to_string_lossy()
-        .replace('\\', "/")
-}
-
-/// The topology at `path`, checked against `cfg`'s project definitions:
-/// its updatable part, the one every update, deploy, flash and project
-/// command works on. The nodes it leaves out are named on stderr with why.
-pub fn read_topology(cfg: &Config, path: &Path) -> Result<dagon_topology::Topology, String> {
-    let yaml = std::fs::read_to_string(path)
-        .map_err(|e| format!("cannot read {}: {e}", path.display()))?;
-    let t = dagon_topology::parse_str(&yaml).map_err(|e| format!("{}: {e}", path.display()))?;
-    let reg = crate::defs::registry(cfg)?;
-    if !dagon_topology::check_with(&reg, &t).is_pushable() {
-        return Err(format!(
-            "{}: topology has errors; run `dagon topo check`",
-            path.display()
-        ));
-    }
-    let cut = dagon_topology::cut_with(&reg, &t);
-    for line in skipped_lines(&cut) {
-        eprintln!("{line}");
-    }
-    cut.topology.ok_or_else(|| {
-        let first = cut.report.errors().next().map_or(String::new(), |i| {
-            format!(": {} {}: {}", i.rule, i.path, i.message)
-        });
-        format!(
-            "{}: no part of this topology can be updated: the part updating would reach does not pass the checks on its own{first}",
-            path.display()
-        )
-    })
 }
 
 /// One line per node updating skips, with why (none for a 構成
@@ -445,7 +364,7 @@ pub fn build_pubkey(cfg: &Config) -> Result<Option<[u8; 32]>, String> {
             .map(Some)
             .map_err(|e| format!("pubkey in dagon.toml: {e}"));
     }
-    let Some(v) = std::env::var_os(crate::nodebuild::PUBKEY_ENV) else {
+    let Some(v) = std::env::var_os(PUBKEY_ENV) else {
         return Ok(None);
     };
     let v = v.to_string_lossy().trim().to_string();
@@ -453,8 +372,7 @@ pub fn build_pubkey(cfg: &Config) -> Result<Option<[u8; 32]>, String> {
         Some(k) => check_pubkey_bytes(cfg, k),
         None => checked_pubkey(cfg, Path::new(&v)),
     };
-    k.map(Some)
-        .map_err(|e| format!("{}: {e}", crate::nodebuild::PUBKEY_ENV))
+    k.map(Some).map_err(|e| format!("{}: {e}", PUBKEY_ENV))
 }
 
 /// 64 hex digits as 32 bytes.
@@ -510,11 +428,26 @@ pub fn read_file(path: &Path) -> Result<Vec<u8>, String> {
     std::fs::read(path).map_err(|e| format!("cannot read {}: {e}", path.display()))
 }
 
+/// The public key file the firmware build scripts embed.
+pub const PUBKEY_ENV: &str = "DAGON_PUBKEY";
+
+/// Where generated projects take the DAGON crates from (`[dagon]`).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DagonSource {
+    /// Git repository and the release tag it is pinned to.
+    pub git: Option<String>,
+    pub tag: Option<String>,
+    /// A local clone (development); relative to dagon.toml.
+    pub path: Option<PathBuf>,
+}
+
 #[cfg(test)]
 // Tests set up and inspect their own scratch folders directly.
 #[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
+    use crate::paths::{forward_path, VERBATIM};
 
     /// A pubkey that is the signing key's seed, or another key's half, is
     /// refused, whatever store the signing key came from.

@@ -90,6 +90,59 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), String> {
     })
 }
 
+/// `p` with `.` dropped and each `..` taking away the name before it,
+/// without looking at the file system (links are not followed).
+pub(crate) fn lexical(p: &Path) -> PathBuf {
+    let mut out = PathBuf::new();
+    for c in p.components() {
+        match c {
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                if !out.pop() {
+                    out.push("..");
+                }
+            }
+            other => out.push(other.as_os_str()),
+        }
+    }
+    out
+}
+
+/// Windows' extended-length path prefix, as `canonicalize` returns it.
+pub(crate) const VERBATIM: &str = concat!('\\', '\\', '?', '\\');
+
+/// Drops the extended-length prefix canonicalising adds on Windows, so the
+/// path prints and passes to other tools as usual: `\\?\C:\x` becomes
+/// `C:\x` and `\\?\UNC\server\share\x` becomes `\\server\share\x`.
+/// Other verbatim paths (volume GUIDs, devices) stay as they are.
+pub(crate) fn plain_path(p: PathBuf) -> PathBuf {
+    let s = p.to_string_lossy();
+    let Some(rest) = s.strip_prefix(VERBATIM) else {
+        return p;
+    };
+    if rest.as_bytes().get(1) == Some(&b':') {
+        return PathBuf::from(rest);
+    }
+    let unc = rest
+        .get(..4)
+        .filter(|h| h.eq_ignore_ascii_case(concat!("UNC", '\\')))
+        .map(|_| &rest[4..]);
+    match unc {
+        Some(share) if !share.is_empty() => {
+            PathBuf::from(format!("{}{share}", concat!('\\', '\\')))
+        }
+        _ => p,
+    }
+}
+
+/// `p` without the extended-length prefix, with forward slashes (for
+/// TOML, the page and messages): `C:/x`, `//server/share/x`.
+pub(crate) fn forward_path(p: &Path) -> String {
+    plain_path(p.to_path_buf())
+        .to_string_lossy()
+        .replace('\\', "/")
+}
+
 #[cfg(test)]
 mod tests {
     #[test]

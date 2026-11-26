@@ -835,7 +835,7 @@ fn slot_and_kind_help_list_what_the_parser_takes() {
             .expect("help")
             .to_string()
     };
-    for l in crate::commands::slot_letters() {
+    for l in crate::values::slot_letters() {
         assert!(help_of("slot").contains(l), "--slot help lacks {l}");
     }
     for (name, _) in dagon_sign::image::IMAGE_KIND_NAMES {

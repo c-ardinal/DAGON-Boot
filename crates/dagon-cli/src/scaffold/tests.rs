@@ -8,7 +8,7 @@ use super::*;
 /// The source of a DAGON developer's project: this clone.
 fn dev() -> crate::dagonsrc::NewSource {
     let here = std::fs::canonicalize(crate::dagonsrc::BUILT_FROM).unwrap();
-    crate::dagonsrc::NewSource::Clone(crate::config::plain_path(here))
+    crate::dagonsrc::NewSource::Clone(crate::paths::plain_path(here))
 }
 
 pub(super) fn tmp(name: &str) -> PathBuf {
@@ -1349,7 +1349,7 @@ fn a_project_slot_override_reaches_the_firmware() {
     let apps = &built[0].slots;
     assert_eq!(apps.len(), 2);
     for (letter, path, _) in apps {
-        let binding = crate::commands::binding_of(*letter);
+        let binding = crate::values::binding_of(*letter);
         let s = slot(image_kind::APP, binding);
         assert_eq!(
             s.start,
@@ -1386,7 +1386,7 @@ fn a_project_slot_override_reaches_the_firmware() {
         .collect();
     assert_eq!(core_starts, [0x1001_0000, 0x1003_0000]);
     for (letter, elf) in &cores {
-        let s = slot(image_kind::BOOTCORE, crate::commands::binding_of(*letter));
+        let s = slot(image_kind::BOOTCORE, crate::values::binding_of(*letter));
         loads_at(elf, s.load_addr, &format!("boot core {letter}"));
     }
 
@@ -1515,7 +1515,7 @@ fn a_project_override_of_unequal_f401_slots_reaches_the_firmware() {
             .slot(
                 "stm32f401re",
                 image_kind::APP,
-                crate::commands::binding_of(*letter),
+                crate::values::binding_of(*letter),
             )
             .unwrap();
         dagon_sign::image::payload_from_file(&std::fs::read(path).unwrap(), s.load_addr)

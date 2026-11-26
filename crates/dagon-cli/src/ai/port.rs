@@ -31,7 +31,7 @@ const INSTALLED: &str = "node_modules/@anthropic-ai/claude-agent-sdk";
 /// The plugin's folder in a DAGON clone.
 const PLUGIN: &str = "plugin";
 /// The environment variable the Agent SDK reads its key from.
-const KEY_ENV: &str = crate::agents::CLAUDE_KEY_ENV;
+const KEY_ENV: &str = crate::childenv::CLAUDE_KEY_ENV;
 /// What the program inherits besides the base allow-list: where the Rust
 /// tools it builds with are.
 const PASS_ENV: [&str; 2] = ["CARGO_HOME", "RUSTUP_HOME"];
@@ -74,7 +74,7 @@ impl Request {
     /// Err: why the request cannot be sent.
     pub fn check(&self) -> Result<(), String> {
         for (name, v) in [("the MCU", &self.mcu), ("the board", &self.board)] {
-            if !crate::serve::api::plain(v) {
+            if !crate::values::plain_name(v) {
                 return Err(format!(
                     "{name} must be an id (letters, digits, '-', '_' and '.', up to 32)"
                 ));
@@ -190,7 +190,7 @@ pub(crate) fn clone_of(cfg: &crate::config::Config) -> Result<PathBuf, String> {
     // Without Windows' extended-length prefix: Node.js does not load a
     // script named with it.
     std::fs::canonicalize(&clone)
-        .map(crate::config::plain_path)
+        .map(crate::paths::plain_path)
         .map_err(|_| "the DAGON clone is not there".to_string())
 }
 
@@ -328,7 +328,7 @@ pub fn command(a: &crate::cli::AiPortArgs) -> Result<(), String> {
     let clone = clone_of(&cfg)?;
     script(&clone)?;
     let listing = format!("{NOTICE}DAGON clone: {}\n", clone.display());
-    if !a.yes && !crate::deploy::confirm(&listing, &mut std::io::stdin().lock()) {
+    if !a.yes && !crate::prompt::confirm(&listing, &mut std::io::stdin().lock()) {
         return Err("nothing was started".into());
     }
     let keys = Keys::system();
@@ -371,7 +371,7 @@ mod tests {
         std::fs::create_dir_all(dir.join(FOLDER).join(INSTALLED)).unwrap();
         std::fs::create_dir_all(dir.join(PLUGIN)).unwrap();
         std::fs::write(dir.join(FOLDER).join(SCRIPT), body).unwrap();
-        crate::config::plain_path(std::fs::canonicalize(dir).unwrap())
+        crate::paths::plain_path(std::fs::canonicalize(dir).unwrap())
     }
 
     /// Runs the clone's program as dagon does, linked to the Claude API

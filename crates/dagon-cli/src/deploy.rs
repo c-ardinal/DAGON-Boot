@@ -9,16 +9,18 @@ use std::io::BufRead;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 
-use dagon_format::header::{image_kind, slot_binding};
+use dagon_format::header::image_kind;
 use dagon_format::Version;
-use dagon_topology::defs::Registry;
 use dagon_topology::Topology;
 use ed25519_compact::KeyPair;
 
 use crate::cli::DeployArgs;
 use crate::commands::{image_for_node, SignOpts};
-use crate::config::{load_key, read_topology, Config};
+use crate::config::{load_key, Config};
+use crate::defs::read_topology;
 use crate::nodebuild::{self, SlotElfs};
+use crate::prompt::confirm;
+use crate::values::has_slot_b_link;
 
 /// Release `apply` takes by default when dagon.toml names none.
 const DEFAULT_RELEASE: &str = "out/release-latest.dgb";
@@ -101,12 +103,6 @@ pub(crate) fn app_version(
     let what = b.package.join("Cargo.toml").display().to_string();
     let source = crate::srcver::crate_version(&cfg.base.join(&b.package))?;
     crate::srcver::agreed(source, given, &what)
-}
-
-/// Whether apps for `mcu` are linked separately for slot B. Not for an MCU
-/// whose one image runs from either slot (ESP32-S3): it builds once.
-pub(crate) fn has_slot_b_link(reg: &Registry, mcu: &str) -> bool {
-    dagon_sign::image::slot_with(reg, mcu, image_kind::APP, slot_binding::B).is_some()
 }
 
 /// `pos`, else every `[build.<id>]` node, ordered as the topology updates
@@ -208,7 +204,7 @@ pub(crate) fn prepare(
             bits: None,
         };
         for (slot, elf) in slots {
-            let binding = crate::commands::binding_of(*slot);
+            let binding = crate::values::binding_of(*slot);
             let img = image_for_node(&reg, t, node, kind, binding, elf, Some(&opts), key)?;
             let rel = crate::genfs::Rel::new(format!(
                 "{DEPLOY_DIR}/{version}/{prefix}{node}-{slot}.img"
@@ -245,17 +241,6 @@ fn answer(yes: bool, question: &str, input: &mut dyn BufRead) -> bool {
         return true;
     }
     confirm(question, input)
-}
-
-/// Shows `listing` and reads one line: `y` or `yes` continues.
-pub(crate) fn confirm(listing: &str, input: &mut dyn BufRead) -> bool {
-    print!("{listing}continue? [y/N] ");
-    let _ = std::io::Write::flush(&mut std::io::stdout());
-    let mut line = String::new();
-    match input.read_line(&mut line) {
-        Ok(n) if n > 0 => matches!(line.trim().to_ascii_lowercase().as_str(), "y" | "yes"),
-        _ => false,
-    }
 }
 
 /// The key the firmware embeds: the build key of dagon.toml or

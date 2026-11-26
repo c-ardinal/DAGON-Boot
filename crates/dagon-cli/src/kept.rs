@@ -119,7 +119,7 @@ pub(crate) fn list(cfg: &Config, t: &Topology, pubkey: &[u8; 32]) -> Vec<Kept> {
 
 /// The bytes of kept package `id`, once they verify under `pubkey`.
 pub(crate) fn read(cfg: &Config, pubkey: &[u8; 32], id: &str) -> Result<Vec<u8>, String> {
-    if !crate::serve::plain_id(id) {
+    if !crate::values::plain_name(id) {
         return Err("bad package id".into());
     }
     let path = crate::paths::contained(&cfg.base, &cfg.base.join(DIR).join(format!("{id}.dgb")))?;
@@ -233,7 +233,7 @@ mod tests {
         );
         assert_ne!(ia, id_of(&b), "different lists keep apart");
         assert_eq!(ia, id_of(&a.clone()), "the same list keeps one file");
-        assert!(crate::serve::plain_id(&ia));
+        assert!(crate::values::plain_name(&ia));
     }
 
     #[test]

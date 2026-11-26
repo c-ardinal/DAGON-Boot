@@ -9,7 +9,7 @@ use std::process::Command;
 
 use serde_json::Value;
 
-use crate::scaffold::DagonSource;
+use crate::config::DagonSource;
 
 /// Repository released projects take the DAGON crates from; a build can
 /// point it elsewhere with DAGON_REPO_URL.
@@ -57,7 +57,7 @@ impl NewSource {
         if let Some(p) = path {
             let abs = std::fs::canonicalize(p)
                 .map_err(|_| format!("--dagon-path {p}: no such folder"))?;
-            return Ok(NewSource::Clone(crate::config::plain_path(abs)));
+            return Ok(NewSource::Clone(crate::paths::plain_path(abs)));
         }
         if git.is_none() && tag.is_none() {
             return Ok(Self::default_for_new());
@@ -87,7 +87,7 @@ impl NewSource {
             ),
             NewSource::Clone(p) => format!(
                 "# git = \"<DAGON repository URL>\"\n# tag = \"<release tag>\"\npath = {:?}\n",
-                crate::config::forward_path(p)
+                crate::paths::forward_path(p)
             ),
         }
     }
@@ -130,10 +130,10 @@ fn checkout(git: &str, tag: &str, base: &Path) -> Result<PathBuf, String> {
     crate::genfs::write(base, &probe.join("Cargo.toml")?, manifest.as_bytes())?;
     crate::genfs::write(base, &probe.join("lib.rs")?, b"")?;
     let mut cmd = Command::new("cargo");
-    for k in crate::nodebuild::secret_env() {
+    for k in crate::childenv::secret_env() {
         cmd.env_remove(k);
     }
-    crate::nodebuild::plain_output(&mut cmd);
+    crate::childenv::plain_output(&mut cmd);
     let o = cmd
         .args(["metadata", "--format-version", "1", "--manifest-path"])
         .arg(dir.join("Cargo.toml"))
@@ -207,7 +207,7 @@ pub(crate) mod tests {
         git(&["commit", "-q", "-m", "release"]);
         git(&["tag", tag]);
         let abs = std::fs::canonicalize(dir).unwrap();
-        let abs = crate::config::forward_path(&abs);
+        let abs = crate::paths::forward_path(&abs);
         format!("file:///{}", abs.trim_start_matches('/'))
     }
 

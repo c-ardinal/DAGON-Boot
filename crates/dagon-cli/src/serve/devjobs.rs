@@ -18,7 +18,8 @@ use serde_json::{json, Value};
 use super::api::{inside, plain, serve_key};
 use super::jobs::Job;
 use crate::commands::FirstWrite;
-use crate::config::{read_topology, Config};
+use crate::config::Config;
+use crate::defs::read_topology;
 use crate::flashdev::{self, Candidate, Pick};
 use dagon_topology::defs::Writer;
 
@@ -328,7 +329,7 @@ mod tests {
             ..Config::default()
         };
         assert!(provision_out(&cfg, "seg").unwrap().starts_with(&cfg.base));
-        cfg.provision_dir = Some(crate::config::lexical(&cfg.base.join("../elsewhere")));
+        cfg.provision_dir = Some(crate::paths::lexical(&cfg.base.join("../elsewhere")));
         let e = provision_out(&cfg, "seg").unwrap_err();
         assert!(e.contains("leaves the work area"), "{e}");
         let _ = std::fs::remove_dir_all(&base);

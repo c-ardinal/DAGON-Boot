@@ -19,7 +19,6 @@ mod project;
 mod recent;
 
 /// What may become a file name (node ids, package ids).
-pub(crate) use api::plain as plain_id;
 #[cfg(test)]
 pub use dagon_sim::Medium;
 mod ws;

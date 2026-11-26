@@ -8,7 +8,8 @@ use dagon_format::header::HEADER_SIZE;
 use dagon_format::header::{image_kind, slot_binding, McuId};
 use dagon_format::{BundleView, ImageHeader};
 
-use crate::config::{read_topology, Config};
+use crate::config::Config;
+use crate::defs::read_topology;
 
 /// An MCU no DAGON source knows: probe-rs writer, A/B app slots.
 const FAKE_MCU: &str = r#"

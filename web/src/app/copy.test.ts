@@ -183,6 +183,14 @@ describe('copy', () => {
     expect(shown.filter((s) => /台|版|(?<![配本])線(?!表)/.test(s))).toEqual([]);
   });
 
+  // The retired role words (explanation/words.md): every MCU is a ノード, whatever its place in the topology.
+  test('no screen text uses a retired role word', () => {
+    const retired = /(?<![電原分因粒量])[親子孫]機(?![器能械構種関材])/;
+    expect([...shown, ...mockWritten].filter((s) => retired.test(s))).toEqual([]);
+    expect(['親', '子', '孫'].map((r) => retired.test(`${r}機に接続します`))).toEqual([true, true, true]);
+    expect(retired.test(`電${'子'}機器`)).toBe(false);
+  });
+
   test('sentences are one polite sentence without exclamation marks', () => {
     const sentences = [
       ...Object.values(copy.BAND).flatMap((b) => ('sentence' in b ? [b.sentence] : [])),

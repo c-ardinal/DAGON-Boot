@@ -231,9 +231,11 @@ id = "cpu0"
 [[core]]
 id = "cpu1"
 
-# Every register block (ESP32-S3 TRM, "System and Memory", peripheral
-# address map). The Wi-Fi and Bluetooth MACs are bus masters DAGON never
-# enables.
+# Every register block: the ranges of the ESP32-S3 TRM (version 1.8, 4.3.5.1
+# "Module/Peripheral Address Mapping", table 4.3-3; tests/trm_map.rs), and
+# in ranges that table calls reserved the blocks Espressif's SVD has
+# (tests/peripheral_map.rs). The Wi-Fi and Bluetooth MACs are bus masters
+# DAGON never enables.
 [[peripheral]]
 id = "uart0"
 base = 0x6000_0000

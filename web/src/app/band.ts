@@ -132,10 +132,10 @@ function label(a: Action, n: Names): string {
   return BUTTON[a];
 }
 
-/** 準備's next step with nothing wrong: what is true of the build now. `built`: this 構成 was built since it last changed. */
-export function prepareSentence(s: { needsSkeleton: boolean; building: boolean; built: boolean }): string {
+/** 準備's next step with nothing wrong: what is true of the build now. `built`: this 構成 was built since it last changed; `progress`: the node the running build is at. */
+export function prepareSentence(s: { needsSkeleton: boolean; building: boolean; built: boolean; progress?: { nth: number; total: number } | null }): string {
   if (s.needsSkeleton) return DEFINE.skeletonFirst;
-  if (s.building) return DEFINE.buildingSentence;
+  if (s.building) return s.progress ? DEFINE.buildingAt(s.progress.nth, s.progress.total) : DEFINE.buildingSentence;
   return s.built ? DEFINE.builtSentence : DEFINE.readySentence;
 }
 

@@ -187,7 +187,11 @@ pub(crate) fn clone_of(cfg: &crate::config::Config) -> Result<PathBuf, String> {
         "porting edits DAGON's source, so the project must build with a local clone: set \
          [dagon] path in dagon.toml (it names a release by git and tag now)",
     )?;
-    std::fs::canonicalize(&clone).map_err(|_| "the DAGON clone is not there".to_string())
+    // Without Windows' extended-length prefix: Node.js does not load a
+    // script named with it.
+    std::fs::canonicalize(&clone)
+        .map(crate::config::plain_path)
+        .map_err(|_| "the DAGON clone is not there".to_string())
 }
 
 /// What the program printed, folded: the steps go to `on_step`, the end
@@ -367,7 +371,7 @@ mod tests {
         std::fs::create_dir_all(dir.join(FOLDER).join(INSTALLED)).unwrap();
         std::fs::create_dir_all(dir.join(PLUGIN)).unwrap();
         std::fs::write(dir.join(FOLDER).join(SCRIPT), body).unwrap();
-        std::fs::canonicalize(dir).unwrap()
+        crate::config::plain_path(std::fs::canonicalize(dir).unwrap())
     }
 
     /// Runs the clone's program as dagon does, linked to the Claude API

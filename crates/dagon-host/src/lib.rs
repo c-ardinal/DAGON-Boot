@@ -32,7 +32,7 @@ pub use ports::{BuildJob, BuildRunner};
 pub use progress::{Event, XferTimes};
 #[cfg(feature = "defs")]
 pub use routes::{local_node, node_targets};
-pub use routes::{LocalNode, NodeTargets, RouteError, Target};
+pub use routes::{Hop, LocalNode, NodeTargets, Route, RouteError, Target, MAX_HOPS};
 #[cfg(feature = "defs")]
 pub use timings::{mcu_timings, node_timings};
 pub use timings::{HostTimings, NodeTimingError};
@@ -311,14 +311,14 @@ impl<T: Transport, C: HostClock> Host<T, C> {
 
     /// Largest payload a request to `to` may carry: the uplink's, and for a
     /// linked node what the relay's tunnel over its link carries
-    /// ([`Relay::tunnel_mtu`]).
+    /// ([`Relay::tunnel_mtu`]), hop after hop.
     pub(crate) fn link_max(&self, to: Target) -> usize {
-        let up = self.transport.max_payload();
-        match to {
-            Target::Local => up,
-            Target::Linked { max_payload, .. } => Relay::tunnel_mtu(up, usize::from(max_payload))
-                .saturating_sub(dagon_proto::frame_len(0)),
-        }
+        to.hops()
+            .iter()
+            .fold(self.transport.max_payload(), |up, hop| {
+                Relay::tunnel_mtu(up, usize::from(hop.max_payload))
+                    .saturating_sub(dagon_proto::frame_len(0))
+            })
     }
 
     /// The target of topology node `node` of `topo` from [`Host::local`].
@@ -328,7 +328,7 @@ impl<T: Transport, C: HostClock> Host<T, C> {
         node: u8,
     ) -> core::result::Result<Target, RouteError> {
         let me = self.local.as_ref().map_err(Clone::clone)?;
-        Target::of_node(routes::links_of(topo), me.index, node, &me.links)
+        Target::of_node_through(routes::links_of(topo), me, node)
     }
 
     /// The target of topology node `node` of the canonical binary
@@ -488,9 +488,16 @@ impl<T: Transport, C: HostClock> Host<T, C> {
         if self.stale {
             self.drain().await?;
         }
-        if !self.opened.contains(&to) {
-            let hello = hello_request(self.link_max(to));
-            self.attempts(to, Cmd::Hello, &hello, timeout_ms.min(REQUEST_MS), retries)
+        // A relaying node behind another keeps a last request too: each one
+        // on the way is opened before a RELAY goes through it.
+        let hops = to.hops();
+        for n in (1..hops.len()).chain([hops.len()]) {
+            let at = Target::through(&hops[..n]).expect("a target's own hops");
+            if self.opened.contains(&at) {
+                continue;
+            }
+            let hello = hello_request(self.link_max(at));
+            self.attempts(at, Cmd::Hello, &hello, timeout_ms.min(REQUEST_MS), retries)
                 .await
                 .or_else(|e| match e {
                     // An answer, even a refusal, means the target now keeps
@@ -498,7 +505,7 @@ impl<T: Transport, C: HostClock> Host<T, C> {
                     Error::Rejected { .. } | Error::BadResponse => Ok(Vec::new()),
                     e => Err(e),
                 })?;
-            self.opened.push(to);
+            self.opened.push(at);
             self.drain().await?;
         }
         self.attempts(to, cmd, payload, timeout_ms, retries).await
@@ -513,38 +520,35 @@ impl<T: Transport, C: HostClock> Host<T, C> {
         timeout_ms: u32,
         retries: usize,
     ) -> Result<Vec<u8>, T::Error> {
-        let (max, relay) = match to {
-            Target::Local => (max_payload::USB, None),
-            Target::Linked {
-                link,
-                addr,
-                max_payload,
-            } => (usize::from(max_payload), Some((link, addr))),
-        };
+        let hops = to.hops();
         let seq = self.next_seq();
-        let relay = relay.map(|r| (r, self.next_seq()));
+        // One seq for each RELAY, the nearest relaying node's first.
+        let outer: Vec<u8> = hops.iter().map(|_| self.next_seq()).collect();
         let mut attempt = 0;
         loop {
             let fl = if attempt == 0 { 0 } else { flags::RETRY };
-            let r = match relay {
-                None => {
-                    let frame = encode(fl, seq, cmd as u8, payload);
-                    self.exchange(seq, cmd, &frame, timeout_ms).await
-                }
-                Some(((link, addr), outer)) => {
-                    let inner = encode(fl, seq, cmd as u8, payload);
-                    let relay = Relay {
-                        link,
-                        addr,
-                        timeout_ms: Some(timeout_ms.min(u16::MAX as u32) as u16),
-                        inner: &inner,
-                    };
-                    let p = request(|b| relay.encode(b));
-                    let frame = encode(fl, outer, Cmd::Relay as u8, &p);
-                    self.exchange(outer, Cmd::Relay, &frame, timeout_ms + REQUEST_MS)
-                        .await
-                        .and_then(|resp| relayed(&resp, max, seq, cmd))
-                }
+            // The request, then a RELAY around it for each hop from the
+            // node back to the PC, each waiting one request longer than
+            // what it carries.
+            let mut frame = encode(fl, seq, cmd as u8, payload);
+            let mut wait_ms = timeout_ms;
+            for (hop, &relay_seq) in hops.iter().zip(&outer).rev() {
+                let relay = Relay {
+                    link: hop.link,
+                    addr: hop.addr,
+                    timeout_ms: Some(wait_ms.min(u16::MAX as u32) as u16),
+                    inner: &frame,
+                };
+                let p = request(|b| relay.encode(b));
+                frame = encode(fl, relay_seq, Cmd::Relay as u8, &p);
+                wait_ms += REQUEST_MS;
+            }
+            let r = match outer.first() {
+                None => self.exchange(seq, cmd, &frame, timeout_ms).await,
+                Some(&first) => self
+                    .exchange(first, Cmd::Relay, &frame, wait_ms)
+                    .await
+                    .and_then(|resp| through(resp, &hops, &outer, seq, cmd)),
             };
             let again = matches!(r, Err(Error::Timeout | Error::Relay(Status::Timeout)));
             if !again || attempt >= retries {
@@ -637,6 +641,26 @@ fn relayed<E>(resp: &[u8], max: usize, seq: u8, cmd: Cmd) -> Result<Vec<u8>, E> 
         return Err(Error::BadResponse);
     }
     Ok(f.payload.to_vec())
+}
+
+/// The node's response payload inside the RELAY responses of `hops`, whose
+/// requests went out under the seqs `outer`: each relaying node's answer
+/// holds the next one's, the last the node's own to (`seq`, `cmd`).
+fn through<E>(
+    mut resp: Vec<u8>,
+    hops: &[routes::Hop],
+    outer: &[u8],
+    seq: u8,
+    cmd: Cmd,
+) -> Result<Vec<u8>, E> {
+    for (i, hop) in hops.iter().enumerate() {
+        let (inner_seq, inner_cmd) = match outer.get(i + 1) {
+            Some(&next) => (next, Cmd::Relay),
+            None => (seq, cmd),
+        };
+        resp = relayed(&resp, usize::from(hop.max_payload), inner_seq, inner_cmd)?;
+    }
+    Ok(resp)
 }
 
 fn ok_body<E>(cmd: Cmd, payload: &[u8]) -> Result<Vec<u8>, E> {

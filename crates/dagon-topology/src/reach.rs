@@ -1,10 +1,13 @@
-//! The part of a 構成 updating reaches: the first coordinator and the nodes
+//! The part of a 構成 updating reaches: the first coordinator, the nodes
 //! linked straight to it over I2C or UART, whichever end of the link each is
-//! listed as. Everything else is a valid definition that updating skips
-//! (V-23 tells why).
+//! listed as, and the nodes behind a node whose MCU relays as a node
+//! (`[relay] relays_as_node`). Everything else is a valid definition that
+//! updating skips (V-23 tells why).
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
+use crate::behind::relayed;
+pub use crate::behind::MAX_RELAYS;
 use crate::defs::Registry;
 use crate::schema::{Constraint, Node, Role, Topology};
 use crate::{check_with, Report};
@@ -14,7 +17,8 @@ use crate::{check_with, Report};
 pub enum Skip {
     /// A second coordinator, or a node in a second coordinator's tree.
     SecondHub,
-    /// Linked through another node (two or more links from the coordinator).
+    /// Linked through another node (two or more links from the coordinator)
+    /// that does not relay as a node, or further than [`MAX_RELAYS`] nodes.
     Deep,
     /// Linked to the coordinator by a kind the compiled topology cannot carry (CAN, Ethernet, ...).
     LinkKind,
@@ -44,7 +48,7 @@ impl Skip {
             Skip::SecondHub => {
                 "it is in a second coordinator's tree; updating reaches the first coordinator only"
             }
-            Skip::Deep => "it is linked through another node; updating reaches only the nodes linked straight to the coordinator",
+            Skip::Deep => "it is linked through another node that does not relay; updating reaches the nodes linked straight to the coordinator and those behind a node that relays",
             Skip::LinkKind => "its link is of a kind updating does not use (I2C and UART only)",
             Skip::Unreachable => "no chain of links leads to it from the first coordinator",
             Skip::CutInvalid => {
@@ -73,7 +77,7 @@ pub struct Cut {
 /// [`updatable`], then `check` on the part itself: a part that does not
 /// pass is never handed on as updatable.
 pub fn cut_with(reg: &Registry, t: &Topology) -> Cut {
-    let (sub, skipped) = updatable(t);
+    let (sub, skipped) = updatable_with(reg, t);
     checked(reg, t, sub, skipped)
 }
 
@@ -110,16 +114,17 @@ pub fn reach_root(t: &Topology) -> Option<&str> {
 
 /// The updatable part of `t` and the nodes it leaves out, in `nodes` order.
 /// The first coordinator is always in it; the nodes linked straight to it over I2C/UART follow in
-/// `nodes` order. The part keeps `nodes` order, so
-/// a 構成 updating reaches whole compiles to the same bytes as before.
+/// `nodes` order, and so do the nodes behind a node whose MCU in `reg` relays as a node. The part
+/// keeps `nodes` order, so a 構成 updating reaches whole compiles to the same bytes as before.
 /// Every node not in the part is skipped with a reason.
-pub fn updatable(t: &Topology) -> (Topology, Vec<(String, Skip)>) {
+pub fn updatable_with(reg: &Registry, t: &Topology) -> (Topology, Vec<(String, Skip)>) {
     let first = reach_root(t);
+    let via = relayed(reg, t, first);
     // The coordinator is reserved first, so nodes listed before it never push it out.
     let mut keep: BTreeSet<&str> = first.into_iter().collect();
     let mut skipped = Vec::new();
     for n in &t.nodes {
-        let why = match skip_of(t, first, &n.id) {
+        let why = match skip_of(t, first, &via, &n.id) {
             Ok(()) if Some(n.id.as_str()) == first => None,
             Ok(()) => {
                 keep.insert(&n.id);
@@ -134,13 +139,17 @@ pub fn updatable(t: &Topology) -> (Topology, Vec<(String, Skip)>) {
     let kept = |id: &String| keep.contains(id.as_str());
     let sub = Topology {
         nodes: t.nodes.iter().filter(|n| kept(&n.id)).cloned().collect(),
-        // Only the first coordinator's own links: a link between two reached nodes
-        // is not one updating runs over.
+        // Only the links updating runs over: the first coordinator's own and
+        // the one from a relaying node to each node behind it. Any other
+        // link between two reached nodes is not in the part.
         links: t
             .links
             .iter()
             .filter(|l| {
-                l.ends.iter().all(|e| kept(&e.node)) && first.is_some_and(|f| l.end(f).is_some())
+                let [a, b] = l.ends.each_ref().map(|e| e.node.as_str());
+                let behind = |near: &str, far: &str| via.get(far) == Some(&near);
+                l.ends.iter().all(|e| kept(&e.node))
+                    && (first.is_some_and(|f| l.end(f).is_some()) || behind(a, b) || behind(b, a))
             })
             .cloned()
             .collect(),
@@ -160,7 +169,7 @@ pub fn updatable(t: &Topology) -> (Topology, Vec<(String, Skip)>) {
                 .collect(),
         },
         // a constraint naming a skipped node is dropped (lockstep keeps
-        // its reached ids); multi-hop relay will carry them whole.
+        // its reached ids).
         constraints: t
             .constraints
             .iter()
@@ -181,8 +190,14 @@ pub fn updatable(t: &Topology) -> (Topology, Vec<(String, Skip)>) {
     (sub, skipped)
 }
 
-/// Ok when `id` is the first coordinator or a node linked straight to it over I2C/UART; else why not.
-fn skip_of(t: &Topology, first: Option<&str>, id: &str) -> Result<(), Skip> {
+/// Ok when `id` is the first coordinator, a node linked straight to it over I2C/UART or a node
+/// behind a relaying node (`via`); else why not.
+fn skip_of(
+    t: &Topology,
+    first: Option<&str>,
+    via: &BTreeMap<&str, &str>,
+    id: &str,
+) -> Result<(), Skip> {
     let n = t.node(id).ok_or(Skip::Unreachable)?;
     if n.role == Role::Coordinator {
         return if Some(id) == first {
@@ -197,7 +212,11 @@ fn skip_of(t: &Topology, first: Option<&str>, id: &str) -> Result<(), Skip> {
         return Err(Skip::SecondHub);
     }
     if hops > 1 {
-        return Err(Skip::Deep);
+        return if via.contains_key(id) {
+            Ok(())
+        } else {
+            Err(Skip::Deep)
+        };
     }
     let link = t.link_between(id, hub).ok_or(Skip::Unreachable)?;
     if !link.kind.compiles() {
@@ -252,7 +271,7 @@ mod tests {
     #[test]
     fn a_valid_single_hub_topology_is_reached_whole() {
         let t = parse_str(SAMPLE).unwrap();
-        let (sub, skipped) = updatable(&t);
+        let (sub, skipped) = updatable_with(Registry::builtin(), &t);
         assert!(skipped.is_empty());
         assert_eq!(sub.nodes.len(), t.nodes.len());
         assert_eq!(sub.links.len(), t.links.len());
@@ -289,7 +308,7 @@ nodes:
                 link("a", "d", "uart", flip),
                 link("h2", "c", "uart", flip),
             );
-            let (sub, skipped) = updatable(&parse_str(&yaml).unwrap());
+            let (sub, skipped) = updatable_with(Registry::builtin(), &parse_str(&yaml).unwrap());
             assert_eq!(
                 skipped,
                 [
@@ -310,7 +329,7 @@ nodes:
             "update:",
             "  - kind: i2c\n    bus: i2c-main\n    ends:\n      - { node: n1, port: i2c3, addr: 0x30, node_pins: { sda: PB4, scl: PA8 } }\n      - { node: n0, port: i2c3 }\n    control:\n      kind: cooperative\n      rom_entry: stm32-i2c-rom\nupdate:",
         );
-        let (sub, skipped) = updatable(&parse_str(&yaml).unwrap());
+        let (sub, skipped) = updatable_with(Registry::builtin(), &parse_str(&yaml).unwrap());
         assert!(skipped.is_empty(), "{skipped:?}");
         assert_eq!(sub.links.len(), 2);
         assert!(sub.links.iter().all(|l| l.end("hub").is_some()));
@@ -513,7 +532,7 @@ links:
         // The part is broken by hand (its coordinator taken out): the checked cut refuses it whole.
         let t = parse_str(&fan(2, false)).unwrap();
         assert!(check_with(Registry::builtin(), &t).is_pushable());
-        let (mut sub, skipped) = updatable(&t);
+        let (mut sub, skipped) = updatable_with(Registry::builtin(), &t);
         sub.nodes.retain(|n| n.role != Role::Coordinator);
         let cut = super::checked(Registry::builtin(), &t, sub, skipped);
         assert!(cut.topology.is_none() && cut.reach.is_empty());

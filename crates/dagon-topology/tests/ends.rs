@@ -6,7 +6,7 @@
 use std::collections::BTreeSet;
 
 use dagon_topology::defs::Registry;
-use dagon_topology::{check_str_with, compile_str, parse_str, updatable, Report, Severity};
+use dagon_topology::{check_str_with, compile_str, parse_str, updatable_with, Report, Severity};
 
 fn check_str(yaml: &str) -> Report {
     check_str_with(Registry::builtin(), yaml)
@@ -222,7 +222,10 @@ fn a_node_below_a_child_is_skipped_whichever_end_is_listed_first() {
                 .any(|m| m.contains("'seg'") && m.contains("'watch'")),
             "{infos:?}"
         );
-        let (sub, skipped) = updatable(&parse_str(&y).unwrap());
+        let (sub, skipped) = updatable_with(
+            dagon_topology::defs::Registry::builtin(),
+            &parse_str(&y).unwrap(),
+        );
         assert_eq!(skipped, [("watch".to_string(), dagon_topology::Skip::Deep)]);
         assert_eq!(sub.links.len(), 1);
     }
@@ -261,8 +264,16 @@ fn every_rule_says_the_same_in_both_orientations() {
     for y in cases {
         assert_eq!(issues(&y), issues(&swapped(&y)), "{y}");
         let (a, b) = (
-            updatable(&parse_str(&y).unwrap()).1,
-            updatable(&parse_str(&swapped(&y)).unwrap()).1,
+            updatable_with(
+                dagon_topology::defs::Registry::builtin(),
+                &parse_str(&y).unwrap(),
+            )
+            .1,
+            updatable_with(
+                dagon_topology::defs::Registry::builtin(),
+                &parse_str(&swapped(&y)).unwrap(),
+            )
+            .1,
         );
         assert_eq!(a, b);
     }

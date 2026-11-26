@@ -413,6 +413,9 @@ pub struct PortDef {
 pub struct RelayFirmware {
     /// Static RAM (`.bss` and `.data`) the relaying app firmware may take, bytes.
     pub ram_bytes: u32,
+    /// The relaying firmware also answers requests that arrive over one of its links.
+    #[serde(default)]
+    pub relays_as_node: bool,
 }
 
 /// `[codec]` of an MCU definition ([`McuDef::codec`]): a budget per image the wire codec is
@@ -682,7 +685,10 @@ pub struct McuDef {
     /// The budget of the relaying app firmware: `ram_bytes` (static RAM, `.bss` plus `.data`, in
     /// bytes; 1 up to the MCU's RAM size). Only an MCU with `[[relay_link]]` gives it. CI builds
     /// the MCU package's `examples/relay.rs`, measures it and fails above this value
-    /// (`scripts/relay_ram.py`).
+    /// (`scripts/relay_ram.py`). `relays_as_node` (`true` or `false`, `false` when absent): the
+    /// relaying firmware also answers requests that arrive over one of its links, so a node of
+    /// this MCU with `role: node` relays to the nodes linked behind it and updating reaches them
+    /// (topology check V-23 skips them otherwise).
     pub relay: Option<RelayFirmware>,
     /// The wire codec's budgets: `bootcore` (every boot core of the MCU) and `relay` (the relay
     /// firmware), each `{ flash_bytes, stack_bytes, ram_bytes }`: the codec's (`dagon_proto`)
@@ -788,6 +794,12 @@ impl McuDef {
     /// The `[[link_port]]` named `name`.
     pub fn port(&self, name: &str) -> Option<&PortDef> {
         self.ports.iter().find(|p| p.name == name)
+    }
+
+    /// A node of this MCU with `role: node` relays to the nodes behind it
+    /// (`[relay] relays_as_node`).
+    pub fn relays_as_node(&self) -> bool {
+        !self.relay_links.is_empty() && self.relay.is_some_and(|r| r.relays_as_node)
     }
 
     /// `[[relay_link]]` as the one runtime type, in definition order: the one

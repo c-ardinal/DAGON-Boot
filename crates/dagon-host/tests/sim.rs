@@ -25,6 +25,8 @@ const SEED: [u8; 32] = [
     0x44, 0x49, 0xc5, 0x69, 0x7b, 0x32, 0x69, 0x19, 0x70, 0x3b, 0xac, 0x03, 0x1c, 0xae, 0x7f, 0x60,
 ];
 
+#[path = "sim/deep.rs"]
+mod deep;
 #[path = "sim/hand_over.rs"]
 mod hand_over;
 
@@ -332,6 +334,7 @@ fn a_nodes_target_comes_from_the_connected_node_the_host_is_given() {
     no_entry.local = Ok(dagon_host::LocalNode {
         index: 0,
         links: Vec::new(),
+        relays: Vec::new(),
     });
     let r = block_on(no_entry.write_path(SEG, &topo, &[]));
     let Err(Error::Route(why)) = r else {
@@ -359,6 +362,7 @@ fn a_route_error_sends_nothing() {
         Ok(dagon_host::LocalNode {
             index: 0,
             links: Vec::new(),
+            relays: Vec::new(),
         }),
         Err(no_mcu),
         Err(dagon_host::RouteError::NoConfiguration),

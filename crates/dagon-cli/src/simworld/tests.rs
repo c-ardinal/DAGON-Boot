@@ -261,7 +261,7 @@ fn nodes_on_two_i2c_buses_are_each_updated_over_their_own_bus() {
 /// What the simulator has no model for is refused by name.
 #[test]
 fn a_topology_past_what_the_simulator_models_is_refused_by_name() {
-    // A link that does not start at the node the PC is connected to.
+    // A link to a node behind one whose MCU does not relay as a node.
     let two_hops = pair_with(1).replace(
         "      - { node: hub, port: i2c0 }\n      - { node: seg2, port: i2c3, addr: 0x43",
         "      - { node: seg, port: i2c1 }\n      - { node: seg2, port: i2c3, addr: 0x43",
@@ -270,10 +270,7 @@ fn a_topology_past_what_the_simulator_models_is_refused_by_name() {
     let e = dagon_sim::world::build(Registry::builtin(), &t, [0; 32], 1)
         .map(|_| ())
         .unwrap_err();
-    assert!(
-        e.contains("relays one hop from hub") && e.contains("seg and seg2"),
-        "{e}"
-    );
+    assert!(e.contains("no link joins node seg2 to hub"), "{e}");
     // A node no link reaches.
     let (head, tail) = PAIR.split_once("links:\n").unwrap();
     let alone = format!(
@@ -307,4 +304,43 @@ fn a_fault_is_written_as_node_and_kind() {
     assert!(Injection::parse("=tamper").is_err());
     let e = Injection::parse("seg=boom").unwrap_err();
     assert!(e.contains("no fault `boom`") && e.contains("erased"), "{e}");
+}
+
+/// hub - mid - leaf over UART links, mid an RP2040 whose definition says it
+/// relays as a node: the leaf is written, and recovers, through both.
+#[test]
+fn a_node_behind_a_node_that_relays_is_updated_through_it() {
+    let reg = project("format = 1\n[mcu_override.rp2040.relay]\nrelays_as_node = true\n");
+    let rp = |id: &str, role: &str| {
+        format!("  - id: {id}\n    mcu: rp2040\n    board: waveshare-rp2040-touch-lcd-1.28\n    role: {role}\n    port: self-boot\n    flash_map: rp2040-4m\n    tag: {id}\n")
+    };
+    let uart = |near: &str, far: &str, port: &str| {
+        format!("  - kind: uart\n    iface: pio-uart\n    ends:\n      - {{ node: {near}, port: pio-uart, pins: {{ tx: 26, rx: 27 }} }}\n      - {{ node: {far}, port: {port} }}\n    baud: 115200\n    control:\n      kind: cooperative\n      rom_entry: force-download-boot\n")
+    };
+    let yaml = format!(
+        "dagon: 2\nname: chain\nnodes:\n{}{}  - id: leaf\n    mcu: stm32f401re\n    role: node\n    port: self-boot\n    flash_map: f401-default\n    tag: leaf\nlinks:\n{}{}update:\n  order: [leaf, mid, hub]\n",
+        rp("hub", "coordinator"),
+        rp("mid", "node"),
+        uart("hub", "mid", "uart0"),
+        uart("mid", "leaf", "usart1"),
+    );
+    let (r, lines) = sim(&reg, &yaml, &["leaf=power-cut", "leaf=no-confirm"]);
+    assert_eq!(r, Ok(()), "{lines:#?}");
+    assert!(
+        lines[0].contains("leaf (stm32f401re, link") && lines[0].contains(", then link"),
+        "{lines:#?}"
+    );
+    assert!(
+        lines[1].starts_with("update PASS: hub, mid, leaf"),
+        "{lines:#?}"
+    );
+    // With the built-in definitions the leaf is skipped: the run is the hub and mid.
+    let t = dagon_topology::parse_str(&yaml).unwrap();
+    let part = dagon_topology::cut_with(Registry::builtin(), &t)
+        .topology
+        .unwrap();
+    let mut lines = Vec::new();
+    let r = run(Registry::builtin(), &part, &[], &mut |l| lines.push(l));
+    assert_eq!(r, Ok(()), "{lines:#?}");
+    assert!(lines[1].starts_with("update PASS: hub, mid"), "{lines:#?}");
 }

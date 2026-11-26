@@ -476,6 +476,12 @@ impl SimNode {
         }
     }
 
+    /// Whether it answers a request arriving at `now_ms`.
+    pub fn answers_at(&mut self, now_ms: u64) -> bool {
+        self.tick(now_ms);
+        self.responsive()
+    }
+
     /// Whether its boot core serves (update or recovery mode): no app runs,
     /// so nothing is relayed.
     pub fn in_boot_core(&self) -> bool {

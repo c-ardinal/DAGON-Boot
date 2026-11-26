@@ -568,9 +568,9 @@ impl<'a> Ctx<'a> {
 
     /// Valid shapes that updating does not reach, told as information
     /// (never errors): more than one coordinator and their trees, nodes
-    /// linked through another node and links of a kind the compiled topology cannot carry.
-    /// Updating covers one coordinator with the nodes linked straight to it
-    /// and skips the rest (see [`crate::updatable`]).
+    /// linked through a node that does not relay and links of a kind the compiled topology cannot
+    /// carry. Updating covers one coordinator with the nodes linked straight to it and the
+    /// nodes behind a node that relays, and skips the rest (see [`crate::updatable_with`]).
     fn v23(&mut self) {
         let hubs: Vec<&str> = self
             .t
@@ -591,6 +591,7 @@ impl<'a> Ctx<'a> {
             );
         }
         let first = hubs.first().copied();
+        let via = crate::behind::relayed(self.reg, self.t, first);
         for (i, l) in self.links() {
             let p = link_path(i);
             let [a, b] = l.ends.each_ref().map(|e| e.node.as_str());
@@ -629,8 +630,10 @@ impl<'a> Ctx<'a> {
                         pair(a, b)
                     ))
                 }
+                // The link from a relaying node to a node behind it.
+                (None, []) if via.get(a) == Some(&b) || via.get(b) == Some(&a) => None,
                 (None, []) => Some(format!(
-                    "the link between the nodes {} is one link further from the coordinator: updating reaches only the nodes linked straight to the coordinator and skips it",
+                    "the link between the nodes {} is further from the coordinator and no node that relays reaches it: updating reaches the nodes linked straight to the coordinator and those behind a node that relays, and skips it",
                     pair(a, b)
                 )),
                 (None, [h, ..]) => Some(format!(

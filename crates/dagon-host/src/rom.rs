@@ -210,7 +210,7 @@ pub fn regions<'a>(
     out
 }
 
-/// The connected node's NRST/BOOT0 and raw I2C, with progress reported
+/// A relaying node's NRST/BOOT0 and raw I2C, with progress reported
 /// as events of phase ROM.
 pub(crate) struct HubRom<'h, T: Transport, C: HostClock> {
     pub host: &'h mut Host<T, C>,
@@ -219,6 +219,9 @@ pub(crate) struct HubRom<'h, T: Transport, C: HostClock> {
     /// The loader's address ([`RomMap::addr`]): the only one I2C_RAW
     /// reaches.
     pub addr: u8,
+    /// The relaying node whose lines and bus reach the node: the connected
+    /// node, or the one a deep node is linked to.
+    pub relay: Target,
     /// The relay's recovery target for the node: the link to it and
     /// [`HubRom::addr`]. `None` asks the relay's first target.
     pub target: Option<RomTarget>,
@@ -252,7 +255,7 @@ impl<T: Transport, C: HostClock> HubRom<'_, T, C> {
         let p = crate::request(|b| req.encode(b));
         let body = self
             .host
-            .call(Target::Local, Cmd::I2cRaw, &p, self.timeout)
+            .call(self.relay, Cmd::I2cRaw, &p, self.timeout)
             .await
             .map_err(bus_error)?;
         let body = payload::parse_bulk_resp(Cmd::I2cRaw, &body).map_err(|_| BusError::Io)?;
@@ -285,7 +288,7 @@ impl<T: Transport, C: HostClock> SubControl for HubRom<'_, T, C> {
         };
         let p = crate::request(|b| lines.encode(b));
         self.host
-            .call(Target::Local, Cmd::SubCtl, &p, REQUEST_MS)
+            .call(self.relay, Cmd::SubCtl, &p, REQUEST_MS)
             .await
             .map(|_| ())
             .map_err(bus_error)
@@ -324,14 +327,21 @@ impl<'h, T: Transport, C: HostClock> HubRom<'h, T, C> {
         on_event: &'h mut dyn FnMut(Event),
         node: u8,
         addr: u8,
-        link: Option<u8>,
+        to: Target,
         version: dagon_format::Version,
     ) -> Self {
+        // The relay tells its recovery targets apart by the link the node
+        // is on: the one RELAY reaches it over.
+        let (relay, link) = match to.parent() {
+            Some((relay, hop)) => (relay, Some(hop.link)),
+            None => (Target::Local, None),
+        };
         HubRom {
             host,
             on_event,
             node,
             addr,
+            relay,
             target: link.map(|link| RomTarget {
                 link,
                 rom_addr: addr,

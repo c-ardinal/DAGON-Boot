@@ -3,7 +3,8 @@
 //! project's own, its overrides included).
 //!
 //! What the simulator models bounds it: the node the PC is connected to
-//! relays one hop, over I2C and UART links, to nodes whose definitions give
+//! relays over the links updating runs over (I2C and UART; a node that
+//! relays as a node is on a UART link), to nodes whose definitions give
 //! a kind S flash layout (`[layout]` with `stage0` and `app_log`) or are
 //! the one the fixed vendor-stage2 layout models
 //! ([`Layout::ESP32S3_WATCH`]). A topology outside that is refused by name,
@@ -14,7 +15,7 @@ use dagon_format::header::target_tag;
 use dagon_proto::max_payload;
 use dagon_proto::payload::{mode, role};
 use dagon_topology::defs::{McuDef, Registry};
-use dagon_topology::schema::{LinkKind, Node, Topology};
+use dagon_topology::schema::{Link, LinkKind, Node, Topology};
 
 use crate::{Layout, SimFlash, SimLink, SimNode, SimRelay};
 
@@ -73,8 +74,99 @@ fn node_of(
     Ok(SimNode::new(cfg, pubkey, flash, layout))
 }
 
+/// What the building of a world carries from node to node.
+struct Wiring<'a> {
+    reg: &'a Registry,
+    t: &'a Topology,
+    pubkey: [u8; 32],
+    seed: u64,
+    /// The links updating runs over, by their place in `t.links`.
+    used: Vec<bool>,
+    /// The first node NRST and BOOT0 reach.
+    wired: Option<String>,
+    placed: Vec<String>,
+}
+
+impl Wiring<'_> {
+    /// Node `at` as a relaying node, reached as `node`, with every node its
+    /// links join to it but the one at the other end of link `up`.
+    fn relay(&mut self, at: &Node, node: SimNode, up: Option<usize>) -> Result<SimRelay, String> {
+        let t = self.t;
+        let def = self
+            .reg
+            .mcu(&at.mcu)
+            .ok_or_else(|| format!("node {}: no MCU definition {}", at.id, at.mcu))?;
+        let mut relay = SimRelay::with_definition(node, def);
+        let down: Vec<usize> = t
+            .links_at(&at.id)
+            .map(|(i, _)| i)
+            .filter(|i| self.used[*i] && Some(*i) != up)
+            .collect();
+        for i in down {
+            let l = &t.links[i];
+            let (Some(near), Some(far)) = (l.end(&at.id), l.other(&at.id)) else {
+                continue;
+            };
+            if def.port(&near.port).is_none() {
+                return Err(format!(
+                    "MCU definition {} has no port {}",
+                    def.id, near.port
+                ));
+            }
+            let n = t
+                .node(&far.node)
+                .ok_or_else(|| format!("the topology has no node {}", far.node))?;
+            self.placed.push(n.id.clone());
+            let seed = self.seed ^ (i as u64 + 1);
+            let relays = t.links_at(&n.id).any(|(j, _)| self.used[j] && j != i);
+            match l.kind {
+                LinkKind::I2c if relays => {
+                    return Err(format!(
+                    "the simulator puts a relaying node on a uart link: node {} is on an i2c link",
+                    n.id
+                ))
+                }
+                LinkKind::I2c => {
+                    let mut node =
+                        node_of(self.reg, n, false, max_payload::I2C, self.pubkey, seed)?;
+                    node.i2c_addr = Some(
+                        far.addr
+                            .ok_or_else(|| format!("node {}: its I2C end has no address", n.id))?,
+                    );
+                    let wire = up.is_none()
+                        && self.wired.is_none()
+                        && near.drives_reset()
+                        && node.rom_addr.is_some();
+                    if wire {
+                        self.wired = Some(n.id.clone());
+                    }
+                    relay.add_i2c(&near.port, node, wire);
+                }
+                LinkKind::Uart => {
+                    let node = node_of(self.reg, n, false, max_payload::UART, self.pubkey, seed)?;
+                    if relays {
+                        let behind = self.relay(n, node, Some(i))?;
+                        relay.set_uart_relay(&near.port, SimLink::new(seed), behind);
+                    } else {
+                        relay.set_uart(&near.port, SimLink::new(seed), node);
+                    }
+                }
+                k => {
+                    return Err(format!(
+                        "the simulator carries i2c and uart links: node {} is on a {} link",
+                        n.id,
+                        k.name()
+                    ))
+                }
+            }
+        }
+        Ok(relay)
+    }
+}
+
 /// The wiring of `t` with every flash empty: the node the PC is connected
-/// to (the first coordinator) and each node a link joins to it. NRST and
+/// to (the first coordinator), each node a link joins to it, and behind a
+/// node whose MCU relays as a node the nodes its links join to it. NRST and
 /// BOOT0 reach the first I2C node whose link gives the connected node both
 /// lines and whose MCU has an I2C ROM loader; its id is the second value.
 /// Provision each node as [`crate::demo_hub`] says.
@@ -86,64 +178,40 @@ pub fn build(
 ) -> Result<(SimRelay, Option<String>), String> {
     let root = dagon_topology::reach_root(t).ok_or("the topology has no coordinator")?;
     let root_node = t.node(root).ok_or("the topology has no coordinator")?;
-    let root_def = reg
-        .mcu(&root_node.mcu)
-        .ok_or_else(|| format!("node {root}: no MCU definition {}", root_node.mcu))?;
     let hub = node_of(reg, root_node, true, max_payload::USB, pubkey, seed)?;
-    let mut relay = SimRelay::with_definition(hub, root_def);
-    let mut wired = None;
-    let mut placed = vec![root.to_string()];
-    for (i, l) in t.links.iter().enumerate() {
-        let [a, b] = &l.ends;
-        let (near, far) = match (a.node == root, b.node == root) {
-            (true, false) => (a, b),
-            (false, true) => (b, a),
-            _ => {
-                return Err(format!(
-                    "the simulator relays one hop from {root}: the link of {} and {} does not start there",
-                    a.node, b.node
-                ))
-            }
-        };
-        if root_def.port(&near.port).is_none() {
-            return Err(format!(
-                "MCU definition {} has no port {}",
-                root_def.id, near.port
-            ));
-        }
-        let n = t
-            .node(&far.node)
-            .ok_or_else(|| format!("the topology has no node {}", far.node))?;
-        let seed = seed ^ (i as u64 + 1);
-        match l.kind {
-            LinkKind::I2c => {
-                let mut node = node_of(reg, n, false, max_payload::I2C, pubkey, seed)?;
-                node.i2c_addr = Some(
-                    far.addr
-                        .ok_or_else(|| format!("node {}: its I2C end has no address", n.id))?,
-                );
-                let wire = wired.is_none() && near.drives_reset() && node.rom_addr.is_some();
-                if wire {
-                    wired = Some(n.id.clone());
-                }
-                relay.add_i2c(&near.port, node, wire);
-            }
-            LinkKind::Uart => {
-                let node = node_of(reg, n, false, max_payload::UART, pubkey, seed)?;
-                relay.set_uart(&near.port, SimLink::new(seed), node);
-            }
-            k => {
-                return Err(format!(
-                    "the simulator carries i2c and uart links: node {} is on a {} link",
-                    n.id,
-                    k.name()
-                ))
-            }
-        }
-        placed.push(n.id.clone());
+    let (part, _) = dagon_topology::updatable_with(reg, t);
+    let same = |a: &Link, b: &Link| {
+        (0..2).all(|k| a.ends[k].node == b.ends[k].node && a.ends[k].port == b.ends[k].port)
+    };
+    let used: Vec<bool> = t
+        .links
+        .iter()
+        .map(|l| part.links.iter().any(|p| same(p, l)))
+        .collect();
+    let reached = |id: &String| part.nodes.iter().any(|n| n.id == *id);
+    if let Some(l) = t
+        .links
+        .iter()
+        .zip(&used)
+        .find_map(|(l, used)| (!used && l.ends.iter().all(|e| reached(&e.node))).then_some(l))
+    {
+        return Err(format!(
+            "the simulator relays over the links updating runs over: the link of {} and {} is not one",
+            l.ends[0].node, l.ends[1].node
+        ));
     }
-    if let Some(n) = t.nodes.iter().find(|n| !placed.contains(&n.id)) {
+    let mut w = Wiring {
+        reg,
+        t,
+        pubkey,
+        seed,
+        used,
+        wired: None,
+        placed: vec![root.to_string()],
+    };
+    let relay = w.relay(root_node, hub, None)?;
+    if let Some(n) = t.nodes.iter().find(|n| !w.placed.contains(&n.id)) {
         return Err(format!("no link joins node {} to {root}", n.id));
     }
-    Ok((relay, wired))
+    Ok((relay, w.wired))
 }

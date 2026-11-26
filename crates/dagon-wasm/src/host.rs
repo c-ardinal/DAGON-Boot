@@ -7,9 +7,9 @@ use alloc::rc::Rc;
 use core::cell::RefCell;
 
 use dagon_host::{
-    check_release, reason, ConfirmOutcome, Discovery, Error, Event, Host, HostClock, NodeOutcome,
-    NodeState, Outcome, RecoverAssets, RecoverPath, RomStats, Silence, Target, Transport,
-    WritePath,
+    check_release, reason, ConfirmOutcome, Discovery, Error, Event, Hop, Host, HostClock,
+    NodeOutcome, NodeState, Outcome, RecoverAssets, RecoverPath, RomStats, Silence, Target,
+    Transport, WritePath,
 };
 use dagon_proto::payload::{HelloResp, SlotInfo, StatusResp, VersionResp, VersionSlots};
 use js_sys::{Array, Object, Promise, Reflect, Uint8Array};
@@ -116,24 +116,43 @@ const TARGET_TS: &str = r#"
  * and passes them back as they are. */
 export type Target =
   | { kind: 'local' }
-  | { kind: 'linked'; link: number; addr: number; maxPayload: number };
+  | { kind: 'linked'; link: number; addr: number; maxPayload: number }
+  | { kind: 'deep'; hops: { link: number; addr: number; maxPayload: number }[] };
 "#;
+
+/// One hop of a `Target` object from the page.
+fn hop(v: &JsValue) -> Result<Hop, JsValue> {
+    let num = |k: &str| Reflect::get(v, &k.into()).ok().and_then(|x| x.as_f64());
+    let byte = |k: &str| num(k).and_then(|x| u8::try_from(x as u32).ok());
+    match (byte("link"), byte("addr"), num("maxPayload")) {
+        (Some(link), Some(addr), Some(m)) => Ok(Hop {
+            link,
+            addr,
+            max_payload: u16::try_from(m as u32).map_err(|_| bad_target())?,
+        }),
+        _ => Err(bad_target()),
+    }
+}
 
 /// A `Target` object from the page (as [`target_js`] makes it).
 fn target(v: &JsValue) -> Result<Target, JsValue> {
     let field = |k: &str| Reflect::get(v, &k.into()).ok();
-    let num = |k: &str| field(k).and_then(|x| x.as_f64());
-    let byte = |k: &str| num(k).and_then(|x| u8::try_from(x as u32).ok());
     match field("kind").and_then(|k| k.as_string()).as_deref() {
         Some("local") => Ok(Target::Local),
-        Some("linked") => match (byte("link"), byte("addr"), num("maxPayload")) {
-            (Some(link), Some(addr), Some(m)) => Ok(Target::Linked {
-                link,
-                addr,
-                max_payload: u16::try_from(m as u32).map_err(|_| bad_target())?,
-            }),
-            _ => Err(bad_target()),
-        },
+        Some("linked") => Target::through(&[hop(v)?]).ok_or_else(bad_target),
+        Some("deep") => {
+            let hops = field("hops")
+                .filter(Array::is_array)
+                .ok_or_else(bad_target)?;
+            let hops: Vec<Hop> = Array::from(&hops)
+                .iter()
+                .map(|h| hop(&h))
+                .collect::<Result<_, _>>()?;
+            match Target::through(&hops) {
+                Some(t @ Target::Deep(_)) => Ok(t),
+                _ => Err(bad_target()),
+            }
+        }
         _ => Err(bad_target()),
     }
 }
@@ -794,6 +813,18 @@ fn target_js(t: Target) -> JsValue {
             set(&o, "link", link.into());
             set(&o, "addr", addr.into());
             set(&o, "maxPayload", max_payload.into());
+        }
+        Target::Deep(route) => {
+            set(&o, "kind", "deep".into());
+            let hops = Array::new();
+            for h in route.hops() {
+                let hop = Object::new();
+                set(&hop, "link", h.link.into());
+                set(&hop, "addr", h.addr.into());
+                set(&hop, "maxPayload", h.max_payload.into());
+                hops.push(&hop);
+            }
+            set(&o, "hops", hops.into());
         }
     }
     o.into()

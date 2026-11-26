@@ -250,7 +250,7 @@ fn link(reg: &Registry, t: &Topology, l: &Link) -> Result<TopoLink, CompileError
         | LinkKind::UsbCdc
         | LinkKind::Ble
         | LinkKind::WifiTcp => {
-            // updatable() leaves these out; reaching here is a caller's bug.
+            // updatable_with() leaves these out; reaching here is a caller's bug.
             return Err(bad(format!(
                 "link {named}: updating uses I2C and UART links only (V-23)"
             )));

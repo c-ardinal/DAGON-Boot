@@ -2,6 +2,7 @@
 //! Topology YAML: schema, validation rules and the supported-board table.
 //! Shared by the CLI and the browser build so both apply the same rules.
 
+mod behind;
 mod check;
 mod compile;
 pub mod defs;
@@ -11,7 +12,7 @@ mod reach;
 mod report;
 pub mod schema;
 
-pub use reach::{cut_with, reach_root, updatable, Cut, Skip};
+pub use reach::{cut_with, reach_root, updatable_with, Cut, Skip, MAX_RELAYS};
 
 pub use check::{
     check_str_with, check_with, default_port, effective_tiers, pin_fault, rom_forced_unavailable,

@@ -337,6 +337,7 @@ impl World {
         h.local = Ok(LocalNode {
             index: CONNECTED,
             links: self.links.clone(),
+            relays: Vec::new(),
         });
         h
     }
@@ -346,6 +347,7 @@ impl World {
         match self.host().target(&self.bin, node).unwrap() {
             Target::Local => Dest::Local,
             Target::Linked { link, addr, .. } => Dest::Linked(link, addr),
+            Target::Deep(_) => unreachable!("every node is linked to the connected one"),
         }
     }
 

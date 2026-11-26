@@ -45,7 +45,9 @@ export const LOCAL: Target = { kind: 'local' };
 
 /** A key that tells targets apart, for matching what discovery found against the targets dagon-host gave. */
 export function targetKey(t: Target): string {
-  return t.kind === 'local' ? 'local' : `${t.link}:${t.addr}`;
+  if (t.kind === 'local') return 'local';
+  const hops = t.kind === 'deep' ? t.hops : [t];
+  return hops.map((h) => `${h.link}:${h.addr}`).join('/');
 }
 
 export interface SlotInfo {

@@ -207,26 +207,43 @@ def statement_end(text, i):
     """The index of the `;` or `{` that ends the statement at `i`, outside
     strings, cell lists and expressions; of the `}` that ends the node; or
     the end of `text`."""
-    depth, quoted = 0, False
+    # `<` and `>` open and close a cell list, but inside the parentheses of
+    # an expression they are operators (`<(1 << 2)>`).
+    cells, round_, square, quoted = False, 0, 0, ""
     while i < len(text):
         ch = text[i]
         if quoted:
             if ch == "\\":
                 i += 1
-            elif ch == '"':
-                quoted = False
+            elif ch == quoted:
+                quoted = ""
         elif ch == '"':
-            quoted = True
+            quoted = ch
+        elif ch == "\x01":
+            # A printed name: text, not source.
+            i = text.find("\x02", i)
+            if i < 0:
+                return len(text)
         elif text.startswith("&{", i):
             # A reference by path, `&{/leds/led_0}`: its braces open no node.
             i = text.find("}", i)
             if i < 0:
                 return len(text)
-        elif ch in "<([":
-            depth += 1
-        elif ch in ">)]":
-            depth -= 1
-        elif depth <= 0 and ch in ";{}":
+        elif ch == "(":
+            round_ += 1
+        elif ch == ")":
+            round_ = max(round_ - 1, 0)
+        elif round_:
+            pass
+        elif ch == "<":
+            cells = True
+        elif ch == ">":
+            cells = False
+        elif ch == "[":
+            square += 1
+        elif ch == "]":
+            square = max(square - 1, 0)
+        elif not cells and not square and ch in ";{}":
             return i
         i += 1
     return i

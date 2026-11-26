@@ -245,6 +245,14 @@ class Stated(unittest.TestCase):
                 b = tomllib.loads(imp.convert(d, path, "x", "rp2040", TAG))["board"]["x"]
             self.assertEqual(b["pin"], [{"pin": "GPIO25", "name": "led0"}], comment)
 
+    def test_an_expression_with_shifts_and_comparisons_ends_where_it_ends(self):
+        b = self.board(
+            "&flash0 { reg = <0 0x1000>; };\n"
+            "/ { other { a = <(1 << 2) (8 >> 1)>; b = <(1 > 2) (1 < 2) (2 >= 1)>; c = [00 ff]; };\n"
+            "    leds { compatible = \"gpio-leds\"; led0: led_0 { gpios = <&gpio0 25 0>; }; }; };\n"
+        )
+        self.assertEqual(b["pin"], [{"pin": "GPIO25", "name": "led0"}])
+
     def test_an_include_inside_a_block_comment_is_not_read(self):
         with tempfile.TemporaryDirectory() as d:
             path = Path(d) / "boards/x/x.dts"

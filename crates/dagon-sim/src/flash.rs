@@ -1,4 +1,5 @@
-//! SimFlash: NOR flash with a geometry, an operation log and power-cut points.
+//! SimFlash: NOR flash with a geometry, an operation log, power-cut points,
+//! an operation that fails with the power on, and bits that flip at rest.
 
 use crate::rng::SimRng;
 use dagon_port::{Flash, FlashError, FlashRegion};
@@ -33,6 +34,9 @@ pub struct SimFlash {
     mem: Vec<Vec<u8>>,
     ops: Vec<FlashOp>,
     cut: Option<CutPoint>,
+    /// The operation that fails with the power on, and whether part of it
+    /// lands ([`SimFlash::arm_failure`]).
+    fail: Option<(usize, bool)>,
     powered: bool,
     rng: SimRng,
 }
@@ -48,6 +52,7 @@ impl SimFlash {
             regions: regions.to_vec(),
             ops: Vec::new(),
             cut: None,
+            fail: None,
             powered: true,
             rng: SimRng::new(seed),
         }
@@ -120,6 +125,33 @@ impl SimFlash {
     /// Arms one power cut; indices count from the current op log.
     pub fn arm_cut(&mut self, cut: CutPoint) {
         self.cut = Some(cut);
+    }
+
+    /// Arms one failed operation with the power left on: operation
+    /// `index` (counted as [`SimFlash::arm_cut`] counts) answers
+    /// [`FlashError::Hw`], as a worn or disturbed sector does. With
+    /// `partly`, a part of it lands first (an erase leaves a prefix
+    /// erased, a write its first whole write units); otherwise none. The
+    /// operations after it land.
+    pub fn arm_failure(&mut self, index: usize, partly: bool) {
+        self.fail = Some((index, partly));
+    }
+
+    /// Flips bit `bit` of the byte at `addr`, as a cell that loses or
+    /// gains charge at rest does: no operation, nothing in the log.
+    pub fn flip_bit(&mut self, addr: u32, bit: u8) -> Result<(), FlashError> {
+        let (i, off) = self.locate(addr, 1)?;
+        self.mem[i][off] ^= 1 << (bit % 8);
+        Ok(())
+    }
+
+    /// Takes the armed failure when it is for the operation just logged.
+    fn failure(&mut self) -> Option<bool> {
+        let (index, partly) = self.fail?;
+        (index + 1 == self.ops.len()).then(|| {
+            self.fail = None;
+            partly
+        })
     }
 
     pub fn is_powered(&self) -> bool {
@@ -218,6 +250,13 @@ impl Flash for SimFlash {
         }
         let cut = self.begin(OpKind::Erase, addr, len)?;
         let n = len as usize;
+        if let Some(partly) = self.failure() {
+            if partly {
+                let done = self.rng.below(n as u64) as usize;
+                self.mem[i][off..off + done].fill(r.erased_value);
+            }
+            return Err(FlashError::Hw);
+        }
         let done = match cut {
             Some(CutPoint::During(_)) => self.rng.below(n as u64) as usize,
             _ => n,
@@ -259,8 +298,12 @@ impl Flash for SimFlash {
             return Err(FlashError::Hw);
         }
         let cut = self.begin(OpKind::Write, addr, data.len() as u32)?;
-        let done = match cut {
-            Some(CutPoint::During(_)) => self.rng.below((data.len() / ws) as u64) as usize * ws,
+        let failed = self.failure();
+        let done = match (cut, failed) {
+            (_, Some(false)) => 0,
+            (Some(CutPoint::During(_)), _) | (_, Some(true)) => {
+                self.rng.below((data.len() / ws) as u64) as usize * ws
+            }
             _ => data.len(),
         };
         for (old, &new) in self.mem[i][off..off + done].iter_mut().zip(data) {
@@ -271,7 +314,7 @@ impl Flash for SimFlash {
         if cut.is_some() {
             self.powered = false;
         }
-        if done < data.len() {
+        if done < data.len() || failed.is_some() {
             return Err(FlashError::Hw);
         }
         Ok(())
@@ -322,5 +365,46 @@ mod tests {
         f.erase(0x1000_0000, 0x1000).unwrap();
         assert!(!f.is_powered());
         assert_eq!(f.peek(0x1000_0000, 4), Some(&[0xFF; 4][..]));
+    }
+
+    #[test]
+    fn a_failed_operation_leaves_the_power_on_and_the_next_ones_land() {
+        for partly in [false, true] {
+            let mut f = SimFlash::rp2040_4m(7);
+            let base = f.geometry()[0].start;
+            f.write(base, &[0x11; 256]).unwrap();
+            // Operation 1 (the erase) fails; the flash stays powered.
+            f.arm_failure(1, partly);
+            assert_eq!(f.erase(base, 0x1000), Err(FlashError::Hw));
+            assert!(f.is_powered());
+            let left = f.peek(base, 256).unwrap();
+            if partly {
+                assert!(left.iter().all(|&b| b == 0xFF || b == 0x11));
+            } else {
+                assert!(left.iter().all(|&b| b == 0x11));
+            }
+            // The retry lands whole, and so does a write after it.
+            f.erase(base, 0x1000).unwrap();
+            f.write(base, &[0x22; 256]).unwrap();
+            assert_eq!(f.peek(base, 256).unwrap(), &[0x22; 256]);
+            // A failed write lands at most a prefix of whole write units.
+            f.arm_failure(f.ops().len(), partly);
+            assert_eq!(f.write(base + 256, &[0x33; 256]), Err(FlashError::Hw));
+            let got = f.peek(base + 256, 256).unwrap();
+            let landed = got.iter().take_while(|&&b| b == 0x33).count();
+            assert!(got[landed..].iter().all(|&b| b == 0xFF));
+            assert!(partly || landed == 0);
+            assert_eq!(f.ops().len(), 5);
+        }
+    }
+
+    #[test]
+    fn a_flipped_bit_is_no_operation() {
+        let mut f = SimFlash::stm32f401xe(1);
+        let ops = f.ops().len();
+        f.flip_bit(0x0800_0003, 6).unwrap();
+        assert_eq!(f.peek(0x0800_0000, 4).unwrap(), &[0xFF, 0xFF, 0xFF, 0xBF]);
+        assert_eq!(f.ops().len(), ops);
+        assert_eq!(f.flip_bit(0, 0), Err(FlashError::Range));
     }
 }

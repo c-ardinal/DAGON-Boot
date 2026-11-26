@@ -25,12 +25,15 @@ pub const SEED: [u8; 32] = [
 ];
 
 /// The F401's flash with a power cut: operations from number `cut` on do
-/// nothing and fail (the one at `cut` lands half when `half`).
+/// nothing and fail (the one at `cut` lands half when `half`). Or with one
+/// failed operation and the power left on: operation number `fail` alone
+/// lands not at all, or half, and answers an error; the ones after it land.
 #[derive(Clone)]
 pub struct Cut {
     pub mem: Rc<RefCell<Vec<u8>>>,
     pub ops: Rc<RefCell<usize>>,
     pub cut: Option<(usize, bool)>,
+    pub fail: Option<(usize, bool)>,
     /// Every erase and write asked for, in order, the cut ones too.
     pub trace: Rc<RefCell<Vec<FlashOp>>>,
 }
@@ -41,6 +44,7 @@ impl Cut {
             mem: Rc::new(RefCell::new(vec![0xFF; MIN_FLASH_SIZE])),
             ops: Rc::default(),
             cut: None,
+            fail: None,
             trace: Rc::default(),
         }
     }
@@ -50,6 +54,7 @@ impl Cut {
             mem: Rc::new(RefCell::new(self.mem.borrow().clone())),
             ops: Rc::default(),
             cut: None,
+            fail: None,
             trace: Rc::default(),
         }
     }
@@ -65,6 +70,11 @@ impl Cut {
     fn op(&mut self) -> Result<bool, FlashError> {
         let n = *self.ops.borrow();
         *self.ops.borrow_mut() += 1;
+        match self.fail {
+            Some((c, true)) if n == c => return Ok(false),
+            Some((c, false)) if n == c => return Err(FlashError::Hw),
+            _ => {}
+        }
         match self.cut {
             Some((c, _)) if n > c => Err(FlashError::Hw),
             Some((c, half)) if n == c => {

@@ -1,16 +1,22 @@
 //! Waitable published state for async display and log tasks. The
 //! layer's composed chain ([`crate::compose`]) is its only writer.
 //!
-//! Interrupt masking (the execution model's rule 2): nothing here masks
-//! by itself (`clippy.toml` refuses it). The `Channel` and `Watch` of
-//! embassy-sync mask for each of their operations, to copy one
-//! [`EventRecord`] or one [`Latest`] in or out; no closure and no
-//! [`Snapshot::apply`] runs inside one. The counters beside them are
-//! atomics written by the one writer.
+//! Interrupt masking (the execution model's rule 2): `clippy.toml`
+//! refuses it here, with one reviewed exemption: [`Recent::push`] holds
+//! one critical section over its ring operations (at most three, each a
+//! copy of one [`EventRecord`]), so that a reader cannot take a record
+//! between the check for a full ring and the removal of its oldest
+//! record. Beside it, the `Channel` and `Watch` of embassy-sync mask for
+//! each of their operations, to copy one [`EventRecord`] or one
+//! [`Latest`] in or out; no closure of a caller and no
+//! [`Snapshot::apply`] runs inside one. The event count is an atomic
+//! written by the one writer.
 
+use core::cell::Cell;
 use core::sync::atomic::{AtomicU32, Ordering};
 
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex as Cs;
+use embassy_sync::blocking_mutex::Mutex;
 use embassy_sync::channel::Channel;
 use embassy_sync::watch::{Receiver, Watch};
 
@@ -44,9 +50,9 @@ pub const WATCHERS: usize = 4;
 /// stays there.
 pub struct Recent<const N: usize> {
     ring: Channel<Cs, EventRecord, N>,
-    /// Records lost and not yet reported. The one producer (the layer's
-    /// composed chain) is its only writer, so a load and a store suffice.
-    unreported: AtomicU32,
+    /// Records lost and not yet reported; its lock is the critical
+    /// section of [`Recent::push`].
+    unreported: Mutex<Cs, Cell<u32>>,
 }
 
 impl<const N: usize> Recent<N> {
@@ -57,28 +63,34 @@ impl<const N: usize> Recent<N> {
         let () = Self::NOT_EMPTY;
         Recent {
             ring: Channel::new(),
-            unreported: AtomicU32::new(0),
+            unreported: Mutex::new(Cell::new(0)),
         }
     }
 
-    /// Each ring operation masks for one record; a reader that takes a
-    /// record between two of them only makes room.
+    /// One critical section over the check for a full ring, the removal
+    /// of its oldest record and the send: a reader that preempted between
+    /// them would make room and still lose the next record. Inside it: at
+    /// most three ring operations, each a copy of one [`EventRecord`],
+    /// and a counter; no caller's code.
+    #[allow(clippy::disallowed_methods)]
     pub(crate) fn push(&self, mut rec: EventRecord) {
-        let mut lost = self.unreported.load(Ordering::Relaxed);
-        if self.ring.is_full() {
-            if let Ok(oldest) = self.ring.try_receive() {
-                // The dropped record's own report is lost with it.
-                lost = lost.saturating_add(1 + u32::from(oldest.dropped));
+        self.unreported.lock(|u| {
+            let mut lost = u.get();
+            if self.ring.is_full() {
+                if let Ok(oldest) = self.ring.try_receive() {
+                    // The dropped record's own report is lost with it.
+                    lost = lost.saturating_add(1 + u32::from(oldest.dropped));
+                }
             }
-        }
-        let report = lost.min(u32::from(u8::MAX));
-        rec.dropped = report as u8;
-        if self.ring.try_send(rec).is_ok() {
-            lost -= report;
-        } else {
-            lost = lost.saturating_add(1);
-        }
-        self.unreported.store(lost, Ordering::Relaxed);
+            let report = lost.min(u32::from(u8::MAX));
+            rec.dropped = report as u8;
+            if self.ring.try_send(rec).is_ok() {
+                lost -= report;
+            } else {
+                lost = lost.saturating_add(1);
+            }
+            u.set(lost);
+        });
     }
 
     /// The oldest record, if any.

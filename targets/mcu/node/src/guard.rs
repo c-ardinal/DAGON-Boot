@@ -280,8 +280,9 @@ impl<D: Dog, const N: usize> Guard<D, N> {
         self.with_state(|s| s.clock = Some(now_us));
     }
 
-    /// The guard's state, shared by DAGON's tasks and the app's. The only
-    /// place DAGON's own code masks interrupts by itself: the closures above
+    /// The guard's state, shared by DAGON's tasks and the app's. The one
+    /// place the MCU packages' own code masks interrupts (the published
+    /// events' ring is the other reviewed one): the closures above
     /// update a few fields or feed the watchdog (a register write), well inside
     /// `[execution] masked_max_us`; none reaches the flash. An app built
     /// with `masked-time` times each ([`crate::masked_time`]).

@@ -82,9 +82,11 @@ fn every_numeric_field_has_a_declared_requirement_and_back() {
     let board_fake = format!("id = \"x\"\n{FAKE_BOARD}");
     let boot_fake = boot_board();
     let flash_fake = format!("{board_fake}{FLASH}");
+    let probed_fake = boot_fake.clone() + super::tests_isolation::PROBED_DEVICES;
     board_texts.extend([
         board_fake.as_str(),
         boot_fake.as_str(),
+        probed_fake.as_str(),
         flash_fake.as_str(),
         clock_board.as_str(),
     ]);

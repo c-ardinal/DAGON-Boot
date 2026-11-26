@@ -234,8 +234,22 @@ pub enum RegRef {
     Name(String),
 }
 
+/// `probe` of a `[[device]]`: how the device is found at run time. It is
+/// fitted when it answers a read of `reg`, and, with a `value`, when the
+/// byte read is `value` under `mask` (all its bits when left out).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DeviceProbe {
+    pub reg: RegRef,
+    #[serde(default)]
+    pub mask: Option<u8>,
+    #[serde(default)]
+    pub value: Option<u8>,
+}
+
 /// `[[device]]`: a device on a board bus, its named registers and the
-/// registers anyone outside DAGON may write.
+/// registers anyone outside DAGON may write. With a `probe` it may not be
+/// fitted; the devices of one `place` are the candidates for it.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct BoardDevice {
@@ -249,6 +263,15 @@ pub struct BoardDevice {
     pub regs: Vec<DeviceReg>,
     #[serde(default)]
     pub writable: Vec<RegRef>,
+    /// Given for a device that may not be fitted: generated code has it
+    /// only once this probe found it.
+    #[serde(default)]
+    pub probe: Option<DeviceProbe>,
+    /// The place on the board the device is one candidate for (`a-z 0-9
+    /// - _`): at most one of a place's devices is fitted, each has a
+    /// `probe`, and generated code has the place as an enum of them.
+    #[serde(default)]
+    pub place: Option<String>,
 }
 
 impl BoardDevice {
@@ -257,14 +280,26 @@ impl BoardDevice {
         self.regs.iter().find(|r| r.name == name).map(|r| r.reg)
     }
 
+    /// Register `r` as its number.
+    fn reg_no(&self, r: &RegRef) -> Option<u8> {
+        match r {
+            RegRef::Reg(r) => Some(*r),
+            RegRef::Name(n) => self.reg(n),
+        }
+    }
+
+    /// The probe as (register, mask, value), for a device that may not be
+    /// fitted (names resolved; checked on load).
+    pub fn probe_regs(&self) -> Option<(u8, u8, Option<u8>)> {
+        let p = self.probe.as_ref()?;
+        Some((self.reg_no(&p.reg)?, p.mask.unwrap_or(0xFF), p.value))
+    }
+
     /// `writable` as register numbers (names resolved; checked on load).
     pub fn writable_regs(&self) -> Vec<u8> {
         self.writable
             .iter()
-            .filter_map(|w| match w {
-                RegRef::Reg(r) => Some(*r),
-                RegRef::Name(n) => self.reg(n),
-            })
+            .filter_map(|w| self.reg_no(w))
             .collect()
     }
 }
@@ -331,6 +366,22 @@ impl BoardDef {
         self.devices.iter().find(|d| d.id == id)
     }
 
+    /// The places of the board with their candidate devices, both in the
+    /// definition's order.
+    pub fn places(&self) -> Vec<(&str, Vec<&BoardDevice>)> {
+        let mut out: Vec<(&str, Vec<&BoardDevice>)> = Vec::new();
+        for d in &self.devices {
+            let Some(place) = d.place.as_deref() else {
+                continue;
+            };
+            match out.iter_mut().find(|(p, _)| *p == place) {
+                Some((_, list)) => list.push(d),
+                None => out.push((place, vec![d])),
+            }
+        }
+        out
+    }
+
     pub fn board_peripheral(&self, id: &str) -> Option<&BoardPeripheral> {
         self.peripherals.iter().find(|p| p.id == id)
     }
@@ -391,9 +442,46 @@ pub(super) fn tables(b: &BoardDef, m: &McuDef) -> Result<(), String> {
         fail(d.max_transfer == 0, || {
             format!("device '{}': max_transfer is at least 1 byte", d.id)
         })?;
+        if let Some(p) = &d.probe {
+            if let RegRef::Name(n) = &p.reg {
+                fail(d.reg(n).is_none(), || {
+                    format!("device '{}': probe reg '{n}' is not in its regs", d.id)
+                })?;
+            }
+            let mask = p.mask.unwrap_or(0xFF);
+            fail(p.mask.is_some() && p.value.is_none(), || {
+                format!("device '{}': a probe mask needs a value", d.id)
+            })?;
+            fail(p.value.is_some_and(|v| mask == 0 || v & !mask != 0), || {
+                format!(
+                    "device '{}': probe value has bits its mask {mask:#04x} does not show",
+                    d.id
+                )
+            })?;
+        }
+        if let Some(place) = &d.place {
+            fail(!code_name(place, b'-'), || {
+                format!(
+                    "device '{}': place '{place}' must be a-z, 0-9, -, _ from a letter",
+                    d.id
+                )
+            })?;
+            fail(d.probe.is_none(), || {
+                format!(
+                    "device '{}': a candidate for place '{place}' needs a probe",
+                    d.id
+                )
+            })?;
+        }
         let bus = b
             .bus(&d.bus)
             .ok_or_else(|| format!("device '{}': bus '{}' is not in [[bus]]", d.id, d.bus))?;
+        fail(d.probe.is_some() && bus.kind != BusKind::I2c, || {
+            format!(
+                "device '{}': a probe reads a register over I2C, and bus '{}' is not I2C",
+                d.id, d.bus
+            )
+        })?;
         fail(
             bus.kind == BusKind::I2c && !super::requirements::I2C_ADDRS.contains(&d.addr),
             || {
@@ -403,6 +491,30 @@ pub(super) fn tables(b: &BoardDef, m: &McuDef) -> Result<(), String> {
                 )
             },
         )?;
+    }
+    for (place, candidates) in b.places() {
+        let first = candidates[0];
+        for d in &candidates[1..] {
+            fail(d.bus != first.bus, || {
+                format!(
+                    "place '{place}': '{}' and '{}' are on different buses",
+                    first.id, d.id
+                )
+            })?;
+        }
+        // Two parts at one address are told apart only by what they read.
+        for (i, d) in candidates.iter().enumerate() {
+            let shared = candidates[..i].iter().find(|o| o.addr == d.addr);
+            if let Some(o) = shared {
+                let told = |x: &BoardDevice| x.probe.as_ref().is_some_and(|p| p.value.is_some());
+                fail(!told(o) || !told(d), || {
+                    format!(
+                        "place '{place}': '{}' and '{}' share addr {:#04x}, so each needs a probe value",
+                        o.id, d.id, d.addr
+                    )
+                })?;
+            }
+        }
     }
     Ok(())
 }
@@ -547,6 +659,18 @@ pub(super) fn wiring(b: &BoardDef, _: &McuDef) -> Result<(), String> {
             not_keyword(&format!("register of device '{}'", d.id), &r.name)?;
         }
     }
+    for (place, _) in b.places() {
+        not_keyword("device place", place)?;
+    }
+    unique(
+        "device place after - becomes _",
+        b.places()
+            .iter()
+            .map(|(p, _)| type_name(&code_ident(p)))
+            .collect::<Vec<_>>()
+            .iter()
+            .map(String::as_str),
+    )?;
     unique(
         "device id after - becomes _",
         b.devices
@@ -636,6 +760,11 @@ fn program(b: &BoardDef, m: &McuDef, boot: &BoardBoot, a: &Action) -> Result<(),
                 let d = b
                     .device(device)
                     .ok_or_else(|| format!("{at}: device '{device}' is not in [[device]]"))?;
+                fail(d.probe.is_some(), || {
+                    format!(
+                        "{at}: '{device}' may not be fitted (it has a probe), and a program does not probe"
+                    )
+                })?;
                 fail(!d.writable_regs().contains(reg), || {
                     format!("{at}: register {reg:#04x} of '{device}' is not writable")
                 })?;

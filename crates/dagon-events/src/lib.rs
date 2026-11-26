@@ -25,7 +25,7 @@ mod machine;
 mod ports;
 mod published;
 
-pub use board::{BoardBringUp, BusError, Device, Shared};
+pub use board::{fitted, BoardBringUp, BusError, Candidate, Device, Probed, Shared};
 pub use catalog::{Catalog, Entry, Field, Flags, Machines, Observe};
 pub use compact::Compact;
 pub use compose::{

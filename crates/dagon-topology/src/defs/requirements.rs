@@ -449,8 +449,11 @@ pub const BOARD: &[Requirement<BoardCheck>] = &[
             "device[].max_transfer",
             "device[].writable[]",
             "device[].regs[].reg",
+            "device[].probe.reg",
+            "device[].probe.mask",
+            "device[].probe.value",
         ],
-        rule: "names unique; buses and peripherals name MCU blocks, a peripheral never one that drives DAGON's link; device ids and register names usable as code names, writable names among the regs, max_transfer at least 1; devices on a declared bus, I2C addresses in 0x08..=0x77",
+        rule: "names unique; buses and peripherals name MCU blocks, a peripheral never one that drives DAGON's link; device ids and register names usable as code names, writable names among the regs, max_transfer at least 1; devices on a declared bus, I2C addresses in 0x08..=0x77; a probe on an I2C bus, its register among the regs when named, its value inside its mask; a place's candidates each with a probe, on one bus, those at one address each with a probe value",
         check: board_boot::tables,
     },
     Requirement {

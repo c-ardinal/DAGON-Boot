@@ -956,7 +956,12 @@ pub struct BoardDef {
     /// A device on a board bus: `id` (`a-z 0-9 - _`), `bus`, `addr`, `max_transfer` (required: the
     /// most data bytes it takes in one transfer, from its datasheet; the bus port and boot programs
     /// keep to it), `regs = [{ name, reg }]` (its registers by name, `a-z 0-9 _`), `writable`
-    /// (registers anything outside DAGON may write: numbers or names of `regs`).
+    /// (registers anything outside DAGON may write: numbers or names of `regs`). A device that may
+    /// not be fitted has `probe = { reg, mask, value }` (it is there when it answers a read of
+    /// `reg`, a number or a name of `regs`, and, with `value`, when the byte reads `value` under
+    /// `mask`): generated code has it only once the probe found it, and a boot program does not
+    /// write it. `place` names what several such devices are candidates for (on one bus; those at
+    /// one address each with a probe `value`): generated code has the place as an enum of them.
     #[serde(default, rename = "device")]
     pub devices: Vec<BoardDevice>,
     /// The flash part the board carries, for an MCU whose flash is a board part: `part` (cite its

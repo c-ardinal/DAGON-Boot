@@ -182,7 +182,7 @@ definition that leaves a class out is refused with the class named.
 | `[[pin]]` | tables | no | The board's pins: `pin`, `name` (what the board package's code takes it by, `a-z 0-9 _`), `boot` (a boot program may drive it), `levels` (allowed levels; all when left out). |
 | `[[bus]]` | tables | no | The board's buses: `id` (`a-z 0-9 - _`), `kind` (`i2c`, `spi`, `uart`, `can`), `controller` (an MCU `[[peripheral]]`), its pins by signal (`sda`, `scl` for i2c; `tx` and/or `rx` for uart; `tx`, `rx` for can; `sck` and `mosi` and/or `miso` for spi), `hz` (i2c, spi) or `baud` (uart, can; on a `dagon = true` UART bus the link speed of a build dagon does not give the topology's, see below), `dagon` (`true`: DAGON's own link runs on it, so neither the bus nor its controller is ever an extension's), `dma` (`true`: the board package opens or hands out the bus with DMA; i2c, spi, uart; its tx and rx streams come from the MCU's `dma_requests`, buses in order, and the board package's build writes them as `<Bus>TxDma`/`<Bus>RxDma`, `take_dma!` and `bind_<bus>_dma!`). |
 | `[[peripheral]]` | tables | no | Board names for MCU blocks extensions may declare: `id`, `mcu` (the MCU `[[peripheral]]` id; never the controller of a `dagon = true` bus). |
-| `[[device]]` | tables | no | A device on a board bus: `id` (`a-z 0-9 - _`), `bus`, `addr`, `max_transfer` (required: the most data bytes it takes in one transfer, from its datasheet; the bus port and boot programs keep to it), `regs = [{ name, reg }]` (its registers by name, `a-z 0-9 _`), `writable` (registers anything outside DAGON may write: numbers or names of `regs`). |
+| `[[device]]` | tables | no | A device on a board bus: `id` (`a-z 0-9 - _`), `bus`, `addr`, `max_transfer` (required: the most data bytes it takes in one transfer, from its datasheet; the bus port and boot programs keep to it), `regs = [{ name, reg }]` (its registers by name, `a-z 0-9 _`), `writable` (registers anything outside DAGON may write: numbers or names of `regs`). A device that may not be fitted has `probe = { reg, mask, value }` (it is there when it answers a read of `reg`, a number or a name of `regs`, and, with `value`, when the byte reads `value` under `mask`): generated code has it only once the probe found it, and a boot program does not write it. `place` names what several such devices are candidates for (on one bus; those at one address each with a probe `value`): generated code has the place as an enum of them. |
 | `[flash]` | table | no | The flash part the board carries, for an MCU whose flash is a board part: `part` (cite its datasheet in a comment) and `erase_regions` in the shape of the MCU's `[execution]` `erase_regions` (`start`, `len`, `unit`, `unit_max_ms`). They replace the MCU's regions whole for nodes on this board; checked with the MCU's watchdog and slot layouts. Left out: the MCU's regions. The node and the host plan every erase from the same regions. |
 | `[clock]` | table | no | What drives the MCU's clock input on this board: `source` is `"internal"`, `{ crystal_hz = N }` or `{ external_hz = N }` (cite the schematic or datasheet that gives N in a comment). Left out: internal. Stage0, the DAGON boot loader and the app each run on their MCU's setup for this source (`[[stage0.clock]]`, `[[bootcore.clock]]`, `[[app.clock]]`), or on the internal one when none matches; an MCU without those stages does not use it. |
 <!-- end of generated table -->
@@ -216,7 +216,12 @@ the board id, flash size, default link, boot LED and halt pattern, bus
 speeds and devices as constants (`def.rs`), and every named pin, bus and
 bus pin as a HAL type with a `take!(p.<name>)` macro (`pins.rs`), and each
 device as a `dagon_events::Device` bus port capability (`devices.rs`, the
-only way one is made). The build reruns when any definition the validation
+only way one is made). A device with a `probe` is a `dagon_events::Probed`,
+whose `find` returns the `Device` only when the probe found it. The
+candidates of a `place` are an enum named after the place with a
+`CANDIDATES` table: `dagon_events::fitted` probes them in the definition's
+order and returns the one fitted, or `None` when none answers. A device that
+may not be fitted has no address constant and no `Device` constant. The build reruns when any definition the validation
 read changes. The MCU packages' boot images read the board's `[boot]` the
 same way (`boot_build`), for the board of the node they are built for:
 `DAGON_BOOT_CRATE` names the node's boot crate (`boot/<id>/` of the project,
@@ -474,6 +479,7 @@ and the fields that may not change:
 | board | `device` | merged entry by entry by key (`id`) |
 | board | `device.regs` | merged entry by entry by key (`name`) |
 | board | `device.writable` | replaced whole when given |
+| board | `device.probe` | replaced whole when given |
 | board | `boot.action` | replaced whole when given |
 | board | `boot.action.ops` | replaced whole when given |
 | board | `flash` | merged key by key; a new `part` comes with the whole table |

@@ -164,6 +164,20 @@ class Tree:
         for node in self.loose:
             yield from node.walk()
 
+    def delete(self, gone):
+        """Takes node `gone` (None: nothing) and what is under it out of
+        the tree, with their labels."""
+        if gone is None:
+            return
+        for parent in list(self.nodes()):
+            for name in [n for n, c in parent.children.items() if c is gone]:
+                del parent.children[name]
+        self.loose = [n for n in self.loose if n is not gone]
+        for dropped in gone.walk():
+            for label in dropped.labels:
+                if self.labels.get(label) is dropped:
+                    del self.labels[label]
+
     def referred(self, label):
         if label not in self.labels:
             node = Node()
@@ -228,16 +242,17 @@ def fill(tree, node, text, i):
         # A printed name after the `;` belongs to the row before it.
         after = re.match(r"[ \t]*\x01[^\x02]*\x02", text[end + 1 :])
         i = end + 1 + (after.end() if after else 0)
+        if head.startswith("/delete-node/"):
+            gone = head.split("/", 2)[2].strip()
+            if gone.startswith("&"):
+                tree.delete(tree.labels.get(gone[1:]))
+            elif node is not None:
+                tree.delete(node.children.get(gone))
+            continue
         if node is None or not head:
             continue
         if head.startswith("/delete-property/"):
             node.props.pop(head.split("/", 2)[2].strip(), None)
-        elif head.startswith("/delete-node/"):
-            gone = head.split("/", 2)[2].strip()
-            for dropped in (n for c in [node.children.pop(gone, None)] if c for n in c.walk()):
-                for label in dropped.labels:
-                    if tree.labels.get(label) is dropped:
-                        del tree.labels[label]
         elif not head.startswith("/"):
             name, _, value = head.partition("=")
             node.props[name.split(":")[-1].strip()] = value + (after.group(0) if after else "")

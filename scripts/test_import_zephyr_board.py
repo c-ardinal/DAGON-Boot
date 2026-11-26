@@ -209,6 +209,16 @@ class Stated(unittest.TestCase):
         )
         self.assertNotIn("bus", b)
 
+    def test_a_node_deleted_by_its_label_is_gone(self):
+        b = self.board(
+            "&flash0 { reg = <0 0x1000>; };\n"
+            "/ { leds { compatible = \"gpio-leds\";\n"
+            "    led0: led_0 { gpios = <&gpio0 25 0>; }; led1: led_1 { gpios = <&gpio0 8 0>; }; }; };\n"
+            "/delete-node/ &led0;\n"
+            "/ { leds { /delete-node/ &led1; }; };\n"
+        )
+        self.assertNotIn("pin", b)
+
     def test_an_include_inside_a_block_comment_is_not_read(self):
         with tempfile.TemporaryDirectory() as d:
             path = Path(d) / "boards/x/x.dts"

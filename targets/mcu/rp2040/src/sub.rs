@@ -12,17 +12,26 @@ const PULSE: Duration = Duration::from_millis(10);
 pub struct SubLines<'d> {
     nrst: Flex<'d>,
     boot0: Output<'d>,
+    /// The GPIO numbers of NRST and BOOT0.
+    pins: (u8, u8),
 }
 
 impl<'d> SubLines<'d> {
     pub fn new(nrst: Peri<'d, impl Pin>, boot0: Peri<'d, impl Pin>) -> Self {
+        let pins = (nrst.pin(), boot0.pin());
         let mut nrst = Flex::new(nrst);
         nrst.set_low();
         nrst.set_as_input();
         SubLines {
             nrst,
             boot0: Output::new(boot0, Level::Low),
+            pins,
         }
+    }
+
+    /// The GPIO numbers of NRST and BOOT0.
+    pub fn pins(&self) -> (u8, u8) {
+        self.pins
     }
 
     /// BOOT0 as last set (I2C_RAW is only allowed while it is high).

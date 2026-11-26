@@ -235,6 +235,22 @@ impl TopoLink {
     }
 }
 
+/// One node a relay recovers through its ROM loader
+/// ([`TopologyView::rom_peers`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RomPeer {
+    /// The node recovered through its ROM loader.
+    pub node: u8,
+    /// The relay's `[[link_port]]` index the loader is reached on.
+    pub port: u8,
+    /// The loader's 7-bit I2C address.
+    pub rom_addr: u8,
+    /// The relay's GPIOs on the node's NRST and BOOT lines; [`NONE`] where
+    /// the link names none on the relay.
+    pub nrst_pin: u8,
+    pub boot_pin: u8,
+}
+
 fn check_counts(nodes: usize, links: usize, constraints: usize) -> Result<(), FormatError> {
     let ok =
         (1..=MAX_NODES).contains(&nodes) && links <= MAX_LINKS && constraints <= MAX_CONSTRAINTS;
@@ -363,21 +379,45 @@ impl<'a> TopologyView<'a> {
         TopoLink::parse(&self.raw[off..off + LINK_SIZE])
     }
 
-    /// The ROM recovery peer of `node`: the node at the other end of the
-    /// first link of `node` that reaches a ROM I2C loader
-    /// ([`TopoLink::reaches_rom_i2c`]) whose MCU has one
-    /// (`has_loader(mcu_id)`). The relay at `node` is built for that
-    /// loader's address; the host takes the ROM path to a node only as a
-    /// peer. The reset and boot lines are not part of it: the board wires
-    /// them.
-    pub fn rom_peer(&self, node: u8, has_loader: impl Fn(McuId) -> bool) -> Option<u8> {
-        (0..self.link_count())
-            .map(|i| self.link(i))
-            .filter(TopoLink::reaches_rom_i2c)
-            .filter_map(|l| l.other(node).map(|e| e.node))
-            .find(|&p| {
-                usize::from(p) < self.node_count() && has_loader(self.node(usize::from(p)).mcu_id)
-            })
+    /// The nodes the relay at `node` recovers through their ROM loaders:
+    /// for each of its links that reaches a ROM I2C loader
+    /// ([`TopoLink::reaches_rom_i2c`]), the node at the other end whose MCU
+    /// has one (`loader(mcu_id)`: its address), in link order. The relay
+    /// at `node` is built to reach each loader by its port and address
+    /// (peers with both alike are one target of the relay); the host takes
+    /// the ROM path to a node only as one of these.
+    pub fn rom_peers<'s>(
+        &'s self,
+        node: u8,
+        loader: impl Fn(McuId) -> Option<u8> + 's,
+    ) -> impl Iterator<Item = RomPeer> + 's {
+        (0..self.link_count()).filter_map(move |i| self.rom_peer_at(node, i, &loader))
+    }
+
+    /// The node link `i` lets the relay at `node` recover.
+    fn rom_peer_at(
+        &self,
+        node: u8,
+        i: usize,
+        loader: &impl Fn(McuId) -> Option<u8>,
+    ) -> Option<RomPeer> {
+        let l = self.link(i);
+        if !l.reaches_rom_i2c() {
+            return None;
+        }
+        let (own, peer) = (l.end(node)?, l.other(node)?);
+        if usize::from(peer.node) >= self.node_count() {
+            return None;
+        }
+        let rom_addr = loader(self.node(usize::from(peer.node)).mcu_id)?;
+        let lines = l.ends.get(usize::from(l.gpio_end)).map(|e| e.node) == Some(node);
+        Some(RomPeer {
+            node: peer.node,
+            port: own.port,
+            rom_addr,
+            nrst_pin: if lines { l.nrst_pin } else { NONE },
+            boot_pin: if lines { l.boot_pin } else { NONE },
+        })
     }
 
     /// Panics if `i >= constraint_count()`.

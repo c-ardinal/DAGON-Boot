@@ -909,7 +909,7 @@ pub fn gen_project(config: &Path, only: &[String], force: bool) -> Result<Vec<St
         src: &tables.dagon,
         check_boot_graph: true,
         link_addr: &|id| link_addr(&t, id),
-        recovery_mcu: &|id| dagon_topology::recovery_peer_mcu(&reg, &t, id),
+        recovery: &|id| dagon_topology::recovery_targets(&reg, &t, id),
     };
     out.extend(crate::extgen::write_nodes(
         &reg,

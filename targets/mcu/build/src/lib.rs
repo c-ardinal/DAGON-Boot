@@ -117,16 +117,19 @@ pub fn definition() -> Definition {
     let dir = manifest_dir();
     let def = Definition::parse(&node_definition_text(), |rel| read(&dir.join(rel)));
     let recovery = env::var_os(BOOT_FOLDER_ENV).and_then(|f| recovery_text(Path::new(&f)));
-    let rs = def.rs() + &recovery_rom_rs(recovery.as_deref());
+    let rs = def.rs() + &recovery_targets_rs(recovery.as_deref(), &def.t);
     fs::write(out_dir().join("definition.rs"), rs).unwrap();
     def
 }
 
-/// The MCU definition of the node on this node's recovery lines (the node
-/// its relay resets and reaches through its ROM loader), with the
-/// project's overrides applied, as `dagon gen` writes it beside
-/// [`NODE_DEFINITION`]; absent when no node is there.
-pub const RECOVERY_DEFINITION: &str = "recovery-mcu.toml";
+/// The ROM loaders this node's relay reaches to recover nodes, one
+/// `[[target]]` each (`port`, the relay's `[[link_port]]` name; `rom_addr`,
+/// the loader's address from the recovered node's MCU definition with the
+/// project's overrides applied; `nrst` and `boot`, the relay's GPIOs on
+/// the node's lines where the topology names them; `nodes`, who is
+/// recovered through it), as `dagon gen` writes it beside
+/// [`NODE_DEFINITION`]; absent when the node recovers none.
+pub const RECOVERY_DEFINITION: &str = "recovery.toml";
 
 /// The text of the boot folder's [`RECOVERY_DEFINITION`], if it holds one
 /// ([`definition`] has checked the folder's hashes first).
@@ -154,27 +157,57 @@ fn recovery_watch(folder: &Path) -> PathBuf {
     }
 }
 
-/// `RECOVERY_ROM_ADDR` of the node whose boot folder is `folder`, as
-/// [`definition`] generates it.
-pub fn recovery_rom_addr_rs(folder: &Path) -> String {
-    recovery_rom_rs(recovery_text(folder).as_deref())
+/// `RECOVERY_TARGETS` of the node whose boot folder is `folder`, as
+/// [`definition`] generates it from the folder's [`NODE_DEFINITION`] and
+/// [`RECOVERY_DEFINITION`].
+pub fn recovery_targets_of(folder: &Path) -> String {
+    let def: toml::Table = read(&folder.join(NODE_DEFINITION))
+        .parse()
+        .expect("the node's MCU definition");
+    recovery_targets_rs(recovery_text(folder).as_deref(), &def)
 }
 
-/// `RECOVERY_ROM_ADDR`, the I2C address of the ROM loader the relay's
-/// recovery reaches: `[rom_i2c] addr` of the recovery node's definition
-/// (`recovery`); `None` without one or for an MCU with no ROM loader.
-fn recovery_rom_rs(recovery: Option<&str>) -> String {
-    let addr = recovery.and_then(|text| {
-        let t: toml::Table = text.parse().expect("the recovery node's MCU definition");
-        let a = t.get("rom_i2c")?.get("addr")?;
-        Some(u8::try_from(int(a, "[rom_i2c] addr")).expect("[rom_i2c] addr fits a u8"))
+/// `RECOVERY_TARGETS`, the nodes the relay recovers through their ROM
+/// loaders: one entry per `[[target]]` of the boot folder's
+/// [`RECOVERY_DEFINITION`] (`recovery`), its `port` as the id of the relay
+/// link on that port (`[[relay_link]]` of the node's definition `def`);
+/// empty without the file. A target on a port that is no relay link of
+/// this MCU stops the build.
+fn recovery_targets_rs(recovery: Option<&str>, def: &toml::Table) -> String {
+    let table: toml::Table = recovery.map_or_else(toml::Table::new, |text| {
+        text.parse().expect("the node's recovery targets")
     });
+    let rows: Vec<String> = array(&table, "target")
+        .iter()
+        .map(|t| {
+            let port = text(t, "port", "[[target]]");
+            let link = array(def, "relay_link")
+                .iter()
+                .find(|l| text(l, "port", "[[relay_link]]") == port)
+                .unwrap_or_else(|| panic!("{RECOVERY_DEFINITION}: port '{port}' is no relay link"));
+            let link = int(link.get("id").expect("[[relay_link]] id"), "id");
+            let byte = |key: &str| {
+                t.get(key).map(|v| {
+                    u8::try_from(int(v, key)).unwrap_or_else(|_| panic!("{key} fits a u8"))
+                })
+            };
+            let addr = byte("rom_addr").expect("[[target]] rom_addr");
+            let pin = |key| byte(key).map_or("None".into(), |p| format!("Some({p})"));
+            format!(
+                "    dagon_port::RecoveryTargetDef {{ link: {link}, rom_addr: {addr:#04x}, \
+                 nrst: {}, boot: {} }},\n",
+                pin("nrst"),
+                pin("boot")
+            )
+        })
+        .collect();
     format!(
-        "/// The I2C address of the ROM loader on this node's recovery lines: the\n\
-         /// `[rom_i2c] addr` of that node's MCU definition (`None`: no node there,\n\
-         /// or its MCU has no ROM loader).\n\
-         pub const RECOVERY_ROM_ADDR: Option<u8> = {};\n",
-        addr.map_or("None".into(), |a| format!("Some({a:#04x})"))
+        "/// The nodes this node recovers through their ROM loaders, from its\n\
+         /// topology (`dagon gen`): the relay link and the address each loader\n\
+         /// answers on, and this node's GPIOs on its NRST and BOOT lines.\n\
+         pub const RECOVERY_TARGETS: [dagon_port::RecoveryTargetDef; {}] = [\n{}];\n",
+        rows.len(),
+        rows.concat()
     )
 }
 
@@ -1366,19 +1399,34 @@ mod tests {
         );
     }
 
-    /// The address of the ROM loader on this node's recovery lines comes
-    /// from the MCU definition of the node there (`[rom_i2c] addr`), which
-    /// the boot folder holds beside the node's own; without one, or for an
-    /// MCU with no ROM loader, there is none. An unlisted one is refused.
+    /// The relay's recovery targets come from the boot folder's list, one
+    /// per `[[target]]`: the relay link by the id the node's definition
+    /// gives the target's port, the loader's address and the lines the
+    /// topology names. Without the list there is none; a target on a port
+    /// the MCU does not relay over stops the build. An unlisted file is
+    /// refused.
     #[test]
-    fn the_recovery_rom_address_comes_from_the_linked_definition() {
-        let some = "pub const RECOVERY_ROM_ADDR: Option<u8> = Some(0x3b);\n";
-        let none = "pub const RECOVERY_ROM_ADDR: Option<u8> = None;\n";
-        let linked = "id = \"m\"\n[rom_i2c]\naddr = 0x3B\n";
-        let rs = recovery_rom_rs(Some(linked));
-        assert!(rs.contains(some), "{rs}");
-        assert!(recovery_rom_rs(Some("id = \"m\"\n")).contains(none));
-        assert!(recovery_rom_rs(None).contains(none));
+    fn the_recovery_targets_come_from_the_boot_folders_list() {
+        let def: toml::Table = "[[relay_link]]\nid = 4\nport = \"i2c0\"\n\
+                                [[relay_link]]\nid = 7\nport = \"i2c1\"\n"
+            .parse()
+            .unwrap();
+        let linked = "[[target]]\nport = \"i2c1\"\nrom_addr = 0x3B\nnrst = 18\nboot = 28\n\
+                      [[target]]\nport = \"i2c0\"\nrom_addr = 0x4A\n";
+        let rs = recovery_targets_rs(Some(linked), &def);
+        assert!(
+            rs.contains(
+                "pub const RECOVERY_TARGETS: [dagon_port::RecoveryTargetDef; 2] = [\n    \
+                 dagon_port::RecoveryTargetDef { link: 7, rom_addr: 0x3b, nrst: Some(18), boot: Some(28) },\n    \
+                 dagon_port::RecoveryTargetDef { link: 4, rom_addr: 0x4a, nrst: None, boot: None },\n];\n"
+            ),
+            "{rs}"
+        );
+        let none = "pub const RECOVERY_TARGETS: [dagon_port::RecoveryTargetDef; 0] = [\n];\n";
+        assert!(recovery_targets_rs(None, &def).contains(none));
+        let stray = "[[target]]\nport = \"pio-uart\"\nrom_addr = 0x3B\n";
+        let refused = std::panic::catch_unwind(|| recovery_targets_rs(Some(stray), &def));
+        assert!(refused.is_err());
 
         let d = std::env::temp_dir().join(format!("dagon-mcu-build-rec-{}", std::process::id()));
         let _ = fs::remove_dir_all(&d);

@@ -23,6 +23,7 @@ use embassy_executor::Spawner;
 use embassy_rp::peripherals::{I2C0, I2C1, PIO0, PIO1, USB};
 use embassy_rp::Peri;
 use embassy_time::{Instant, Timer};
+use heapless::Vec;
 use static_cell::StaticCell;
 
 use crate::links::{I2cLink, PioStream, RpI2c};
@@ -31,7 +32,7 @@ use crate::sub::SubLines;
 use crate::uart::UartLink;
 use crate::watchdog::{feed_forever, now_ms, Guard, Level, Watch};
 use crate::{
-    RECOVERY_ROM_ADDR, RELAY_LINKS, RELAY_LINK_BUFFERS, RELAY_LINK_I2C0, RELAY_LINK_I2C1,
+    RECOVERY_TARGETS, RELAY_LINKS, RELAY_LINK_BUFFERS, RELAY_LINK_I2C0, RELAY_LINK_I2C1,
     RELAY_LINK_PIO_UART, RELAY_LINK_PIO_UART1,
 };
 
@@ -59,12 +60,39 @@ pub struct Links {
     pub uart: Option<PioStream<'static, PIO0, 0, 1>>,
     /// Port `pio-uart1`: PIO1's state machines 0 (TX) and 1 (RX).
     pub uart1: Option<PioStream<'static, PIO1, 0, 1>>,
-    /// NRST / BOOT0 of an STM32 node on the link [`Links::lines_link`]
-    /// (SUBCTL, I2C_RAW).
-    pub lines: Option<SubLines<'static>>,
-    /// The relay link the node on `lines` answers on, its ROM loader
-    /// included: the id of `i2c0` or of `i2c1`.
-    pub lines_link: u8,
+    /// NRST / BOOT0 of the STM32 nodes the board wires (SUBCTL, I2C_RAW):
+    /// one per I2C link at most. The relay recovers the nodes its topology
+    /// names (`RECOVERY_TARGETS`), each through the lines wired for its
+    /// link ([`dagon_port::RecoveryTargetDef::wired_by`]).
+    pub lines: [Option<RecoveryLines>; RECOVERY_LINES],
+}
+
+/// The most nodes a board wires recovery lines for: one per I2C link.
+pub const RECOVERY_LINES: usize = 2;
+
+/// NRST / BOOT0 of one STM32 node, and the relay link that node answers
+/// on, its ROM loader included: the id of `i2c0` or of `i2c1`.
+pub struct RecoveryLines {
+    pub lines: SubLines<'static>,
+    pub link: u8,
+}
+
+impl RecoveryLines {
+    /// Lines of the node on `i2c0`.
+    pub fn on_i2c0(lines: SubLines<'static>) -> Self {
+        RecoveryLines {
+            lines,
+            link: RELAY_LINK_I2C0,
+        }
+    }
+
+    /// Lines of the node on `i2c1`.
+    pub fn on_i2c1(lines: SubLines<'static>) -> Self {
+        RecoveryLines {
+            lines,
+            link: RELAY_LINK_I2C1,
+        }
+    }
 }
 
 impl Links {
@@ -75,8 +103,7 @@ impl Links {
             i2c1: None,
             uart: None,
             uart1: None,
-            lines: None,
-            lines_link: RELAY_LINK_I2C0,
+            lines: [None, None],
         }
     }
 }
@@ -276,7 +303,6 @@ pub fn start<B: BoardDef, const N: usize>(
         setup.app,
     );
     let watch = RpWatch(guard);
-    let lines_link = links.lines_link;
     let uart = links
         .uart
         .map(|s| UartLink::new(s, now_ms as fn() -> u64, RELAY_LINK_PIO_UART));
@@ -295,21 +321,30 @@ pub fn start<B: BoardDef, const N: usize>(
         link: RELAY_LINKS[i],
         port: ports[i],
     }));
-    // The ROM loader of the node on the recovery lines answers on the
-    // link the board names for them, at the address its MCU definition gives (generated); without
-    // one there is no recovery target.
-    static RECOVERY: StaticCell<Option<Recovery<SubLines<'static>>>> = StaticCell::new();
-    let recovery =
-        RECOVERY.init(
-            links
-                .lines
-                .zip(RECOVERY_ROM_ADDR)
-                .map(|(lines, rom_addr)| Recovery {
-                    lines,
-                    link: lines_link,
-                    rom_addr,
-                }),
-        );
+    // One recovery target per node the topology gives this relay
+    // (generated: the link and address its ROM loader answers on), each
+    // with the lines the board wires for it; a target the board wires no
+    // lines for is not served.
+    static RECOVERY: StaticCell<Vec<Recovery<SubLines<'static>>, RECOVERY_LINES>> =
+        StaticCell::new();
+    let mut wired = links.lines;
+    let recovery = RECOVERY.init(Vec::new());
+    for t in RECOVERY_TARGETS {
+        let lines = wired.iter_mut().find_map(|w| {
+            let (nrst, boot) = w.as_ref()?.lines.pins();
+            t.wired_by(w.as_ref()?.link, nrst, boot)
+                .then(|| w.take())
+                .flatten()
+        });
+        if let Some(l) = lines {
+            // One entry per set of lines: the list holds them all.
+            let _ = recovery.push(Recovery {
+                lines: l.lines,
+                link: t.link,
+                rom_addr: t.rom_addr,
+            });
+        }
+    }
     let relay = RpRelay {
         agent: RpAgent(agent),
         links: routes,

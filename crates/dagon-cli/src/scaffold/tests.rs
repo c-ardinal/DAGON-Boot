@@ -390,16 +390,22 @@ fn gen_with(name: &str, id: &str, entry: &str, extra: &str) -> (PathBuf, Vec<Str
     (dir, lines)
 }
 
-/// `dagon gen` gives the hub the definition, as the project resolves it,
-/// of the node its I2C ROM link reaches, whether or not the hub's end names
-/// the reset and boot lines (its board wires them): the relay's build takes
-/// that loader's address. The host takes the ROM path to the same node.
+/// `dagon gen` gives the hub the node its I2C ROM link reaches, with its
+/// loader's address as the project resolves it, whether or not the hub's
+/// end names the reset and boot lines (its board wires them): the relay's
+/// build takes the link, the address and the lines the topology names.
+/// The host takes the ROM path to the same node.
 #[test]
 fn gen_gives_the_relay_its_rom_link_peer_with_or_without_named_lines() {
-    use dagon_topology::defs::boot_folder::recovery_rom_addr_rs;
+    use dagon_topology::defs::boot_folder::recovery_targets_of;
     let moved = "\n[mcu_override.stm32f401re.rom_i2c]\naddr = 0x3B\n";
     let without = SAMPLE.replace(", nrst: 18, boot: 28", "");
-    for (name, yaml) in [("rec-lines", SAMPLE), ("rec-nolines", without.as_str())] {
+    let named = "nrst: Some(18), boot: Some(28)";
+    let unnamed = "nrst: None, boot: None";
+    for (name, yaml, lines) in [
+        ("rec-lines", SAMPLE, named),
+        ("rec-nolines", without.as_str(), unnamed),
+    ] {
         let d = tmp(name);
         let dir = d.join("proj");
         new_project(&dir, "proj", yaml, &d.join("keys"), &dev()).unwrap();
@@ -407,11 +413,9 @@ fn gen_gives_the_relay_its_rom_link_peer_with_or_without_named_lines() {
         let toml = read(&dir, crate::config::CONFIG_FILE) + moved;
         std::fs::write(&config, toml).unwrap();
         gen_project(&config, &["hub".to_string()], false).unwrap_or_else(|e| panic!("{e}"));
-        let rs = recovery_rom_addr_rs(&dir.join("boot/hub"));
-        assert!(
-            rs.contains("pub const RECOVERY_ROM_ADDR: Option<u8> = Some(0x3b);\n"),
-            "{name}: {rs}"
-        );
+        let rs = recovery_targets_of(&dir.join("boot/hub"));
+        let row = format!("RecoveryTargetDef {{ link: 1, rom_addr: 0x3b, {lines} }},\n");
+        assert!(rs.contains(&row), "{name}: {rs}");
         let _ = std::fs::remove_dir_all(&d);
     }
 }

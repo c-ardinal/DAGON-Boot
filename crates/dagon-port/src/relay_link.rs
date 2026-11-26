@@ -26,6 +26,31 @@ impl Addressing {
     }
 }
 
+/// One node a relay recovers through its ROM loader: the relay link and
+/// the address the loader answers on, and the relay's GPIOs on the node's
+/// NRST and BOOT lines where the topology names them. An MCU package's
+/// build generates them (`RECOVERY_TARGETS`) from the node's topology.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RecoveryTargetDef {
+    /// Id of the relay link ([`RelayLinkDef::id`]).
+    pub link: u8,
+    /// The loader's 7-bit I2C address.
+    pub rom_addr: u8,
+    pub nrst: Option<u8>,
+    pub boot: Option<u8>,
+}
+
+impl RecoveryTargetDef {
+    /// Whether lines a board wires for a node on relay link `link`, on the
+    /// GPIOs `nrst` and `boot`, are this target's: the link is its link,
+    /// and each line the topology names is on that GPIO.
+    pub fn wired_by(&self, link: u8, nrst: u8, boot: u8) -> bool {
+        self.link == link
+            && self.nrst.is_none_or(|p| p == nrst)
+            && self.boot.is_none_or(|p| p == boot)
+    }
+}
+
 /// One link a node relays over (RELAY `link`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct RelayLinkDef {
@@ -68,6 +93,30 @@ mod tests {
         addressing: Addressing::SevenBit,
         max_payload: 32,
     };
+
+    /// Lines are a target's when they are wired for its link and on every
+    /// GPIO the topology names; a target that names none takes the lines
+    /// of its link.
+    #[test]
+    fn a_target_takes_the_lines_wired_for_its_link_and_gpios() {
+        let named = RecoveryTargetDef {
+            link: 1,
+            rom_addr: 0x3b,
+            nrst: Some(18),
+            boot: Some(28),
+        };
+        assert!(named.wired_by(1, 18, 28));
+        assert!(!named.wired_by(3, 18, 28));
+        assert!(!named.wired_by(1, 26, 28));
+        assert!(!named.wired_by(1, 18, 27));
+        let unnamed = RecoveryTargetDef {
+            nrst: None,
+            boot: None,
+            ..named
+        };
+        assert!(unnamed.wired_by(1, 26, 27));
+        assert!(!unnamed.wired_by(3, 26, 27));
+    }
 
     #[test]
     fn a_links_buffer_is_one_frame_of_its_largest_payload() {

@@ -21,10 +21,10 @@ use embassy_usb::{Handler, UsbDevice};
 use portable_atomic::{AtomicU32, Ordering};
 use static_cell::StaticCell;
 
-use crate::frames::FrameReader;
 use crate::watchdog::Watch;
 use dagon_format::SigVerifier;
 use dagon_mcu_common::link::{Kind, Link, LinkError, Reconnect};
+use dagon_mcu_common::packets::{self, PacketFrames, PacketPort};
 use dagon_node::serve::{serve, Exit, ServeHost};
 
 // This package owns the USB interrupt: apps must not bind USBCTRL_IRQ.
@@ -78,11 +78,7 @@ pub fn new(
     let class = CdcAcmClass::new(&mut builder, USB_STATE.init(State::new()), USB_PACKET);
     let link = CdcLink {
         class,
-        rx: FrameReader::new(max_payload::USB),
-        pkt: [0; USB_PACKET as usize],
-        at: 0,
-        len: 0,
-        last: 0,
+        rx: PacketFrames::new(max_payload::USB),
     };
     (builder.build(), link)
 }
@@ -223,16 +219,25 @@ impl dagon_mcu_common::reattach::Pullup for SiePullup {
     }
 }
 
-/// DAGON frames over the CDC serial class.
+/// The CDC data interface as the packet pipe the frames go through.
+struct CdcPort<'a>(&'a mut Cdc);
+
+impl PacketPort for CdcPort<'_> {
+    type Error = EndpointError;
+    async fn read_packet(&mut self, buf: &mut [u8]) -> Result<usize, EndpointError> {
+        self.0.wait_connection().await;
+        self.0.read_packet(buf).await
+    }
+    async fn write_packet(&mut self, data: &[u8]) -> Result<(), EndpointError> {
+        self.0.write_packet(data).await
+    }
+}
+
+/// DAGON frames over the CDC serial class (cut and written by
+/// `dagon_mcu_common::packets`, which holds the host tests).
 pub struct CdcLink {
     class: Cdc,
-    rx: FrameReader<{ MAX_FRAME + USB_PACKET as usize }>,
-    pkt: [u8; USB_PACKET as usize],
-    /// Unread part of `pkt`: `at..len`.
-    at: usize,
-    len: usize,
-    /// Length of the frame handed out last (dropped on the next read).
-    last: usize,
+    rx: PacketFrames<{ MAX_FRAME + USB_PACKET as usize }, { USB_PACKET as usize }>,
 }
 
 impl CdcLink {
@@ -262,46 +267,14 @@ impl Link for CdcLink {
 
     /// Waits for the next complete frame from the host (never times out).
     async fn read_frame(&mut self) -> Result<&[u8], LinkError> {
-        if self.last > 0 {
-            self.rx.consume(self.last);
-            self.last = 0;
-        }
-        loop {
-            if let Some(n) = self.rx.poll() {
-                self.last = n;
-                return Ok(self.rx.frame(n));
-            }
-            if self.at < self.len {
-                self.at += self.rx.push(&self.pkt[self.at..self.len]);
-                continue;
-            }
-            self.class.wait_connection().await;
-            match self.class.read_packet(&mut self.pkt).await {
-                Ok(n) => (self.at, self.len) = (0, n),
-                Err(_) => {
-                    self.rx.clear();
-                    (self.at, self.len) = (0, 0);
-                }
-            }
-        }
+        Ok(self.rx.read_frame(&mut CdcPort(&mut self.class)).await)
     }
 
     /// Writes one frame (a zero-length packet ends a frame that fills its
     /// last packet); gives up if the host stops reading.
     async fn write_frame(&mut self, data: &[u8]) -> Result<(), LinkError> {
-        if data.is_empty() {
-            return Ok(());
-        }
-        let class = &mut self.class;
-        let write = async {
-            for chunk in data.chunks(USB_PACKET as usize) {
-                class.write_packet(chunk).await?;
-            }
-            if data.len().is_multiple_of(USB_PACKET as usize) {
-                class.write_packet(&[]).await?;
-            }
-            Ok::<(), EndpointError>(())
-        };
+        let mut port = CdcPort(&mut self.class);
+        let write = packets::write_frame(&mut port, data, USB_PACKET as usize);
         match with_timeout(USB_WRITE_TIMEOUT, write).await {
             Ok(Ok(())) => Ok(()),
             _ => Err(LinkError::Closed),

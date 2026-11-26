@@ -32,6 +32,7 @@ pub mod links;
 pub mod mailbox;
 pub mod reset;
 mod store;
+pub mod target_link;
 pub use store::KindSStore;
 #[cfg(target_os = "none")]
 pub mod trial;

@@ -7,7 +7,9 @@
 //! - [`liveness`]: deadline bookkeeping that gates watchdog feeding, with
 //!   preemption accounting for two-level task layouts;
 //! - [`frames`]: DAGON frames cut out of a byte stream (USB CDC, UART);
+//! - [`packets`]: DAGON frames over a packet pipe (a USB CDC interface);
 //! - [`uart`]: request/response over a byte stream (bounded, resyncing);
+//! - [`i2c_link`]: request/response with a node's I2C mailbox (bounded);
 //! - [`reattach`]: when a USB device drops off the bus and attaches again
 //!   because the host never reset it;
 //! - [`mapped`]: read-only `Flash` over memory-mapped flash;
@@ -26,9 +28,11 @@ pub use dagon_format as __format;
 #[cfg(any(test, feature = "boot-time"))]
 pub mod boot_time;
 pub mod frames;
+pub mod i2c_link;
 pub mod link;
 pub mod liveness;
 pub mod mapped;
+pub mod packets;
 pub mod reattach;
 pub mod shared;
 pub mod tag;

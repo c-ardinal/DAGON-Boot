@@ -97,10 +97,9 @@ def read_tree(root, start):
             if any(a <= m.start() < b for a, b in commented):
                 return m.group(0)
             quoted, angled = m.group(1), m.group(2)
-            if quoted:
-                found = [path.parent / quoted]
-            else:
-                found = [root / r / angled for r in INCLUDE_ROOTS]
+            # A quoted file is looked for beside the file first.
+            found = [path.parent / quoted] if quoted else []
+            found += [root / r / (quoted or angled) for r in INCLUDE_ROOTS]
             for f in found:
                 if f.is_file():
                     return load(f.resolve())

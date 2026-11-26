@@ -253,6 +253,22 @@ class Stated(unittest.TestCase):
         )
         self.assertEqual(b["pin"], [{"pin": "GPIO25", "name": "led0"}])
 
+    def test_a_quoted_include_not_beside_the_file_is_looked_for_in_the_roots(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / "boards/x/x.dts"
+            path.parent.mkdir(parents=True)
+            common = Path(d) / "dts/common"
+            common.mkdir(parents=True)
+            (common / "leds.dtsi").write_text(
+                "/ { leds { compatible = \"gpio-leds\"; led0: led_0 { gpios = <&gpio0 25 0>; }; }; };\n",
+                encoding="utf-8",
+            )
+            path.write_text(
+                "#include \"leds.dtsi\"\n&flash0 { reg = <0 0x1000>; };\n", encoding="utf-8"
+            )
+            b = tomllib.loads(imp.convert(d, path, "x", "rp2040", TAG))["board"]["x"]
+        self.assertEqual(b["pin"], [{"pin": "GPIO25", "name": "led0"}])
+
     def test_an_include_inside_a_block_comment_is_not_read(self):
         with tempfile.TemporaryDirectory() as d:
             path = Path(d) / "boards/x/x.dts"

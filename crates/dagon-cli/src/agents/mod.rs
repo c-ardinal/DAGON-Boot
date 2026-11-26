@@ -16,6 +16,7 @@ use serde::Deserialize;
 use serde_json::Value;
 
 use crate::keystore::Keys;
+use crate::values::plain_id;
 
 const BUILTIN: [(&str, &str); 1] = [("claude.toml", include_str!("../../agents/claude.toml"))];
 /// The files the builtin agents' `[[project_files]]` name, by their `from`.
@@ -42,7 +43,6 @@ const PROJECT_OWN: [&str; 3] = ["dagon.toml", "topology.yaml", ".gitignore"];
 /// ~/.dagon/agents/*.toml: the user's own agents and ways.
 const USER_DIR: &str = "agents";
 const MAX_DEF_FILE: usize = 64 * 1024;
-const MAX_ID: usize = 32;
 const MAX_NAME: usize = 64;
 
 /// Largest prompt sent (system and user text together); a larger one is
@@ -169,13 +169,6 @@ impl AgentDef {
     pub fn label(&self) -> String {
         format!("{} ({})", self.name, self.provider)
     }
-}
-
-/// Lower-case letters, digits and '-', up to 32.
-pub fn plain_id(s: &str) -> bool {
-    (1..=MAX_ID).contains(&s.len())
-        && s.bytes()
-            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
 }
 
 fn plain_name(s: &str) -> bool {

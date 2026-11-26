@@ -17,17 +17,15 @@ MOD = re.compile(r"^\s*(?:pub(?:\([^)]*\))?\s+)?mod\s+(\w+)\s*;", re.M)
 CRATE_PATH = re.compile(r"\bcrate::(\w+)")
 CRATE_GROUP = re.compile(r"\bcrate::\{([^}]*)\}")
 ROOT_USE = re.compile(r"^\s*(?:pub(?:\([^)]*\))?\s+)?use\s+(?:self::)?(\w+)::([^;]+);", re.M | re.S)
-# Cycles not yet untangled (GitHub issue #61): each must stay as it is or
-# shrink; a new cycle anywhere, or a module joining one of these, fails.
-KNOWN = {
-    "crates/dagon-cli": [
-        ["agents", "consent", "keystore"],
-        ["conform", "demo", "deploy", "device", "doctor", "flash", "kept", "serve"],
-        ["extgen", "scaffold"],
-    ],
-}
+# Cycles a change could not yet untangle, by crate: each must stay as it
+# is or shrink; a new cycle anywhere, or a module joining one of these,
+# fails. None is left (GitHub issue #61).
+KNOWN = {}
 
-TEST_MOD = re.compile(r"#\[cfg\(test\)\]\s*(?:pub(?:\([^)]*\))?\s+)?mod\s+\w+\s*\{")
+# A comment or another attribute may stand between `#[cfg(test)]` and `mod`.
+TEST_MOD = re.compile(
+    r"#\[cfg\(test\)\]\s*(?:(?://[^\n]*|#\[[^\]]*\])\s*)*(?:pub(?:\([^)]*\))?\s+)?mod\s+\w+\s*\{"
+)
 
 
 def crates():
@@ -164,6 +162,11 @@ class ModuleCycles(unittest.TestCase):
         code = "fn f() { crate::a::x(); }\n#[cfg(test)]\nmod tests { fn g() { crate::b::y(); } }\n"
         self.assertNotIn("crate::b", strip_tests(code))
         self.assertIn("crate::a", strip_tests(code))
+        noted = "#[cfg(test)]\n// why\n#[allow(clippy::x)]\nmod tests { fn g() { crate::b::y(); } }\nuse crate::c;\n"
+        self.assertNotIn("crate::b", strip_tests(noted))
+        self.assertIn("crate::c", strip_tests(noted))
+        # A test module in its own file has no block to leave out.
+        self.assertIn("crate::c", strip_tests("#[cfg(test)]\nmod tests;\nuse crate::c;\n"))
 
 
 if __name__ == "__main__":

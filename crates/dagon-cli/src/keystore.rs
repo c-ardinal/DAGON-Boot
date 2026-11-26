@@ -10,11 +10,7 @@
 
 use std::sync::{Arc, OnceLock};
 
-use crate::cli::{AgentWay, AiKeyCmd};
-
 use keyring_core::{CredentialStore, Error};
-
-use crate::agents::{AgentDef, Agents, WayDef};
 
 /// The service every agent key is stored under.
 pub const SERVICE: &str = "dagon";
@@ -130,6 +126,11 @@ impl Keys {
         Keys(Err(unavailable(why)))
     }
 
+    /// Whether the store can be used; else why not.
+    pub fn usable(&self) -> Result<(), String> {
+        self.0.as_ref().map(|_| ()).map_err(Clone::clone)
+    }
+
     fn entry(&self, agent: &str, way: &str) -> Result<keyring_core::Entry, String> {
         let store = self.0.as_ref().map_err(Clone::clone)?;
         store
@@ -183,66 +184,6 @@ pub fn check_key(key: &str) -> Result<&str, String> {
         return Err("the key may hold only visible ASCII characters, no spaces".into());
     }
     Ok(k)
-}
-
-/// The way `--agent` / `--way` name; default: the first agent, its first
-/// way that takes a key.
-fn chosen<'a>(agents: &'a Agents, sel: &AgentWay) -> Result<(&'a AgentDef, &'a WayDef), String> {
-    let (a, w) = crate::consent::chosen(agents, sel, |w| w.transport.takes_key())?;
-    if !w.transport.takes_key() {
-        return Err(format!("{}/{} takes no key", a.id, w.id));
-    }
-    Ok((a, w))
-}
-
-/// `dagon ai key set|status|delete`.
-pub fn command(cmd: &AiKeyCmd) -> Result<(), String> {
-    let home = crate::consent::home()?;
-    let agents = Agents::load(Some(&home));
-    let keys = Keys::system();
-    match cmd {
-        AiKeyCmd::Set(sel) => {
-            let (a, w) = chosen(&agents, sel)?;
-            // Refused before anything is typed: no store, or no terminal to type into.
-            keys.0.as_ref().map_err(Clone::clone)?;
-            if !std::io::IsTerminal::is_terminal(&std::io::stdin()) {
-                return Err(
-                    "the key is typed in a terminal (without echo); run this in one".into(),
-                );
-            }
-            let prompt = format!("{}の{}のキー（表示されません）: ", a.name, w.name);
-            let key = rpassword::prompt_password(prompt).map_err(|_| {
-                "the key is read from a terminal (without echo); run this in one".to_string()
-            })?;
-            keys.set(&a.id, &w.id, &key)?;
-            println!("{}/{}: 登録済", a.id, w.id);
-            Ok(())
-        }
-        AiKeyCmd::Delete(sel) => {
-            let (a, w) = chosen(&agents, sel)?;
-            let removed = keys.delete(&a.id, &w.id)?;
-            println!(
-                "{}/{}: {}",
-                a.id,
-                w.id,
-                if removed { "削除済み" } else { "未登録" }
-            );
-            Ok(())
-        }
-        AiKeyCmd::Status => {
-            for a in &agents.list {
-                for w in a.ways.iter().filter(|w| w.transport.takes_key()) {
-                    let state = match keys.get(&a.id, &w.id) {
-                        Ok(Some(_)) => "登録済".to_string(),
-                        Ok(None) => "未登録".to_string(),
-                        Err(e) => format!("未登録 ({e})"),
-                    };
-                    println!("{}/{} ({}, {}): {state}", a.id, w.id, a.name, w.name);
-                }
-            }
-            Ok(())
-        }
-    }
 }
 
 #[cfg(test)]

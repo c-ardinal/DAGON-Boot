@@ -22,7 +22,6 @@ use crate::cli::FlashArgs;
 use crate::commands::{command_lines, node_mcu, provision_files, FirstWrite};
 use crate::config::{load_key, Config, ProvisionInputs};
 use crate::defs::read_topology;
-use crate::deploy::firmware_key;
 use crate::esp::Esp;
 use crate::flashdev::{self, Pick, DRIVE_WAIT};
 use crate::nodebuild;
@@ -462,7 +461,7 @@ fn inputs(
     if !in_source {
         same_source(cfg, node)?;
     }
-    let fw_key = firmware_key(cfg, key)?;
+    let fw_key = crate::config::firmware_key(cfg, key)?;
     let hex = dagon_sign::to_hex(&fw_key);
     log(&match paths {
         Paths::Full => format!("{node}: DAGON source {}", root.display()),
@@ -493,7 +492,7 @@ fn inputs(
 /// `version`, and its boot crate's for its boot core (none without a boot
 /// crate: an MCU without one has no boot core of its own).
 fn first_versions(cfg: &Config, node: &str) -> Result<(String, Option<String>), String> {
-    let app = crate::deploy::app_version(cfg, node, None)?;
+    let app = crate::srcver::app_version(cfg, node, None)?;
     let boot = cfg.base.join(crate::extgen::BOOT_CRATES).join(node);
     let core = boot
         .join("Cargo.toml")

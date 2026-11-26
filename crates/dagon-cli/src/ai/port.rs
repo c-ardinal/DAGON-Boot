@@ -308,7 +308,7 @@ pub(crate) fn run(
 #[allow(clippy::disallowed_methods)]
 pub fn command(a: &crate::cli::AiPortArgs) -> Result<(), String> {
     let home = crate::consent::home()?;
-    crate::consent::require_linked(&home)?;
+    crate::ailink::require_linked(&home)?;
     let description = match &a.input {
         Some(p) => Some(std::fs::read_to_string(p).map_err(|e| format!("cannot read {p}: {e}"))?),
         None => None,

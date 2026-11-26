@@ -45,7 +45,7 @@ const EXAMPLE_YAML: &str = include_str!("../../../topology/sample.yaml");
 #[allow(clippy::disallowed_methods)]
 pub fn topology(a: &crate::cli::AiTopologyArgs) -> Result<(), String> {
     let home = crate::consent::home()?;
-    crate::consent::require_linked(&home)?;
+    crate::ailink::require_linked(&home)?;
     let keys = crate::keystore::Keys::system();
     crate::agents::ready(&home, &keys)?;
     let description = match &a.input {

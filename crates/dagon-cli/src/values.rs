@@ -41,3 +41,14 @@ pub(crate) fn plain_name(s: &str) -> bool {
 pub(crate) fn has_slot_b_link(reg: &Registry, mcu: &str) -> bool {
     dagon_sign::image::slot_with(reg, mcu, image_kind::APP, slot_binding::B).is_some()
 }
+
+/// Longest id of an agent or a way.
+const MAX_ID: usize = 32;
+
+/// Lower-case letters, digits and '-', up to 32: the id of an agent or a
+/// way, as definitions and the consent file write it.
+pub(crate) fn plain_id(s: &str) -> bool {
+    (1..=MAX_ID).contains(&s.len())
+        && s.bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+}

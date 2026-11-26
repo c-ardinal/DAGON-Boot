@@ -52,6 +52,10 @@ ALLOWED = {
         3,
         "the built-in sample world of `dagon sim` (its images and ROM maps)",
     ),
+    "crates/dagon-sim/src/esp_rom.rs": (
+        1,
+        "the banner the simulated ROM serial loader prints, as the chip's ROM prints it",
+    ),
     "crates/dagon-sim/src/flash.rs": (
         4,
         "the simulator's fixed sample flashes",

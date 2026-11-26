@@ -82,6 +82,10 @@ fn word(data: &[u8], i: usize) -> u32 {
     u32::from_le_bytes(data[4 * i..4 * i + 4].try_into().expect("4 bytes"))
 }
 
+/// What the ROM prints when the chip resets into its serial loader.
+pub const BANNER: &[u8] =
+    b"ESP-ROM:esp32s3-20210327\r\nboot:0x0 (DOWNLOAD(USB/UART0))\r\nwaiting for download\r\n";
+
 impl SimEspRom {
     /// The loader just after the chip reset into it: `log` is what it has
     /// printed on the stream so far.

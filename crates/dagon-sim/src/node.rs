@@ -588,9 +588,7 @@ impl SimNode {
     pub fn enter_download(&mut self) {
         self.core = None;
         self.run = Run::Rom;
-        self.esp_rom = Some(SimEspRom::started(
-            b"ESP-ROM:esp32s3-20210327\r\nboot:0x0 (DOWNLOAD(USB/UART0))\r\nwaiting for download\r\n",
-        ));
+        self.esp_rom = Some(SimEspRom::started(crate::esp_rom::BANNER));
     }
 
     /// Whether its ROM serial loader holds its UART.

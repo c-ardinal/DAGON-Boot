@@ -250,12 +250,15 @@ const OPS: [Op; 7] = [
 ];
 
 /// A fault in a step: the flash operation `at` lands (`half`: half of it),
-/// then the power goes (`keep`: a reset, which keeps retained memory).
+/// then the power goes (`keep`: a reset, which keeps retained memory). Or,
+/// with `stay`, the flash operation `at` alone fails (`half`: half of it
+/// lands) and answers an error, the power stays and the step goes on.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct Fault {
     at: usize,
     half: bool,
     keep: bool,
+    stay: bool,
 }
 
 #[derive(Debug)]
@@ -510,13 +513,18 @@ type Ran = (Node, Result<(), Broke>, Option<Site>);
 /// `op` from `n`, cut by `fault`.
 fn run(cores: Cores, n: &Node, op: Op, fault: Option<Fault>) -> Option<Ran> {
     let mut m = n.copy();
-    m.f.cut = fault.map(|x| (x.at, x.half));
+    match fault {
+        Some(x) if x.stay => m.f.fail = Some((x.at, x.half)),
+        _ => m.f.cut = fault.map(|x| (x.at, x.half)),
+    }
     let r = step(cores, &mut m, op)?;
     let mut site = None;
     if let Some(x) = fault {
-        m.running = Running::Down;
-        if !x.keep {
-            m.cell = CLEARED;
+        if !x.stay {
+            m.running = Running::Down;
+            if !x.keep {
+                m.cell = CLEARED;
+            }
         }
         site = m.f.site(x.at);
     }
@@ -671,7 +679,7 @@ impl Packed {
 
 /// The search: breadth first over distinct states from `start`; returns
 /// the states seen and the flash operations it cut.
-fn explore(cores: Cores, start: Node, bound: Bound) -> (usize, Coverage) {
+fn explore(cores: Cores, start: Node, bound: Bound, kind: Faults) -> (usize, Coverage) {
     let broken = broken(cores);
     let mut covered = Coverage::default();
     let mut seen: HashSet<(u64, u8, u8, u8)> = HashSet::new();
@@ -704,8 +712,23 @@ fn explore(cores: Cores, start: Node, bound: Bound) -> (usize, Coverage) {
             if left.faults > 0 {
                 for at in 0..count {
                     for half in [false, true] {
-                        for keep in [false, true] {
-                            faults.push(Some(Fault { at, half, keep }));
+                        match kind {
+                            Faults::PowerCuts => {
+                                for keep in [false, true] {
+                                    faults.push(Some(Fault {
+                                        at,
+                                        half,
+                                        keep,
+                                        stay: false,
+                                    }));
+                                }
+                            }
+                            Faults::FailedOperations => faults.push(Some(Fault {
+                                at,
+                                half,
+                                keep: true,
+                                stay: true,
+                            })),
                         }
                     }
                 }
@@ -714,7 +737,7 @@ fn explore(cores: Cores, start: Node, bound: Bound) -> (usize, Coverage) {
                 let Some((m, r, site)) = run(cores, &n, op, fault) else {
                     continue;
                 };
-                if let Some(x) = fault {
+                if let Some(x) = fault.filter(|x| !x.stay) {
                     let site = site.expect("the cut operation was asked for");
                     covered.add(
                         site,
@@ -741,6 +764,16 @@ fn explore(cores: Cores, start: Node, bound: Bound) -> (usize, Coverage) {
         }
     }
     (seen.len(), covered)
+}
+
+/// What goes wrong in a search's steps.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Faults {
+    /// The power goes at a flash operation.
+    PowerCuts,
+    /// One flash operation fails (the part answers an error; a worn or
+    /// disturbed sector) and the node runs on.
+    FailedOperations,
 }
 
 /// The search's bound: `DAGON_EXPLORE_STEPS` / `_WRITES` / `_FAULTS`
@@ -839,7 +872,7 @@ fn allowed(cores: Cores) -> Vec<Site> {
 /// section `name`.
 fn search(cores: Cores, node: Node, compaction: bool, name: &str, title: &str) {
     let b = bound();
-    let (n, c) = explore(cores, node, b);
+    let (n, c) = explore(cores, node, b, Faults::PowerCuts);
     eprintln!("{title}: {n} states, {} cuts", c.cuts());
     assert!(n > 100, "{n} states");
     c.check(&inventory(cores, compaction), &allowed(cores), &ALL_WAYS);
@@ -905,6 +938,33 @@ fn every_state_of_a_node_with_one_boot_core_slot_and_a_short_log_boots_a_good_ap
     );
 }
 
+/// A flash operation that fails with the power on (the part answers an
+/// error for one erase or write; half of it may have landed) leaves the
+/// node as safe as a power cut does: from every state such a failure
+/// reaches, N1 to N4 hold. One failure per history, at every flash
+/// operation of every step.
+fn survives_a_failed_operation(cores: Cores, node: Node) {
+    let b = Bound {
+        writes: bound().writes.min(1),
+        ..bound()
+    };
+    let (n, _) = explore(cores, node, b, Faults::FailedOperations);
+    eprintln!("{cores:?}: {n} states with a failed flash operation");
+    assert!(n > 100, "{n} states");
+}
+
+#[test]
+fn a_failed_flash_operation_leaves_a_node_with_two_boot_core_slots_a_good_app() {
+    survives_a_failed_operation(TWO, installed_node(TWO));
+    survives_a_failed_operation(TWO, short_log_node(TWO));
+}
+
+#[test]
+fn a_failed_flash_operation_leaves_a_node_with_one_boot_core_slot_a_good_app() {
+    survives_a_failed_operation(ONE, installed_node(ONE));
+    survives_a_failed_operation(ONE, short_log_node(ONE));
+}
+
 /// Runs `path` from the installed node; every step happens.
 fn walk(cores: Cores, path: &[(Op, Option<Fault>)]) -> Node {
     walk_from(cores, installed_node(cores), path)
@@ -923,6 +983,7 @@ const CUT_FIRST: Option<Fault> = Some(Fault {
     at: 0,
     half: true,
     keep: false,
+    stay: false,
 });
 
 /// Found by the search: with one boot core slot, a new core written while
@@ -1029,6 +1090,7 @@ fn a_core_over_a_pending_one_whose_record_is_lost_settles_as_the_confirmed_core(
                         at: 6,
                         half,
                         keep: false,
+                        stay: false,
                     }),
                 ),
             ],

@@ -147,4 +147,95 @@ mod tests {
         l.idle(LCD, 6_000);
         assert!(l.alive(6_000));
     }
+
+    /// The accounting the module's doc describes, written the plain way:
+    /// a background task's work uses up its bound only while the
+    /// preempting level is idle; a preempting task's deadline is a time.
+    #[derive(Clone)]
+    struct Plain<const N: usize> {
+        levels: [Level; N],
+        /// Preempting: the deadline. Background: time used so far.
+        work: [Option<u64>; N],
+        now: u64,
+    }
+
+    impl<const N: usize> Plain<N> {
+        fn preempting_busy(&self) -> bool {
+            (0..N).any(|i| self.levels[i] == Level::Preempting && self.work[i].is_some())
+        }
+        fn advance(&mut self, dt: u64) {
+            if !self.preempting_busy() {
+                for i in 0..N {
+                    if self.levels[i] == Level::Background {
+                        if let Some(used) = self.work[i].as_mut() {
+                            *used += dt;
+                        }
+                    }
+                }
+            }
+            self.now += dt;
+        }
+        fn busy(&mut self, t: usize) {
+            self.work[t] = Some(match self.levels[t] {
+                Level::Preempting => self.now + BOUND,
+                Level::Background => 0,
+            });
+        }
+        fn alive(&self) -> bool {
+            (0..N).all(|i| match (self.levels[i], self.work[i]) {
+                (_, None) => true,
+                (Level::Preempting, Some(d)) => self.now < d,
+                (Level::Background, Some(used)) => used < BOUND,
+            })
+        }
+    }
+
+    const BOUND: u64 = 4;
+    const STEPS: u32 = 7;
+
+    /// Every sequence of `STEPS` operations (a task gets busy or idle,
+    /// time passes by 1 or by 3) on `levels` gives the answer of the plain
+    /// accounting after each one. A background task acts only while the
+    /// preempting level is idle, which is the module's premise.
+    fn agrees_with_the_plain_accounting<const N: usize>(levels: [Level; N]) {
+        let ops = 2 * N + 2;
+        for mut seq in 0..(ops as u64).pow(STEPS) {
+            let mut live = Liveness::new(levels);
+            let mut plain = Plain {
+                levels,
+                work: [None; N],
+                now: 0,
+            };
+            for step in 0..STEPS {
+                let op = (seq % ops as u64) as usize;
+                seq /= ops as u64;
+                let (t, second) = (op / 2, op & 1 == 1);
+                if t == N {
+                    plain.advance(if second { 3 } else { 1 });
+                } else if levels[t] == Level::Background && plain.preempting_busy() {
+                    continue;
+                } else if second {
+                    plain.work[t] = None;
+                    live.idle(t, plain.now);
+                } else {
+                    plain.busy(t);
+                    live.busy(t, plain.now, BOUND);
+                }
+                assert_eq!(
+                    live.alive(plain.now),
+                    plain.alive(),
+                    "step {step}: {live:?} at {}",
+                    plain.now
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn every_short_history_agrees_with_the_plain_accounting() {
+        use Level::{Background as B, Preempting as P};
+        agrees_with_the_plain_accounting([P, B]);
+        agrees_with_the_plain_accounting([P, B, B]);
+        agrees_with_the_plain_accounting([P, P, B]);
+    }
 }

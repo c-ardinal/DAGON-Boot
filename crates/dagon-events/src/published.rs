@@ -211,3 +211,75 @@ impl<S: Snapshot + 'static, const N: usize> Reader<S, N> {
         &self.0.recent
     }
 }
+
+#[cfg(test)]
+mod tests {
+    extern crate std;
+
+    use std::vec::Vec;
+
+    use super::*;
+
+    const PUSHES: usize = 8;
+    const RING: usize = 2;
+
+    /// A reader that runs between any two pushes (a push is one critical
+    /// section, so nowhere inside one), taking any number of records
+    /// there, never loses count: what it takes is in publishing order,
+    /// and the losses the records report, with the ones not yet reported,
+    /// are exactly the records it never got. Every schedule of up to
+    /// `RING` takes after each of `PUSHES` pushes into a ring of `RING`.
+    #[test]
+    fn a_reader_between_any_pushes_keeps_the_count_of_lost_records() {
+        let takes = RING + 1;
+        for schedule in 0..takes.pow(PUSHES as u32) {
+            let ring: Recent<RING> = Recent::new();
+            let mut taken: Vec<EventRecord> = Vec::new();
+            let mut plan = schedule;
+            for seq in 1..=PUSHES as u32 {
+                ring.push(EventRecord {
+                    seq,
+                    ..EventRecord::default()
+                });
+                for _ in 0..plan % takes {
+                    taken.extend(ring.try_take());
+                }
+                plan /= takes;
+            }
+            while let Some(r) = ring.try_take() {
+                taken.push(r);
+            }
+            assert!(
+                taken.windows(2).all(|w| w[0].seq < w[1].seq),
+                "schedule {schedule}: out of order {taken:?}"
+            );
+            let reported: u32 = taken.iter().map(|r| u32::from(r.dropped)).sum();
+            // One more record into the emptied ring reports what was not
+            // reported yet.
+            ring.push(EventRecord::default());
+            let unreported = u32::from(ring.try_take().expect("room").dropped);
+            assert_eq!(
+                (reported + unreported) as usize,
+                PUSHES - taken.len(),
+                "schedule {schedule}: {taken:?}, {unreported} unreported"
+            );
+            // A record is lost only to a full ring: the reader gets every
+            // record it had room for.
+            assert!(
+                taken.len() >= RING.min(PUSHES),
+                "schedule {schedule}: {taken:?}"
+            );
+            // A record never reports a loss that has not happened yet: the
+            // reports up to it count records published before it that the
+            // reader did not get.
+            let mut reports = 0;
+            for (got, r) in taken.iter().enumerate() {
+                reports += u32::from(r.dropped);
+                assert!(
+                    reports <= r.seq - 1 - got as u32,
+                    "schedule {schedule}: {r:?} reports a loss not before it in {taken:?}"
+                );
+            }
+        }
+    }
+}

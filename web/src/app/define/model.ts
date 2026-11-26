@@ -552,8 +552,18 @@ export function setLink(doc: Doc, index: number, path: string, value: unknown): 
   return { ...doc, topo: { ...t, links } };
 }
 
-/** Switches link `index` to `kind` with that kind's defaults. */
+/** Switches link `index` to `kind` with that kind's defaults. The link keeps its place among the links, and so the key it is selected by. */
 export function setLinkKind(doc: Doc, index: number, kind: LinkKind): Doc {
+  const next = relinked(doc, index, kind);
+  const links = next.topo.links ?? [];
+  if (next === doc || links.length !== (doc.topo.links ?? []).length || index === links.length - 1) return next;
+  // relinked() leaves the new link last: back to where the old one was.
+  const last = links[links.length - 1];
+  return { ...next, topo: { ...next.topo, links: [...links.slice(0, index), last, ...links.slice(index, -1)] } };
+}
+
+/** Link `index` taken out and linked again as `kind`; a link of I2C or UART is then the last one. */
+function relinked(doc: Doc, index: number, kind: LinkKind): Doc {
   const l = (doc.topo.links ?? [])[index];
   if (!l || l.kind === kind) return doc;
   const node = (id: string) => doc.topo.nodes.find((x) => x.id === id);

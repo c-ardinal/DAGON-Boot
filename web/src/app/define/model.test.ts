@@ -3,7 +3,7 @@ import { describe, expect, test } from 'vitest';
 import { supportedBoards, topo_check, topo_compile } from '../../wasm/dagon.ts';
 import { rom_i2c_addrs, schema_version, topo_parse } from '../../wasm/pkg/dagon_wasm.js';
 import { SAMPLE_CONFIG, SAMPLE_YAML } from '../sample.ts';
-import { canPlace, LinkKind, mcus, ownFlash, maxNodes, connect, emptyDoc, freeAddrs, fromYaml, hopAvailable, linkKinds, linkView, SCHEMA_VERSION, place, placeMcu, removeNode, setLink, setLinkKind, setNode, setUplink, toConfig, topoWithNames, toYaml, withDefaults, type Topo } from './model.ts';
+import { canPlace, type Doc, LinkKind, mcus, ownFlash, maxNodes, connect, emptyDoc, freeAddrs, fromYaml, hopAvailable, linkKinds, linkView, SCHEMA_VERSION, place, placeMcu, removeNode, setLink, setLinkKind, setNode, setUplink, toConfig, topoWithNames, toYaml, withDefaults, type Topo } from './model.ts';
 import { topoDiff } from './diff.ts';
 import { problemChip } from './problems.ts';
 import { problems } from './problems.ts';
@@ -144,6 +144,15 @@ describe('define document', () => {
     // Each link drawn carries its own speed for its label.
     expect(toConfig(edited, supportedBoards()).links.map((l) => l.baud)).toEqual([undefined, 115200, 9600]);
     expect(topoDiff(sample.topo, ring.topo, {})).toEqual([{ what: 'seg → watch', here: DIFF.none, file: expect.stringContaining('UART'), nodes: ['watch'] }]);
+    // A node under two nodes as near the coordinator: the link switched to another kind keeps its place, so the key that selects it goes on selecting it.
+    const placed = placeMcu(sample, 'rp2040').doc;
+    const leaf = placed.topo.nodes[placed.topo.nodes.length - 1].id;
+    const twin = connect(connect(placed, leaf, 'seg'), leaf, 'watch');
+    const pairs = (d: Doc) => toConfig(d, supportedBoards()).links.map((l) => [l.key, l.from, l.to]);
+    expect(pairs(twin).slice(2)).toEqual([[`link:${leaf}`, 'seg', leaf], [`link:${leaf}~watch`, 'watch', leaf]]);
+    const switched = setLinkKind(twin, 2, LinkKind.I2c);
+    expect(switched.topo.links![2].kind).toBe(LinkKind.I2c);
+    expect(pairs(switched)).toEqual(pairs(twin));
     // The file written and read back is the same ring.
     expect(fromYaml(toYaml(ring.topo)).topo).toEqual(ring.topo);
   });

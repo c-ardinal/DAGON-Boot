@@ -11,7 +11,8 @@ use embassy_stm32::interrupt::{self, InterruptExt, Priority};
 use embassy_stm32::mode::Async;
 use embassy_stm32::time::Hertz;
 use embassy_stm32::{bind_interrupts, dma, peripherals};
-use embassy_time::{with_timeout, Duration, Instant};
+use embassy_time::{Duration, Instant, Timer};
+use f401_app::screen::{Bus, Fault, Screen, Time};
 use f401_app::{seg, shield};
 
 bind_interrupts!(struct Irqs {
@@ -21,18 +22,37 @@ bind_interrupts!(struct Irqs {
     DMA1_STREAM6 => dma::InterruptHandler<peripherals::DMA1_CH6>;
 });
 
-const WRITE_TIMEOUT: Duration = Duration::from_millis(shield::WRITE_TIMEOUT_MS);
 pub use shield::SHOW_BOUND_MS;
 /// Below DAGON's executor (P6) and every default-priority interrupt.
 const IRQ_PRIORITY: Priority = Priority::P7;
 
+/// The Arduino I2C as the display's bus.
+struct ArduinoBus(I2c<'static, Async, Master>);
+
+impl Bus for ArduinoBus {
+    type Error = i2c::Error;
+    async fn write(&mut self, addr: u8, bytes: &[u8]) -> Result<(), i2c::Error> {
+        self.0.write(addr, bytes).await
+    }
+}
+
+/// The board's timer as the display's time.
+struct BoardTime;
+
+impl Time for BoardTime {
+    fn now_us(&self) -> u64 {
+        Instant::now().as_micros()
+    }
+    async fn after_ms(&self, ms: u64) {
+        Timer::after(Duration::from_millis(ms)).await
+    }
+}
+
 /// The 4-digit display, sensors held in XSHUT.
 pub struct SegDisplay {
-    i2c: I2c<'static, Async, Master>,
-    ready: bool,
-    /// The longest write so far, in microseconds (logged when it grows:
-    /// the measured side of [`shield::WRITE_TIMEOUT_MS`]).
-    longest_us: u64,
+    screen: Screen<ArduinoBus, BoardTime>,
+    /// The longest write logged so far, in microseconds.
+    logged_us: u64,
 }
 
 impl SegDisplay {
@@ -50,41 +70,27 @@ impl SegDisplay {
         interrupt::DMA1_STREAM6.set_priority(IRQ_PRIORITY);
         interrupt::DMA1_STREAM0.set_priority(IRQ_PRIORITY);
         SegDisplay {
-            i2c,
-            ready: false,
-            longest_us: 0,
+            screen: Screen::new(ArduinoBus(i2c), BoardTime),
+            logged_us: 0,
         }
     }
 
-    /// Shows `codes` ([`seg`] text). The first call sets the expanders up
-    /// (all off, XSHUT low, then outputs); a failed set-up is retried on
-    /// the next call.
-    pub async fn show(&mut self, codes: [u8; seg::DIGITS]) -> Result<(), i2c::Error> {
-        if !self.ready {
-            self.write_all(&shield::INIT).await?;
-            self.ready = true;
+    /// Shows `codes` ([`seg`] text): [`Screen::show`], and the longest
+    /// write goes to RTT when it grew (the measured side of
+    /// [`shield::WRITE_TIMEOUT_MS`]).
+    pub async fn show(&mut self, codes: [u8; seg::DIGITS]) -> Result<(), Fault<i2c::Error>> {
+        let shown = self.screen.show(codes).await;
+        let us = self.screen.longest_us();
+        if us > self.logged_us {
+            self.logged_us = us;
+            defmt::info!(
+                "display: longest write {} us (free bus {} us, limit {} ms)",
+                us,
+                shield::WRITE_FREE_US,
+                shield::WRITE_TIMEOUT_MS
+            );
         }
-        self.write_all(&shield::show(&codes)).await
-    }
-
-    async fn write_all(&mut self, writes: &[shield::Write]) -> Result<(), i2c::Error> {
-        for (addr, bytes) in writes {
-            let started = Instant::now();
-            with_timeout(WRITE_TIMEOUT, self.i2c.write(*addr, bytes))
-                .await
-                .map_err(|_| i2c::Error::Timeout)??;
-            let us = started.elapsed().as_micros();
-            if us > self.longest_us {
-                self.longest_us = us;
-                defmt::info!(
-                    "display: longest write {} us (free bus {} us, limit {} ms)",
-                    us,
-                    shield::WRITE_FREE_US,
-                    shield::WRITE_TIMEOUT_MS
-                );
-            }
-        }
-        Ok(())
+        shown
     }
 }
 

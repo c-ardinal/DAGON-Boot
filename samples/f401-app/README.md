@@ -5,9 +5,10 @@ package (`../../targets/mcu/stm32f401re`: layout, boot core, watchdog,
 I2C target serving) and the board package
 (`../../targets/boards/nucleo-f401re`: pins, the Arduino I2C the shield sits
 on). The X-NUCLEO-53L0A1's 7-segment display is this sample's own: the text
-(`src/seg.rs`), the expander writes (`src/shield.rs`, both host-tested:
-`cargo test --no-default-features --target <host triple>`) and the driver
-on the board's Arduino I2C (`src/display.rs`).
+(`src/seg.rs`), the expander writes (`src/shield.rs`), the showing with its
+write limit over an injected bus and clock (`src/screen.rs`; all three
+host-tested: `cargo test --no-default-features --target <host triple>`) and
+the board's Arduino I2C and embassy time handed to it (`src/display.rs`).
 
 | Address | Size | Content |
 |---|---|---|
@@ -39,8 +40,11 @@ bus only while something holds SCL or SDA low, which the I2C-bus specification
 does not limit, so a held bus fails the write instead of hanging the task. A
 showing is at most six writes (four of set-up the first time, two for the
 digits), so it ends within 120 ms (`SHOW_BOUND_MS`); the display task declares
-that bound to the watchdog guard for each showing. RTT shows the longest write
-measured so far (`display: longest write N us`).
+that bound to the watchdog guard for each showing. The host tests of
+`src/screen.rs` hold a simulated bus and check that the write fails at its
+limit, that the set-up is sent again after a failure, and that no showing
+passes the bound. RTT shows the longest write measured so far
+(`display: longest write N us`).
 
 Version display (this app's own format, `seg::version`):
 

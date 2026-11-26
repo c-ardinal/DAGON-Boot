@@ -12,6 +12,7 @@ pub const KINDS: &[&str] = &[
     "gen",
     "flash",
     "doctor",
+    "ai_port",
     "ai_topology",
 ];
 

@@ -369,6 +369,11 @@ fn user_files(home: &Path) -> Vec<(String, Result<String, String>)> {
 /// the user's own login.
 const NEVER_PASSED: [&str; 1] = ["ANTHROPIC_API_KEY"];
 
+/// The variable the Claude Agent SDK reads its key from. dagon reads it
+/// nowhere: [`crate::aiport`] sets it, from the OS credential store, for
+/// the porting program alone.
+pub(crate) const CLAUDE_KEY_ENV: &str = NEVER_PASSED[0];
+
 /// Environment variables a child process of dagon never sees: the signing
 /// key's and [`NEVER_PASSED`].
 pub fn secret_env(_home: Option<&Path>) -> Vec<String> {
@@ -447,6 +452,35 @@ pub(crate) fn call(
         }
     }
 }
+
+/// The host of the Claude API: a way that posts there has the key the
+/// porting agent runs with.
+const CLAUDE_API: &str = "https://api.anthropic.com/";
+
+/// The consent, held until the returned value is dropped, and the linked
+/// way's Claude API key: what [`crate::aiport`] runs with. Err when the
+/// linked way is not one that posts to the Claude API with a key.
+pub(crate) fn claude_api_key(home: &Path, keys: &Keys) -> Result<(Cleared, String), String> {
+    let cleared = Cleared {
+        held: crate::consent::hold(home)?,
+    };
+    let c = cleared.consent();
+    let agents = Agents::load(Some(home));
+    let (_, way) = agents
+        .way(&c.agent, &c.way)
+        .ok_or(crate::consent::NOT_LINKED)?;
+    match &way.transport {
+        Transport::MessagesHttp(h) if h.url.starts_with(CLAUDE_API) => {
+            let key = key_of(keys, &c.agent, &c.way)?;
+            Ok((cleared, key))
+        }
+        _ => Err(NO_API_WAY.into()),
+    }
+}
+
+/// The error of [`claude_api_key`] for a linked way of another kind.
+pub(crate) const NO_API_WAY: &str = "porting needs DAGON linked to the Claude API with an API \
+     key (the linked way is another one); link it with dagon ai link --agent claude --way api";
 
 /// The way's key from the store, or why there is none (never a value).
 fn key_of(keys: &Keys, agent: &str, way: &str) -> Result<String, String> {

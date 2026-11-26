@@ -224,8 +224,7 @@ pub fn handle(server: &Arc<Server>, req: &Request) -> Response {
         ("POST", ["conform"]) => start(server, req, "conform", job_conform),
         ("GET", ["conform", node]) => conform_get(server, node),
         ("POST", ["ai", "topology"]) => ai_topology_start(server, req),
-        // Porting DAGON to a board: answers 501.
-        ("POST", ["ai", "port"]) => Ok(Response::error(501, "porting is not available here")),
+        ("POST", ["ai", "port"]) => ai_port_start(server, req),
         ("GET", ["jobs", id]) => job_get(server, id),
         ("POST", ["jobs", id, "answer"]) => answer(server, id, req),
         ("POST", ["jobs", id, "cancel"]) => cancel(server, id),
@@ -245,9 +244,10 @@ pub fn handle(server: &Arc<Server>, req: &Request) -> Response {
 
 /// What this serve offers the page. `flash` and `doctor` join when this
 /// dagon has those commands.
-const FEATURES: [&str; 13] = [
+const FEATURES: [&str; 14] = [
     "topology_save",
     "ai_topology",
+    "ai_port",
     "build",
     "sign",
     "release",
@@ -507,8 +507,10 @@ fn agent_link(server: &Server, req: &Request) -> Res {
 fn agent_unlink(server: &Server) -> Res {
     let home = super::project::home(server)?;
     crate::consent::unlink(&home).map_err(|e| Response::error(500, &e))?;
-    // Running topology drafts stop too; every call checks the consent anyway.
+    // Running topology drafts and ports stop too; every call checks the
+    // consent anyway.
     server.cancel_kind("ai_topology");
+    server.cancel_kind("ai_port");
     Ok(agent_get(server))
 }
 
@@ -1463,6 +1465,64 @@ fn job_ai_topology(job: &mut Job, s: &Server, reg: &Registry, v: &Value) -> Resu
     let (yaml, report) = crate::ai::topology_for(&description, reg, &mut ask, &cancel, &mut *post)?;
     let report: Value = serde_json::from_str(&report).unwrap_or(Value::Null);
     Ok(json!({ "yaml": yaml, "report": report }))
+}
+
+/// POST /v1/ai/port {mcu, board, kind, description?, max_hours?, max_iterations?, rerun?, accept}: a job in which the agent ports DAGON to a board in the project's DAGON clone (`dagon ai port`). The agent edits files and runs commands there without asking, so `accept` must be true; its steps are the job's log and its report the result.
+fn ai_port_start(server: &Arc<Server>, req: &Request) -> Res {
+    let v = body_json(req)?;
+    let count = |k: &str| match &v[k] {
+        Value::Null => Ok(None),
+        n => n
+            .as_u64()
+            .and_then(|n| u32::try_from(n).ok())
+            .map(Some)
+            .ok_or_else(|| Response::error(400, &format!("{k} must be a whole number"))),
+    };
+    let text = |k: &str| v[k].as_str().unwrap_or("").to_string();
+    let r = crate::aiport::Request {
+        mcu: text("mcu"),
+        board: text("board"),
+        kind: text("kind"),
+        description: v["description"].as_str().map(str::to_string),
+        max_hours: count("max_hours")?,
+        max_iterations: count("max_iterations")?,
+        rerun: v["rerun"] == true,
+        model: None,
+    };
+    r.check().map_err(|e| Response::error(400, &e))?;
+    if v["accept"] != true {
+        return Err(Response::error(
+            400,
+            "accept must be true: the agent edits files and runs commands in the DAGON clone",
+        ));
+    }
+    let s = Arc::clone(server);
+    match server.spawn("ai_port", move |job| {
+        let (_, cfg, _) = job.project()?;
+        job_ai_port(job, &s, &cfg, &r)
+    }) {
+        Some(id) => Ok(accepted(id)),
+        None => Err(Response::error(429, "too many jobs running")),
+    }
+}
+
+fn job_ai_port(
+    job: &mut Job,
+    s: &Server,
+    cfg: &Config,
+    r: &crate::aiport::Request,
+) -> Result<Value, String> {
+    let home = super::project::home(s).map_err(|_| crate::consent::NOT_LINKED.to_string())?;
+    let clone = crate::aiport::clone_of(cfg)?;
+    let cancel = job.cancel_flag();
+    job.progress("port", None);
+    let out = crate::aiport::run(&home, s.keys(), &clone, r, &cancel, &mut |step| {
+        job.log(&step.line())
+    })?;
+    job.flush();
+    let mut v = out.json();
+    v["text"] = json!(job.page_text(&out.text));
+    Ok(v)
 }
 
 fn job_id(id: &str) -> Result<u64, Response> {

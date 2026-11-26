@@ -155,6 +155,17 @@ impl Command {
     }
 }
 
+/// The program `name` on PATH.
+pub(crate) fn on_path(name: &str) -> Option<PathBuf> {
+    Command {
+        program: name.into(),
+        args: Vec::new(),
+        system: SystemVia::default(),
+        pass_env: Vec::new(),
+    }
+    .program_path()
+}
+
 fn has_ext(p: &std::path::Path) -> bool {
     p.extension()
         .is_some_and(|e| e.eq_ignore_ascii_case("exe") || e.eq_ignore_ascii_case("com"))
@@ -201,7 +212,7 @@ fn run_in(
         }
     }
     let secrets = super::secret_env(crate::consent::home().ok().as_deref());
-    let mut group = spawn(exe, &args, dir, &cmd.pass_env, &secrets)?;
+    let mut group = spawn(exe, &args, dir, &cmd.pass_env, &secrets, &[])?;
     let child = group.child();
     let mut stdin = child.stdin.take().expect("piped");
     // A program that never reads stdin only loses this write. Neither
@@ -257,6 +268,99 @@ fn run_in(
     }
     String::from_utf8(out).map_err(|_| "the agent's answer is not UTF-8 text".into())
 }
+
+/// One line of a streamed program kept at most; a longer one arrives in
+/// pieces.
+const MAX_LINE: u64 = 64 * 1024;
+
+/// A program that works for a long time and reports on stdout line by
+/// line ([`stream`]).
+pub(crate) struct Streamed<'a> {
+    pub exe: &'a std::path::Path,
+    pub args: &'a [String],
+    /// Its working folder.
+    pub dir: &'a std::path::Path,
+    /// Environment variables passed on besides [`BASE_ENV`] (names only).
+    pub pass_env: &'a [String],
+    /// Variables set for this program alone (the way's key).
+    pub set_env: &'a [(&'a str, &'a str)],
+    /// What it reads on stdin.
+    pub input: String,
+    pub timeout: Duration,
+}
+
+/// Runs `p` in its group under the consent held by `_cleared`: `on_line`
+/// gets each stdout line as it arrives. Ends when the program ends, the
+/// time is over ([`TIMED_OUT`]) or `cancel` is set; whatever the program
+/// started is stopped then. Ok: the program's exit was a success.
+pub(crate) fn stream(
+    _cleared: &Cleared,
+    p: Streamed<'_>,
+    cancel: &std::sync::atomic::AtomicBool,
+    on_line: &mut dyn FnMut(&str),
+) -> Result<bool, String> {
+    use std::io::BufRead;
+    use std::sync::mpsc::RecvTimeoutError;
+    let secrets = super::secret_env(crate::consent::home().ok().as_deref());
+    let mut group = spawn(p.exe, p.args, p.dir, p.pass_env, &secrets, p.set_env)?;
+    let child = group.child();
+    let mut stdin = child.stdin.take().expect("piped");
+    let input = p.input;
+    std::thread::spawn(move || {
+        let _ = stdin.write_all(input.as_bytes());
+    });
+    let stdout = child.stdout.take().expect("piped");
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let mut r = std::io::BufReader::new(stdout);
+        loop {
+            let mut line = Vec::new();
+            match (&mut r).take(MAX_LINE).read_until(b'\n', &mut line) {
+                Ok(n) if n > 0 => {
+                    if tx.send(String::from_utf8_lossy(&line).into_owned()).is_err() {
+                        break;
+                    }
+                }
+                _ => break,
+            }
+        }
+    });
+    let deadline = Instant::now() + p.timeout;
+    let mut status = None;
+    loop {
+        match rx.recv_timeout(POLL) {
+            Ok(line) => {
+                on_line(line.trim_end());
+                continue;
+            }
+            // The program and all it started have closed stdout.
+            Err(RecvTimeoutError::Disconnected) if status.is_some() => break,
+            Err(_) => {}
+        }
+        if cancel.load(std::sync::atomic::Ordering::Relaxed) {
+            group.stop();
+            return Err(STOPPED.into());
+        }
+        if Instant::now() >= deadline {
+            group.stop();
+            return Err(TIMED_OUT.into());
+        }
+        if status.is_none() {
+            status = group
+                .child()
+                .try_wait()
+                .map_err(|_| "the agent program could not be watched".to_string())?;
+            if status.is_some() {
+                // Whatever it left running is stopped, so stdout closes.
+                group.stop();
+            }
+        }
+    }
+    Ok(status.is_some_and(|s| s.success()))
+}
+
+/// The error of a streamed program stopped by its `cancel` flag.
+pub(crate) const STOPPED: &str = "stopped";
 
 /// The agent program and everything it starts.
 ///
@@ -326,12 +430,14 @@ fn spawn(
     dir: &std::path::Path,
     pass_env: &[String],
     secrets: &[String],
+    set_env: &[(&str, &str)],
 ) -> Result<Group, String> {
     let mut c = std::process::Command::new(exe);
     c.args(args)
         .current_dir(dir)
         .env_clear()
         .envs(child_env(std::env::vars_os(), pass_env, secrets))
+        .envs(set_env.iter().copied())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
@@ -486,7 +592,7 @@ mod tests {
     fn stopping_the_group_stops_the_whole_tree() {
         let (exe, args) = parent_of_a_sleeper();
         let dir = super::super::temp_dir().unwrap();
-        let mut group = spawn(&exe, &args, &dir, &[], &[]).unwrap();
+        let mut group = spawn(&exe, &args, &dir, &[], &[], &[]).unwrap();
         let mut out = group.child().stdout.take().unwrap();
         let (tx, rx) = std::sync::mpsc::channel();
         std::thread::spawn(move || {

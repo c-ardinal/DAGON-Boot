@@ -68,7 +68,7 @@
       <table>
         <thead><tr>{#each TABLE.linkCols as h (h)}<th scope="col">{h}</th>{/each}<th></th></tr></thead>
         <tbody>
-          {#each c.links as l (l.to)}
+          {#each c.links as l (l.key)}
             <tr>
               <td>{nameOf(l.from)}</td>
               <th scope="row">{nameOf(l.to)}</th>
@@ -76,8 +76,8 @@
               <td translate="no">{l.addr}</td>
               <td translate="no">{l.wires.map((w) => w.hubPin).filter((p) => p.startsWith('GPIO')).join(' · ')}</td>
               <td class="ops">
-                <button class="secondary" onclick={() => edit(`link:${l.to}`)}>{TABLE.edit}</button>
-                <button class="secondary destructive" onclick={() => d.requestRemove(`link:${l.to}`)}>{TABLE.remove}</button>
+                <button class="secondary" onclick={() => edit(l.key)}>{TABLE.edit}</button>
+                <button class="secondary destructive" onclick={() => d.requestRemove(l.key)}>{TABLE.remove}</button>
               </td>
             </tr>
           {/each}
@@ -87,7 +87,7 @@
       <table>
         <thead><tr><th scope="col">{TABLE.linkCols[1]}</th>{#each WIRING.cols as h (h)}<th scope="col">{h}</th>{/each}</tr></thead>
         <tbody translate="no">
-          {#each c.links as l (l.to)}
+          {#each c.links as l (l.key)}
             {#each l.wires as w (w.signal)}
               <tr><td>{nameOf(l.to)}</td><th scope="row">{w.signal}</th><td>{w.hubPin}</td><td>{w.nodePin}</td><td>{w.shared ? WIRING.shared : WIRING.own}</td></tr>
             {/each}

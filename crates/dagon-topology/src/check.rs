@@ -618,6 +618,17 @@ impl<'a> Ctx<'a> {
                     if a == f { b } else { a }
                 )),
                 (Some(_), _) => None,
+                // A second way to nodes updating already reaches (a ring).
+                (None, [])
+                    if first.is_some_and(|f| {
+                        [a, b].iter().all(|id| self.t.link_between(id, f).is_some())
+                    }) =>
+                {
+                    Some(format!(
+                        "the nodes {} are each linked straight to the coordinator: updating reaches them over those links and does not use this one",
+                        pair(a, b)
+                    ))
+                }
                 (None, []) => Some(format!(
                     "the link between the nodes {} is one link further from the coordinator: updating reaches only the nodes linked straight to the coordinator and skips it",
                     pair(a, b)

@@ -205,7 +205,7 @@
     {@const to = byId(link.to)}
     <div class="head">
       <h2 id="inspector-h" tabindex="-1" title="{name(link.from)} → {name(link.to)}">{name(link.from)} → {name(link.to)}</h2>
-      <button class="button-icon trash" aria-label={INSPECT.removeLink} title={INSPECT.removeLink} onclick={() => d.requestRemove(`link:${link.to}`)}><span class="layer"><Icon name="trash-2" /></span></button>
+      <button class="button-icon trash" aria-label={INSPECT.removeLink} title={INSPECT.removeLink} onclick={() => d.requestRemove(d.selected)}><span class="layer"><Icon name="trash-2" /></span></button>
     </div>
     <div class="fields">
       <label

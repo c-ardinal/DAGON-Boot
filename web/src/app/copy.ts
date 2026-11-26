@@ -595,9 +595,7 @@ export const LINK = {
 
 /** Why a link drag is refused (a failure: red). */
 export const LINK_WHY = {
-  taken: 'このノードはPC側のノードと接続済です',
-  under: (name: string) => `このノードは${name}の接続先のノードです`,
-  loop: 'このノードの接続先のノードへの接続は不可です',
+  pair: 'このノードとは接続済です',
 } as const;
 
 /** Right column. */

@@ -3,7 +3,7 @@
 import { supportedBoards } from '../../wasm/dagon.ts';
 import { ANNOUNCE, LINK_WHY } from '../copy.ts';
 import { SAMPLE_CONFIG, SAMPLE_YAML, type Config } from '../sample.ts';
-import { connect, docWithDefaults, emptyDoc, fromYaml, isCoordinator, linkIndexOf, linkKey, place, placeMcu, removeLink, sides, withDefaults, removeNode, toConfig, toYaml, type Doc, type Topo } from './model.ts';
+import { connect, docWithDefaults, emptyDoc, fromYaml, isCoordinator, linked, linkKey, place, placeMcu, removeLink, withDefaults, removeNode, toConfig, toYaml, type Doc, type Topo } from './model.ts';
 import type { SaveResult } from './cli.svelte.ts';
 import { keepComments } from './comments.ts';
 import { problems, type Problem } from './problems.ts';
@@ -172,25 +172,12 @@ export class Define {
     this.apply(connect(this.doc, id, parent));
   }
 
-  /** Why `id` cannot go under `parent` by a port drag, or null when it can. */
+  /**
+   * Why a port drag from `parent` cannot end on `id`, or null when it can. A node takes links from
+   * several nodes (a star, a ring): only a second link between one pair is refused (V-05).
+   */
   linkRefusal(parent: string, id: string): string | null {
-    const t = this.doc.topo;
-    const links = t.links ?? [];
-    // The node a link is shown under, by the editor's sides of each link.
-    const above = (x: string | undefined) => {
-      const i = x === undefined ? -1 : linkIndexOf(t, x);
-      return i < 0 ? undefined : sides(t, links[i]).up.node;
-    };
-    const up = above(id);
-    if (up !== undefined) {
-      const p = this.doc.topo.nodes.find((n) => n.id === up);
-      return isCoordinator(p) ? LINK_WHY.taken : LINK_WHY.under(this.doc.names[up] ?? up);
-    }
-    // Under its own descendant: the link would close a loop.
-    for (let at: string | undefined = parent, i = 0; at !== undefined && i < 64; at = above(at), i++) {
-      if (at === id) return LINK_WHY.loop;
-    }
-    return null;
+    return linked(this.doc.topo, parent, id) ? LINK_WHY.pair : null;
   }
 
   /** "配置" by MCU: a node without a board; nothing is asked for it. */

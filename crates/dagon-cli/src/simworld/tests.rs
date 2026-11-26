@@ -161,6 +161,52 @@ fn a_fault_that_does_not_stop_the_write_fails_its_run() {
     assert!(e.contains("did not stop at seg"), "{e}");
 }
 
+/// The sample closed into a ring by a link between its two nodes: each is
+/// still written over its own link from the node the PC is connected to,
+/// and the ring's link carries nothing.
+#[test]
+fn a_ring_is_updated_over_the_links_from_the_connected_node() {
+    let ring = SAMPLE.replace(
+        "\nrecovery:",
+        "  - kind: uart\n    iface: hw-uart0\n    ends:\n      - { node: seg, port: usart1, pins: { tx: 9, rx: 10 } }\n      - { node: watch, port: uart0 }\n    baud: 115200\n    control:\n      kind: cooperative\n      rom_entry: force-download-boot\n\nrecovery:",
+    );
+    assert_ne!(ring, SAMPLE);
+    let t = dagon_topology::parse_str(&ring).unwrap();
+    let cut = dagon_topology::cut_with(Registry::builtin(), &t);
+    assert_eq!(cut.reach, ["hub", "seg", "watch"]);
+    assert!(cut.skipped.is_empty(), "{:?}", cut.skipped);
+    let whole = dagon_topology::check_with(Registry::builtin(), &t);
+    assert!(whole.is_pushable(), "{:?}", whole.issues);
+    assert!(
+        whole
+            .issues
+            .iter()
+            .any(|i| i.rule == "V-23" && i.message.contains("does not use this one")),
+        "{:?}",
+        whole.issues
+    );
+    // `dagon sim` runs the part updating reaches, as every command does.
+    let part = cut.topology.expect("the part passes the checks");
+    // `dagon gen` builds each node for its link from the connected node:
+    // no firmware is asked to relay over the ring's link.
+    for n in &part.nodes {
+        crate::scaffold::hop_placeholders(Registry::builtin(), &part, n)
+            .unwrap_or_else(|e| panic!("{}: {e}", n.id));
+    }
+    let mut lines = Vec::new();
+    let r = run(
+        Registry::builtin(),
+        &part,
+        &inject(&["seg=power-cut", "watch=no-confirm"]),
+        &mut |l| lines.push(l),
+    );
+    assert_eq!(r, Ok(()), "{lines:#?}");
+    assert!(
+        lines[1].starts_with("update PASS: hub, seg, watch"),
+        "{lines:#?}"
+    );
+}
+
 /// What the simulator has no model for is refused by name.
 #[test]
 fn a_topology_past_what_the_simulator_models_is_refused_by_name() {

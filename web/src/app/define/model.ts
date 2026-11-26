@@ -88,17 +88,46 @@ function hops(t: Topo): Map<string, number> {
   return out;
 }
 
+type Sides = { up: TEnd; down: TEnd; upAt: 0 | 1; downAt: 0 | 1 };
+
+const sidesBy = (h: Map<string, number>, l: TLink): Sides => {
+  const d = (e: TEnd) => h.get(e.node) ?? Infinity;
+  const upAt: 0 | 1 = d(l.ends[1]) < d(l.ends[0]) ? 1 : 0;
+  const downAt: 0 | 1 = upAt === 0 ? 1 : 0;
+  return { up: l.ends[upAt], down: l.ends[downAt], upAt, downAt };
+};
+
 /**
  * The two ends of link `l` as the editor draws them: `up` the end nearer a coordinator (the first listed
  * on a tie), `down` the end the link is shown under. Display only: the link has no direction and
  * the check reads its ends unordered.
  */
-export function sides(t: Topo, l: TLink): { up: TEnd; down: TEnd; upAt: 0 | 1; downAt: 0 | 1 } {
+export function sides(t: Topo, l: TLink): Sides {
+  return sidesBy(hops(t), l);
+}
+
+/** A link as the editor shows it: its sides and the key it is selected by. */
+export type Shown = Sides & { key: string; primary: boolean };
+
+/**
+ * Every link of `t` as the editor shows it, in `links` order. Of the links shown under one node
+ * the one from the node nearest a coordinator (the first listed on a tie) is its primary link,
+ * `link:<node>`: the node stands under it. Each other link there is `link:<node>~<the other node>`
+ * (one link joins a pair of nodes, V-05).
+ */
+export function shownLinks(t: Topo): Shown[] {
   const h = hops(t);
-  const d = (e: TEnd) => h.get(e.node) ?? Infinity;
-  const upAt: 0 | 1 = d(l.ends[1]) < d(l.ends[0]) ? 1 : 0;
-  const downAt: 0 | 1 = upAt === 0 ? 1 : 0;
-  return { up: l.ends[upAt], down: l.ends[downAt], upAt, downAt };
+  const all = (t.links ?? []).map((l) => sidesBy(h, l));
+  const first = new Map<string, number>();
+  all.forEach((s, i) => {
+    const k = first.get(s.down.node);
+    const d = (x: Sides) => h.get(x.up.node) ?? Infinity;
+    if (k === undefined || d(s) < d(all[k])) first.set(s.down.node, i);
+  });
+  return all.map((s, i) => {
+    const primary = first.get(s.down.node) === i;
+    return { ...s, primary, key: primary ? `link:${s.down.node}` : `link:${s.down.node}~${s.up.node}` };
+  });
 }
 
 /** A link as the editor's fields read it: drawn `from` → `to`, the per-node fields from their end ([`setLink`] writes them back there). */
@@ -109,13 +138,16 @@ export function linkView(t: Topo, l: TLink): LinkView {
   return { ...l, from: up.node, to: down.node, addr: down.addr, node_pins: down.node_pins, pins: up.pins, nrst: up.nrst, boot: up.boot };
 }
 
-/** The position of the link shown under node `id`, or -1. */
+/** The position of the primary link of node `id` (the link it stands under), or -1. */
 export function linkIndexOf(t: Topo, id: string): number {
-  return (t.links ?? []).findIndex((l) => sides(t, l).down.node === id);
+  return shownLinks(t).findIndex((s) => s.primary && s.down.node === id);
 }
 
-/** The selection key of link `l`: the node it is shown under. */
-export const linkKey = (t: Topo, l: TLink): string => `link:${sides(t, l).down.node}`;
+/** The selection key of link `l` ([`shownLinks`]). */
+export const linkKey = (t: Topo, l: TLink): string => shownLinks(t)[(t.links ?? []).indexOf(l)]?.key ?? `link:${sides(t, l).down.node}`;
+
+/** Whether a link joins nodes `a` and `b`, whichever end each is. */
+export const linked = (t: Topo, a: string, b: string): boolean => (t.links ?? []).some((l) => l.ends.some((e) => e.node === a) && l.ends.some((e) => e.node === b));
 
 /** The end of a new link at node `n`, at the port its definitions name for `kind`. */
 function endAt(n: TNode, kind: LinkKind, iface?: string): TEnd {
@@ -415,7 +447,9 @@ export function connect(doc: Doc, id: string, parent?: string): Doc {
   const t = doc.topo;
   const h = parent ? t.nodes.find((x) => x.id === parent) : hub(t);
   const n = t.nodes.find((x) => x.id === id);
-  if (!h || !n || n === h || linkIndexOf(t, id) >= 0) return doc;
+  if (!h || !n || n === h || linked(t, h.id, n.id)) return doc;
+  // A link has no direction: one drawn from a node to a coordinator is the coordinator's link to that node.
+  if (isCoordinator(n) && !isCoordinator(h)) return connect(doc, h.id, n.id);
   // A node chosen by MCU links like its MCU's default board, if any (its pins are the developer's).
   const stand = n.board ?? defaultBoard(n.mcu);
   const tpl = stand ? template(stand) : null;
@@ -634,8 +668,8 @@ export function toConfig(doc: Doc, boards: Board[]): Config {
   const bus = (id?: string) => (t.buses ?? []).find((b) => b.id === id);
   // Depth by parent links from a coordinator nobody links to (0), at any depth; a coordinator linked from
   // another node sits below it, and a node no link reaches in the first row.
-  const shown = links.map((l) => sides(t, l));
-  const parent = (id: string) => shown.find((s) => s.down.node === id)?.up.node;
+  const shown = shownLinks(t);
+  const parent = (id: string) => shown.find((s) => s.primary && s.down.node === id)?.up.node;
   const depth = (id: string, seen = new Set<string>()): number => {
     const n = t.nodes.find((x) => x.id === id);
     const p = parent(id);
@@ -652,7 +686,7 @@ export function toConfig(doc: Doc, boards: Board[]): Config {
     const b = boards.find((x) => x.id === n.board);
     // A node chosen by MCU (no board): the MCU's name and not its id.
     const mcuName = b?.mcuName ?? mcuTable.find((m) => m.id === n.mcu)?.name ?? n.mcu;
-    const k = shown.findIndex((s) => s.down.node === n.id);
+    const k = shown.findIndex((s) => s.primary && s.down.node === n.id);
     const l = k >= 0 ? links[k] : undefined;
     const s = k >= 0 ? shown[k] : undefined;
     const via = !l ? '' : l.kind === LinkKind.I2c ? `${kindLabel(l.kind)} ${hex(s?.down.addr)}` : l.kind === LinkKind.Uart ? `${kindLabel(l.kind)} ${l.baud ?? ''}`.trim() : kindLabel(l.kind);
@@ -673,7 +707,7 @@ export function toConfig(doc: Doc, boards: Board[]): Config {
     };
   });
   const glinks: GLink[] = links.map((l, k) => {
-    const { up, down } = shown[k];
+    const { up, down, key } = shown[k];
     const wires: Wire[] =
       l.kind !== LinkKind.I2c && l.kind !== LinkKind.Uart
         ? []
@@ -690,7 +724,7 @@ export function toConfig(doc: Doc, boards: Board[]): Config {
             { signal: 'RX ← TX', hubPin: gpio(up.pins?.rx) ?? '', nodePin: '', shared: false },
             { signal: 'GND', hubPin: 'GND', nodePin: 'GND', shared: true },
           ];
-    return { from: up.node, to: down.node, kind: l.kind, addr: hex(down.addr), wires };
+    return { key, from: up.node, to: down.node, kind: l.kind, addr: hex(down.addr), wires };
   });
   return {
     name: t.name,

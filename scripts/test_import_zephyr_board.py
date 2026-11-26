@@ -139,6 +139,18 @@ class Stated(unittest.TestCase):
         )
         self.assertEqual(b["pin"], [{"pin": "GPIO25", "name": "led0"}])
 
+    def test_a_connector_inside_a_block_comment_states_nothing(self):
+        b = self.board(
+            "&flash0 { reg = <0 0x1000>; };\n"
+            "/* c: connector { gpio-map = <0 0 &gpio0 16 0>; }; */\n"
+            "/ { d: connector { gpio-map = <0 0 &gpio0 2 0>,	/* GP2 */\n"
+            "    /* <1 0 &gpio0 3 0>, */\n"
+            "    <2 0 &gpio0 4 0>; /* GP4 */ }; };\n"
+        )
+        self.assertEqual(
+            b["header"], [{"pin": "GPIO2", "label": "GP2"}, {"pin": "GPIO4", "label": "GP4"}]
+        )
+
     def test_an_overlay_of_a_pin_control_group_moves_the_bus(self):
         b = self.board(
             "&pinctrl { uart0_default: uart0_default {\n"

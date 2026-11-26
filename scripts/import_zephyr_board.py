@@ -31,7 +31,7 @@ LINE_COMMENT = re.compile(r'"(?:\\.|[^"\\\n])*"|/\*.*?\*/|(//[^\n]*)', re.S)
 # One row of a connector's `gpio-map`, with the printed name Zephyr keeps in
 # the comment after it.
 MAP_ROW = re.compile(
-    r"<\s*\w+\s+\w+\s+&(\w+)\s+(\w+)\s+\w+\s*>\s*[,;]?[ \t]*(?:/\*\s*(.*?)\s*\*/)?"
+    r"<\s*\w+\s+\w+\s+&(\w+)\s+(\w+)\s+\w+\s*>\s*[,;]?[ \t]*(?:\x01(.*?)\x02)?"
 )
 OVERLAY = re.compile(r"&(\w+)\s*\{")
 GPIOS = re.compile(r"gpios\s*=\s*<\s*&(\w+)\s+([^\s>]+)")
@@ -92,6 +92,21 @@ def read_tree(root, start):
 
     root = root.resolve()
     return load(start.resolve()), read, missing
+
+
+def labelled(text):
+    """`text` without its block comments, but for the one-line comment that
+    follows a cell list on its line (`<...>, /* GP0 */`): a printed name,
+    kept between `\\x01` and `\\x02`. Source inside a comment states nothing."""
+
+    def keep(m):
+        line = text[text.rfind("\n", 0, m.start()) + 1 : m.start()]
+        name = m.group(0)[2:-2].strip()
+        if "\n" not in name and re.search(r">\s*[,;]?[ \t]*$", line):
+            return f"\x01{name}\x02"
+        return ""
+
+    return BLOCK_COMMENT.sub(keep, text)
 
 
 def without_line_comments(text):
@@ -225,9 +240,10 @@ def flash_bytes(text):
 
 
 def header(raw):
-    """`[(pin, label)]` of every connector row, a pin once."""
+    """`[(pin, label)]` of every connector row, a pin once (`raw`: the text
+    of [`labelled`])."""
     rows, seen = [], set()
-    for m in re.finditer(r"gpio-map\s*=\s*(.*?>\s*;[ \t]*(?:/\*.*?\*/)?)", raw, re.S):
+    for m in re.finditer(r"gpio-map\s*=\s*(.*?>\s*;[ \t]*(?:\x01.*?\x02)?)", raw, re.S):
         for port, num, label in MAP_ROW.findall(m.group(1)):
             pin = pin_name(port, num)
             if pin not in seen:
@@ -272,8 +288,8 @@ def convert(root, start, board_id, mcu, tag):
     """The `[board.<id>]` text of the board file `start` in the tree `root`."""
     root, start = Path(root), Path(start)
     raw, files, missing = read_tree(root, start)
-    raw = without_line_comments(raw)
-    text = BLOCK_COMMENT.sub("", raw)
+    raw = labelled(without_line_comments(raw))
+    text = re.sub(r"\x01.*?\x02", "", raw)
     nodes = overlays(text)
     product, yml = full_name(root, start)
     if yml:

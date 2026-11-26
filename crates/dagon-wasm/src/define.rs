@@ -4,15 +4,12 @@
 //! checks it with `topo_check`, so every rule stays in dagon-topology.
 
 use crate::defs::with_registry;
+use crate::js::set;
 use crate::kinds::code;
 use dagon_topology::schema::{ControlKind, UartIface};
-use js_sys::{Array, Object, Reflect};
+use js_sys::{Array, Object};
 use wasm_bindgen::prelude::*;
 use yaml_serde::Value;
-
-pub(crate) fn set(o: &Object, k: &str, v: JsValue) {
-    Reflect::set(o, &k.into(), &v).expect("plain object");
-}
 
 fn to_js(v: &Value) -> JsValue {
     match v {

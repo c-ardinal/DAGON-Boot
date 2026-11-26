@@ -1303,7 +1303,19 @@ below keep code and data to it.
    path, so an alias or a wrapper does not hide
    one. The functions that mask (the watchdog guard's state update) carry `#[allow(clippy::disallowed_methods)]`
    with their reason, and a test keeps the list and the exemptions as they
-   are reviewed.
+   are reviewed. The same list and test hold for the code the MCU
+   definitions run from other crates (`crates/dagon-relay`, and
+   `crates/dagon-events` for the published events, where the push of a
+   record into the ring of recent events is the second reviewed function
+   that masks: its check for a full ring, the removal of the oldest
+   record and the send are one section of at most three copies of one
+   record). Beside these,
+   the `Channel` and `Watch` of embassy-sync that carry published events
+   and the relay port's requests mask for each of their operations, to
+   copy one value of a fixed size in or out; the operations that would run
+   a closure there (`send_modify`, `try_get_and`) are refused by the same
+   list, so a snapshot is folded outside them. These sections, and the push's, are bounded
+   by the size of the value, not timed by a `masked-time` build.
 3. **Flash operations are hardware facts.** What an erase or program
    stops is the definition's `[execution] flash_op`:
    - `fetch-stall`: single-bank flash the code runs from; instruction

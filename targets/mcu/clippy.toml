@@ -11,4 +11,9 @@ disallowed-methods = [
     { path = "cortex_m::interrupt::free", reason = "masks interrupts: execution model 11.1 rule 2" },
     { path = "cortex_m::interrupt::disable", reason = "masks interrupts: execution model 11.1 rule 2" },
     { path = "embassy_sync::blocking_mutex::Mutex::lock", reason = "masks interrupts with a critical-section raw mutex: execution model 11.1 rule 2" },
+    { path = "embassy_sync::watch::Snd::send_modify", reason = "runs its closure with interrupts masked: execution model 11.1 rule 2" },
+    { path = "embassy_sync::watch::Snd::send_if_modified", reason = "runs its closure with interrupts masked: execution model 11.1 rule 2" },
+    { path = "embassy_sync::watch::Snd::try_get_and", reason = "runs its closure with interrupts masked: execution model 11.1 rule 2" },
+    { path = "embassy_sync::watch::Watch::try_get_and", reason = "runs its closure with interrupts masked: execution model 11.1 rule 2" },
+    { path = "embassy_sync::watch::Rcv::try_get_and", reason = "runs its closure with interrupts masked: execution model 11.1 rule 2" },
 ]

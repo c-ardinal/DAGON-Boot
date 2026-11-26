@@ -216,6 +216,7 @@ class Tree:
     def referred(self, label):
         if label not in self.labels:
             node = Node()
+            node.labels.append(label)
             self.loose.append(node)
             self.labels[label] = node
         return self.labels[label]

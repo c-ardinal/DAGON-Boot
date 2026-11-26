@@ -303,6 +303,18 @@ class Stated(unittest.TestCase):
             self.assertEqual(b["pin"], [{"pin": pin, "name": "led0"}], guard)
             self.assertEqual(text.count("leds.dtsi"), 1, guard)
 
+    def test_a_deleted_node_whose_declaration_is_not_read_gives_no_bus(self):
+        dts = (
+            "&pinctrl { uart0_default: uart0_default {\n"
+            "    group1 { pinmux = <UART0_TX_P0>; };\n"
+            "    group2 { pinmux = <UART0_RX_P1>; input-enable; };\n"
+            "}; };\n"
+            "&flash0 { reg = <0 0x1000>; };\n"
+            "&uart0 { status = \"okay\"; pinctrl-0 = <&uart0_default>; };\n"
+        )
+        self.assertEqual(len(self.board(dts)["bus"]), 1)
+        self.assertNotIn("bus", self.board(dts + "/delete-node/ &uart0;\n"))
+
     def test_an_include_inside_a_block_comment_is_not_read(self):
         with tempfile.TemporaryDirectory() as d:
             path = Path(d) / "boards/x/x.dts"

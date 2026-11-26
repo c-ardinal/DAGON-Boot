@@ -153,6 +153,10 @@ describe('define document', () => {
     const switched = setLinkKind(twin, 2, LinkKind.I2c);
     expect(switched.topo.links![2].kind).toBe(LinkKind.I2c);
     expect(pairs(switched)).toEqual(pairs(twin));
+    // A kind described only is put where the link stands: the links keep their places too.
+    const described = setLinkKind(twin, 2, LinkKind.Can);
+    expect(described.topo.links![2].kind).toBe(LinkKind.Can);
+    expect(pairs(described)).toEqual(pairs(twin));
     // The file written and read back is the same ring.
     expect(fromYaml(toYaml(ring.topo)).topo).toEqual(ring.topo);
   });

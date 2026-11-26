@@ -552,18 +552,15 @@ export function setLink(doc: Doc, index: number, path: string, value: unknown): 
   return { ...doc, topo: { ...t, links } };
 }
 
-/** Switches link `index` to `kind` with that kind's defaults. The link keeps its place among the links, and so the key it is selected by. */
-export function setLinkKind(doc: Doc, index: number, kind: LinkKind): Doc {
-  const next = relinked(doc, index, kind);
-  const links = next.topo.links ?? [];
-  if (next === doc || links.length !== (doc.topo.links ?? []).length || index === links.length - 1) return next;
-  // relinked() leaves the new link last: back to where the old one was.
-  const last = links[links.length - 1];
-  return { ...next, topo: { ...next.topo, links: [...links.slice(0, index), last, ...links.slice(index, -1)] } };
+/** `doc` with its last link moved to `index`: a link made anew stands where the one it replaces stood, and keeps the key it is selected by. */
+function lastAt(doc: Doc, index: number): Doc {
+  const links = doc.topo.links ?? [];
+  if (index >= links.length - 1) return doc;
+  return { ...doc, topo: { ...doc.topo, links: [...links.slice(0, index), links[links.length - 1], ...links.slice(index, -1)] } };
 }
 
-/** Link `index` taken out and linked again as `kind`; a link of I2C or UART is then the last one. */
-function relinked(doc: Doc, index: number, kind: LinkKind): Doc {
+/** Switches link `index` to `kind` with that kind's defaults. The link keeps its place among the links. */
+export function setLinkKind(doc: Doc, index: number, kind: LinkKind): Doc {
   const l = (doc.topo.links ?? [])[index];
   if (!l || l.kind === kind) return doc;
   const node = (id: string) => doc.topo.nodes.find((x) => x.id === id);
@@ -581,14 +578,17 @@ function relinked(doc: Doc, index: number, kind: LinkKind): Doc {
   const tpl = saved ? template(saved) : null;
   const t = without.topo;
   const h = t.nodes.find((x) => x.id === up.node) ?? hub(t)!;
-  if (tpl?.link?.kind === kind && isCoordinator(h)) return connect(without, down.node, h.id);
+  if (tpl?.link?.kind === kind && isCoordinator(h)) {
+    const made = connect(without, down.node, h.id);
+    return made === without ? made : lastAt(made, index);
+  }
   const lower = n ? endAt(n, kind, kind === LinkKind.Uart ? 'pio-uart' : undefined) : { node: down.node, port: '' };
   const link: TLink =
     kind === LinkKind.Uart
       ? { kind, iface: 'pio-uart', ends: [{ ...endAt(h, kind, 'pio-uart'), pins: hubUart(h) }, lower], ...firstBaud(h, n ?? h), control: { kind: 'cooperative' } }
       : { kind, bus: t.buses?.[0]?.id ?? 'i2c-main', ends: [endAt(h, kind), { ...lower, addr: freeAddrs(t)[0] }], control: { kind: 'full' } };
   const buses = kind === LinkKind.I2c && !t.buses?.length ? [hubBus(h, n ?? h)] : t.buses;
-  return { ...without, topo: { ...t, buses, links: [...(t.links ?? []), link] } };
+  return lastAt({ ...without, topo: { ...t, buses, links: [...(t.links ?? []), link] } }, index);
 }
 
 export function setBus(doc: Doc, index: number, field: keyof TBus, value: unknown): Doc {

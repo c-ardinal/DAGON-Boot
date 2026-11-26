@@ -925,7 +925,7 @@ mod tests {
         for want in [
             "pub const DEVICE_IOE_REG_OUT_L: u8 = 0x05;",
             "pub const DEVICE_IOE_WRITABLE: &[u8] = &[3, 5, 19];",
-            "::dagon_events::Device::from_definition(0x4f, &[3, 5, 19], 2)",
+            "::dagon_events::Device::from_definition(0x4f, &[3, 5, 19], 64)",
         ] {
             assert!(rs.contains(want), "{want} in\n{rs}");
         }

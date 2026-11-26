@@ -3,6 +3,8 @@ format = 4
 id = "m5stopwatch"
 product = "M5StopWatch"
 mcu = "esp32s3"
+# The flash is a Winbond W25Q128JVPIQ, 16 MiB (StopWatch schematic
+# C152-SCH_Stopwatch_PRJ_Main_VA_20251201).
 flash_bytes = 0x100_0000
 # esp-hal has no I2C target mode for the ESP32-S3.
 i2c_target = false

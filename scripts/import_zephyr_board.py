@@ -165,18 +165,19 @@ def signals(text, refs):
     return out
 
 
-def flash_bytes(text, nodes):
-    """The size of `flash0`: the board's own `reg` before the SoC's."""
-    given = [last_prop(nodes.get("flash0", ""), "reg")]
-    soc = re.search(r"\bflash0\s*:\s*[\w@]+\s*\{", text)
-    if soc:
-        given.append(prop(own(body_at(text, soc.end() - 1)), "reg"))
-    for reg in given:
-        cells = re.fullmatch(r"<\s*(\S+)\s+(.+?)\s*>", reg or "")
-        size = number(cells.group(2)) if cells else None
-        if size:
-            return size
-    return None
+def stated(text, label):
+    """The own properties of node `label` wherever the files state them,
+    in source order: its declarations (`label: name { ... }`) and its
+    overlays (`&label { ... }`). A later one wins."""
+    found = re.finditer(rf"(?:\b{re.escape(label)}\s*:\s*[\w@-]+|&{re.escape(label)})\s*\{{", text)
+    return "\n".join(own(body_at(text, m.end() - 1)) for m in found)
+
+
+def flash_bytes(text):
+    """The size of `flash0`: the last `reg` the files give it."""
+    reg = last_prop(stated(text, "flash0"), "reg")
+    cells = re.fullmatch(r"<\s*(\S+)\s+(.+?)\s*>", reg or "")
+    return (number(cells.group(2)) if cells else None) or None
 
 
 def header(raw):
@@ -197,7 +198,9 @@ def named_pins(text, compatible):
     for m in re.finditer(rf'compatible\s*=\s*"{compatible}"\s*;', text):
         start = text.rfind("{", 0, m.start())
         for child in re.finditer(r"(\w+)\s*:\s*[\w-]+\s*\{", body_at(text, start)):
-            g = GPIOS.search(body_at(body_at(text, start), child.end() - 1))
+            # An overlay of the child (`&led0 { gpios = ... }`) rewires it.
+            given = last_prop(stated(text, child.group(1)), "gpios")
+            g = GPIOS.search(f"gpios = {given}") if given else None
             if g:
                 out.append((child.group(1).lower(), pin_name(g.group(1), g.group(2))))
     return out
@@ -247,7 +250,7 @@ def convert(root, start, board_id, mcu, tag):
                 buses.append((label, s.get("tx"), s.get("rx"), baud))
 
     pins = named_pins(text, "gpio-leds") + named_pins(text, "gpio-keys")
-    size = flash_bytes(text, nodes)
+    size = flash_bytes(text)
     rows = header(raw)
     table = f"board.{board_id}" if re.fullmatch(r"[A-Za-z0-9_-]+", board_id) else f"board.{quote(board_id)}"
 

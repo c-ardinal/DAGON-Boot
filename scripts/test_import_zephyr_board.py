@@ -104,6 +104,39 @@ class Imported(unittest.TestCase):
         self.assertIn("raspberrypi/rpi_pico/rp2040.dtsi", text.split("[board.")[0])
 
 
+class Stated(unittest.TestCase):
+    """A node's last word counts, wherever the files state it."""
+
+    def board(self, dts):
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / "boards/x/x.dts"
+            path.parent.mkdir(parents=True)
+            path.write_text(dts, encoding="utf-8")
+            return tomllib.loads(imp.convert(d, path, "x", "rp2040", TAG))["board"]["x"]
+
+    def test_an_overlay_rewires_an_led(self):
+        b = self.board(
+            "/ { leds { compatible = \"gpio-leds\"; led0: led_0 { gpios = <&gpio0 25 0>; }; }; };\n"
+            "&flash0 { reg = <0 0x1000>; };\n"
+            "&led0 { gpios = <&gpio0 16 0>; };\n"
+        )
+        self.assertEqual(b["pin"], [{"pin": "GPIO16", "name": "led0"}])
+
+    def test_a_later_declaration_of_flash0_gives_its_size(self):
+        b = self.board(
+            "/ { soc { flash0: flash@0 { compatible = \"soc-nv-flash\"; }; }; };\n"
+            "/ { soc { flash0: flash@0 { reg = <0 DT_SIZE_K(512)>; }; }; };\n"
+        )
+        self.assertEqual(b["flash_bytes"], 512 * 1024)
+
+    def test_a_later_size_of_flash0_replaces_an_earlier_one(self):
+        b = self.board(
+            "/ { soc { flash0: flash@0 { reg = <0 DT_SIZE_M(1)>; }; }; };\n"
+            "/ { soc { flash0: flash@0 { reg = <0 DT_SIZE_M(4)>; }; }; };\n"
+        )
+        self.assertEqual(b["flash_bytes"], 4 * 1024 * 1024)
+
+
 class Refused(unittest.TestCase):
     def convert(self, dts):
         with tempfile.TemporaryDirectory() as d:

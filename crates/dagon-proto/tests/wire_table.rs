@@ -286,6 +286,7 @@ fn idempotent_column() {
             Cmd::EnterRom,
             Cmd::SubCtl,
             Cmd::I2cRaw,
+            Cmd::UartRaw,
             Cmd::ConfRun
         ]
     );
@@ -507,7 +508,7 @@ fn typed(cmd: Cmd, resp: bool) -> Typed {
                 Box::new(|b| dbg(PeersResp::parse(b))),
             )
         }
-        (Cmd::Relay | Cmd::I2cRaw, true) => (
+        (Cmd::Relay | Cmd::I2cRaw | Cmd::UartRaw, true) => (
             enc(|b| encode_bulk_resp(&[0, 0xDA, 0x6F], b).unwrap()),
             Box::new(move |b| dbg(parse_bulk_resp(cmd, b))),
         ),
@@ -531,6 +532,18 @@ fn typed(cmd: Cmd, resp: bool) -> Typed {
             (
                 enc(|b| m.encode(b).unwrap()),
                 Box::new(|b| dbg(I2cRaw::parse(b))),
+            )
+        }
+        (Cmd::UartRaw, false) => {
+            let m = UartRaw {
+                link: 4,
+                read_max: 64,
+                wait_ms: 3000,
+                data: &[0xC0, 0x00],
+            };
+            (
+                enc(|b| m.encode(b).unwrap()),
+                Box::new(|b| dbg(UartRaw::parse(b))),
             )
         }
         (Cmd::ConfList, true) => {
@@ -689,6 +702,8 @@ fn golden_cores_and_samples() {
         (Cmd::SubCtl, true, 0, ""),
         (Cmd::I2cRaw, false, 0, "03020300 00 00FF"),
         (Cmd::I2cRaw, true, 0, "00 00DA6F"),
+        (Cmd::UartRaw, false, 1, "04 03024000 0502B80B 00 C000"),
+        (Cmd::UartRaw, true, 0, "00 00DA6F"),
         (Cmd::ConfList, false, 0, ""),
         (Cmd::ConfList, true, 0, "0203010207"),
         (Cmd::ConfRun, false, 1, "04 03044D000000"),

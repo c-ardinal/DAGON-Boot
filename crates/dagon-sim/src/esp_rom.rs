@@ -188,7 +188,13 @@ impl SimEspRom {
         data: &[u8],
         now_ms: &mut u64,
     ) -> Result<Vec<u8>, u8> {
-        let words = |n: usize| if data.len() == 4 * n { Ok(()) } else { Err(INVALID) };
+        let words = |n: usize| {
+            if data.len() == 4 * n {
+                Ok(())
+            } else {
+                Err(INVALID)
+            }
+        };
         match op {
             cmd::SYNC => {
                 if data.len() != 36 || data[..4] != [0x07, 0x07, 0x12, 0x20] {

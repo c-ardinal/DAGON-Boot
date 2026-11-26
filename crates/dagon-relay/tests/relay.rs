@@ -23,7 +23,7 @@ use dagon_port::{
 use dagon_port::{Addressing, RelayLinkDef};
 use dagon_proto::payload::{
     boot0, nrst, CapsReq, CapsResp, CmdSet, HelloResp, I2cRaw, Peer, PeersResp, Relay as RelayReq,
-    RomTarget, Show, SubCtl,
+    RomTarget, Show, SubCtl, UartRaw,
 };
 use dagon_proto::{finish, frame_len, max_payload, plant, split_status, Cmd, Frame, Status};
 use dagon_relay::{
@@ -245,6 +245,26 @@ impl NodeLink for SimNodeLink<'_> {
         }
         Ok(())
     }
+
+    async fn stream(
+        &mut self,
+        write: &[u8],
+        read: &mut [u8],
+        wait_ms: u16,
+    ) -> Result<usize, Status> {
+        if self.addressed {
+            return Err(Status::Unsupported);
+        }
+        let t0 = self.bus.borrow().now_ms;
+        let got = self
+            .bus
+            .borrow_mut()
+            .uart_raw(self.port, write, read.len(), wait_ms.into());
+        self.spend(t0).await;
+        let got = got.ok_or(Status::Unsupported)?;
+        read[..got.len()].copy_from_slice(&got);
+        Ok(got.len())
+    }
 }
 
 /// The reset and boot-mode lines through `SimBus::set_lines`.
@@ -434,9 +454,10 @@ impl Pc<'_> {
         let (f, _) = Frame::decode(&reply, max_payload::USB).unwrap();
         assert_eq!((f.seq, f.cmd), (seq, cmd as u8));
         let (status, body) = split_status(f.payload).unwrap();
-        // RELAY and I2C_RAW answer with bulk: the node's frame, the bytes read.
+        // RELAY, I2C_RAW and UART_RAW answer with bulk: the node's frame,
+        // the bytes read.
         let body = match (status, cmd) {
-            (Status::Ok, Cmd::Relay | Cmd::I2cRaw) => {
+            (Status::Ok, Cmd::Relay | Cmd::I2cRaw | Cmd::UartRaw) => {
                 dagon_proto::payload::parse_bulk_resp(cmd, body).unwrap()
             }
             _ => body,
@@ -504,6 +525,24 @@ impl Pc<'_> {
         let mut p = vec![0u8; I2cRaw::OVERHEAD_MAX + data.len()];
         let n = raw.encode(&mut p).unwrap();
         self.ask(Cmd::I2cRaw, &p[..n]).await
+    }
+
+    async fn stream(
+        &self,
+        link: u8,
+        read_max: u16,
+        wait_ms: u16,
+        data: &[u8],
+    ) -> (Status, Vec<u8>) {
+        let raw = UartRaw {
+            link,
+            read_max,
+            wait_ms,
+            data,
+        };
+        let mut p = vec![0u8; UartRaw::OVERHEAD_MAX + data.len()];
+        let n = raw.encode(&mut p).unwrap();
+        self.ask(Cmd::UartRaw, &p[..n]).await
     }
 
     /// RELAY of a request frame carrying the link's whole `max` payload (a
@@ -695,6 +734,40 @@ fn the_relay_serves_the_pc_over_its_links() {
         let (s, body) = pc.ask(Cmd::Peers, &[1]).await;
         let past = PeersResp::parse(&body).unwrap();
         assert_eq!((s, past.total, past.peers()), (Status::Ok, 2, &[][..]));
+
+        // UART_RAW: only a UART link, within its buffer, and E_UNSUPPORTED
+        // where the board wires none or the driver has no raw stream.
+        let buffer = LINKS[1].buffer_len();
+        let over = vec![0u8; buffer + 1];
+        let ops = bus.borrow().ops;
+        assert_eq!(pc.stream(BUS, 1, 10, &[]).await.0, Status::Arg);
+        assert_eq!(pc.stream(0x7E, 1, 10, &[]).await.0, Status::Arg);
+        assert_eq!(pc.stream(STREAM, 0, 10, &over).await.0, Status::Arg);
+        let (st, _) = pc.stream(STREAM, buffer as u16 + 1, 10, &[]).await;
+        assert_eq!(st, Status::Arg);
+        assert_eq!(pc.stream(SPARE, 1, 10, &[]).await.0, Status::Unsupported);
+        assert_eq!(bus.borrow().ops, ops, "refused before a port was used");
+        // The node's app holds the line: nothing comes back, after the wait.
+        let t0 = clock.now_ms();
+        let (st, read) = pc.stream(STREAM, 64, 150, &[0xC0]).await;
+        assert_eq!((st, read.len()), (Status::Ok, 0));
+        assert!(clock.now_ms() - t0 >= 150);
+        // Once the node switched to its ROM serial loader (ENTER_ROM
+        // method 1), the loader's bytes come back as they are.
+        let mut enter = [0u8; 16];
+        enter[8] = 1;
+        let n = finish(&mut enter, 0, 0x41, Cmd::EnterRom as u8, 1).unwrap();
+        let (st, reply) = pc.relay(STREAM, STREAM_ADDR, 300, &enter[..n]).await;
+        assert_eq!(st, Status::Ok);
+        let (f, _) = Frame::decode(&reply, max_payload::UART).unwrap();
+        assert_eq!(split_status(f.payload).unwrap().0, Status::Ok);
+        let mut sync = vec![0xC0, 0x00, 0x08, 36, 0, 0, 0, 0, 0, 0x07, 0x07, 0x12, 0x20];
+        sync.extend([0x55; 32]);
+        sync.push(0xC0);
+        let (st, read) = pc.stream(STREAM, buffer as u16, 100, &sync).await;
+        assert_eq!(st, Status::Ok);
+        assert!(read.starts_with(b"ESP-ROM:"), "{read:02X?}");
+        assert!(read.windows(3).any(|w| w == [0xC0, 0x01, 0x08]));
 
         // The relay's own work went out as its events: the PC link first.
         let seen = RELAY_EVENTS.with(|e| e.borrow().clone());
@@ -920,7 +993,7 @@ fn the_relay_says_what_it_serves_and_reads_before_it_acts() {
         use Cmd::*;
         let want = [
             Hello, Status, Version, Caps, Stay, XferBegin, XferData, XferEnd, XferHdr, SetPending,
-            Reboot, Confirm, Show, Relay, Peers, SubCtl, I2cRaw,
+            Reboot, Confirm, Show, Relay, Peers, SubCtl, I2cRaw, UartRaw,
         ];
         let mut req = [0u8; 32];
         let n = hello_request(max_payload::USB, 1, &mut req).unwrap();
@@ -1238,12 +1311,19 @@ fn a_relay_recovers_a_node_on_each_of_two_buses() {
 /// A relay without recovery lines does not say it serves SUBCTL and
 /// I2C_RAW.
 #[test]
-fn a_relay_without_a_recovery_serves_relay_and_peers_alone() {
+fn a_relay_without_a_recovery_serves_no_recovery_command() {
+    let base = [Cmd::Relay, Cmd::Peers, Cmd::UartRaw];
     assert_eq!(
         dagon_relay::cmds(false),
-        CmdSet::EMPTY.with(Cmd::Relay as u8).with(Cmd::Peers as u8)
+        base.iter().fold(CmdSet::EMPTY, |s, c| s.with(*c as u8))
     );
-    let all = [Cmd::Relay, Cmd::Peers, Cmd::SubCtl, Cmd::I2cRaw];
+    let all = [
+        Cmd::Relay,
+        Cmd::Peers,
+        Cmd::UartRaw,
+        Cmd::SubCtl,
+        Cmd::I2cRaw,
+    ];
     assert_eq!(
         dagon_relay::cmds(true),
         all.iter().fold(CmdSet::EMPTY, |s, c| s.with(*c as u8))

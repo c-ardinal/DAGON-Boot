@@ -11,7 +11,7 @@ use crate::field::{
 };
 use crate::table::{
     caps, conf_list, conf_result, conf_run, confirm, error, hello, i2c_raw, peers, reboot, relay,
-    set_pending, show, status, subctl, version, xfer_begin, xfer_end, ERROR,
+    set_pending, show, status, subctl, uart_raw, version, xfer_begin, xfer_end, ERROR,
 };
 use crate::{Cmd, FrameError, Status};
 use dagon_format::header::McuId;
@@ -1240,6 +1240,52 @@ impl<'a> I2cRaw<'a> {
     }
 }
 
+/// UART_RAW request (to the ROM loader a node on a UART link of the relay
+/// has entered). Response: the bytes read, as bulk ([`parse_bulk_resp`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct UartRaw<'a> {
+    /// A UART `[[relay_link]]` id of the relay.
+    pub link: u8,
+    /// 0 (left out on the wire): nothing is read.
+    pub read_max: u16,
+    /// How long the first byte read may take.
+    pub wait_ms: u16,
+    /// Bytes to send.
+    pub data: &'a [u8],
+}
+
+impl<'a> UartRaw<'a> {
+    /// The most bytes of a request around its data.
+    pub const OVERHEAD_MAX: usize = 1 + 4 + 4 + 1;
+
+    pub fn parse(b: &'a [u8]) -> Result<Self, Status> {
+        Self::of(&rd(b, &Cmd::UartRaw.spec().req)?)
+    }
+    /// From a request the reader accepted.
+    pub fn of(p: &Parsed<'a>) -> Result<Self, Status> {
+        let [link] = at(p.core, 0)?;
+        let word = |f| Ok::<_, Status>(val(p, f)?.map(u16::from_le_bytes));
+        Ok(UartRaw {
+            link,
+            read_max: word(&uart_raw::READ_MAX)?.unwrap_or(0),
+            wait_ms: word(&uart_raw::WAIT_MS)?.unwrap_or(uart_raw::WAIT_DEFAULT_MS),
+            data: p.bulk,
+        })
+    }
+    pub fn encode(&self, out: &mut [u8]) -> Result<usize, FrameError> {
+        let mut w = FieldWriter::new(out);
+        w.put(&[self.link])?
+            .field_unless(&uart_raw::READ_MAX, &self.read_max.to_le_bytes(), &[0, 0])?
+            .field_unless(
+                &uart_raw::WAIT_MS,
+                &self.wait_ms.to_le_bytes(),
+                &uart_raw::WAIT_DEFAULT_MS.to_le_bytes(),
+            )?;
+        w.bulk(self.data)?;
+        Ok(w.len())
+    }
+}
+
 /// CONF_RUN request (conformance builds only).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ConfRunReq {
@@ -1610,6 +1656,7 @@ requests! {
     Peers(u8) peers = peers_of;
     SubCtl(SubCtl) sub_ctl = SubCtl::of;
     I2cRaw(I2cRaw<'a>) i2c_raw = I2cRaw::of;
+    UartRaw(UartRaw<'a>) uart_raw = UartRaw::of;
     ConfList(()) conf_list = nothing;
     ConfRun(ConfRunReq) conf_run = ConfRunReq::of;
     ConfResult(u8) conf_result = conf_result_of;
@@ -1634,6 +1681,7 @@ impl Req<'_> {
             Req::XferData(_) | Req::XferHdr(_) => NEXT_OFFSET_LEN,
             Req::XferEnd(()) => DIGEST_LEN,
             Req::I2cRaw(raw) => BULK_RESP_AT + usize::from(raw.read_len),
+            Req::UartRaw(raw) => BULK_RESP_AT + usize::from(raw.read_max),
             Req::ConfList(()) => ConfListResp::MAX_LEN,
             Req::ConfRun(_) => ConfRunResp::MAX_LEN,
             Req::ConfResult(_) => ConfResultResp::MAX_LEN,

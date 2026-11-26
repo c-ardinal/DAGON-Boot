@@ -26,7 +26,7 @@ pub const SYNC_ATTEMPTS: u32 = 20;
 /// How long one SYNC waits for its response.
 pub const SYNC_WAIT_MS: u32 = 100;
 /// Timeout of a command that neither erases nor hashes.
-pub const COMMAND_MS: u32 = 3_000;
+pub const REPLY_MS: u32 = 3_000;
 /// FLASH_BEGIN: the loader erases the region before it answers.
 pub const ERASE_MS_PER_MIB: u32 = 30_000;
 /// SPI_FLASH_MD5: the loader reads the region back.
@@ -37,9 +37,9 @@ const ESC: u8 = 0xDB;
 const ESC_END: u8 = 0xDC;
 const ESC_ESC: u8 = 0xDD;
 const HEADER: usize = 8;
-const STATUS: usize = 4;
+const TRAILER: usize = 4;
 /// Largest response read whole: SPI_FLASH_MD5's 32 characters and status.
-const MAX_RESPONSE: usize = HEADER + 32 + STATUS;
+const MAX_RESPONSE: usize = HEADER + 32 + TRAILER;
 const CHECKSUM_SEED: u8 = 0xEF;
 
 pub mod cmd {
@@ -247,11 +247,11 @@ impl<L: EspLink> Session<'_, L> {
                     continue;
                 }
                 let size = usize::from(u16::from_le_bytes([f[2], f[3]]));
-                if size < STATUS || HEADER + size != len {
+                if size < TRAILER || HEADER + size != len {
                     return Err(EspError::Malformed(cmd));
                 }
-                let data = &f[HEADER..len - STATUS];
-                let status = &f[len - STATUS..];
+                let data = &f[HEADER..len - TRAILER];
+                let status = &f[len - TRAILER..];
                 if status[0] != 0 {
                     return Err(EspError::Failed {
                         cmd,
@@ -288,7 +288,7 @@ fn words<const N: usize>(w: [u32; N]) -> [[u8; 4]; N] {
 
 fn per_mib(bytes: u32, ms_per_mib: u32) -> u32 {
     let ms = u64::from(bytes) * u64::from(ms_per_mib) / (1 << 20);
-    COMMAND_MS.max(ms.min(u64::from(u32::MAX)) as u32)
+    REPLY_MS.max(ms.min(u64::from(u32::MAX)) as u32)
 }
 
 /// Writes `plan` through the loader on `link` and checks every region by
@@ -304,10 +304,10 @@ pub async fn flash<L: EspLink>(link: &mut L, plan: &Plan<'_>) -> Result<Stats, E
         syncs: s.sync().await?,
         ..Stats::default()
     };
-    s.command(cmd::SPI_ATTACH, 0, words([0, 0]).as_flattened(), &[], COMMAND_MS)
+    s.command(cmd::SPI_ATTACH, 0, words([0, 0]).as_flattened(), &[], REPLY_MS)
         .await?;
     let params = words([0, plan.flash_bytes, 0x1_0000, 0x1000, 0x100, 0xFFFF]);
-    s.command(cmd::SPI_SET_PARAMS, 0, params.as_flattened(), &[], COMMAND_MS)
+    s.command(cmd::SPI_SET_PARAMS, 0, params.as_flattened(), &[], REPLY_MS)
         .await?;
     let total: u64 = plan.regions.iter().map(|r| r.data.len() as u64).sum();
     let mut written = 0u64;
@@ -323,7 +323,7 @@ pub async fn flash<L: EspLink>(link: &mut L, plan: &Plan<'_>) -> Result<Stats, E
             block[..part.len()].copy_from_slice(part);
             let head = words([BLOCK as u32, seq as u32, 0, 0]);
             let check = checksum(&block);
-            s.command(cmd::FLASH_DATA, check, head.as_flattened(), &block, COMMAND_MS)
+            s.command(cmd::FLASH_DATA, check, head.as_flattened(), &block, REPLY_MS)
                 .await?;
             stats.blocks += 1;
             written += part.len() as u64;
@@ -348,7 +348,7 @@ pub async fn flash<L: EspLink>(link: &mut L, plan: &Plan<'_>) -> Result<Stats, E
     }
     // 0 reboots the chip, 1 leaves the loader running.
     let stay = words([u32::from(!plan.reboot)]);
-    s.command(cmd::FLASH_END, 0, stay.as_flattened(), &[], COMMAND_MS)
+    s.command(cmd::FLASH_END, 0, stay.as_flattened(), &[], REPLY_MS)
         .await?;
     stats.elapsed_ms = s.link.now_ms() - started;
     Ok(stats)

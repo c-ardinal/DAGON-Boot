@@ -47,6 +47,7 @@
   import { STATE_ICON, type NodeState } from '../app/nodeState.ts';
   import type { Live } from '../app/writeProgress.ts';
   import { imageRows } from '../app/slots.ts';
+  import { Leaving } from './leaving.svelte.ts';
   import Icon from '../screens/Icon.svelte';
   import { SLOT_STATE, versionText } from '../wasm/dagon.ts';
   import type { Chip } from './Graph.svelte';
@@ -121,6 +122,9 @@
   const role = $derived(roleOf(config, n));
   const meta = $derived(metaOf(n));
 
+  /** The chip that is fading out: still on the card, so still in its name (WCAG 2.5.3) until it is gone. */
+  const leaving = new Leaving();
+
   function spokenName(): string {
     const mark = m && m !== 'skeleton' ? m : null;
     return NODE.name({
@@ -131,7 +135,7 @@
       product: n.product,
       meta,
       slots: (slots ?? []).map((sl) => `${sl.row} ${sl.text}`).join(' '),
-      chip: mark?.chip ?? '',
+      chip: mark?.chip || leaving.text,
       note: compact ? '' : (mark?.note ?? ''),
       // A state no chip shows (応答あり, 応答なし) is said after the words.
       state: mark && !mark.chip ? mark.spoken : '',
@@ -180,7 +184,7 @@
     <!-- Its row, and the chip's below it, are always there: no card changes height when one fills. -->
     <span class="slotline" translate="no">{#each slots ?? [] as sl (sl.row)}<span class:on={sl.on}>{sl.row} {sl.text}</span> {/each}</span>
     <span class="chips"
-      >{#if m === 'skeleton'}<span class="skeleton chip-sk"></span>{:else if m?.chip}<span in:rise={{ dur: '--dur-quick' }} out:lateFade class="chip" class:silent={m.silent} class:uns={!!n.skip && m.chip === NODE.skipped}>{m.chip}</span>{/if} {#if m && m !== 'skeleton' && m.note}<span class="note" title={m.note}>{m.note}</span>{/if}</span
+      >{#if m === 'skeleton'}<span class="skeleton chip-sk"></span>{:else if m?.chip}<span in:rise={{ dur: '--dur-quick' }} out:lateFade onintrostart={() => (leaving.text = '')} onoutrostart={(e) => (leaving.text = e.currentTarget.textContent ?? '')} onoutroend={() => (leaving.text = '')} class="chip" class:silent={m.silent} class:uns={!!n.skip && m.chip === NODE.skipped}>{m.chip}</span>{/if} {#if m && m !== 'skeleton' && m.note}<span class="note" title={m.note}>{m.note}</span>{/if}</span
     >
   </span>
   {#if level !== undefined}<span in:fade out:lateFade={{ shown: confirmed ? 100 : undefined }} class="pct" aria-hidden="true" style:--shown={Math.round(level)}></span>{/if}

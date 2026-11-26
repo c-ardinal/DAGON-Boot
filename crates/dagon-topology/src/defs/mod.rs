@@ -854,6 +854,18 @@ impl McuDef {
             .find(|s| s.image == kind && matches!(s.binding, Binding::A | Binding::Any))
     }
 
+    /// Whether the recovery agent can be rewritten through this MCU's ROM
+    /// serial loader with the node's help: its first write goes through
+    /// Espressif's ROM loader (`[writer] kind = "espflash"`), its firmware
+    /// takes ENTER_ROM (`[[rom_entry]]`), and it has an agent slot and a
+    /// flash map. The one rule of the host's serial ROM maps.
+    pub fn has_serial_rom(&self) -> bool {
+        matches!(self.writer, Writer::Espflash { .. })
+            && !self.rom_entries.is_empty()
+            && !self.flash_maps.is_empty()
+            && self.slot_a(ImageKind::Agent).is_some()
+    }
+
     /// Whether a first install can go through this MCU's ROM I2C loader: it
     /// has one, a boot core slot A, an APP slot A and an APP log. The one
     /// rule for a ROM recovery peer, in `dagon gen` and in the host's ROM

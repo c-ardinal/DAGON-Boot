@@ -16,7 +16,7 @@ use dagon_sim::block_on;
 use dagon_topology::defs::Registry;
 use dagon_topology::Topology;
 
-use crate::cli::{ApplyArgs, RollbackArgs, StatusArgs};
+use crate::cli::{ApplyArgs, RecoverArgs, RollbackArgs, StatusArgs};
 use crate::config::{load_key, read_file, read_topology, Config};
 use crate::serial;
 
@@ -375,6 +375,70 @@ pub fn rollback(a: &RollbackArgs) -> Res {
         &mut print,
     )?;
     println!("{node}: back on {v}, confirmed");
+    Ok(())
+}
+
+/// `dagon recover`: rewrites a node's recovery agent through its ROM
+/// serial loader ([`Host::rewrite_agent`]). A node that does not answer is
+/// waited for while a person brings it into its loader.
+pub fn recover(a: &RecoverArgs) -> Res {
+    use dagon_host::serial_rom::MANUAL_SYNC_MS;
+    let node = a.node.as_str();
+    let cfg = Config::load(a.config.as_deref())?;
+    let t = read_topology(&cfg, &cfg.topology_path(a.topology.as_deref())?)?;
+    let reg = crate::defs::registry(&cfg)?;
+    let i = t.nodes.iter().position(|n| n.id == node);
+    let i = i.ok_or_else(|| format!("no updatable node '{node}' in the topology"))?;
+    let n = &t.nodes[i];
+    if !reg.mcu(&n.mcu).is_some_and(|m| m.has_serial_rom()) {
+        return Err(format!(
+            "{node}: the MCU definition '{}' names no ROM serial loader",
+            n.mcu
+        ));
+    }
+    let bin = topology_bin(&reg, &t)?;
+    let maps = dagon_host::serial_rom::serial_rom_maps(&reg);
+    let key = pubkey(a.pubkey.as_deref(), a.key.as_deref(), &cfg)?;
+    let agent = read_file(Path::new(&a.agent))?;
+    let listing = format!(
+        "{node}: its recovery agent is erased and rewritten with {} through the ROM serial \
+         loader; keep the node powered until it restarts\n",
+        a.agent
+    );
+    if !a.yes && !crate::deploy::confirm(&listing, &mut std::io::stdin().lock()) {
+        return Err("nothing was written".into());
+    }
+    let mut host = serial::host(a.port.as_deref())?;
+    host.timings = node_timings(&reg, &t)?;
+    host.local = local(&reg, &t);
+    let mut print = |e: Event| match e.phase {
+        phase::TRANSFER => println!("{node}: transfer {}% ({})", e.percent, e.version),
+        p => println!("{node}: {} ({})", phase_name(p), e.version),
+    };
+    let mut run = |manual_sync_ms| {
+        let assets = dagon_host::AgentAssets {
+            topology: &bin,
+            pubkey: &key,
+            agent: &agent,
+            maps: &maps,
+            confirmed: true,
+            manual_sync_ms,
+        };
+        block_on(host.rewrite_agent(i as u8, &assets, &mut print)).map(|(_, v)| v)
+    };
+    let v = match run(0) {
+        Err(dagon_host::Error::Unreachable { .. }) => {
+            println!(
+                "{node}: no answer. Bring it into its ROM serial loader by hand (as its \
+                 board's manual says) within {} s",
+                MANUAL_SYNC_MS / 1000
+            );
+            run(MANUAL_SYNC_MS)
+        }
+        r => r,
+    }
+    .map_err(|e| format!("recover {node}: {e:?}"))?;
+    println!("{node}: recovery agent {v} written, the node answers again");
     Ok(())
 }
 

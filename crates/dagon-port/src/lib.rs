@@ -385,6 +385,22 @@ pub trait NodeLink {
         let _ = (addr, write, read);
         Err(Status::Unsupported)
     }
+
+    /// Raw bytes on a link whose medium is a byte stream, outside DAGON
+    /// frames (UART_RAW, to a ROM loader that holds the line): sends
+    /// `write`, then stores what arrives in `read`, waiting `wait_ms` for
+    /// the first byte and stopping when `read` is full or the line stays
+    /// silent for `dagon_proto::table::uart_raw::GAP_MS`; returns the
+    /// count, 0 when nothing arrived. Default: [`Status::Unsupported`].
+    async fn stream(
+        &mut self,
+        write: &[u8],
+        read: &mut [u8],
+        wait_ms: u16,
+    ) -> Result<usize, Status> {
+        let _ = (write, read, wait_ms);
+        Err(Status::Unsupported)
+    }
 }
 
 /// NRST action, as in the SUBCTL command.

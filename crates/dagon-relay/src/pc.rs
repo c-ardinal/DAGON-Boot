@@ -17,7 +17,7 @@ use dagon_port::{Link, Nrst, SubControl};
 use dagon_proto::handler::{self, Handler};
 use dagon_proto::payload::{
     self, boot0, nrst, CapsReq, CapsResp, CmdSet, I2cRaw, Peer, PeersResp, Relay as RelayReq,
-    Req as Asked, RomTarget, SubCtl,
+    Req as Asked, RomTarget, SubCtl, UartRaw,
 };
 use dagon_proto::{flags, Cmd, Frame, FrameError, Status, HEADER_LEN, MAX_FRAME};
 
@@ -56,9 +56,10 @@ pub struct Relay<'a, A, C, W, T> {
 /// The commands the relay answers itself. Its handlers wait on the
 /// node's links, so the rows have no action: [`Pc::handle`] takes the
 /// typed request of a row and runs it.
-const TABLE: [Handler<(), ()>; 4] = [
+const TABLE: [Handler<(), ()>; 5] = [
     Handler::deferred(Cmd::Relay),
     Handler::deferred(Cmd::Peers),
+    Handler::deferred(Cmd::UartRaw),
     Handler::deferred(Cmd::SubCtl),
     Handler::deferred(Cmd::I2cRaw),
 ];
@@ -70,13 +71,17 @@ const CAPS: Handler<(), ()> = Handler::deferred(Cmd::Caps);
 /// The most recovery targets a relay tells apart (one bit each of BOOT0).
 pub const MAX_RECOVERY: usize = 32;
 
-/// The commands of its own a relay serves: RELAY and PEERS, and with
-/// recovery targets SUBCTL and I2C_RAW. The node's HELLO names them with its agent's.
+/// The commands of its own a relay serves: RELAY, PEERS and UART_RAW, and
+/// with recovery targets SUBCTL and I2C_RAW. The node's HELLO names them
+/// with its agent's.
 pub const fn cmds(recovery: bool) -> CmdSet {
     if recovery {
         handler::cmds(&TABLE)
     } else {
-        CmdSet::EMPTY.with(Cmd::Relay as u8).with(Cmd::Peers as u8)
+        CmdSet::EMPTY
+            .with(Cmd::Relay as u8)
+            .with(Cmd::Peers as u8)
+            .with(Cmd::UartRaw as u8)
     }
 }
 
@@ -196,6 +201,7 @@ where
             Ok(Asked::Caps(c)) => self.caps(c, room),
             Ok(Asked::SubCtl(s)) => (self.lines(s).await, 0),
             Ok(Asked::I2cRaw(raw)) => self.i2c_raw(raw, room).await,
+            Ok(Asked::UartRaw(raw)) => self.uart_raw(raw, room).await,
             Ok(Asked::Relay(r)) => self.relay(&r, room).await,
             Ok(Asked::Peers(page)) => self.peers(page),
             Ok(_) => (Status::Unsupported, 0),
@@ -412,6 +418,23 @@ where
         self.r.agent.child_raw(addr, len, raw.read_len);
         let timeout = self.r.config.raw_timeout_ms;
         let req = self.req(Op::Raw, addr, timeout, raw.read_len);
+        self.via(port, req, raw.data, max).await
+    }
+
+    /// Raw bytes to and from the UART link it names: E_ARG for a link
+    /// the node does not have or that is no UART, E_UNSUPPORTED for one
+    /// the board does not wire or whose driver has no raw stream.
+    async fn uart_raw(&mut self, raw: UartRaw<'_>, max: usize) -> (Status, usize) {
+        let Some(route) = self.route(raw.link) else {
+            return (Status::Arg, 0);
+        };
+        if let Err(e) = cmd::uart_raw(&raw, &route.link) {
+            return (e, 0);
+        }
+        let Some(port) = route.port else {
+            return (Status::Unsupported, 0);
+        };
+        let req = self.req(Op::Stream, 0, raw.wait_ms, raw.read_max);
         self.via(port, req, raw.data, max).await
     }
 }

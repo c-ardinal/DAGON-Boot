@@ -219,6 +219,15 @@ fn todays_invocations() -> Vec<(&'static str, Command)> {
             }),
         ),
         (
+            "recover --node watch --agent agent.img --yes",
+            C::Recover(RecoverArgs {
+                node: "watch".into(),
+                agent: "agent.img".into(),
+                yes: true,
+                ..Default::default()
+            }),
+        ),
+        (
             "new my-fleet",
             C::New(NewArgs {
                 dir: "my-fleet".into(),
@@ -554,6 +563,7 @@ fn bad_command_lines_are_usage_errors() {
         // `provision <node>` makes any node's first-install files.
         ("rescue hub", ErrorKind::InvalidSubcommand),
         ("rollback", ErrorKind::MissingRequiredArgument),
+        ("recover --node watch", ErrorKind::MissingRequiredArgument),
         ("flash", ErrorKind::MissingRequiredArgument),
         ("new", ErrorKind::MissingRequiredArgument),
         ("sim now", ErrorKind::InvalidValue),
@@ -844,7 +854,7 @@ fn top_help_lists_the_commands_under_task_headings() {
         ),
         (
             "Write to a node",
-            vec!["flash", "deploy", "apply", "rollback"],
+            vec!["flash", "deploy", "apply", "rollback", "recover"],
         ),
         ("Check a node", vec!["status", "conform"]),
         ("Tools", vec!["serve", "sim", "ai"]),

@@ -466,6 +466,41 @@ fn hub_command_vectors() {
 }
 
 #[test]
+fn uart_raw_vector() {
+    let raw = UartRaw {
+        link: 2,
+        read_max: 64,
+        wait_ms: 3000,
+        data: &[0xC0],
+    };
+    let file = golden(
+        "frame_uart_raw.bin",
+        &frame(0, 0x19, Cmd::UartRaw, |b| raw.encode(b).unwrap()),
+    );
+    assert_eq!(UartRaw::parse(decode(&file).payload).unwrap(), raw);
+    // core link 2, must fields 1 read_max 64 and 2 wait_ms 3000, the
+    // delimiter, the byte to send
+    expect_at(
+        &file,
+        &[(
+            5,
+            &[0x62, 11, 0, 2, 0x03, 2, 64, 0, 0x05, 2, 0xB8, 0x0B, 0, 0xC0],
+        )],
+    );
+    // Nothing read and the default wait are left out.
+    let quiet = UartRaw {
+        read_max: 0,
+        wait_ms: dagon_proto::table::uart_raw::WAIT_DEFAULT_MS,
+        ..raw
+    };
+    let mut b = [0u8; 8];
+    let n = quiet.encode(&mut b).unwrap();
+    assert_eq!(&b[..n], &[2, 0, 0xC0]);
+    assert_eq!(UartRaw::parse(&b[..n]), Ok(quiet));
+    assert_eq!(UartRaw::parse(&[]), Err(Status::Arg));
+}
+
+#[test]
 fn enter_rom_vector() {
     let req = EnterRom {
         method: rom_method::FORCE_DOWNLOAD_BOOT,

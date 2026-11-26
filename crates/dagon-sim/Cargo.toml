@@ -13,6 +13,8 @@ dagon-events = { path = "../dagon-events" }
 dagon-format = { path = "../dagon-format" }
 dagon-port = { path = "../dagon-port" }
 dagon-proto = { path = "../dagon-proto" }
+# MD5 for the ESP ROM loader model's SPI_FLASH_MD5.
+dagon-romlink = { path = "../dagon-romlink" }
 # The MCU definitions: each board's boot attempt limit.
 dagon-topology = { path = "../dagon-topology" }
 

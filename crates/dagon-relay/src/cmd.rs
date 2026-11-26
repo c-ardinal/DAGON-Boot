@@ -2,7 +2,8 @@
 //! relay (`dagon-sim`) so tools tested against it behave the same on a
 //! node.
 
-use dagon_proto::payload::{I2cRaw, Relay, RomTarget};
+use dagon_port::LinkKind;
+use dagon_proto::payload::{I2cRaw, Relay, RomTarget, UartRaw};
 use dagon_proto::Status;
 
 use crate::RelayLinkDef;
@@ -33,6 +34,17 @@ pub fn i2c_raw(raw: &I2cRaw<'_>, boot0_high: bool, link: &RelayLinkDef) -> Resul
     }
     let limit = link.buffer_len();
     if usize::from(raw.read_len) > limit || raw.data.len() > limit {
+        return Err(Status::Arg);
+    }
+    Ok(())
+}
+
+/// UART_RAW over `link`: E_ARG unless it is a UART link, and for data to
+/// send or a read longer than the link's buffer
+/// ([`RelayLinkDef::buffer_len`]).
+pub fn uart_raw(raw: &UartRaw<'_>, link: &RelayLinkDef) -> Result<(), Status> {
+    let limit = link.buffer_len();
+    if link.kind != LinkKind::Uart || usize::from(raw.read_max) > limit || raw.data.len() > limit {
         return Err(Status::Arg);
     }
     Ok(())

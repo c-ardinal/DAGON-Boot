@@ -19,6 +19,7 @@ For application developers, extension authors and DAGON contributors. The last s
 - The boot loader does not relay. A node reached only through a node whose boot loader holds it in update or recovery mode is reached again once that node runs an app: write that node first.
 
 - The ESP32-S3 boots through the official ESP-IDF 2nd stage (the port `vendor-stage2` in compat.toml). A broken 2nd stage is outside what DAGON recovers: it has to be rewritten over USB with the vendor tools.
+- `dagon recover` rewrites the ESP32-S3's recovery agent through the chip's ROM serial loader, over the UART link of the relaying node (UART_RAW). A node that does not answer has to be brought into its loader by hand within 60 s.
 - On the RP2040 a boot takes about 15 s on a board without a crystal (the ring oscillator, nominally 6.5 MHz) and about 0.8 s with a 12 MHz crystal: stage0 and the boot loader each check one signature with `Ed25519Small` on every boot. The boot loader keeps its watchdog fed through its check. This is by design: the small verifier leaves the boot loader room for the update session.
 - On a board running on the ring oscillator, the RP2040's boot loader makes its UART bit rate from the nominal 6.5 MHz, so the rate may be off, and its I2C target follows a 400 kHz bus only with a crystal; on the ring oscillator use 100 kHz.
 - DAGON Console writes the topology file back in its own layout. It keeps a hand-written comment only on a line whose content did not change (indentation aside): the comments of lines changed or removed in DAGON Console, and of lines written in another style than its own (quotes, flow style), are not kept, and blank lines follow its layout. Keeping every comment would take a YAML library that keeps the syntax tree, which DAGON Console does not carry.
@@ -80,4 +81,5 @@ Parts of the design the code lacks, in whole or in part:
 - AI Agent Link: `dagon serve` has no job that ports DAGON to a board: `POST /v1/ai/port` answers 501.
 - Boot Action Interpreter: Not in the code.
 - Retained Codecs: The firmware has none of the retained codecs: the topology body is `dagon-format`'s (a 32-byte head, 40-byte nodes), as section 3.1 of [Retained and persistent formats](/en/explanation/retained-formats/) gives it. No node stores the topology: it stays in the host's package, and target 3 (where a node once stored it) stays a reserved number no node takes.
+- ROM Loader Client: The write through the ESP32-S3's ROM serial loader (`dagon recover`) is tested against the simulated loader only. On hardware it is to be confirmed that the loader listens on the link's UART after ENTER_ROM and that the relaying node's UART keeps up with the loader's answers.
 <!-- end of generated table -->

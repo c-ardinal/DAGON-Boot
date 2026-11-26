@@ -16,6 +16,8 @@
 
 use dagon_port::{BusError, I2cBus, SubControl};
 
+pub mod esp;
+
 pub const ACK: u8 = 0x79;
 pub const NACK: u8 = 0x1F;
 pub const BUSY: u8 = 0x76;

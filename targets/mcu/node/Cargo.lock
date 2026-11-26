@@ -142,6 +142,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "dagon-romlink"
+version = "0.1.0"
+dependencies = [
+ "dagon-port",
+]
+
+[[package]]
 name = "dagon-sim"
 version = "0.1.0"
 dependencies = [
@@ -152,6 +159,7 @@ dependencies = [
  "dagon-format",
  "dagon-port",
  "dagon-proto",
+ "dagon-romlink",
  "dagon-topology",
 ]
 

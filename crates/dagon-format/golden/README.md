@@ -38,3 +38,4 @@ data; images carry the `TEST_KEY` build flag). Public key:
 | `frame_version_resp.bin` | VERSION response: OK, 6 TLVs: wire 1, the F401 identity (8 bytes), stage0 0.1.0, running boot core 1.0.0, boot core slots (A confirmed 1.0.0 running, B empty), app slots (A written 1.0.0, B trying 1.1.0 running, factory empty) |
 | `frame_subctl_target.bin` | SUBCTL nrst = pulse, boot0 = high, naming its recovery target: field 3 `link` 1 (I2C0) and field 4 `rom_addr` 0x39, seq 0x17. Additive: `frame_subctl.bin`, which names none (the relay's first target), is unchanged |
 | `frame_i2c_raw_target.bin` | I2C_RAW writing `00 FF`, reading 1 byte, naming its recovery target: field 2 `link` 1 (I2C0) and field 3 `rom_addr` 0x39, seq 0x18. Additive: `frame_i2c_raw_get.bin` is unchanged |
+| `frame_uart_raw.bin` | UART_RAW (0x62) on link 2 (the RP2040's PIO UART), sending `C0`, reading up to 64 bytes, the first within 3000 ms, seq 0x19. Additive: the files above are unchanged |

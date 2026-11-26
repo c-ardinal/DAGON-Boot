@@ -169,6 +169,11 @@ ABSENT = ("コードに存在しません。", "Not in the code.")
 NOT_IN_TREE = {
     "AI Agent Link": ("`dagon serve`にボード移植の作業は存在しません。`POST /v1/ai/port`の応答は501です。",
                       "`dagon serve` has no job that ports DAGON to a board: `POST /v1/ai/port` answers 501."),
+    "ROM Loader Client": ("ESP32-S3のROMシリアルローダー経由の書込（`dagon recover`）は、模擬ローダーとの試験だけです。"
+                          "実機では、ENTER_ROM後にローダーがリンクのUARTで受信すること、中継ノードのUARTがローダーの応答を欠落なく受信することが未確認です。",
+                          "The write through the ESP32-S3's ROM serial loader (`dagon recover`) is tested against the simulated "
+                          "loader only. On hardware it is to be confirmed that the loader listens on the link's UART after ENTER_ROM "
+                          "and that the relaying node's UART keeps up with the loader's answers."),
     "Boot Action Interpreter": ABSENT,
     "Retained Codecs": ("ファームウェアに保持形式のコーデックは存在しません。"
                         "構成本体の形式は`dagon-format`の形式（先頭32バイト、ノード40バイト）で、[保持と永続の形式](/explanation/retained-formats/)"

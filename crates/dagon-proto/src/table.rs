@@ -100,6 +100,10 @@ commands! {
     SubCtl = 0x60, idempotent: false, req: msg(0, &subctl::REQ, false), resp: NONE;
     /// Not resent: a raw transaction acts on the ROM loader every time.
     I2cRaw = 0x61, idempotent: false, req: msg(0, &i2c_raw::REQ, true), resp: msg(0, &[], true);
+    /// To a node that relays, about a node on one of its UART links whose
+    /// ROM loader holds the line (after ENTER_ROM). Not resent: raw bytes
+    /// act on the loader every time.
+    UartRaw = 0x62, idempotent: false, req: msg(1, &uart_raw::REQ, true), resp: msg(0, &[], true);
     /// Starts a conformance session: the node forgets the results it
     /// holds and names the tests it runs (`payload::ConfListResp`).
     ConfList = 0x70, idempotent: true, req: NONE, resp: msg(0, &conf_list::RESP, false);
@@ -328,6 +332,24 @@ pub mod i2c_raw {
     /// That target's ROM loader address (7-bit), with [`LINK`].
     pub const ROM_ADDR: FieldSpec = FieldSpec::must(3, 1, 1);
     pub const REQ: [FieldSpec; 3] = [READ_LEN, LINK, ROM_ADDR];
+}
+
+/// UART_RAW request. Core: `link u8` (a UART `[[relay_link]]` id); bulk:
+/// the bytes to send as they are, outside DAGON frames. The response's
+/// bulk is the bytes that arrived after them: the relay waits [`WAIT_MS`]
+/// for the first and stops at [`READ_MAX`] bytes or once the line stays
+/// silent for [`GAP_MS`]. No byte within the wait is an OK response with
+/// an empty bulk.
+pub mod uart_raw {
+    use super::FieldSpec;
+    /// The most bytes read. Left out: nothing is read.
+    pub const READ_MAX: FieldSpec = FieldSpec::must(1, 2, 2);
+    /// How long the first byte may take. Left out: [`WAIT_DEFAULT_MS`].
+    pub const WAIT_MS: FieldSpec = FieldSpec::must(2, 2, 2);
+    pub const REQ: [FieldSpec; 2] = [READ_MAX, WAIT_MS];
+    pub const WAIT_DEFAULT_MS: u16 = 100;
+    /// Silence that ends the read after its first byte.
+    pub const GAP_MS: u16 = 5;
 }
 
 /// CONF_LIST. No core.

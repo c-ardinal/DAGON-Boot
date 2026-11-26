@@ -18,6 +18,7 @@ use dagon_proto::handler::{self, Handler};
 use dagon_proto::mailbox::{State, STATE_LEN};
 use dagon_proto::payload::{
     self, boot0, nrst, CapsReq, CapsResp, CmdSet, I2cRaw, PeersResp, Relay, Req, RomTarget, SubCtl,
+    UartRaw,
 };
 use dagon_proto::{find_sof, flags, frame_len, max_payload, Cmd, Frame, FrameError, Status};
 use dagon_topology::defs::{McuDef, PortDef};
@@ -317,6 +318,38 @@ impl SimBus {
         }
     }
 
+    /// UART_RAW on UART port `port`: `write` goes to the node as it is,
+    /// then up to `read_max` bytes come back, the first within `wait_ms`
+    /// (nothing arrived: empty, after the whole wait). `None`: no such
+    /// port.
+    pub fn uart_raw(
+        &mut self,
+        port: u8,
+        write: &[u8],
+        read_max: usize,
+        wait_ms: u64,
+    ) -> Option<Vec<u8>> {
+        // 115200 bit/s, 10 bits a byte.
+        let byte_ms = |n: usize| (n as u64 * 10).div_ceil(115);
+        self.ops += 1;
+        let mut now = self.now_ms + byte_ms(write.len());
+        let s = self.uart.get_mut(&port)?;
+        let mut read = vec![0u8; read_max];
+        let n = if s.link.silent {
+            0
+        } else {
+            s.node.uart_raw_write(write, &mut now);
+            s.node.uart_raw_read(&mut read)
+        };
+        read.truncate(n);
+        now += match n {
+            0 => wait_ms,
+            n => byte_ms(n) + u64::from(dagon_proto::table::uart_raw::GAP_MS),
+        };
+        self.advance_ms(now - self.now_ms);
+        Some(read)
+    }
+
     /// Bytes received on UART port `port` and not yet taken.
     pub fn uart_pending(&self, port: u8) -> usize {
         self.uart.get(&port).map_or(0, |s| s.output.len())
@@ -426,7 +459,8 @@ impl SimRelay {
             "the definition of {} given to a node of {mcu}",
             def.id
         );
-        node.also_serves(CmdSet::EMPTY.with(Cmd::Relay as u8).with(Cmd::Peers as u8));
+        let always = [Cmd::Relay, Cmd::Peers, Cmd::UartRaw];
+        node.also_serves(always.iter().fold(CmdSet::EMPTY, |s, c| s.with(*c as u8)));
         SimRelay {
             node,
             bus: SimBus::new(),
@@ -593,9 +627,10 @@ impl SimRelay {
 
     /// The commands the relay answers itself; [`SimRelay::request`] takes
     /// the typed request of a row and runs it, as the relay on a node.
-    const TABLE: [Handler<(), ()>; 4] = [
+    const TABLE: [Handler<(), ()>; 5] = [
         Handler::deferred(Cmd::Relay),
         Handler::deferred(Cmd::Peers),
+        Handler::deferred(Cmd::UartRaw),
         Handler::deferred(Cmd::SubCtl),
         Handler::deferred(Cmd::I2cRaw),
     ];
@@ -638,12 +673,12 @@ impl Serving<'_> {
         if self.node.in_boot_core() {
             return self.node.handle_frame(frame, self.bus.now_ms);
         }
-        // As the relay on a node: RELAY and PEERS always, SUBCTL and
+        // As the relay on a node: RELAY, PEERS and UART_RAW always, SUBCTL and
         // I2C_RAW with a node on the recovery lines, CAPS about RELAY; the
         // rest is the node's own agent.
         let wired = self.bus.sub.is_some();
         let row = handler::find(&SimRelay::TABLE, f.cmd)
-            .filter(|h| wired || matches!(h.cmd, Cmd::Relay | Cmd::Peers))
+            .filter(|h| wired || matches!(h.cmd, Cmd::Relay | Cmd::Peers | Cmd::UartRaw))
             .filter(|h| self.serves_peers || h.cmd != Cmd::Peers)
             .or((f.cmd == Cmd::Caps as u8).then_some(&SimRelay::CAPS));
         let Some(row) = row else {
@@ -665,6 +700,7 @@ impl Serving<'_> {
             Ok(Req::Peers(page)) => self.peers(page),
             Ok(Req::SubCtl(s)) => self.subctl(s),
             Ok(Req::I2cRaw(raw)) => self.i2c_raw(&raw),
+            Ok(Req::UartRaw(raw)) => self.uart_raw(&raw),
             Ok(_) => (Status::Unsupported, Vec::new()),
         };
         let mut out = vec![0u8; frame_len(2 + bytes.len()).max(frame_len(8))];
@@ -761,6 +797,32 @@ impl Serving<'_> {
                 (Status::Ok, body)
             }
             Err(_) => (Status::Arg, Vec::new()),
+        }
+    }
+
+    /// Raw bytes to and from the node on the UART link it names, as the
+    /// relay on a node (`dagon_relay::cmd::uart_raw`): E_ARG for a link
+    /// the definition does not list or that is no UART, and for data or a
+    /// read longer than the link's buffer; E_UNSUPPORTED for a link
+    /// nothing is wired to.
+    fn uart_raw(&mut self, raw: &UartRaw<'_>) -> Answer {
+        let Some(link) = self.links.iter().find(|l| l.id == raw.link) else {
+            return (Status::Arg, Vec::new());
+        };
+        let limit = link.buffer_len();
+        if link.kind != LinkKind::Uart
+            || usize::from(raw.read_max) > limit
+            || raw.data.len() > limit
+        {
+            return (Status::Arg, Vec::new());
+        }
+        let wait = u64::from(raw.wait_ms);
+        match self
+            .bus
+            .uart_raw(link.port, raw.data, raw.read_max.into(), wait)
+        {
+            Some(read) => (Status::Ok, read),
+            None => (Status::Unsupported, Vec::new()),
         }
     }
 

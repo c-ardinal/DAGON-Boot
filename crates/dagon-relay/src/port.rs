@@ -1,4 +1,4 @@
-//! The link workers. Each owns its link, serves the RELAY and I2C_RAW
+//! The link workers. Each owns its link, serves the RELAY, I2C_RAW and UART_RAW
 //! requests [`serve`](crate::serve) hands it through its [`Port`]. Every
 //! link operation is bounded by a deadline (the link's own).
 //!
@@ -22,6 +22,9 @@ pub(crate) enum Op {
     Relay,
     /// I2C_RAW: write the data, then read `read_len` bytes.
     Raw,
+    /// UART_RAW: send the data, then read up to `read_len` bytes, the
+    /// first within `timeout_ms`.
+    Stream,
 }
 
 pub(crate) struct Req {
@@ -188,6 +191,13 @@ pub async fn run_link<L: NodeLink, W: Liveness, const N: usize>(
                     let r = link.raw(req.addr, sent, read).await;
                     r.map_or_else(|s| (s, 0), |()| (Status::Ok, n))
                 }
+                None => (Status::Arg, 0),
+            },
+            Op::Stream => match d.bytes.get_mut(..usize::from(req.read_len)) {
+                Some(read) => link
+                    .stream(sent, read, req.timeout_ms)
+                    .await
+                    .map_or_else(|s| (s, 0), |n| (Status::Ok, n)),
                 None => (Status::Arg, 0),
             },
         };

@@ -8,6 +8,7 @@
 
 use dagon_port::{NoHello, NodeLink, StreamPort, NO_ADDR};
 use dagon_proto::payload::HelloResp;
+use dagon_proto::table::uart_raw::GAP_MS as RAW_GAP_MS;
 use dagon_proto::{flags, frame_len, max_payload, Status};
 
 use crate::frames::{FrameReader, GAP_MS};
@@ -113,6 +114,31 @@ impl<S: StreamPort, C: Fn() -> u64> NodeLink for UartLink<S, C> {
         out: &mut [u8],
     ) -> Result<usize, Status> {
         UartLink::exchange(self, frame, timeout_ms, out).await
+    }
+
+    /// UART_RAW: `write` goes out as it is; then `read` takes what
+    /// arrives, the first byte within `wait_ms`, until it is full or the
+    /// line stays silent for the protocol's gap. A DAGON frame half read
+    /// before is dropped.
+    async fn stream(
+        &mut self,
+        write: &[u8],
+        read: &mut [u8],
+        wait_ms: u16,
+    ) -> Result<usize, Status> {
+        self.reader.clear();
+        self.last = 0;
+        self.port.write(write).await.map_err(|_| Status::Timeout)?;
+        let mut n = 0;
+        let mut wait = u32::from(wait_ms);
+        while n < read.len() {
+            match self.port.read(&mut read[n..], wait).await {
+                Ok(0) | Err(_) => break,
+                Ok(got) => n += got,
+            }
+            wait = u32::from(RAW_GAP_MS);
+        }
+        Ok(n)
     }
 }
 
@@ -265,6 +291,54 @@ mod tests {
         };
         // This test's own link id.
         (UartLink::new(port, move || c.get(), 0x21), clock)
+    }
+
+    /// UART_RAW: the bytes go out as they are, and what comes back is
+    /// taken until the line falls silent or the read is full.
+    #[test]
+    fn a_raw_stream_reads_until_the_line_is_silent() {
+        // 30 ms until the first byte, then two bursts 20 ms apart.
+        let mut bytes = std::vec![(30, 0xC0)];
+        bytes.extend(steady(&[1, 2, 3]));
+        bytes.push((20, 9));
+        let (mut l, clock) = link(bytes);
+        let mut read = [0u8; 16];
+        let n = block_on(NodeLink::stream(
+            &mut l,
+            &[0xC0, 0x00, 0xDA],
+            &mut read,
+            100,
+        ));
+        assert_eq!(n, Ok(4));
+        assert_eq!(&read[..4], &[0xC0, 1, 2, 3]);
+        assert_eq!(l.port.written, [0xC0, 0x00, 0xDA]);
+        assert_eq!(clock.get(), 30 + 3 + u64::from(RAW_GAP_MS));
+
+        // A full read ends it at once.
+        let (mut l, clock) = link(steady(&[1, 2, 3, 4]));
+        let mut read = [0u8; 2];
+        assert_eq!(
+            block_on(NodeLink::stream(&mut l, &[], &mut read, 100)),
+            Ok(2)
+        );
+        assert_eq!((read, clock.get()), ([1, 2], 2));
+
+        // Nothing within the wait: an empty read, after the whole wait.
+        let (mut l, clock) = link(std::vec![(101, 7)]);
+        let mut read = [0u8; 4];
+        assert_eq!(
+            block_on(NodeLink::stream(&mut l, &[5], &mut read, 100)),
+            Ok(0)
+        );
+        assert_eq!(clock.get(), 100);
+
+        // Nothing asked for: only the write.
+        let (mut l, clock) = link(steady(&[1]));
+        assert_eq!(
+            block_on(NodeLink::stream(&mut l, &[5, 6], &mut [], 100)),
+            Ok(0)
+        );
+        assert_eq!((l.port.written.len(), clock.get()), (2, 0));
     }
 
     #[test]

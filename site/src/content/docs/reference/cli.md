@@ -38,6 +38,7 @@ Write to a node:
   deploy     Build, sign, package and write the nodes in one go
   apply      Write a release package to the nodes
   rollback   Go back to the node's previously confirmed version
+  recover    Rewrite a node's recovery agent through its ROM serial loader
 
 Check a node:
   status     Show HELLO, STATUS and VERSION of the hub and each topology node
@@ -565,6 +566,44 @@ Options:
 
       --topology <YAML>
           Topology YAML [default: topology in dagon.toml]
+
+      --config <FILE>
+          Project file the defaults come from [default: ./dagon.toml]
+
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+## dagon recover
+
+```text
+Rewrite a node's recovery agent through its ROM serial loader
+
+For a node whose MCU definition names a ROM serial loader (ESP32-S3), on a UART link of a relaying node. Checks the signed agent image, asks, then has the node switch to its loader; the loader writes the agent, checks it by MD5 and restarts the node. A node that does not answer is waited for while you bring it into its loader by hand.
+
+Usage: dagon recover [OPTIONS] --node <ID> --agent <IMG>
+
+Options:
+      --node <ID>
+          Node id in the topology
+
+      --agent <IMG>
+          Signed recovery agent image of the node
+
+      --port <NAME>
+          Serial port of the hub [default: the USB device c0de:cafe or named "DAGON hub"]
+
+      --topology <YAML>
+          Topology YAML [default: topology in dagon.toml]
+
+      --pubkey <FILE>
+          Public key file the release is verified with [default: pubkey in dagon.toml, else the public half of the signing key]
+
+      --key <FILE>
+          Secret signing key file, outside any git work tree [default: the one set of $DAGON_SIGNING_KEY_COMMAND, $DAGON_SIGNING_KEY_SEED, $DAGON_SIGNING_KEY]
+
+      --yes
+          Rewrite without asking
 
       --config <FILE>
           Project file the defaults come from [default: ./dagon.toml]

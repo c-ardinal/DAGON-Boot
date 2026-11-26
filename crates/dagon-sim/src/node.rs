@@ -2,6 +2,7 @@
 //! decision at reset, an I2C target mailbox, the ROM loader (BOOT0 high) and
 //! a configurable behaviour for images running on trial.
 
+use crate::esp_rom::SimEspRom;
 use crate::flash::SimFlash;
 use crate::rom::SimRom;
 use crate::store::{Boot, Layout, SimStore};
@@ -21,8 +22,8 @@ use dagon_events::{
 use dagon_format::statelog::slot;
 use dagon_port::BusError;
 use dagon_proto::mailbox::{State, STATE_LEN};
-use dagon_proto::payload::{mode, role, SlotState, StatusResp};
-use dagon_proto::{finish, flags, frame_len, max_payload, Frame, Status, HEADER_LEN};
+use dagon_proto::payload::{mode, role, EnterRom, SlotState, StatusResp};
+use dagon_proto::{finish, flags, frame_len, max_payload, Cmd, Frame, Status, HEADER_LEN};
 
 /// How an image running on trial behaves (confirmed images always work).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
@@ -46,7 +47,8 @@ pub enum Run {
     /// Application running from this slot (`0xFF`: hub firmware without a
     /// recorded image).
     App(u8),
-    /// ROM loader (BOOT0 was high at reset).
+    /// ROM loader (BOOT0 was high at reset, or the chip switched itself
+    /// to its serial loader on ENTER_ROM).
     Rom,
     /// NRST held low.
     Held,
@@ -153,6 +155,15 @@ pub struct SimNode {
     /// Where its ROM loader answers on I2C: its MCU definition's
     /// `[rom_i2c] addr` (`None`: its MCU has none).
     pub rom_addr: Option<u8>,
+    /// The ROM serial loader on its UART, while the chip is in download
+    /// mode.
+    esp_rom: Option<SimEspRom>,
+    /// What the loader sent before it restarted the chip, still on the
+    /// line.
+    raw_sent: Vec<u8>,
+    /// The ENTER_ROM methods its firmware takes: its MCU definition's
+    /// `[[rom_entry]]`.
+    rom_methods: Vec<u8>,
     run: Run,
     on_trial: bool,
     nrst_low: bool,
@@ -188,6 +199,14 @@ impl SimNode {
             predates: Vec::new(),
             rom: SimRom::default(),
             rom_addr: layout.definition().rom_i2c.as_ref().map(|r| r.addr),
+            esp_rom: None,
+            raw_sent: Vec::new(),
+            rom_methods: layout
+                .definition()
+                .rom_entries
+                .iter()
+                .map(|e| e.method)
+                .collect(),
             run: Run::Dead,
             on_trial: false,
             nrst_low: false,
@@ -283,6 +302,8 @@ impl SimNode {
     /// runs. RAM state (agent session, mailbox) is lost.
     pub fn reset(&mut self, now_ms: u64) {
         self.boots += 1;
+        self.esp_rom = None;
+        self.raw_sent.clear();
         self.core = None;
         self.reboot_after_read = false;
         self.busy_left = 0;
@@ -530,11 +551,83 @@ impl SimNode {
     /// Stream links (UART, USB): returns the response frame; a REBOOT reply
     /// is sent before the reset.
     pub fn handle_frame(&mut self, request: &[u8], now_ms: u64) -> Option<Vec<u8>> {
+        if let Some(reply) = self.enter_rom(request, now_ms) {
+            return Some(reply);
+        }
         let (frame, reboot) = self.serve(request, now_ms)?;
         if reboot {
             self.reset(now_ms);
         }
         Some(frame)
+    }
+
+    /// ENTER_ROM with a method of the definition's `[[rom_entry]]`, to
+    /// firmware that answers: the OK reply, and the chip is in its ROM
+    /// serial loader from then on. `None`: any other frame.
+    fn enter_rom(&mut self, request: &[u8], now_ms: u64) -> Option<Vec<u8>> {
+        let max = request.len().saturating_sub(frame_len(0));
+        let (f, _) = Frame::decode(request, max).ok()?;
+        if f.cmd != Cmd::EnterRom as u8 || f.flags & (flags::RESP | flags::EVENT) != 0 {
+            return None;
+        }
+        let asked = EnterRom::parse(f.payload).ok()?;
+        self.tick(now_ms);
+        if !self.responsive() || !self.rom_methods.contains(&asked.method) {
+            return None;
+        }
+        let mut out = vec![0u8; frame_len(1)];
+        let n = finish(&mut out, flags::RESP, f.seq, f.cmd, 1).ok()?;
+        out.truncate(n);
+        self.enter_download();
+        Some(out)
+    }
+
+    /// The chip restarts into its ROM serial loader (ENTER_ROM, or the
+    /// user's buttons on a board that has them): what the loader prints
+    /// first waits on the stream.
+    pub fn enter_download(&mut self) {
+        self.core = None;
+        self.run = Run::Rom;
+        self.esp_rom = Some(SimEspRom::started(crate::esp_rom::BANNER));
+    }
+
+    /// Whether its ROM serial loader holds its UART.
+    pub fn in_download(&self) -> bool {
+        self.esp_rom.is_some()
+    }
+
+    /// Raw bytes arriving on its UART: its ROM serial loader takes them
+    /// while it runs (anything else drops them). A loader told to reboot
+    /// answers, then resets the node.
+    pub fn uart_raw_write(&mut self, data: &[u8], now_ms: &mut u64) {
+        let Some(rom) = self.esp_rom.as_mut() else {
+            return;
+        };
+        rom.write(&mut self.store.flash(), data, now_ms);
+        if rom.rebooted() {
+            let mut last = [0u8; 64];
+            let n = rom.read(&mut last);
+            self.reset(*now_ms);
+            self.raw_sent = last[..n].to_vec();
+        }
+    }
+
+    /// Takes up to `buf.len()` bytes its ROM serial loader sent; what is
+    /// left over is lost, as on a receiver nobody reads.
+    pub fn uart_raw_read(&mut self, buf: &mut [u8]) -> usize {
+        let sent = core::mem::take(&mut self.raw_sent);
+        if !sent.is_empty() {
+            let n = buf.len().min(sent.len());
+            buf[..n].copy_from_slice(&sent[..n]);
+            return n;
+        }
+        let Some(rom) = self.esp_rom.as_mut() else {
+            return 0;
+        };
+        let n = rom.read(buf);
+        let mut rest = [0u8; 64];
+        while rom.read(&mut rest) > 0 {}
+        n
     }
 
     /// Whether `addr` ACKs on the I2C bus.

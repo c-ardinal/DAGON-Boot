@@ -90,6 +90,7 @@ fn main() -> ExitCode {
         Command::Apply(a) => run(device::apply(&a)),
         Command::Conform(a) => run(conform::command(&a)),
         Command::Rollback(a) => run(device::rollback(&a)),
+        Command::Recover(a) => run(device::recover(&a)),
         Command::New(a) => run(scaffold::new_command(&a)),
         Command::Gen(a) => run(scaffold::gen_command(&a)),
         Command::Build(a) => run(nodebuild::command(&a)),

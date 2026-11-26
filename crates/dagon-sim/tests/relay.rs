@@ -246,7 +246,13 @@ fn the_relaying_node_says_what_it_serves_and_reads_before_it_acts() {
     let (st, body) = pc.ask(&mut relay, Cmd::Hello, &hello());
     assert_eq!(st, Status::Ok);
     let cmds = HelloResp::parse(&body).unwrap().cmds;
-    let own = [Cmd::Relay, Cmd::Peers, Cmd::SubCtl, Cmd::I2cRaw];
+    let own = [
+        Cmd::Relay,
+        Cmd::Peers,
+        Cmd::SubCtl,
+        Cmd::I2cRaw,
+        Cmd::UartRaw,
+    ];
     assert_eq!(cmds, set_of(&APP).union(set_of(&own)));
     let behind = pc.ok(&mut relay, Cmd::Hello, &hello());
     assert_eq!(HelloResp::parse(&behind).unwrap().cmds, set_of(&APP));
@@ -356,8 +362,8 @@ fn the_relaying_node_says_what_it_serves_and_reads_before_it_acts() {
     assert_ne!(st, Status::Arg);
     assert!(relay.bus.ops > ops);
 
-    // A relaying node with no node on its recovery lines serves RELAY and
-    // PEERS alone of the relay's commands.
+    // A relaying node with no node on its recovery lines serves RELAY,
+    // PEERS and UART_RAW alone of the relay's commands.
     let mut bare = SimRelay::new(SimNode::new(
         hub_config(),
         *kp().pk,
@@ -366,7 +372,8 @@ fn the_relaying_node_says_what_it_serves_and_reads_before_it_acts() {
     ));
     let (_, body) = pc.ask(&mut bare, Cmd::Hello, &hello());
     let cmds = HelloResp::parse(&body).unwrap().cmds;
-    assert_eq!(cmds, set_of(&APP).union(set_of(&[Cmd::Relay, Cmd::Peers])));
+    let bare_own = [Cmd::Relay, Cmd::Peers, Cmd::UartRaw];
+    assert_eq!(cmds, set_of(&APP).union(set_of(&bare_own)));
     let mut served = CmdSet::EMPTY;
     plant::each_probe(|n, p| {
         if pc.status(&mut bare, n, p) == Status::Field {

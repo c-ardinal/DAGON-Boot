@@ -82,7 +82,10 @@ pub(crate) const GROUPS: &[(&str, &[&str])] = &[
         "Build a release",
         &["topo", "build", "image", "release", "provision"],
     ),
-    ("Write to a node", &["flash", "deploy", "apply", "rollback"]),
+    (
+        "Write to a node",
+        &["flash", "deploy", "apply", "rollback", "recover"],
+    ),
     ("Check a node", &["status", "conform"]),
     ("Tools", &["serve", "sim", "ai"]),
     ("Help", &["help"]),
@@ -188,6 +191,14 @@ pub enum Command {
     /// confirms it there. A node whose MCU definition gives the app one slot
     /// has no previous version to go back to.
     Rollback(RollbackArgs),
+    /// Rewrite a node's recovery agent through its ROM serial loader
+    ///
+    /// For a node whose MCU definition names a ROM serial loader (ESP32-S3),
+    /// on a UART link of a relaying node. Checks the signed agent image,
+    /// asks, then has the node switch to its loader; the loader writes the
+    /// agent, checks it by MD5 and restarts the node. A node that does not
+    /// answer is waited for while you bring it into its loader by hand.
+    Recover(RecoverArgs),
     /// Show HELLO, STATUS and VERSION of the hub and each topology node
     ///
     /// Versions of stage0, boot core, app, wire format and MCU.
@@ -460,6 +471,29 @@ pub struct RollbackArgs {
     pub port: Option<String>,
     #[arg(long, value_name = "YAML", help = TOPOLOGY)]
     pub topology: Option<String>,
+    #[arg(long, value_name = "FILE", help = CONFIG)]
+    pub config: Option<String>,
+}
+
+#[derive(Debug, Default, PartialEq, Args)]
+pub struct RecoverArgs {
+    /// Node id in the topology
+    #[arg(long, value_name = "ID")]
+    pub node: String,
+    /// Signed recovery agent image of the node
+    #[arg(long, value_name = "IMG")]
+    pub agent: String,
+    #[arg(long, value_name = "NAME", help = HUB_PORT)]
+    pub port: Option<String>,
+    #[arg(long, value_name = "YAML", help = TOPOLOGY)]
+    pub topology: Option<String>,
+    #[arg(long, value_name = "FILE", help = PUBKEY)]
+    pub pubkey: Option<String>,
+    #[arg(long, value_name = "FILE", help = KEY)]
+    pub key: Option<String>,
+    /// Rewrite without asking
+    #[arg(long)]
+    pub yes: bool,
     #[arg(long, value_name = "FILE", help = CONFIG)]
     pub config: Option<String>,
 }

@@ -32,6 +32,12 @@ INCLUDE = re.compile(
     r'^[ \t]*#include[ \t]+(?:"([^"]+)"|<([^>]+)>)[ \t]*(?://[^\n]*|/\*[^\n]*?\*/[ \t]*)?$',
     re.M,
 )
+# A file that lets itself be read once: `#pragma once`, or `#ifndef X` with
+# `#define X` after it.
+GUARD = re.compile(
+    r"^[ \t]*#[ \t]*pragma[ \t]+once\b|^[ \t]*#[ \t]*ifndef[ \t]+(\w+)\s*?\n[ \t]*#[ \t]*define[ \t]+\1\b",
+    re.M,
+)
 BLOCK_COMMENT = re.compile(r"/\*.*?\*/", re.S)
 # A string or a block comment (kept as they are), or a line comment.
 LINE_COMMENT = re.compile(r'"(?:\\.|[^"\\\n])*"|/\*.*?\*/|(//[^\n]*)', re.S)
@@ -81,14 +87,25 @@ def pin_name(port, number):
 def read_tree(root, start):
     """The text of `start` with every include found in `root` put in its
     place, the files read (in order) and the includes not found."""
-    read, missing = [], []
+    read, missing, open_ = [], [], []
 
     def load(path):
         rel = path.relative_to(root).as_posix()
-        if rel in read:
-            return ""
-        read.append(rel)
         text = path.read_text(encoding="utf-8")
+        # A file is read again wherever it is included again (what it states
+        # then follows what was stated in between), but for one that guards
+        # itself, and never inside itself.
+        if rel in open_ or (rel in read and GUARD.search(text)):
+            return ""
+        if rel not in read:
+            read.append(rel)
+        open_.append(rel)
+        try:
+            return expand(path, text)
+        finally:
+            open_.pop()
+
+    def expand(path, text):
         # An include inside a block comment states nothing: it stays as
         # written, and goes with its comment.
         commented = [

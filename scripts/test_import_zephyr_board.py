@@ -280,6 +280,29 @@ class Stated(unittest.TestCase):
             [{"pin": "GPIO1"}, {"pin": "GPIO2"}, {"pin": "GPIO3", "label": "GP3"}],
         )
 
+    def test_a_file_included_again_states_again_unless_it_guards_itself(self):
+        led = "/ { leds { compatible = \"gpio-leds\"; led0: led_0 { gpios = <&gpio0 25 0>; }; }; };\n"
+        for guard, pin in (
+            ("", "GPIO25"),
+            ("#ifndef LEDS_DTSI\n#define LEDS_DTSI\n", "GPIO16"),
+            ("#pragma once\n", "GPIO16"),
+        ):
+            with tempfile.TemporaryDirectory() as d:
+                path = Path(d) / "boards/x/x.dts"
+                path.parent.mkdir(parents=True)
+                (path.parent / "leds.dtsi").write_text(
+                    guard + "#include \"leds.dtsi\"\n" + led, encoding="utf-8"
+                )
+                path.write_text(
+                    "#include \"leds.dtsi\"\n&flash0 { reg = <0 0x1000>; };\n"
+                    "&led0 { gpios = <&gpio0 16 0>; };\n#include \"leds.dtsi\"\n",
+                    encoding="utf-8",
+                )
+                text = imp.convert(d, path, "x", "rp2040", TAG)
+            b = tomllib.loads(text)["board"]["x"]
+            self.assertEqual(b["pin"], [{"pin": pin, "name": "led0"}], guard)
+            self.assertEqual(text.count("leds.dtsi"), 1, guard)
+
     def test_an_include_inside_a_block_comment_is_not_read(self):
         with tempfile.TemporaryDirectory() as d:
             path = Path(d) / "boards/x/x.dts"

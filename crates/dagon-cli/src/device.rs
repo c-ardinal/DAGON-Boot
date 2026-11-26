@@ -597,11 +597,31 @@ where
                 e.version
             );
         };
-        let (_, v) = block_on(host.recover(*index, &assets, &mut print))
+        let (path, v) = block_on(host.recover(*index, &assets, &mut print))
             .map_err(|e| format!("{node}: {e:?}"))?;
+        if let dagon_host::RecoverPath::Rom(stats) = &path {
+            println!("{}", rom_stats_line(node, stats));
+        }
         println!("{node}: rewritten through the ROM loader, {v}");
     }
     Ok(answering)
+}
+
+/// What the ROM loader's session took, as one line before the node's
+/// "rewritten" line: the sessions started, the transactions of the one
+/// that succeeded, the longest round trip of one and the whole time, then
+/// what ended the session before it, if one failed. The hardware test
+/// reads the line from its start (samples/hardware-test/hwt.py,
+/// `ROM_STATS`), so words are only added at its end.
+pub(crate) fn rom_stats_line(node: &str, s: &dagon_host::RomStats) -> String {
+    let mut line = format!(
+        "{node}: ROM loader: attempts {}, frames {}, max round trip {} ms, elapsed {} ms",
+        s.attempts, s.frames, s.max_rtt_ms, s.elapsed_ms
+    );
+    if let Some(e) = s.last_error {
+        line.push_str(&format!(", last error {e:?}"));
+    }
+    line
 }
 
 pub fn apply(a: &ApplyArgs) -> Res {
@@ -743,6 +763,30 @@ mod tests {
     use super::*;
     use dagon_proto::payload::{SlotInfo, SlotVersion};
     use dagon_proto::Cmd;
+
+    /// The line the hardware test reads (hwt.py `ROM_STATS`; its test
+    /// holds the same two lines).
+    #[test]
+    fn the_rom_loaders_figures_are_one_line_the_hardware_test_reads() {
+        let mut s = dagon_host::RomStats {
+            attempts: 1,
+            frames: 412,
+            max_rtt_ms: 37,
+            elapsed_ms: 5210,
+            ..Default::default()
+        };
+        assert_eq!(
+            rom_stats_line("seg", &s),
+            "seg: ROM loader: attempts 1, frames 412, max round trip 37 ms, elapsed 5210 ms"
+        );
+        s.attempts = 2;
+        s.last_error = Some(dagon_host::RomError::Busy);
+        assert_eq!(
+            rom_stats_line("seg", &s),
+            "seg: ROM loader: attempts 2, frames 412, max round trip 37 ms, elapsed 5210 ms, \
+             last error Busy"
+        );
+    }
 
     /// The three cases keep the names the design and the page give them,
     /// and only a node that was never reached lets the run go on.

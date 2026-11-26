@@ -380,6 +380,15 @@ fn s4() -> R {
         return Err(format!("expected the ROM path, got {path:?}"));
     };
     w.expect(seg_at(), v)?;
+    // The line `dagon deploy` prints for the node: one session, no error.
+    let line = crate::device::rom_stats_line("seg", &stats);
+    let want = format!(
+        "seg: ROM loader: attempts 1, frames {}, max round trip {} ms, elapsed {} ms",
+        stats.frames, stats.max_rtt_ms, stats.elapsed_ms
+    );
+    if line != want || stats.frames == 0 {
+        return Err(format!("the ROM loader's figures: {line}"));
+    }
     Ok(format!(
         "ROM path: {} frames, max round trip {} ms, {} ms simulated",
         stats.frames, stats.max_rtt_ms, stats.elapsed_ms

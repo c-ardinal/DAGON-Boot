@@ -219,6 +219,32 @@ class Stated(unittest.TestCase):
         )
         self.assertNotIn("pin", b)
 
+    def test_a_node_referred_to_by_its_path_is_that_node(self):
+        b = self.board(
+            "&flash0 { reg = <0 0x1000>; };\n"
+            "/ { leds { compatible = \"gpio-leds\";\n"
+            "    led0: led_0 { gpios = <&gpio0 25 0>; }; led1: led_1 { gpios = <&gpio0 8 0>; }; }; };\n"
+            "&{/leds/led_0} { gpios = <&gpio0 16 0>; };\n"
+            "/delete-node/ &{/leds/led_1};\n"
+        )
+        self.assertEqual(b["pin"], [{"pin": "GPIO16", "name": "led0"}])
+
+    def test_an_include_followed_by_a_comment_is_read(self):
+        for comment in ("// wiring", "/* wiring */"):
+            with tempfile.TemporaryDirectory() as d:
+                path = Path(d) / "boards/x/x.dts"
+                path.parent.mkdir(parents=True)
+                (path.parent / "leds.dtsi").write_text(
+                    "/ { leds { compatible = \"gpio-leds\"; led0: led_0 { gpios = <&gpio0 25 0>; }; }; };\n",
+                    encoding="utf-8",
+                )
+                path.write_text(
+                    f"#include \"leds.dtsi\" {comment}\n&flash0 {{ reg = <0 0x1000>; }};\n",
+                    encoding="utf-8",
+                )
+                b = tomllib.loads(imp.convert(d, path, "x", "rp2040", TAG))["board"]["x"]
+            self.assertEqual(b["pin"], [{"pin": "GPIO25", "name": "led0"}], comment)
+
     def test_an_include_inside_a_block_comment_is_not_read(self):
         with tempfile.TemporaryDirectory() as d:
             path = Path(d) / "boards/x/x.dts"

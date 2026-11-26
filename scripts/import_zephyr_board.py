@@ -27,7 +27,11 @@ import re
 import sys
 from pathlib import Path
 
-INCLUDE = re.compile(r'^[ \t]*#include[ \t]+(?:"([^"]+)"|<([^>]+)>)[ \t]*$', re.M)
+# An include line; a comment may follow the file on it.
+INCLUDE = re.compile(
+    r'^[ \t]*#include[ \t]+(?:"([^"]+)"|<([^>]+)>)[ \t]*(?://[^\n]*|/\*[^\n]*?\*/[ \t]*)?$',
+    re.M,
+)
 BLOCK_COMMENT = re.compile(r"/\*.*?\*/", re.S)
 # A string or a block comment (kept as they are), or a line comment.
 LINE_COMMENT = re.compile(r'"(?:\\.|[^"\\\n])*"|/\*.*?\*/|(//[^\n]*)', re.S)
@@ -164,6 +168,19 @@ class Tree:
         for node in self.loose:
             yield from node.walk()
 
+    def at(self, path, make=False):
+        """The node at `path` (`/leds/led_0`); one the files have not
+        stated is None, or with `make` stated now."""
+        node = self.root
+        for name in [n for n in path.split("/") if n.strip()]:
+            name = name.strip()
+            if name not in node.children:
+                if not make:
+                    return None
+                node.children[name] = Node()
+            node = node.children[name]
+        return node
+
     def delete(self, gone):
         """Takes node `gone` (None: nothing) and what is under it out of
         the tree, with their labels."""
@@ -200,6 +217,11 @@ def statement_end(text, i):
                 quoted = False
         elif ch == '"':
             quoted = True
+        elif text.startswith("&{", i):
+            # A reference by path, `&{/leds/led_0}`: its braces open no node.
+            i = text.find("}", i)
+            if i < 0:
+                return len(text)
         elif ch in "<([":
             depth += 1
         elif ch in ">)]":
@@ -228,6 +250,8 @@ def fill(tree, node, text, i):
             *labels, name = [w for w in re.split(r"\s*:\s*|\s+", head) if w] or [""]
             if name == "/":
                 target = tree.root
+            elif name.startswith("&{"):
+                target = tree.at(name[2:-1], make=True)
             elif name.startswith("&"):
                 target = tree.referred(name[1:])
             elif node is None:
@@ -244,7 +268,9 @@ def fill(tree, node, text, i):
         i = end + 1 + (after.end() if after else 0)
         if head.startswith("/delete-node/"):
             gone = head.split("/", 2)[2].strip()
-            if gone.startswith("&"):
+            if gone.startswith("&{"):
+                tree.delete(tree.at(gone[2:-1]))
+            elif gone.startswith("&"):
                 tree.delete(tree.labels.get(gone[1:]))
             elif node is not None:
                 tree.delete(node.children.get(gone))

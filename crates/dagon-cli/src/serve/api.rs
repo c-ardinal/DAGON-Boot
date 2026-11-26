@@ -506,11 +506,17 @@ fn agent_link(server: &Server, req: &Request) -> Res {
 /// DELETE /v1/agent/link: withdraws the consent (done also when none was).
 fn agent_unlink(server: &Server) -> Res {
     let home = super::project::home(server)?;
+    // Running topology drafts and ports are asked to stop first: the unlink
+    // waits for the calls in flight. Every call checks the consent anyway,
+    // and a port reads it again while it runs.
+    let stop = || {
+        server.cancel_kind("ai_topology");
+        server.cancel_kind("ai_port");
+    };
+    stop();
     crate::consent::unlink(&home).map_err(|e| Response::error(500, &e))?;
-    // Running topology drafts and ports stop too; every call checks the
-    // consent anyway.
-    server.cancel_kind("ai_topology");
-    server.cancel_kind("ai_port");
+    // What started between the request to stop and the removal.
+    stop();
     Ok(agent_get(server))
 }
 

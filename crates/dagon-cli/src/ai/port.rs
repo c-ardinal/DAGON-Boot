@@ -469,6 +469,45 @@ process.stdin.on("end", () => {
         assert!(t0.elapsed() < Duration::from_secs(20));
     }
 
+    /// A program that never stops writing is stopped all the same.
+    #[test]
+    fn a_program_that_keeps_writing_is_stopped_too() {
+        let noisy =
+            r#"setInterval(() => { for (let i = 0; i < 2000; i++) console.log("{}"); }, 1);"#;
+        let clone = clone_with("noisy", noisy);
+        let cancel = AtomicBool::new(false);
+        let t0 = std::time::Instant::now();
+        let out = std::thread::scope(|s| {
+            s.spawn(|| {
+                std::thread::sleep(Duration::from_secs(1));
+                cancel.store(true, std::sync::atomic::Ordering::Relaxed);
+            });
+            run_in(&clone, &req(), &cancel).0
+        });
+        assert_eq!(out.unwrap_err(), crate::agents::command::STOPPED);
+        assert!(t0.elapsed() < Duration::from_secs(20));
+    }
+
+    /// Withdrawing the consent stops a running port, and the unlink does
+    /// not wait for the port's own end.
+    #[test]
+    fn a_withdrawn_consent_stops_the_program() {
+        let clone = clone_with("unlink", "setInterval(() => {}, 1000);");
+        let home = clone.join("home");
+        let t0 = std::time::Instant::now();
+        let (out, unlinked) = std::thread::scope(|s| {
+            let unlink = s.spawn(|| {
+                std::thread::sleep(Duration::from_secs(1));
+                crate::consent::unlink(&home)
+            });
+            let out = run_in(&clone, &req(), &AtomicBool::new(false)).0;
+            (out, unlink.join().unwrap())
+        });
+        assert_eq!(out.unwrap_err(), crate::consent::NOT_LINKED);
+        assert_eq!(unlinked, Ok(true));
+        assert!(t0.elapsed() < Duration::from_secs(20));
+    }
+
     #[test]
     fn a_request_that_is_not_plain_is_never_sent() {
         for bad in [

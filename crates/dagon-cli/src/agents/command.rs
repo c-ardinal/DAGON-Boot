@@ -289,12 +289,15 @@ pub(crate) struct Streamed<'a> {
     pub timeout: Duration,
 }
 
-/// Runs `p` in its group under the consent held by `_cleared`: `on_line`
+/// Runs `p` in its group under the consent held by `cleared`: `on_line`
 /// gets each stdout line as it arrives. Ends when the program ends, the
-/// time is over ([`TIMED_OUT`]) or `cancel` is set; whatever the program
-/// started is stopped then. Ok: the program's exit was a success.
+/// time is over ([`TIMED_OUT`]), `cancel` is set or the consent is
+/// withdrawn (looked at every [`CONSENT_POLL`]: the unlink that waits for
+/// this call may be another process's); whatever the program started is
+/// stopped then, however much it is writing. Ok: the program's exit was a
+/// success.
 pub(crate) fn stream(
-    _cleared: &Cleared,
+    cleared: &Cleared,
     p: Streamed<'_>,
     cancel: &std::sync::atomic::AtomicBool,
     on_line: &mut dyn FnMut(&str),
@@ -330,12 +333,10 @@ pub(crate) fn stream(
     });
     let deadline = Instant::now() + p.timeout;
     let mut status = None;
+    let mut consent_at = Instant::now() + CONSENT_POLL;
     loop {
         match rx.recv_timeout(POLL) {
-            Ok(line) => {
-                on_line(line.trim_end());
-                continue;
-            }
+            Ok(line) => on_line(line.trim_end()),
             // The program and all it started have closed stdout.
             Err(RecvTimeoutError::Disconnected) if status.is_some() => break,
             Err(_) => {}
@@ -343,6 +344,13 @@ pub(crate) fn stream(
         if cancel.load(std::sync::atomic::Ordering::Relaxed) {
             group.stop();
             return Err(STOPPED.into());
+        }
+        if Instant::now() >= consent_at {
+            if !cleared.stands() {
+                group.stop();
+                return Err(crate::consent::NOT_LINKED.into());
+            }
+            consent_at = Instant::now() + CONSENT_POLL;
         }
         if Instant::now() >= deadline {
             group.stop();
@@ -361,6 +369,9 @@ pub(crate) fn stream(
     }
     Ok(status.is_some_and(|s| s.success()))
 }
+
+/// How often a streamed program's consent is read again.
+const CONSENT_POLL: Duration = Duration::from_millis(500);
 
 /// The error of a streamed program stopped by its `cancel` flag.
 pub(crate) const STOPPED: &str = "stopped";

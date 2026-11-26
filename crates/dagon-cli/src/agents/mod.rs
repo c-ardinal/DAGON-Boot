@@ -417,6 +417,12 @@ impl Cleared {
     pub fn consent(&self) -> &crate::consent::Consent {
         self.held.consent()
     }
+
+    /// Whether the consent is still given (a call that works for long asks
+    /// again while it runs).
+    pub fn stands(&self) -> bool {
+        self.held.stands()
+    }
 }
 
 /// What every call passes just before it leaves: the prompt's size, and

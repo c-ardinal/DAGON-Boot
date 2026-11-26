@@ -308,5 +308,18 @@ digits) and is embedded at build time. Unset, the build fails, unless
 cargo test --no-default-features --target <host triple>
 ```
 
+`tests/explore.rs` (with `tests/cut/`) is the power-cut acceptance
+criterion on this MCU: every sequence of an app or boot core update, a
+CONFIRM, a boot and a power loss up to a bound, with a power cut or a
+reset at every flash operation (each slot's erase, body and header; each
+record of the boot core log and the app log; each step of either log's
+compaction), not landed or half landed, and with one flash operation that
+fails while the power stays. After each, stage0 starts something, no
+broken image is confirmed, and boots end at a good app. It runs
+`store::Store`, the app's slot store, over a flash that cuts the power;
+what the store asks of the chip (`store::Chip`) is given by the test.
+With the folder in `DAGON_POWERCUT_REPORT` it writes the cuts per flash
+operation.
+
 [`BoardCore`]: ../common/src/hooks.rs
 [`BoardDef`]: src/node.rs

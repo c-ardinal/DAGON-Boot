@@ -17,7 +17,7 @@ description: "DAGONに新規のマイコンやリンクを追加する場合の�
 6. 全マイコンで`template/`を用意します。`dagon gen`はこのフォルダからノードのcrateを作成します。
 7. `compat.toml`に部品を追加します（[バージョンとリリース](/explanation/versioning/)）。
 8. `dagon sim`で確認し、`dagon conform`をPC接続ノード経由で実行します。
-9. 電断の受入基準を確認します。`targets/mcu/stm32f401re/tests/explore.rs`と`update_mode.rs`（`tests/cut/`も対象）を新規マイコンの配置に移植し、ホストで実行します。全フラッシュ操作（スロットの消去・本体・ヘッダ、状態ログの各記録、ログ圧縮の各段階）で、未反映と半分の反映、電源断とリセットの全パターンの電断を発生させ、全状態が復旧することが合格条件です。網羅の不足と一覧外の操作では試験が失敗します。環境変数`DAGON_POWERCUT_REPORT`にフォルダを指定すると、操作別の電断件数の表をMarkdownで出力します。ベンダーの起動段がスロットを選択するマイコン（ストア種別V）では、代替として`targets/mcu/esp32s3/src/tests_cut.rs`を移植します。
+9. 電断の受入基準を確認します。`targets/mcu/stm32f401re/tests/explore.rs`と`update_mode.rs`（`tests/cut/`も対象）を新規マイコンの配置に移植し、ホストで実行します。全フラッシュ操作（スロットの消去・本体・ヘッダ、状態ログの各記録、ログ圧縮の各段階）で、未反映と半分の反映、電源断とリセットの全パターンの電断を発生させ、全状態が復旧することが合格条件です。網羅の不足と一覧外の操作では試験が失敗します。環境変数`DAGON_POWERCUT_REPORT`にフォルダを指定すると、操作別の電断件数の表をMarkdownで出力します。状態ログが2個（ブートローダ用とアプリ用）のマイコンでは、同一の探索である`targets/mcu/rp2040/tests/explore.rs`を参照します。ベンダーの起動段がスロットを選択するマイコン（ストア種別V）では、代替として`targets/mcu/esp32s3/src/tests_cut.rs`を移植します。
 
 `plugin/skills/dagon-port/SKILL.md`は同一の手順をClaude Codeで実行します。
 

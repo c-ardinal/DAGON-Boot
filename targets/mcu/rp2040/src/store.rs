@@ -2,16 +2,15 @@
 //! the boot core slots with the boot core log, behind dagon-agent's
 //! `SlotStore`.
 
-use crate::flash::SharedFlash;
 use crate::image;
 use crate::layout::{APP_LOG_LAYOUT, BL_LOG_LAYOUT, STAGE0, STAGE0_SIZE};
-use crate::watchdog::Watch;
 use crate::TRIAL_ATTEMPTS;
 use dagon_agent::{erase_plan, Transition};
 use dagon_core::log::{trial_room, Log, SlotRef};
 use dagon_format::header::HEADER_SIZE;
 use dagon_format::statelog::{kind, slot};
 use dagon_format::{stage0, Version};
+use dagon_node::guard::Watch;
 use dagon_port::timeout::{EraseLayout, EraseRegion, Plan};
 use dagon_port::Flash;
 use dagon_port::{SlotStore, StoreError};
@@ -23,16 +22,32 @@ pub const ACTIVE: u8 = if cfg!(feature = "slot-b") { 1 } else { 0 };
 /// The app's slot store. `task` is the guard
 /// task that serves the agent: long erases report progress for it, and
 /// CONFIRM ends the trial.
-pub struct AppStore {
-    pub(crate) flash: SharedFlash,
+pub struct Store<F> {
+    pub(crate) flash: F,
     pub(crate) watch: &'static dyn Watch,
     pub(crate) task: usize,
     /// The erase regions the board returns (`BoardDef::ERASE_REGIONS`).
     pub(crate) regions: &'static [EraseRegion],
     /// The APP slot the caller runs from (`slot::NONE`: no app runs).
     pub(crate) running: u8,
+    pub(crate) chip: Chip,
 }
 
+/// What the store asks of the running chip (read when asked, never kept).
+#[derive(Clone, Copy)]
+pub struct Chip {
+    /// Whether the trial cell holds a value across a reset: without it
+    /// stage0 could not count a new boot core's starts.
+    pub trial_cell_holds: fn() -> bool,
+    /// Whether the boot core receives on a link (its update mode).
+    pub boot_core_receives: fn() -> bool,
+}
+
+/// The store on the RP2040 itself: its flash driver and its own [`Chip`].
+#[cfg(feature = "hal")]
+pub type AppStore = Store<crate::flash::SharedFlash>;
+
+#[cfg(feature = "hal")]
 impl AppStore {
     /// The slot store over `flash`, this MCU's flash driver. A long erase
     /// reports its progress to guard task `task` of `watch`; erases are
@@ -43,18 +58,37 @@ impl AppStore {
     /// its BOOT_ATTEMPT starts the confirmed slot with the trial the log
     /// names left open.
     pub fn new(
-        flash: SharedFlash,
+        flash: crate::flash::SharedFlash,
         watch: &'static dyn Watch,
         task: usize,
         regions: &'static [EraseRegion],
         running: u8,
     ) -> Self {
-        AppStore {
+        let chip = Chip {
+            trial_cell_holds: crate::arm::trial::holds,
+            boot_core_receives: crate::clock::boot_core_receives,
+        };
+        Store::over(flash, watch, task, regions, running, chip)
+    }
+}
+
+impl<F: Flash> Store<F> {
+    /// [`AppStore::new`] over any flash, with what `chip` tells.
+    pub fn over(
+        flash: F,
+        watch: &'static dyn Watch,
+        task: usize,
+        regions: &'static [EraseRegion],
+        running: u8,
+        chip: Chip,
+    ) -> Self {
+        Store {
             flash,
             watch,
             task,
             regions,
             running,
+            chip,
         }
     }
 }
@@ -76,7 +110,7 @@ fn flash_err(_: dagon_port::FlashError) -> StoreError {
     StoreError::Flash
 }
 
-impl AppStore {
+impl<F: Flash> Store<F> {
     fn append(&mut self, k: u8, slot: u8, header: &[u8; HEADER_SIZE]) -> Result<(), StoreError> {
         let at = image::ref_of(header, slot).ok_or(StoreError::Flash)?;
         // A log with no valid face (lost, and no slot image passed the
@@ -94,7 +128,7 @@ impl AppStore {
     }
 }
 
-impl AppStore {
+impl<F: Flash> Store<F> {
     /// The header in each slot of `t` STATUS can carry (`wire`), as a log
     /// reference; `None` past the slots the definition gives.
     fn heads<const N: usize>(&mut self, t: u8, _wire: &[SlotInfo; N]) -> [Option<SlotRef>; N] {
@@ -105,7 +139,7 @@ impl AppStore {
     }
 }
 
-impl SlotStore for AppStore {
+impl<F: Flash> SlotStore for Store<F> {
     type Transition = Transition;
 
     fn status(&mut self) -> StatusResp {
@@ -119,7 +153,7 @@ impl SlotStore for AppStore {
     /// could not count a new core's starts (the agent then refuses
     /// BOOTCORE as unsupported).
     fn capacity(&self, t: u8, slot: u8) -> u32 {
-        if t == target::BOOTCORE && !crate::arm::trial::holds() {
+        if t == target::BOOTCORE && !(self.chip.trial_cell_holds)() {
             return 0;
         }
         region(t, slot).map_or(0, |(_, _, cap)| cap)
@@ -231,7 +265,7 @@ impl SlotStore for AppStore {
     /// ([`crate::bl::request_update_mode`]); `Unsupported` (E_UNSUPPORTED)
     /// when the boot core receives on no link.
     fn request_update_mode(&mut self) -> Result<(), StoreError> {
-        let receives = crate::clock::boot_core_receives();
+        let receives = (self.chip.boot_core_receives)();
         crate::bl::request_update_mode(&mut self.flash, receives).map_err(|e| match e {
             crate::bl::HandOverError::Unsupported => StoreError::Unsupported,
             crate::bl::HandOverError::Log(_) => StoreError::Flash,

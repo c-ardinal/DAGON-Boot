@@ -75,7 +75,6 @@ pub mod links;
 pub mod node;
 #[cfg(feature = "relay")]
 pub mod relay;
-#[cfg(feature = "hal")]
 pub mod store;
 #[cfg(feature = "hal")]
 pub mod sub;

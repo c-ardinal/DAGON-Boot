@@ -11,6 +11,10 @@ publish = false
 #   cargo test --no-default-features --target <host triple>
 [workspace]
 
+[package.metadata.dagon]
+# Firmware clippy runs in CI (scripts/ci_crates.py --firmware-lint).
+lint = { target = "thumbv7em-none-eabihf", features = [""], env = { DAGON_ALLOW_TEST_KEY = "1" } }
+
 [features]
 # Link for APP-B (0x08040200) instead of APP-A (0x08020200).
 slot-b = ["dagon-board-nucleo-f401re/slot-b"]

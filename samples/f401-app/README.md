@@ -32,6 +32,16 @@ an image that never gets CONFIRM resets when the 4 s trial watchdog runs out
 and is rolled back after three attempts. RTT shows the boot state and every request that takes
 20 ms or more (`cmd 0x20: N ms` for SET_PENDING).
 
+Display timing (`src/shield.rs`): one expander write is the address and three
+bytes, 38 clock periods, so 380 us on a free bus at 100 kHz. A write may take
+20 ms (`WRITE_TIMEOUT_MS`), 50 times that: a write takes longer than the free
+bus only while something holds SCL or SDA low, which the I2C-bus specification
+does not limit, so a held bus fails the write instead of hanging the task. A
+showing is at most six writes (four of set-up the first time, two for the
+digits), so it ends within 120 ms (`SHOW_BOUND_MS`); the display task declares
+that bound to the watchdog guard for each showing. RTT shows the longest write
+measured so far (`display: longest write N us`).
+
 Version display (this app's own format, `seg::version`):
 
 - `major.minor.patch` right-aligned on the 4 digits, each `.` set as the

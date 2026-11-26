@@ -754,7 +754,12 @@ mod tests {
             .find_map(|l| l.split("ready ").nth(1).map(|pid| pid.trim().to_string()));
         let pid = ready.expect("the owner never started its group");
         let marker = if cfg!(windows) { OWNER_MARKER } else { &pid };
-        std::thread::sleep(Duration::from_millis(500));
+        // The group is spawned before `ready`, but the shell starts its
+        // program some time after: wait for it instead of a fixed pause.
+        let t0 = Instant::now();
+        while !alive(marker) && t0.elapsed() < Duration::from_secs(20) {
+            std::thread::sleep(Duration::from_millis(200));
+        }
         assert!(alive(marker), "the program never started");
         owner.kill().unwrap();
         let _ = owner.wait();

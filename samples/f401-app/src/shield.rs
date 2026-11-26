@@ -52,6 +52,26 @@ pub const INIT: [Write; 4] = [
 /// Writes one [`show`] makes.
 pub const SHOW_WRITES: usize = 2;
 
+/// The speed the firmware opens the bus at (standard mode).
+pub const BUS_HZ: u32 = 100_000;
+/// Clock periods one [`Write`] takes on a free bus: the address and three
+/// data bytes, each 8 bits and its acknowledge, with START and STOP.
+pub const WRITE_CLOCKS: u32 = 4 * 9 + 2;
+/// The time one write takes on a free bus: 380 us at 100 kHz.
+pub const WRITE_FREE_US: u32 = WRITE_CLOCKS * (1_000_000 / BUS_HZ);
+/// Longest one write may take. On a free bus it takes [`WRITE_FREE_US`];
+/// it takes longer only while something holds SCL or SDA low, and the
+/// I2C-bus specification puts no limit on that, so the firmware has to.
+/// The limit is 50 times the free-bus time: room for the display's
+/// interrupts, which run below DAGON's executor, to be served late. It is
+/// this sample's choice, not a figure of the expander.
+pub const WRITE_TIMEOUT_MS: u64 = 20;
+/// The longest showing a text can take: every write of the first showing
+/// (the set-up, then the digits) at its limit. The display task declares
+/// this bound to the watchdog guard for each showing, so a showing that
+/// overruns it stops the watchdog being fed.
+pub const SHOW_BOUND_MS: u64 = WRITE_TIMEOUT_MS * (INIT.len() + SHOW_WRITES) as u64;
+
 /// Shows `codes` (see [`crate::seg`]; points are dropped), sensors kept in
 /// XSHUT: the GPSR writes after [`INIT`].
 pub fn show(codes: &[u8; DIGITS]) -> [Write; SHOW_WRITES] {
@@ -79,6 +99,15 @@ mod tests {
     use super::*;
     use crate::seg::{render, version, BLANK, POINT};
     use dagon_format::Version;
+
+    /// The limits follow from the frame: a write is 380 us on a free bus,
+    /// its limit 50 times that and more, and a showing six writes.
+    #[test]
+    fn the_write_limit_is_fifty_free_bus_writes_and_a_showing_six_writes() {
+        assert_eq!(WRITE_FREE_US, 380);
+        assert!(WRITE_TIMEOUT_MS * 1_000 >= 50 * u64::from(WRITE_FREE_US));
+        assert_eq!(SHOW_BOUND_MS, 120);
+    }
 
     #[test]
     fn init_turns_everything_off_and_holds_the_sensors() {

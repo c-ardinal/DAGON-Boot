@@ -165,7 +165,10 @@ fn v23_grandchild_is_described_but_not_updatable() {
     assert!(rules.is_empty(), "{rules:?}");
     // Valid: it saves and builds; updating carries the hub and seg only.
     assert!(check_str(&yaml).is_pushable());
-    let (sub, skipped) = dagon_topology::updatable(&dagon_topology::parse_str(&yaml).unwrap());
+    let (sub, skipped) = dagon_topology::updatable_with(
+        dagon_topology::defs::Registry::builtin(),
+        &dagon_topology::parse_str(&yaml).unwrap(),
+    );
     assert_eq!(
         skipped,
         vec![("watch".to_string(), dagon_topology::Skip::Deep)]
@@ -202,7 +205,10 @@ fn v23_several_coordinators_over_can() {
     let rules = error_rules(&yaml);
     assert!(rules.is_empty(), "{rules:?}");
     // The second coordinator is skipped: the compiled topology is the sample's.
-    let (_, skipped) = dagon_topology::updatable(&dagon_topology::parse_str(&yaml).unwrap());
+    let (_, skipped) = dagon_topology::updatable_with(
+        dagon_topology::defs::Registry::builtin(),
+        &dagon_topology::parse_str(&yaml).unwrap(),
+    );
     assert_eq!(
         skipped,
         vec![("hub2".to_string(), dagon_topology::Skip::SecondHub)]

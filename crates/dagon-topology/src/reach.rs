@@ -6,6 +6,8 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use crate::behind::relayed;
+pub use crate::behind::MAX_RELAYS;
 use crate::defs::Registry;
 use crate::schema::{Constraint, Node, Role, Topology};
 use crate::{check_with, Report};
@@ -110,15 +112,6 @@ pub fn reach_root(t: &Topology) -> Option<&str> {
         .map(|n| n.id.as_str())
 }
 
-/// The relaying nodes a request goes through at most, the coordinator
-/// among them: what the host's route holds (`dagon_host::MAX_HOPS`).
-pub const MAX_RELAYS: usize = 4;
-
-/// [`updatable_with`] against the builtin definitions.
-pub fn updatable(t: &Topology) -> (Topology, Vec<(String, Skip)>) {
-    updatable_with(Registry::builtin(), t)
-}
-
 /// The updatable part of `t` and the nodes it leaves out, in `nodes` order.
 /// The first coordinator is always in it; the nodes linked straight to it over I2C/UART follow in
 /// `nodes` order, and so do the nodes behind a node whose MCU in `reg` relays as a node. The part
@@ -195,56 +188,6 @@ pub fn updatable_with(reg: &Registry, t: &Topology) -> (Topology, Vec<(String, S
         ..t.clone()
     };
     (sub, skipped)
-}
-
-/// Each node behind a relaying node, with that node: the nodes two or more
-/// links from the first coordinator that a chain of I2C/UART links reaches
-/// through nodes whose MCU relays as a node. Of two chains the shorter, then
-/// the one whose relaying node is listed first. A node with a link of its
-/// own to the coordinator is reached over that link or not at all.
-pub(crate) fn relayed<'t>(
-    reg: &Registry,
-    t: &'t Topology,
-    first: Option<&'t str>,
-) -> BTreeMap<&'t str, &'t str> {
-    let mut via = BTreeMap::new();
-    let Some(first) = first else { return via };
-    let next_to = |at: &'t str| {
-        t.links_at(at)
-            .filter(|(_, l)| l.kind.compiles())
-            .filter_map(move |(_, l)| l.other(at).and_then(|e| t.node(&e.node)))
-            .filter(|n| n.role == Role::Node)
-    };
-    let straight: BTreeSet<&str> = t
-        .links_at(first)
-        .filter_map(|(_, l)| l.other(first).map(|e| e.node.as_str()))
-        .collect();
-    let relays = |id: &str| {
-        t.node(id)
-            .and_then(|n| reg.mcu(&n.mcu))
-            .is_some_and(|m| m.relays_as_node())
-    };
-    let mut frontier: Vec<&str> = t
-        .nodes
-        .iter()
-        .map(|n| n.id.as_str())
-        .filter(|id| next_to(first).any(|n| n.id == *id))
-        .collect();
-    // The coordinator is the first relaying node of every chain.
-    for _ in 1..MAX_RELAYS {
-        let mut next = Vec::new();
-        for at in frontier.into_iter().filter(|at| relays(at)) {
-            for n in next_to(at) {
-                let id = n.id.as_str();
-                if !straight.contains(id) && !via.contains_key(id) {
-                    via.insert(id, at);
-                    next.push(id);
-                }
-            }
-        }
-        frontier = next;
-    }
-    via
 }
 
 /// Ok when `id` is the first coordinator, a node linked straight to it over I2C/UART or a node
@@ -328,7 +271,7 @@ mod tests {
     #[test]
     fn a_valid_single_hub_topology_is_reached_whole() {
         let t = parse_str(SAMPLE).unwrap();
-        let (sub, skipped) = updatable(&t);
+        let (sub, skipped) = updatable_with(Registry::builtin(), &t);
         assert!(skipped.is_empty());
         assert_eq!(sub.nodes.len(), t.nodes.len());
         assert_eq!(sub.links.len(), t.links.len());
@@ -365,7 +308,7 @@ nodes:
                 link("a", "d", "uart", flip),
                 link("h2", "c", "uart", flip),
             );
-            let (sub, skipped) = updatable(&parse_str(&yaml).unwrap());
+            let (sub, skipped) = updatable_with(Registry::builtin(), &parse_str(&yaml).unwrap());
             assert_eq!(
                 skipped,
                 [
@@ -386,7 +329,7 @@ nodes:
             "update:",
             "  - kind: i2c\n    bus: i2c-main\n    ends:\n      - { node: n1, port: i2c3, addr: 0x30, node_pins: { sda: PB4, scl: PA8 } }\n      - { node: n0, port: i2c3 }\n    control:\n      kind: cooperative\n      rom_entry: stm32-i2c-rom\nupdate:",
         );
-        let (sub, skipped) = updatable(&parse_str(&yaml).unwrap());
+        let (sub, skipped) = updatable_with(Registry::builtin(), &parse_str(&yaml).unwrap());
         assert!(skipped.is_empty(), "{skipped:?}");
         assert_eq!(sub.links.len(), 2);
         assert!(sub.links.iter().all(|l| l.end("hub").is_some()));
@@ -589,7 +532,7 @@ links:
         // The part is broken by hand (its coordinator taken out): the checked cut refuses it whole.
         let t = parse_str(&fan(2, false)).unwrap();
         assert!(check_with(Registry::builtin(), &t).is_pushable());
-        let (mut sub, skipped) = updatable(&t);
+        let (mut sub, skipped) = updatable_with(Registry::builtin(), &t);
         sub.nodes.retain(|n| n.role != Role::Coordinator);
         let cut = super::checked(Registry::builtin(), &t, sub, skipped);
         assert!(cut.topology.is_none() && cut.reach.is_empty());

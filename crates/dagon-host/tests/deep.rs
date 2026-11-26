@@ -266,9 +266,9 @@ fn a_target_is_its_hops_and_knows_the_node_that_reaches_it() {
     assert_eq!(
         to(1),
         Target::Linked {
-            link: 1,
-            addr: 0xFF,
-            max_payload: UART as u16
+            link: HOPS[0].link,
+            addr: HOPS[0].addr,
+            max_payload: HOPS[0].max_payload
         }
     );
     for hops in 0..=3 {

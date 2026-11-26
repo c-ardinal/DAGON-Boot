@@ -591,7 +591,7 @@ impl<'a> Ctx<'a> {
             );
         }
         let first = hubs.first().copied();
-        let via = crate::reach::relayed(self.reg, self.t, first);
+        let via = crate::behind::relayed(self.reg, self.t, first);
         for (i, l) in self.links() {
             let p = link_path(i);
             let [a, b] = l.ends.each_ref().map(|e| e.node.as_str());

@@ -757,7 +757,7 @@ fn a_shape_not_updatable_yet_is_saved_and_its_updatable_part_compiled() {
     );
     // The second coordinator is skipped: the compiled topology is the coordinator alone.
     let t = dagon_topology::parse_str(&y).unwrap();
-    let (sub, _) = dagon_topology::updatable(&t);
+    let (sub, _) = dagon_topology::updatable_with(dagon_topology::defs::Registry::builtin(), &t);
     assert_eq!(
         dagon_topology::compile(&t).unwrap(),
         dagon_topology::compile(&sub).unwrap()

@@ -61,10 +61,31 @@ impl FrameCutter {
     }
 }
 
+/// What a relaying node has besides its own agent: what its ports reach
+/// and its relay table.
+pub struct Relaying {
+    pub bus: SimBus,
+    /// Its MCU definition's `[[relay_link]]`: the links RELAY reaches
+    /// nodes over.
+    links: Vec<RelayLinkDef>,
+    rom_addr: Option<u8>,
+    serves_peers: bool,
+}
+
+impl Relaying {
+    /// The links RELAY reaches nodes over.
+    pub fn links(&self) -> &[RelayLinkDef] {
+        &self.links
+    }
+}
+
 /// The node behind one UART port, and that port's byte stream.
 pub struct SimStream {
     pub link: SimLink,
     pub node: SimNode,
+    /// `Some`: the node relays too, to what its own ports reach
+    /// ([`SimRelay::set_uart_relay`]).
+    pub relaying: Option<Box<Relaying>>,
     input: FrameCutter,
     output: Vec<u8>,
 }
@@ -74,21 +95,69 @@ impl SimStream {
         SimStream {
             link,
             node,
+            relaying: None,
             input: FrameCutter::default(),
             output: Vec::new(),
         }
     }
 
-    /// Request out, response back; returns it with the round-trip delay.
+    /// The simulated clock reached `now`: the node, and what it relays to.
+    fn tick(&mut self, now: u64) {
+        self.node.tick(now);
+        if let Some(r) = self.relaying.as_mut() {
+            r.bus.advance_ms(now.saturating_sub(r.bus.now_ms));
+        }
+    }
+
+    /// Request out, response back; returns it with the round-trip delay,
+    /// the time the node took relaying included.
     fn carry(&mut self, frame: &[u8], now: u64) -> (Option<Vec<u8>>, u64) {
         let d = self.link.delay_ms;
-        let resp = self
-            .link
-            .carry(frame)
-            .filter(|_| !self.link.silent)
-            .and_then(|f| self.node.handle_frame(&f, now + d))
-            .and_then(|r| self.link.carry(&r));
-        (resp, 2 * d)
+        let Some(f) = self.link.carry(frame).filter(|_| !self.link.silent) else {
+            return (None, 2 * d);
+        };
+        let arrived = now + d;
+        let (resp, took) = match self.relaying.as_mut() {
+            None => (self.node.handle_frame(&f, arrived), 0),
+            Some(r) => {
+                r.bus.advance_ms(arrived.saturating_sub(r.bus.now_ms));
+                let resp = Serving {
+                    node: &mut self.node,
+                    bus: &mut r.bus,
+                    links: &r.links,
+                    rom_addr: r.rom_addr,
+                    serves_peers: r.serves_peers,
+                    ingress: max_payload::UART,
+                }
+                .request(&f);
+                (resp, r.bus.now_ms - arrived)
+            }
+        };
+        (resp.and_then(|r| self.link.carry(&r)), 2 * d + took)
+    }
+}
+
+/// The node RELAY over link `link` of `links` to `addr` reaches on `bus`,
+/// as the stream it is behind when the link is a UART.
+fn behind<'a>(
+    bus: &'a mut SimBus,
+    links: &[RelayLinkDef],
+    link: u8,
+    addr: u8,
+) -> Option<(&'a mut SimNode, Option<&'a mut Relaying>)> {
+    let l = links.iter().find(|l| l.id == link)?;
+    match l.kind {
+        LinkKind::I2c => bus
+            .i2c
+            .get_mut(&l.port)?
+            .iter_mut()
+            .find(|n| n.i2c_addr == Some(addr))
+            .map(|n| (n, None)),
+        LinkKind::Uart => bus
+            .uart
+            .get_mut(&l.port)
+            .map(|s| (&mut s.node, s.relaying.as_deref_mut())),
+        _ => None,
     }
 }
 
@@ -122,7 +191,7 @@ impl SimBus {
         self.now_ms += ms;
         let now = self.now_ms;
         self.i2c.values_mut().flatten().for_each(|n| n.tick(now));
-        self.uart.values_mut().for_each(|s| s.node.tick(now));
+        self.uart.values_mut().for_each(|s| s.tick(now));
     }
 
     /// Port `port` as a `dagon-port` I2C bus and byte stream.
@@ -410,17 +479,22 @@ impl SimRelay {
 
     /// [`SimRelay::node_behind`], to change.
     pub fn node_behind_mut(&mut self, link: u8, addr: u8) -> Option<&mut SimNode> {
-        let l = self.links.iter().find(|l| l.id == link)?;
-        match l.kind {
-            dagon_port::LinkKind::I2c => self
-                .bus
-                .i2c
-                .get_mut(&l.port)?
-                .iter_mut()
-                .find(|n| n.i2c_addr == Some(addr)),
-            dagon_port::LinkKind::Uart => self.bus.uart.get_mut(&l.port).map(|s| &mut s.node),
-            _ => None,
+        self.node_through(&[(link, addr)])
+    }
+
+    /// The node the RELAYs `hops` reach, each a link and an address at the
+    /// relaying node before it, nearest first (none: this node itself).
+    pub fn node_through(&mut self, hops: &[(u8, u8)]) -> Option<&mut SimNode> {
+        let Some((&(link, addr), mut rest)) = hops.split_first() else {
+            return Some(&mut self.node);
+        };
+        let (mut node, mut relaying) = behind(&mut self.bus, &self.links, link, addr)?;
+        while let Some((&(link, addr), after)) = rest.split_first() {
+            let r = relaying?;
+            (node, relaying) = behind(&mut r.bus, &r.links, link, addr)?;
+            rest = after;
         }
+        Some(node)
     }
 
     pub fn now_ms(&self) -> u64 {
@@ -461,6 +535,21 @@ impl SimRelay {
         self.bus.uart.insert(p, SimStream::new(link, node));
     }
 
+    /// Puts the relaying node `relay`, with what its own ports reach,
+    /// behind `link` on UART port `port`: it answers there what it answers
+    /// the PC, for a requester whose frames are that link's.
+    pub fn set_uart_relay(&mut self, port: &str, link: SimLink, relay: SimRelay) {
+        let p = self.port(port, LinkKind::Uart);
+        let mut stream = SimStream::new(link, relay.node);
+        stream.relaying = Some(Box::new(Relaying {
+            bus: relay.bus,
+            links: relay.links,
+            rom_addr: relay.rom_addr,
+            serves_peers: relay.serves_peers,
+        }));
+        self.bus.uart.insert(p, stream);
+    }
+
     /// The node and link on UART port `port`.
     pub fn uart(&mut self, port: &str) -> Option<&mut SimStream> {
         let p = self.port(port, LinkKind::Uart);
@@ -485,7 +574,52 @@ impl SimRelay {
     /// not a request, or the node's own agent is not answering).
     pub fn request(&mut self, frame: &[u8]) -> Option<Vec<u8>> {
         self.advance_ms(PC_ROUND_TRIP_MS);
-        let f = match Frame::decode(frame, max_payload::USB) {
+        self.serving().request(frame)
+    }
+
+    /// This node answering a request of the PC's.
+    fn serving(&mut self) -> Serving<'_> {
+        Serving {
+            node: &mut self.node,
+            bus: &mut self.bus,
+            links: &self.links,
+            rom_addr: self.rom_addr,
+            serves_peers: self.serves_peers,
+            ingress: max_payload::USB,
+        }
+    }
+
+    /// The commands the relay answers itself; [`SimRelay::request`] takes
+    /// the typed request of a row and runs it, as the relay on a node.
+    const TABLE: [Handler<(), ()>; 4] = [
+        Handler::deferred(Cmd::Relay),
+        Handler::deferred(Cmd::Peers),
+        Handler::deferred(Cmd::SubCtl),
+        Handler::deferred(Cmd::I2cRaw),
+    ];
+
+    /// CAPS, answered here about RELAY and by the agent about the rest.
+    const CAPS: Handler<(), ()> = Handler::deferred(Cmd::Caps);
+}
+
+/// A relaying node answering one request: its own agent, what its ports
+/// reach, its relay table, and the largest payload of the link the request
+/// came in on.
+struct Serving<'a> {
+    node: &'a mut SimNode,
+    bus: &'a mut SimBus,
+    links: &'a [RelayLinkDef],
+    rom_addr: Option<u8>,
+    serves_peers: bool,
+    ingress: usize,
+}
+
+impl Serving<'_> {
+    /// One request frame from whoever drives this node; returns the
+    /// response frame (`None`: not a request, or the node's own agent is
+    /// not answering).
+    fn request(&mut self, frame: &[u8]) -> Option<Vec<u8>> {
+        let f = match Frame::decode(frame, self.ingress) {
             Ok((f, _)) => f,
             Err(FrameError::BadVersion) => {
                 let mut out = vec![0u8; frame_len(4)];
@@ -506,16 +640,16 @@ impl SimRelay {
         // I2C_RAW with a node on the recovery lines, CAPS about RELAY; the
         // rest is the node's own agent.
         let wired = self.bus.sub.is_some();
-        let row = handler::find(&Self::TABLE, f.cmd)
+        let row = handler::find(&SimRelay::TABLE, f.cmd)
             .filter(|h| wired || matches!(h.cmd, Cmd::Relay | Cmd::Peers))
             .filter(|h| self.serves_peers || h.cmd != Cmd::Peers)
-            .or((f.cmd == Cmd::Caps as u8).then_some(&Self::CAPS));
+            .or((f.cmd == Cmd::Caps as u8).then_some(&SimRelay::CAPS));
         let Some(row) = row else {
             return self.node.handle_frame(frame, self.bus.now_ms);
         };
         // What the requester takes: the ingress of a tunnel, and the most
         // an answer may be.
-        let ceiling = self.node.ceiling().over(max_payload::USB);
+        let ceiling = self.node.ceiling().over(self.ingress);
         let room = ceiling.bytes();
         // The whole request is read, and its answer held against the
         // ceiling, before any of it runs.
@@ -548,18 +682,6 @@ impl SimRelay {
         out.truncate(n);
         Some(out)
     }
-
-    /// The commands the relay answers itself; [`SimRelay::request`] takes
-    /// the typed request of a row and runs it, as the relay on a node.
-    const TABLE: [Handler<(), ()>; 4] = [
-        Handler::deferred(Cmd::Relay),
-        Handler::deferred(Cmd::Peers),
-        Handler::deferred(Cmd::SubCtl),
-        Handler::deferred(Cmd::I2cRaw),
-    ];
-
-    /// CAPS, answered here about RELAY and by the agent about the rest.
-    const CAPS: Handler<(), ()> = Handler::deferred(Cmd::Caps);
 
     /// CAPS about RELAY: its fields, and for the link asked about the
     /// tunnel over it for a requester that takes `room` payload bytes;
@@ -727,7 +849,7 @@ mod tests {
             boot0: boot0::HIGH,
             target: None,
         };
-        assert_eq!(relay.subctl(asked).0, Status::Timeout);
+        assert_eq!(relay.serving().subctl(asked).0, Status::Timeout);
         assert_eq!(
             dagon_proto::table::subctl::LINES_FAILED,
             Status::Timeout,

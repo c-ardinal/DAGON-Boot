@@ -251,7 +251,10 @@ fn a_silent_deep_node_is_the_timeout_of_the_relaying_node_before_it() {
     // Its history is asked of the node it is linked to, not of the
     // connected one (the stand-in's answer is no record at all).
     log.borrow_mut().clear();
-    assert_eq!(block_on(h.silence(nobody)).unwrap(), Silence::HistoryUnknown);
+    assert_eq!(
+        block_on(h.silence(nobody)).unwrap(),
+        Silence::HistoryUnknown
+    );
     let peers = Cmd::Peers as u8;
     assert!(seen_by(&log, 2).iter().any(|s| s.cmd == peers));
     assert!(seen_by(&log, 0).iter().all(|s| s.cmd != peers));

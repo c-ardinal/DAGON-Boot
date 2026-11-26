@@ -978,3 +978,29 @@ fn a_rom_erase_sector_past_the_erase_regions_is_refused() {
     )
     .unwrap();
 }
+
+/// The boards scripts/import_zephyr_board.py made from Zephyr's files load as
+/// a project's own boards, beside the built-in ones.
+#[test]
+fn boards_imported_from_zephyr_load_as_project_boards() {
+    let pico = include_str!("../../../../scripts/fixtures/imported/rpi-pico.toml");
+    let nucleo = include_str!("../../../../scripts/fixtures/imported/nucleo-f401re-zephyr.toml");
+    // Zephyr does not say where DAGON's slots go: the built-in RP2040 map
+    // needs 4 MiB, so the 2 MiB board is refused until the project gives one.
+    let e = load("zephyr-as-is", pico).unwrap_err().to_string();
+    assert!(e.contains("V-16"), "{e}");
+    let two_mib = "[[mcu_override.rp2040.flash_map]]\nname = \"rp2040-4m\"\nbytes = 0x20_0000\n\n\
+        [[mcu_override.rp2040.slot]]\nimage = \"app\"\nbinding = \"a\"\nsize = 0xD_C000\n\n\
+        [[mcu_override.rp2040.slot]]\nimage = \"app\"\nbinding = \"b\"\nat = 0x1012_4000\n\
+        size = 0xD_C000\n\n\
+        [[mcu_override.rp2040.slot_layout]]\ntarget = \"app\"\nslot = \"a\"\n\
+        capacity = 0xD_BE00\n\n\
+        [[mcu_override.rp2040.slot_layout]]\ntarget = \"app\"\nslot = \"b\"\n\
+        start = 0x1012_4000\ncapacity = 0xD_BE00\n";
+    let reg = load("zephyr", &format!("{pico}\n{nucleo}\n{two_mib}")).unwrap();
+    let b = reg.board("rpi-pico").unwrap();
+    assert_eq!((b.mcu.as_str(), b.flash_bytes), ("rp2040", 0x20_0000));
+    assert_eq!(b.header.len(), 26);
+    let b = reg.board("nucleo-f401re-zephyr").unwrap();
+    assert_eq!((b.mcu.as_str(), b.flash_bytes), ("stm32f401re", 0x8_0000));
+}

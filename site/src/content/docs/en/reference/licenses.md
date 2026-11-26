@@ -40,6 +40,10 @@ Points to note:
 - Fonts in `web/public/fonts/` are under the SIL Open Font License 1.1:
   Doto, DotGothic16, Zen Kaku Gothic New and JetBrains Mono (licence texts
   next to the files; see `web/README.md`).
+- `scripts/fixtures/zephyr-v4.1.0/` holds unchanged copies of board definition
+  files of Zephyr v4.1.0 (Apache-2.0). Only the tests of the board import
+  script use them; nothing from them ships in a DAGON program (licence in
+  `LICENSE` in that folder).
 - The screen of the sample `samples/rp2040-round-lcd` uses bitmaps
   rasterised from Noto Sans JP for its Japanese state words (SIL Open Font
   License 1.1; licence in `samples/rp2040-round-lcd/screen/fonts/`).

@@ -22,6 +22,7 @@ description: "DAGONのライセンス、依存ライブラリのライセンス�
 - `lightningcss`（MPL-2.0）はwebのビルドツールがビルド時だけに使用する依存で、DAGON Consoleには一切同梱しません。
 - DAGON Consoleに同梱するnpmのコードは、Svelteのクライアント用ランタイムと、そのランタイムが読込する`clsx`と`esm-env`（いずれもMIT）だけです。他のnpmのライブラリはビルドとテスト用のツールです（表の"Ships in"列）。
 - `web/public/fonts/`の書体はSIL Open Font License 1.1です: Doto、DotGothic16、Zen Kaku Gothic New、JetBrains Mono（ライセンス文はフォントファイルと同一のフォルダにあります。`web/README.md`を参照）。
+- `scripts/fixtures/zephyr-v4.1.0/`は、Zephyr v4.1.0のボード定義のファイル（Apache-2.0）の無変更の複製です。ボード定義の取込スクリプトの試験だけが使用し、DAGONのプログラムには同梱しません（ライセンス文は同一のフォルダの`LICENSE`）。
 - サンプル`samples/rp2040-round-lcd`の画面に表示する日本語の状態語は、Noto Sans JP（SIL Open Font License 1.1）から作成したビットマップです（ライセンス文は`samples/rp2040-round-lcd/screen/fonts/`）。
 
 Rust crates: 408 packages, 449 name/version pairs. "Used by": `crates/` is the host workspace, `samples/...` the sample apps, other names are firmware packages under `targets/`.

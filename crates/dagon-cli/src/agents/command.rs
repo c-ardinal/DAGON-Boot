@@ -379,13 +379,14 @@ pub(crate) const STOPPED: &str = "stopped";
 /// The agent program and everything it starts.
 ///
 /// Windows: a job object, killed when closed, so also when dagon itself
-/// ends. Unix: a process group led by a small keeper process (`cat` reading
-/// a pipe only dagon holds) that the program joins. The keeper stays
-/// unreaped until the group has been signalled, so the group id can never
-/// belong to anyone else when dagon signals it, even after the program has
-/// ended and been reaped. When dagon itself is killed on Unix, the keeper
-/// ends (its pipe closes) but the program and what it started keep running
-/// until they end on their own: Unix has no kill-on-close for groups.
+/// ends. Unix: a process group led by a small keeper process ([`KEEPER`],
+/// a shell reading a pipe only dagon holds) that the program joins. The
+/// keeper stays unreaped until the group has been signalled, so the group
+/// id can never belong to anyone else when dagon signals it, even after
+/// the program has ended and been reaped. When dagon itself ends without
+/// stopping the group (killed, or interrupted from the terminal: the group
+/// is not the terminal's), the keeper's pipe closes and the keeper kills
+/// its group: nothing an agent call started outlives dagon.
 struct Group {
     #[cfg(windows)]
     inner: command_group::GroupChild,
@@ -436,6 +437,12 @@ impl Drop for Group {
     }
 }
 
+/// The keeper's script (Unix): reads its stdin until it closes, which is
+/// when dagon ended without stopping the group, then kills the group it
+/// leads. Shell built-ins only, so it needs no PATH.
+#[cfg(not(windows))]
+const KEEPER: &str = "while read -r _; do :; done; kill -s KILL -- -$$";
+
 /// Starts the program in its group with piped stdin/stdout, the
 /// allow-listed environment, in `dir`.
 fn spawn(
@@ -467,7 +474,8 @@ fn spawn(
     #[cfg(not(windows))]
     let group = {
         use std::os::unix::process::CommandExt;
-        let keeper = std::process::Command::new("cat")
+        let keeper = std::process::Command::new("/bin/sh")
+            .args(["-c", KEEPER])
             .current_dir(dir)
             .env_clear()
             .stdin(Stdio::piped())
@@ -688,39 +696,42 @@ mod tests {
     }
 
     /// Set for the helper below when a test starts it as its own process.
-    #[cfg(windows)]
     const OWNER_ENV: &str = "DAGON_TEST_AGENT_OWNER";
-    #[cfg(windows)]
     const OWNER_MARKER: &str = "127.0.0.38";
 
     /// Not a test on its own: the owner process of the next test. It starts
-    /// a group whose program leaves a 30 s grandchild, says "ready", and
-    /// waits to be killed.
-    #[cfg(windows)]
+    /// a group whose program leaves a 30 s grandchild, says "ready" (and on
+    /// Unix the program's PID), and waits to be killed.
     #[test]
     #[ignore]
     fn owner_of_a_group() {
         if std::env::var_os(OWNER_ENV).is_none() {
             return;
         }
-        let exe = Command {
-            program: "cmd".into(),
-            args: Vec::new(),
-            system: SystemVia::Stdin,
-            pass_env: Vec::new(),
+        let (exe, args) = if cfg!(windows) {
+            let exe = Command {
+                program: "cmd".into(),
+                args: Vec::new(),
+                system: SystemVia::Stdin,
+                pass_env: Vec::new(),
+            };
+            (
+                exe.program_path().unwrap(),
+                vec!["/C".to_string(), format!("ping -n 30 {OWNER_MARKER}")],
+            )
+        } else {
+            parent_of_a_sleeper()
         };
         let dir = super::super::temp_dir().unwrap();
-        let args = vec!["/C".to_string(), format!("ping -n 30 {OWNER_MARKER}")];
-        let _group = spawn(&exe.program_path().unwrap(), &args, &dir, &[], &[], &[]).unwrap();
-        println!("ready");
+        let mut group = spawn(&exe, &args, &dir, &[], &[], &[]).unwrap();
+        println!("ready {}", group.child().id());
         std::thread::sleep(Duration::from_secs(60));
     }
 
-    /// dagon itself is killed while an agent call runs: on Windows the job
-    /// closes with the process and takes every process in it along
-    /// (kill-on-close). Unix has no such guarantee for process groups (see
-    /// [`Group`]), so this runs on Windows only.
-    #[cfg(windows)]
+    /// dagon itself is killed while an agent call runs (or interrupted
+    /// from the terminal, which ends it the same way): on Windows the job
+    /// closes with the process and takes every process in it along; on
+    /// Unix the keeper sees its pipe close and kills its group.
     #[test]
     fn killing_the_owning_process_stops_the_agent_tree() {
         use std::io::BufRead;
@@ -740,16 +751,17 @@ mod tests {
         let ready = out
             .lines()
             .map_while(Result::ok)
-            .any(|l| l.contains("ready"));
-        assert!(ready, "the owner never started its group");
+            .find_map(|l| l.split("ready ").nth(1).map(|pid| pid.trim().to_string()));
+        let pid = ready.expect("the owner never started its group");
+        let marker = if cfg!(windows) { OWNER_MARKER } else { &pid };
         std::thread::sleep(Duration::from_millis(500));
-        assert!(alive(OWNER_MARKER), "the grandchild never started");
+        assert!(alive(marker), "the program never started");
         owner.kill().unwrap();
         let _ = owner.wait();
         let t0 = Instant::now();
-        while alive(OWNER_MARKER) && t0.elapsed() < Duration::from_secs(10) {
+        while alive(marker) && t0.elapsed() < Duration::from_secs(10) {
             std::thread::sleep(Duration::from_millis(200));
         }
-        assert!(!alive(OWNER_MARKER), "the grandchild outlived its owner");
+        assert!(!alive(marker), "the program outlived its owner");
     }
 }

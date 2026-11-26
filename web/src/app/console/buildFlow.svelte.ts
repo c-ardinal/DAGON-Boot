@@ -3,7 +3,7 @@
 import { untrack } from 'svelte';
 import type { Autosave } from '../define/autosave.svelte.ts';
 import type { Cli, Job } from '../define/cli.svelte.ts';
-import { buildingNow, buildStateOf, type BuildingMemo, type BuildState } from '../jobFlow.ts';
+import { buildingNow, buildProgress, buildStateOf, type BuildingMemo, type BuildState } from '../jobFlow.ts';
 import type { Control } from '../locks.ts';
 
 type Step = 'build' | 'sign' | 'release';
@@ -30,17 +30,21 @@ export class BuildFlow {
   readonly state: BuildState = $derived(buildStateOf(this.jobs, this.startFailed));
   /** The 構成 as it was when a build last finished: while it stays so, the next step is to write. */
   builtRevision = $state<number | null>(null);
-  /** While building, only the node cargo builds now carries the edge light; it goes when the next is named or the job ends. */
-  readonly building: readonly string[] = $derived.by(() => {
-    this.memo = buildingNow(this.jobs, this.deps.reach(), this.memo);
-    return this.memo.node ? [this.memo.node] : [];
+  /** What the running job has named: the node cargo builds now, and how many it has started. */
+  private readonly memo: BuildingMemo = $derived.by(() => {
+    this.last = buildingNow(this.jobs, this.deps.reach(), this.last);
+    return this.last;
   });
+  /** While building, only the node cargo builds now carries the edge light; it goes when the next is named or the job ends. */
+  readonly building: readonly string[] = $derived(this.memo.node ? [this.memo.node] : []);
+  /** The node being built is the nth of the nodes built; null while nothing is named. */
+  readonly progress = $derived(buildProgress(this.memo, this.deps.reach().length));
 
   /** テンプレート生成: the modal is open while set; `id` is serve's job once it has taken it. */
   skeleton = $state<{ id: number | null; failure?: string } | null>(null);
   readonly skeletonJob: Job | null = $derived(this.jobOf(this.skeleton?.id ?? null));
 
-  private memo: BuildingMemo = { job: null, node: null };
+  private last: BuildingMemo = { job: null, node: null, seen: [] };
   private announced: BuildState = null;
 
   /** Call it where an effect may be made (a component's script). */

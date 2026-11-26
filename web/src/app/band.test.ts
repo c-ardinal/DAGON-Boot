@@ -9,6 +9,10 @@ describe('準備 says the next true step about the build', () => {
   test('before a build: build', () => expect(at({})).toBe(DEFINE.readySentence));
   test('no skeleton: the skeleton first, whatever else', () => expect(at({ needsSkeleton: true, built: true })).toBe(DEFINE.skeletonFirst));
   test('while it runs: wait, not build again', () => expect(at({ building: true })).toBe(DEFINE.buildingSentence));
+  test('while it runs and a node is named: which node of how many, and how long a first build takes', () => {
+    expect(at({ building: true, progress: { nth: 2, total: 3 } })).toBe('ビルド中です（ノード2/3）。初回は1ノード1〜3分が基準です。');
+    expect(at({ building: false, built: true, progress: { nth: 2, total: 3 } })).toBe(DEFINE.builtSentence);
+  });
 
   test('after it: write. No longer asks for a build', () => {
     expect(at({ built: true })).toBe(DEFINE.builtSentence);

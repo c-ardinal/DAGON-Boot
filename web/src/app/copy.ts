@@ -923,7 +923,9 @@ export const DEFINE = {
   save: '保存',
   fixSentence: '修正後にビルドが可能です。',
   readySentence: 'ビルド後に書込モードで書込を実行します。',
-  buildingSentence: 'ビルドの完了まで待機してください。',
+  buildingSentence: 'ビルドの完了まで待機してください。初回は1ノード1〜3分が基準です。',
+  /** The running build is at its `nth` node of `total`. */
+  buildingAt: (nth: number, total: number) => `ビルド中です（ノード${nth}/${total}）。初回は1ノード1〜3分が基準です。`,
   builtSentence: '書込モードへの切替後にノードへの書込を実行します。',
   skeletonFirst: 'テンプレートの事前生成でビルドが可能になります。',
   /** Nodes updating skips; the 構成 is valid as it is. */

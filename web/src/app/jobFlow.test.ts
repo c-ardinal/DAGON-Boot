@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import type { Job } from './define/cli.svelte.ts';
-import { buildFailure, buildingNode, buildingNow, buildStateOf, firstWriteNodes} from './jobFlow.ts';
+import { buildFailure, buildingNode, buildingNow, buildProgress, buildStateOf, firstWriteNodes} from './jobFlow.ts';
 
 const job = (p: Partial<Job>): Job => ({ id: 1, kind: 'build', state: 'running', target: '', stage: '', percent: null, lines: [], result: null, question: null, started: 0, ended: null, ...p });
 const none = { build: null, sign: null, release: null };
@@ -54,7 +54,7 @@ describe('which card says ビルド中', () => {
 });
 
 describe('the node being built, over a whole build', () => {
-  const none2 = { job: null, node: null };
+  const none2 = { job: null, node: null, seen: [] };
   const running = (lines: string[], id = 1) => ({ ...none, build: job({ id, state: 'running', lines }) });
 
   test('names nobody until cargo does, then only the one it names', () => {
@@ -76,6 +76,20 @@ describe('the node being built, over a whole build', () => {
     const m = buildingNow(running(['seg: building slot a']), reach, none2);
     expect(buildingNow({ ...none, sign: job({ id: 2, kind: 'sign', state: 'running', lines: [] }) }, reach, m).node).toBeNull();
     expect(buildingNow({ ...none, build: job({ state: 'succeeded', lines: ['seg: building slot a'] }) }, reach, m)).toEqual(none2);
+  });
+
+  test('counts the nodes the job has named, each once, also after their lines scrolled off', () => {
+    let m = buildingNow(running([]), reach, none2);
+    expect(buildProgress(m, 3)).toBeNull();
+    m = buildingNow(running(['hub: building slot a', 'hub: building slot b']), reach, m);
+    expect(buildProgress(m, 3)).toEqual({ nth: 1, total: 3 });
+    m = buildingNow(running(['   Compiling x', 'seg: building slot a']), reach, m);
+    expect(buildProgress(m, 3)).toEqual({ nth: 2, total: 3 });
+    // A node outside what is built is not counted, and the count never passes the total.
+    m = buildingNow(running(['other: building slot a']), reach, m);
+    expect(buildProgress(m, 3)).toEqual({ nth: 2, total: 3 });
+    expect(buildProgress(m, 1)).toEqual({ nth: 1, total: 1 });
+    expect(buildProgress(none2, 3)).toBeNull();
   });
 });
 

@@ -42,7 +42,7 @@ export class DefineView {
     if (firstError) return { sentence: DEFINE.fixSentence };
     if (d.skipped) return { sentence: DEFINE.skippedSentence(d.skipped) };
     if (d.doc.topo.nodes.length === 0) return { sentence: CANVAS.empty };
-    return { sentence: prepareSentence({ needsSkeleton: this.needsSkeleton, building: build.state === 'running', built: build.builtRevision === d.revision }) };
+    return { sentence: prepareSentence({ needsSkeleton: this.needsSkeleton, building: build.state === 'running', built: build.builtRevision === d.revision, progress: build.progress }) };
   });
   readonly savedLabel = $derived(this.deps.ws.local ? '' : this.deps.d.unsaved ? SAVE.unsaved : this.deps.ws.autosave.pending ? STATUS.saving : STATUS.saved);
   /** The problems on their nodes' cards. */

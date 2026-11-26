@@ -42,18 +42,26 @@ export function buildingNode(j: BuildJobs, reach: readonly string[]): string | n
   return running ? lastBuilding(running.lines, reach) : null;
 }
 
-/** A job keeps only its latest lines, so a name can scroll off while that node still builds: what the running job named last. */
+/** A job keeps only its latest lines, so a name can scroll off while that node still builds: what the running job named last, and every node it has named. */
 export interface BuildingMemo {
   job: number | null;
   node: string | null;
+  seen: readonly string[];
 }
 
-/** `buildingNode`, holding the running job's last name; a job that ended, or a new one, names nobody until it does. */
+/** `buildingNode`, holding the running job's names; a job that ended, or a new one, names nobody until it does. */
 export function buildingNow(j: BuildJobs, reach: readonly string[], memo: BuildingMemo): BuildingMemo {
   const running = [j.sign, j.build].find((x) => x?.state === 'running');
-  if (!running) return { job: null, node: null };
-  const named = lastBuilding(running.lines, reach);
-  return { job: running.id, node: named ?? (memo.job === running.id ? memo.node : null) };
+  if (!running) return { job: null, node: null, seen: [] };
+  const same = memo.job === running.id;
+  const named = running.lines.flatMap((l) => BUILDING.exec(l)?.[1] ?? []).filter((id) => reach.includes(id));
+  const seen = [...new Set([...(same ? memo.seen : []), ...named])];
+  return { job: running.id, node: lastBuilding(running.lines, reach) ?? (same ? memo.node : null), seen };
+}
+
+/** How far the running job is: the node it builds now is the `nth` of `total`; null until it names one. */
+export function buildProgress(memo: BuildingMemo, total: number): { nth: number; total: number } | null {
+  return memo.job !== null && memo.seen.length > 0 && total > 0 ? { nth: Math.min(memo.seen.length, total), total } : null;
 }
 
 export interface BuildFailure {

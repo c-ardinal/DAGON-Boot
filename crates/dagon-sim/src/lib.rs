@@ -5,6 +5,8 @@
 //! - [`SimLink`]: frame loss, bit flips, delay, silent peer.
 //! - [`SimRom`]: the STM32 I2C ROM loader (ACK/NACK/BUSY, 1000 ms frame
 //!   timeout, at most 256 bytes per read or write).
+//! - [`SimEspRom`]: the ESP32-S3 ROM serial loader (SLIP packets, erase,
+//!   block writes with checksum, MD5 of a region).
 //! - [`SimNode`]: dagon-agent over a [`SimStore`], with a boot decision at
 //!   reset, an I2C mailbox and selectable trial-app behaviour.
 //! - [`SimRelay`]: answers the PC (directly or as a USB byte stream), relays
@@ -20,6 +22,7 @@
 //! Randomness comes only from [`SimRng`] seeds, so a seed replays a run.
 #![forbid(unsafe_code)]
 
+pub mod esp_rom;
 pub mod flash;
 pub mod link;
 pub mod listen;
@@ -33,6 +36,7 @@ pub mod store;
 pub mod timing;
 pub mod world;
 
+pub use esp_rom::SimEspRom;
 pub use flash::{CutPoint, FlashOp, OpKind, SimFlash};
 pub use link::SimLink;
 pub use node::{Run, SimNode, TrialApp};

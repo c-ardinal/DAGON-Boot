@@ -725,6 +725,7 @@ dependencies = [
  "dagon-format",
  "dagon-port",
  "dagon-proto",
+ "dagon-romlink",
  "dagon-sign",
  "dagon-topology",
  "ed25519-compact",

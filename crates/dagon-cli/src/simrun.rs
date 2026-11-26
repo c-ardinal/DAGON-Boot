@@ -386,22 +386,20 @@ fn s4() -> R {
     ))
 }
 
-const SCENARIOS: [Scenario; 4] = [
-    ("S1", "update with a power cut", s1),
-    ("S2", "trial app never confirms", s2),
-    ("S3", "tampered release", s3),
-    ("S4", "erased F401 via ROM loader", s4),
-];
+/// The scenarios of [`crate::simfault::SCENARIOS`], in its order.
+const RUNS: [fn() -> R; crate::simfault::SCENARIOS.len()] = [s1, s2, s3, s4];
 
-/// Every scenario's ID and title, in run order.
-pub fn scenarios() -> impl Iterator<Item = (&'static str, &'static str)> {
-    SCENARIOS.iter().map(|(id, title, _)| (*id, *title))
+/// Every scenario: its ID, its title and what runs it.
+fn scenarios() -> impl Iterator<Item = Scenario> {
+    crate::simfault::SCENARIOS
+        .iter()
+        .zip(RUNS)
+        .map(|(&(id, title), run)| (id, title, run))
 }
 
 /// Runs the scenario `only` names, or every scenario.
 pub fn run(only: Option<&str>) -> Result<(), String> {
-    let chosen: Vec<&Scenario> = SCENARIOS
-        .iter()
+    let chosen: Vec<Scenario> = scenarios()
         .filter(|(id, _, _)| only.is_none_or(|o| o == *id))
         .collect();
     if chosen.is_empty() {

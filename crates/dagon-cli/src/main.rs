@@ -3,6 +3,7 @@
 mod agents;
 mod ai;
 mod ask;
+mod childenv;
 mod cli;
 mod commands;
 mod config;
@@ -29,6 +30,7 @@ mod nodebuild;
 // Writes outside genfs: implements the atomic write genfs and the commands use.
 #[allow(clippy::disallowed_methods)]
 mod paths;
+mod prompt;
 mod scaffold;
 mod serial;
 mod serve;
@@ -36,6 +38,7 @@ mod simfault;
 mod simrun;
 mod simworld;
 mod srcver;
+mod values;
 mod versions;
 
 use std::path::Path;

@@ -20,11 +20,11 @@ ROOT_USE = re.compile(r"^\s*(?:pub(?:\([^)]*\))?\s+)?use\s+(?:self::)?(\w+)::([^
 # Cycles not yet untangled (GitHub issue #61): each must stay as it is or
 # shrink; a new cycle anywhere, or a module joining one of these, fails.
 KNOWN = {
-    "crates/dagon-cli": [[
-        "agents", "ai", "ask", "cli", "commands", "config", "conform", "consent", "dagonsrc",
-        "defs", "demo", "deploy", "device", "doctor", "extgen", "flash", "genfs", "kept",
-        "keystore", "nodebuild", "scaffold", "serve", "simrun", "srcver", "versions",
-    ]],
+    "crates/dagon-cli": [
+        ["agents", "consent", "keystore"],
+        ["conform", "demo", "deploy", "device", "doctor", "flash", "kept", "serve"],
+        ["extgen", "scaffold"],
+    ],
 }
 
 TEST_MOD = re.compile(r"#\[cfg\(test\)\]\s*(?:pub(?:\([^)]*\))?\s+)?mod\s+\w+\s*\{")

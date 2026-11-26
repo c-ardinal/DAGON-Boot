@@ -12,21 +12,16 @@ use serde_json::{json, Value};
 
 use super::http::{Request, Response};
 use super::jobs::{Job, Server};
-use crate::commands::{image_for_node, version, SignOpts};
-use crate::config::{load_key, read_file, read_topology, BuildInputs, Config};
+use crate::commands::{image_for_node, SignOpts};
+use crate::config::{load_key, read_file, BuildInputs, Config};
+use crate::defs::read_topology;
 use crate::nodebuild;
+use crate::values::version;
 
 const SIGN_DIR: &str = "out/sign";
 const RELEASE_DIR: &str = "out/release";
 
-/// Node ids, release names: what may become a file name.
-pub(crate) fn plain(s: &str) -> bool {
-    (1..=32).contains(&s.len())
-        && s.bytes()
-            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_' || b == b'.')
-        && !s.starts_with('.')
-        && !crate::paths::device_name(s)
-}
+pub(crate) use crate::values::plain_name as plain;
 
 /// `p` resolved inside the work area (symlinks and junctions followed).
 pub(super) fn inside(cfg: &Config, p: &Path) -> Result<PathBuf, String> {
@@ -818,7 +813,7 @@ fn sign_nodes(
         let mut images = Vec::new();
         for (slot, elf) in elfs {
             stop_if(cancel)?;
-            let binding = crate::commands::binding_of(slot);
+            let binding = crate::values::binding_of(slot);
             let img = image_for_node(
                 &reg,
                 t,
@@ -886,7 +881,7 @@ fn sign_cores(
         .into_iter()
         .map(|(slot, elf)| {
             stop_if(cancel)?;
-            let binding = crate::commands::binding_of(slot);
+            let binding = crate::values::binding_of(slot);
             image_for_node(
                 reg,
                 t,
@@ -925,7 +920,7 @@ fn sign_swaps(
     let mut files = Vec::new();
     // The app's images, then its boot core's (`bootcore-<node>-<slot>.img`).
     for (prefix, set) in [("", images), ("bootcore-", cores)] {
-        for slot in crate::commands::slot_letters() {
+        for slot in crate::values::slot_letters() {
             let rel = crate::genfs::Rel::new(format!("{SIGN_DIR}/{prefix}{node}-{slot}.img"))?;
             let Some((_, img)) = set.iter().find(|(s, _)| *s == slot) else {
                 files.push((rel, None));
@@ -1754,7 +1749,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
         let dir = d.join("proj");
         let here = std::fs::canonicalize(crate::dagonsrc::BUILT_FROM).unwrap();
-        let src = crate::dagonsrc::NewSource::Clone(crate::config::plain_path(here));
+        let src = crate::dagonsrc::NewSource::Clone(crate::paths::plain_path(here));
         crate::scaffold::new_project(&dir, "proj", crate::scaffold::SAMPLE, &d.join("keys"), &src)
             .unwrap();
         let config = dir.join(crate::config::CONFIG_FILE);
@@ -1787,7 +1782,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
         let dir = d.join("proj");
         let here = std::fs::canonicalize(crate::dagonsrc::BUILT_FROM).unwrap();
-        let src = crate::dagonsrc::NewSource::Clone(crate::config::plain_path(here));
+        let src = crate::dagonsrc::NewSource::Clone(crate::paths::plain_path(here));
         let yaml = crate::scaffold::SAMPLE;
         crate::scaffold::new_project(&dir, "proj", yaml, &d.join("keys"), &src).unwrap();
         let config = dir.join(crate::config::CONFIG_FILE);

@@ -18,19 +18,13 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use crate::childenv::{plain_output, secret_env};
 use crate::cli::BuildArgs;
+use crate::config::PUBKEY_ENV;
 use crate::config::{BuildInputs, Config};
 
 const OUT_DIR: &str = "out/build";
 const RECORD: &str = "build.json";
-/// The public key file the firmware build scripts embed.
-pub const PUBKEY_ENV: &str = "DAGON_PUBKEY";
-
-/// Secrets the CLI holds that a build (build scripts, proc macros) must not
-/// see: the signing key path and every agent key a way names.
-pub fn secret_env() -> Vec<String> {
-    crate::agents::secret_env(crate::consent::home().ok().as_deref())
-}
 
 /// What the last successful build of a node produced.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -176,7 +170,7 @@ fn build_node(
     // Windows `\\?\` prefix: MSVC's link.exe cannot open object files
     // under such a --target-dir (LNK1181 for host build scripts).
     let dir = package_dir(cfg, b, source)
-        .map(crate::config::plain_path)
+        .map(crate::paths::plain_path)
         .map_err(|e| format!("[build.{id}]{e}"))?;
     let bin = match &b.bin {
         Some(n) => n.clone(),
@@ -278,12 +272,6 @@ const INHERITED_BUILD_ENV: [&str; 7] = [
     "CARGO_ENCODED_RUSTFLAGS",
 ];
 
-/// cargo's lines are read as text, on the page and in messages: a colour
-/// setting in the caller's environment or cargo configuration stays out of them.
-pub fn plain_output(cmd: &mut Command) {
-    cmd.env("CARGO_TERM_COLOR", "never");
-}
-
 /// Removes the CLI's secrets, and build settings inherited from a parent
 /// cargo, from a child's environment.
 fn scrub(cmd: &mut Command) {
@@ -351,7 +339,7 @@ pub(crate) fn link_baud(cfg: &Config, id: &str) -> Result<Option<u32>, String> {
     let Some(path) = &cfg.topology else {
         return Ok(None);
     };
-    crate::config::read_topology(cfg, path)?.uart_baud(id)
+    crate::defs::read_topology(cfg, path)?.uart_baud(id)
 }
 
 /// The firmware build inputs of `fw`, each set or (`None`) removed.
@@ -977,7 +965,7 @@ mod tests {
     fn the_package_folder_goes_to_cargo_without_the_verbatim_prefix() {
         let dir = std::env::temp_dir();
         let canon = std::fs::canonicalize(&dir).unwrap();
-        let plain = crate::config::plain_path(canon.clone());
+        let plain = crate::paths::plain_path(canon.clone());
         let verbatim: String = [char::from(92), char::from(92), '?'].iter().collect();
         assert!(!plain.to_string_lossy().starts_with(&verbatim));
         assert_eq!(std::fs::canonicalize(&plain).unwrap(), canon);

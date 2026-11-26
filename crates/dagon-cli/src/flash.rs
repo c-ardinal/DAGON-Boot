@@ -20,11 +20,13 @@ use ed25519_compact::KeyPair;
 
 use crate::cli::FlashArgs;
 use crate::commands::{command_lines, node_mcu, provision_files, FirstWrite};
-use crate::config::{load_key, read_topology, Config, ProvisionInputs};
-use crate::deploy::{confirm, firmware_key};
+use crate::config::{load_key, Config, ProvisionInputs};
+use crate::defs::read_topology;
+use crate::deploy::firmware_key;
 use crate::esp::Esp;
 use crate::flashdev::{self, Pick, DRIVE_WAIT};
 use crate::nodebuild;
+use crate::prompt::confirm;
 use crate::scaffold::Want;
 
 /// The stage0 part (the layout's `stage0` region); every other part is
@@ -73,13 +75,13 @@ pub(crate) fn parts(reg: &Registry, mcu: &str, board: Option<&str>) -> Vec<Part>
 /// cargo's checkout of the `[dagon]` release tag (fetched when missing).
 pub(crate) fn source_root(cfg: &Config) -> Result<PathBuf, String> {
     let r = crate::dagonsrc::root(&cfg.dagon, &cfg.base)?;
-    Ok(std::fs::canonicalize(&r).map_or(r, crate::config::plain_path))
+    Ok(std::fs::canonicalize(&r).map_or(r, crate::paths::plain_path))
 }
 
 /// Folder of the package `owner` under `root`.
 fn package_dir(root: &Path, owner: &Want) -> Result<PathBuf, String> {
     crate::scaffold::find_for(root, owner)
-        .map(|f| crate::config::plain_path(f.dir))
+        .map(|f| crate::paths::plain_path(f.dir))
         .ok_or_else(|| {
             format!(
                 "no package {} in {}",
@@ -144,18 +146,18 @@ fn shown(cfg: &Config, p: &Path, paths: Paths) -> String {
     if paths == Paths::Full {
         return p.display().to_string();
     }
-    let base = std::fs::canonicalize(&cfg.base).map_or(cfg.base.clone(), crate::config::plain_path);
+    let base = std::fs::canonicalize(&cfg.base).map_or(cfg.base.clone(), crate::paths::plain_path);
     [&cfg.base, &base]
         .iter()
         .find_map(|b| p.strip_prefix(b).ok())
-        .map(crate::config::forward_path)
+        .map(crate::paths::forward_path)
         .or_else(|| p.file_name().map(|n| n.to_string_lossy().into_owned()))
         .unwrap_or_default()
 }
 
 /// Every spelling of `dir` a line may carry: as given and canonical.
 pub(crate) fn spellings(dir: &Path) -> Vec<String> {
-    let canon = std::fs::canonicalize(dir).map(crate::config::plain_path);
+    let canon = std::fs::canonicalize(dir).map(crate::paths::plain_path);
     let mut v: Vec<String> = [Some(dir.to_path_buf()), canon.ok()]
         .into_iter()
         .flatten()
@@ -319,10 +321,10 @@ fn source_relative(cfg: &Config, owner: &Want) -> String {
     let Some(root) = crate::dagonsrc::clone_root(&cfg.dagon, &cfg.base) else {
         return name;
     };
-    let root = std::fs::canonicalize(&root).map_or(root, crate::config::plain_path);
+    let root = std::fs::canonicalize(&root).map_or(root, crate::paths::plain_path);
     package_dir(&root, owner)
         .ok()
-        .and_then(|d| d.strip_prefix(&root).ok().map(crate::config::forward_path))
+        .and_then(|d| d.strip_prefix(&root).ok().map(crate::paths::forward_path))
         .unwrap_or(name)
 }
 
@@ -628,8 +630,8 @@ pub(crate) fn build_core_slots(
     cancel: &AtomicBool,
 ) -> Result<nodebuild::SlotElfs, String> {
     use dagon_format::header::{image_kind, slot_binding};
-    let slots: Vec<(char, Vec<String>)> = crate::commands::slot_letters()
-        .map(|c| (crate::commands::binding_of(c), c))
+    let slots: Vec<(char, Vec<String>)> = crate::values::slot_letters()
+        .map(|c| (crate::values::binding_of(c), c))
         .filter(|(b, _)| {
             dagon_sign::image::slot_with(reg, &n.mcu, image_kind::BOOTCORE, *b).is_some()
         })
@@ -847,7 +849,7 @@ fn esp_files(
     let csv =
         std::fs::read_to_string(&csv_path).map_err(|e| format!("{}: {e}", csv_path.display()))?;
     let l = esp::layout(mcu)?;
-    let version = crate::commands::version(i.version.as_deref().ok_or("no app version")?)?;
+    let version = crate::values::version(i.version.as_deref().ok_or("no app version")?)?;
     let opts = crate::commands::SignOpts {
         version,
         release_seq: i.release_seq.unwrap_or(1),
@@ -868,7 +870,7 @@ fn esp_files(
     let (header, body) = img.split_at(HEADER_SIZE);
     let agent_opts = crate::commands::SignOpts {
         version: match &i.bootcore_version {
-            Some(v) => crate::commands::version(v)?,
+            Some(v) => crate::values::version(v)?,
             None => version,
         },
         bits: None,
@@ -1279,7 +1281,7 @@ mod tests {
     /// The DAGON checkout this test runs in.
     fn here() -> PathBuf {
         std::fs::canonicalize(crate::dagonsrc::BUILT_FROM)
-            .map(crate::config::plain_path)
+            .map(crate::paths::plain_path)
             .unwrap()
     }
 
@@ -1386,7 +1388,7 @@ mod tests {
             .with_file_name(format!("dagon-flash-shared-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&shared);
         // As Config::load leaves `provision_dir = "../dagon-flash-shared-<pid>"`.
-        cfg.provision_dir = Some(crate::config::lexical(
+        cfg.provision_dir = Some(crate::paths::lexical(
             &cfg.base.join("..").join(shared.file_name().unwrap()),
         ));
         let out = cfg.provision_dir().join("seg");
@@ -1463,7 +1465,7 @@ mod tests {
                 ("targets/mcu/rp2040/bootcore/lib.rs", ""),
             ],
         );
-        cfg.dagon = crate::scaffold::DagonSource {
+        cfg.dagon = crate::config::DagonSource {
             git: Some(url.clone()),
             tag: Some("v3.1.4".into()),
             path: None,
@@ -1509,7 +1511,7 @@ mod tests {
             )
             .unwrap()
         };
-        cfg.dagon = crate::scaffold::DagonSource {
+        cfg.dagon = crate::config::DagonSource {
             git: Some("file:///dagon".into()),
             tag: Some("v1.1.0".into()),
             path: None,
@@ -1531,12 +1533,12 @@ mod tests {
         // Path mode: a path inside the clone matches, a release does not.
         let clone = cfg.base.join("clone");
         std::fs::create_dir_all(clone.join("boards/nucleo")).unwrap();
-        cfg.dagon = crate::scaffold::DagonSource {
+        cfg.dagon = crate::config::DagonSource {
             git: None,
             tag: None,
             path: Some(PathBuf::from("clone")),
         };
-        let inside = crate::config::forward_path(&clone.join("boards/nucleo"));
+        let inside = crate::paths::forward_path(&clone.join("boards/nucleo"));
         write(&format!(
             "dagon-board-nucleo-f401re = {{ path = {inside:?} }}"
         ));

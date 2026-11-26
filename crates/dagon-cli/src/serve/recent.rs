@@ -73,7 +73,7 @@ pub fn add(home: &Path, dir: &Path) {
 
 /// A path as the page shows it (forward slashes, no verbatim prefix).
 pub fn shown(p: &Path) -> String {
-    crate::config::forward_path(p)
+    crate::paths::forward_path(p)
 }
 
 /// The list for GET /v1/project.

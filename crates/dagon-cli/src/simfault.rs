@@ -67,3 +67,12 @@ impl Injection {
         })
     }
 }
+
+/// Every scenario `dagon sim --scenario` takes: its ID and title, in run
+/// order (`simrun` runs them).
+pub const SCENARIOS: [(&str, &str); 4] = [
+    ("S1", "update with a power cut"),
+    ("S2", "trial app never confirms"),
+    ("S3", "tampered release"),
+    ("S4", "erased F401 via ROM loader"),
+];

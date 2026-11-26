@@ -87,8 +87,8 @@ fn the_builtin_agent_is_claude_with_two_ways_claude_code_first() {
         !way.transport.takes_key(),
         "Claude Code uses the user's own login"
     );
-    assert!(secret_env(None).contains(&"ANTHROPIC_API_KEY".to_string()));
-    assert!(secret_env(None).contains(&crate::config::KEY_ENV.to_string()));
+    assert!(crate::childenv::secret_env().contains(&"ANTHROPIC_API_KEY".to_string()));
+    assert!(crate::childenv::secret_env().contains(&crate::config::KEY_ENV.to_string()));
 }
 
 #[test]

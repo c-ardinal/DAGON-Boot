@@ -27,7 +27,7 @@ pub(crate) fn crate_version(dir: &Path) -> Result<Version, String> {
             ))
         }
     };
-    crate::commands::version(&text).map_err(|e| format!("{}: version: {e}", manifest.display()))
+    crate::values::version(&text).map_err(|e| format!("{}: version: {e}", manifest.display()))
 }
 
 fn read_toml(path: &Path) -> Result<toml::Value, String> {
@@ -163,7 +163,7 @@ pub(crate) fn agreed(source: Version, given: Option<&str>, what: &str) -> Result
     let Some(g) = given else {
         return Ok(source);
     };
-    let g = crate::commands::version(g)?;
+    let g = crate::values::version(g)?;
     if g != source {
         return Err(format!(
             "version {g} was given, but {what} says {source}: the version comes from the \

@@ -31,22 +31,12 @@ use dagon_topology::SCHEMA_VERSION;
 use serde::Deserialize;
 
 use crate::cli::{GenArgs, NewArgs};
-use crate::config::{read_topology, Config};
+use crate::config::{Config, DagonSource};
+use crate::defs::read_topology;
 use crate::genfs;
 use crate::paths::contained;
 
 pub const SAMPLE: &str = include_str!("../../../topology/sample.yaml");
-
-/// Where generated projects take the DAGON crates from (`[dagon]`).
-#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct DagonSource {
-    /// Git repository and the release tag it is pinned to.
-    pub git: Option<String>,
-    pub tag: Option<String>,
-    /// A local clone (development); relative to dagon.toml.
-    pub path: Option<PathBuf>,
-}
 
 /// A file written (or kept) by gen, relative to the project.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -322,7 +312,7 @@ fn dependency(name: &str, src: &DagonSource, base: &Path) -> Result<String, Stri
         Some(root) => {
             let dir = find_named(&root, name)
                 .ok_or_else(|| format!("no package '{name}' in {}", root.display()))?;
-            let dir = crate::config::forward_path(&dir);
+            let dir = crate::paths::forward_path(&dir);
             Ok(format!("{name} = {{ path = {dir:?} }}"))
         }
     }
@@ -989,7 +979,7 @@ pub fn add_build_tables(
         tbl.insert("package", toml_edit::value(format!("nodes/{}", n.id)));
         // An MCU without its own slot B link (ESP32-S3: one image runs
         // from either OTA slot) builds once.
-        if crate::deploy::has_slot_b_link(reg, &n.mcu) {
+        if crate::values::has_slot_b_link(reg, &n.mcu) {
             tbl.insert("slot_b_feature", toml_edit::value("slot-b"));
         }
         builds.insert(&n.id, toml_edit::Item::Table(tbl));

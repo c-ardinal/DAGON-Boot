@@ -330,7 +330,7 @@ fn or_list(items: Vec<String>) -> String {
 
 /// The slot letters `--slot` takes, as help and errors say them.
 pub(crate) fn slot_choices() -> String {
-    or_list(crate::commands::slot_letters().map(String::from).collect())
+    or_list(crate::values::slot_letters().map(String::from).collect())
 }
 
 /// The image kinds `--kind` takes, as help and errors say them.
@@ -656,8 +656,9 @@ pub struct SimArgs {
 /// The scenario IDs `dagon sim` takes: the simulator's own list.
 fn scenario_ids() -> clap::builder::PossibleValuesParser {
     clap::builder::PossibleValuesParser::new(
-        crate::simrun::scenarios()
-            .map(|(id, title)| clap::builder::PossibleValue::new(id).help(title)),
+        crate::simfault::SCENARIOS
+            .iter()
+            .map(|&(id, title)| clap::builder::PossibleValue::new(id).help(title)),
     )
 }
 

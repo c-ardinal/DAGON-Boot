@@ -17,7 +17,8 @@ use dagon_topology::defs::Registry;
 use dagon_topology::Topology;
 
 use crate::cli::{ApplyArgs, RecoverArgs, RollbackArgs, StatusArgs};
-use crate::config::{load_key, read_file, read_topology, Config};
+use crate::config::{load_key, read_file, Config};
+use crate::defs::read_topology;
 use crate::serial;
 
 type Res = Result<(), String>;
@@ -405,7 +406,7 @@ pub fn recover(a: &RecoverArgs) -> Res {
          loader; keep the node powered until it restarts\n",
         a.agent
     );
-    if !a.yes && !crate::deploy::confirm(&listing, &mut std::io::stdin().lock()) {
+    if !a.yes && !crate::prompt::confirm(&listing, &mut std::io::stdin().lock()) {
         return Err("nothing was written".into());
     }
     let mut host = serial::host(a.port.as_deref())?;

@@ -1616,7 +1616,7 @@ fn local_dirs(a: &Area) -> Vec<String> {
     let canon = std::fs::canonicalize(&a.dir).unwrap();
     vec![
         a.dir.display().to_string(),
-        crate::config::plain_path(canon).display().to_string(),
+        crate::paths::plain_path(canon).display().to_string(),
     ]
 }
 

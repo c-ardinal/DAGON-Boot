@@ -15,7 +15,9 @@ use ed25519_compact::KeyPair;
 use crate::cli::{
     FirstInstallOpts, ImageSignArgs, ProvisionArgs, ReleaseBuildArgs, TopoCompileArgs,
 };
-use crate::config::{load_key, read_file, read_topology, write_file, Config};
+use crate::config::{load_key, read_file, write_file, Config};
+use crate::defs::read_topology;
+use crate::values::{binding_of, slot_letters, version};
 
 type Res = Result<(), String>;
 
@@ -28,10 +30,6 @@ pub(crate) struct SignOpts {
     pub bits: Option<(u32, u32)>,
 }
 
-pub(crate) fn version(s: &str) -> Result<Version, String> {
-    image::parse_version(s).ok_or_else(|| format!("bad version '{s}' (want major.minor.patch)"))
-}
-
 fn number(name: &str, s: &str) -> Result<u32, String> {
     s.parse().map_err(|_| format!("--{name} must be a number"))
 }
@@ -42,22 +40,6 @@ fn slot_arg(s: &str) -> Result<u8, String> {
         (Some(l), None) if slot_letters().any(|x| x == l.to_ascii_lowercase()) => Ok(binding_of(l)),
         _ => Err(format!("--slot must be {}", crate::cli::slot_choices())),
     }
-}
-
-/// The image header binding of slot letter `c` (`a` slot A, `b` slot B):
-/// the letter's place in the alphabet, as STATUS numbers the slots.
-pub(crate) fn binding_of(c: char) -> u8 {
-    (c.to_ascii_lowercase() as u8).wrapping_sub(b'a')
-}
-
-/// The letter of slot `binding`.
-pub(crate) fn slot_letter(binding: u8) -> char {
-    char::from(b'a' + binding)
-}
-
-/// The letters of every image slot the wire has room for (`a`, `b`).
-pub(crate) fn slot_letters() -> impl Iterator<Item = char> {
-    (0..dagon_proto::payload::StatusResp::IMAGE_SLOTS as u8).map(slot_letter)
 }
 
 /// Signs `input` (ELF or raw payload) for `node`, or, when `input` already is

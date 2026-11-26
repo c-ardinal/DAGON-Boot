@@ -94,13 +94,13 @@ impl Out {
     /// passing a resolved path here would skip the link checks, so callers
     /// never resolve first.
     pub fn of(base: &Path, path: &Path) -> Result<Out, String> {
-        let at = crate::config::lexical(path);
-        if let Ok(r) = at.strip_prefix(crate::config::lexical(base)) {
+        let at = crate::paths::lexical(path);
+        if let Ok(r) = at.strip_prefix(crate::paths::lexical(base)) {
             return Ok(Out::Work(Rel::new(r.to_string_lossy())?));
         }
         // Outside the work area as written, yet under it once resolved:
         // a resolved path, which would skip the link checks. Refused.
-        let plain = |p: &Path| crate::config::plain_path(p.to_path_buf());
+        let plain = |p: &Path| crate::paths::plain_path(p.to_path_buf());
         let resolved = std::fs::canonicalize(base).is_ok_and(|b| plain(&at).starts_with(plain(&b)));
         if resolved {
             return Err(format!(

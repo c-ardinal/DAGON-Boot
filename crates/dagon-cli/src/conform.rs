@@ -15,7 +15,8 @@ use dagon_port::LinkKind;
 use dagon_sim::block_on;
 
 use crate::cli::ConformArgs;
-use crate::config::{load_key, read_file, read_topology, Config};
+use crate::config::{load_key, read_file, Config};
+use crate::defs::read_topology;
 
 /// Where conformance results go in the work area, per node.
 pub(crate) const CONFORM_DIR: &str = "out/conform";
@@ -28,7 +29,7 @@ pub const REPORT_FILE: &str = "report.html";
 /// slot b when the node has it (either file there).
 pub(crate) fn conform_images(dir: &std::path::Path) -> Result<ConformImages, String> {
     let mut images = ConformImages::default();
-    for (i, s) in crate::commands::slot_letters().enumerate() {
+    for (i, s) in crate::values::slot_letters().enumerate() {
         let good = dir.join(format!("good-{s}.img"));
         let no_confirm = dir.join(format!("no-confirm-{s}.img"));
         if i > 0 && !good.exists() && !no_confirm.exists() {

@@ -1,0 +1,33 @@
+# FUNCSEL names of IO_BANK0 GPIOn_CTRL, one line a GPIO: from RP2040.svd of
+# pico-sdk 2.1.1 (src/rp2040/hardware_regs/RP2040.svd, BSD-3-Clause,
+# Copyright (c) 2024 Raspberry Pi Ltd.), in FUNCSEL value order.
+GPIO0 jtag_tck spi0_rx uart0_tx i2c0_sda pwm_a_0 sio_0 pio0_0 pio1_0 usb_muxing_overcurr_detect null
+GPIO1 jtag_tms spi0_ss_n uart0_rx i2c0_scl pwm_b_0 sio_1 pio0_1 pio1_1 usb_muxing_vbus_detect null
+GPIO2 jtag_tdi spi0_sclk uart0_cts i2c1_sda pwm_a_1 sio_2 pio0_2 pio1_2 usb_muxing_vbus_en null
+GPIO3 jtag_tdo spi0_tx uart0_rts i2c1_scl pwm_b_1 sio_3 pio0_3 pio1_3 usb_muxing_overcurr_detect null
+GPIO4 spi0_rx uart1_tx i2c0_sda pwm_a_2 sio_4 pio0_4 pio1_4 usb_muxing_vbus_detect null
+GPIO5 spi0_ss_n uart1_rx i2c0_scl pwm_b_2 sio_5 pio0_5 pio1_5 usb_muxing_vbus_en null
+GPIO6 spi0_sclk uart1_cts i2c1_sda pwm_a_3 sio_6 pio0_6 pio1_6 usb_muxing_extphy_softcon usb_muxing_overcurr_detect null
+GPIO7 spi0_tx uart1_rts i2c1_scl pwm_b_3 sio_7 pio0_7 pio1_7 usb_muxing_extphy_oe_n usb_muxing_vbus_detect null
+GPIO8 spi1_rx uart1_tx i2c0_sda pwm_a_4 sio_8 pio0_8 pio1_8 usb_muxing_extphy_rcv usb_muxing_vbus_en null
+GPIO9 spi1_ss_n uart1_rx i2c0_scl pwm_b_4 sio_9 pio0_9 pio1_9 usb_muxing_extphy_vp usb_muxing_overcurr_detect null
+GPIO10 spi1_sclk uart1_cts i2c1_sda pwm_a_5 sio_10 pio0_10 pio1_10 usb_muxing_extphy_vm usb_muxing_vbus_detect null
+GPIO11 spi1_tx uart1_rts i2c1_scl pwm_b_5 sio_11 pio0_11 pio1_11 usb_muxing_extphy_suspnd usb_muxing_vbus_en null
+GPIO12 spi1_rx uart0_tx i2c0_sda pwm_a_6 sio_12 pio0_12 pio1_12 usb_muxing_extphy_speed usb_muxing_overcurr_detect null
+GPIO13 spi1_ss_n uart0_rx i2c0_scl pwm_b_6 sio_13 pio0_13 pio1_13 usb_muxing_extphy_vpo usb_muxing_vbus_detect null
+GPIO14 spi1_sclk uart0_cts i2c1_sda pwm_a_7 sio_14 pio0_14 pio1_14 usb_muxing_extphy_vmo usb_muxing_vbus_en null
+GPIO15 spi1_tx uart0_rts i2c1_scl pwm_b_7 sio_15 pio0_15 pio1_15 usb_muxing_digital_dp usb_muxing_overcurr_detect null
+GPIO16 spi0_rx uart0_tx i2c0_sda pwm_a_0 sio_16 pio0_16 pio1_16 usb_muxing_digital_dm usb_muxing_vbus_detect null
+GPIO17 spi0_ss_n uart0_rx i2c0_scl pwm_b_0 sio_17 pio0_17 pio1_17 usb_muxing_vbus_en null
+GPIO18 spi0_sclk uart0_cts i2c1_sda pwm_a_1 sio_18 pio0_18 pio1_18 usb_muxing_overcurr_detect null
+GPIO19 spi0_tx uart0_rts i2c1_scl pwm_b_1 sio_19 pio0_19 pio1_19 usb_muxing_vbus_detect null
+GPIO20 spi0_rx uart1_tx i2c0_sda pwm_a_2 sio_20 pio0_20 pio1_20 clocks_gpin_0 usb_muxing_vbus_en null
+GPIO21 spi0_ss_n uart1_rx i2c0_scl pwm_b_2 sio_21 pio0_21 pio1_21 clocks_gpout_0 usb_muxing_overcurr_detect null
+GPIO22 spi0_sclk uart1_cts i2c1_sda pwm_a_3 sio_22 pio0_22 pio1_22 clocks_gpin_1 usb_muxing_vbus_detect null
+GPIO23 spi0_tx uart1_rts i2c1_scl pwm_b_3 sio_23 pio0_23 pio1_23 clocks_gpout_1 usb_muxing_vbus_en null
+GPIO24 spi1_rx uart1_tx i2c0_sda pwm_a_4 sio_24 pio0_24 pio1_24 clocks_gpout_2 usb_muxing_overcurr_detect null
+GPIO25 spi1_ss_n uart1_rx i2c0_scl pwm_b_4 sio_25 pio0_25 pio1_25 clocks_gpout_3 usb_muxing_vbus_detect null
+GPIO26 spi1_sclk uart1_cts i2c1_sda pwm_a_5 sio_26 pio0_26 pio1_26 usb_muxing_vbus_en null
+GPIO27 spi1_tx uart1_rts i2c1_scl pwm_b_5 sio_27 pio0_27 pio1_27 usb_muxing_overcurr_detect null
+GPIO28 spi1_rx uart0_tx i2c0_sda pwm_a_6 sio_28 pio0_28 pio1_28 usb_muxing_vbus_detect null
+GPIO29 spi1_ss_n uart0_rx i2c0_scl pwm_b_6 sio_29 pio0_29 pio1_29 usb_muxing_vbus_en null

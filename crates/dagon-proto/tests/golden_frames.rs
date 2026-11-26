@@ -484,9 +484,7 @@ fn uart_raw_vector() {
         &file,
         &[(
             5,
-            &[
-                0x62, 11, 0, 2, 0x03, 2, 64, 0, 0x05, 2, 0xB8, 0x0B, 0, 0xC0,
-            ],
+            &[0x62, 11, 0, 2, 0x03, 2, 64, 0, 0x05, 2, 0xB8, 0x0B, 0, 0xC0],
         )],
     );
     // Nothing read and the default wait are left out.

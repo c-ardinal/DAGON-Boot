@@ -83,6 +83,7 @@ fn plan<'a>(regions: &'a [Region<'a>]) -> Plan<'a> {
         flash_bytes: 0x40_0000,
         regions,
         reboot: true,
+        sync_ms: esp::SYNC_MS,
     }
 }
 
@@ -163,10 +164,7 @@ fn a_stream_with_no_loader_ends_as_no_sync() {
         block_on(esp::flash(&mut w, &plan(&regions))),
         Err(EspError::NoSync)
     );
-    assert_eq!(
-        w.now_ms,
-        u64::from(esp::SYNC_ATTEMPTS) * u64::from(esp::SYNC_WAIT_MS)
-    );
+    assert_eq!(w.now_ms, u64::from(esp::SYNC_MS));
 }
 
 #[test]

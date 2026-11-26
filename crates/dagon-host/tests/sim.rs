@@ -29,6 +29,8 @@ const SEED: [u8; 32] = [
 mod deep;
 #[path = "sim/hand_over.rs"]
 mod hand_over;
+#[path = "sim/serial_rom.rs"]
+mod serial_rom;
 
 const YAML: &str = include_str!("../../../topology/sim-pair.yaml");
 

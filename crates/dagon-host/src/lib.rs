@@ -18,12 +18,15 @@ mod progress;
 pub mod realign;
 pub mod rom;
 mod routes;
+pub mod serial_rom;
 mod timings;
 
+pub use dagon_romlink::esp::{EspError, Stats as SerialRomStats};
 pub use dagon_romlink::{RomError, Stats as RomStats};
 pub use ops::{
-    agent_digest, app_digest, check_release, reason, ConfirmOutcome, Discovery, NodeOutcome,
-    NodeState, Outcome, RecoverAssets, RecoverPath, Silence, WritePath, HUB_RECONNECT_MS, REASONS,
+    agent_digest, app_digest, check_release, reason, AgentAssets, ConfirmOutcome, Discovery,
+    NodeOutcome, NodeState, Outcome, RecoverAssets, RecoverPath, Silence, WritePath,
+    HUB_RECONNECT_MS, REASONS,
 };
 pub use percent::{transfer_percent, trial_percent};
 pub use ports::{Agent, Prompt};
@@ -145,6 +148,8 @@ pub enum Error<E> {
     },
     /// The ROM loader session failed (after its retries).
     Rom(dagon_romlink::RomError),
+    /// The ROM serial loader path failed ([`Host::rewrite_agent`]).
+    SerialRom(dagon_romlink::esp::EspError),
     /// The node takes no boot core: it refused XFER_BEGIN with target
     /// BOOTCORE as unsupported (its trial cell does not hold, so stage0
     /// could not count a new core's starts).
@@ -687,6 +692,7 @@ mod tests {
             Cmd::ConfRun,
             Cmd::SubCtl,
             Cmd::I2cRaw,
+            Cmd::UartRaw,
         ];
         for c in Cmd::ALL {
             assert_eq!(repeatable(c), !never.contains(&c), "{c:?}");

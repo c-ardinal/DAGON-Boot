@@ -158,6 +158,9 @@ pub struct SimNode {
     /// The ROM serial loader on its UART, while the chip is in download
     /// mode.
     esp_rom: Option<SimEspRom>,
+    /// What the loader sent before it restarted the chip, still on the
+    /// line.
+    raw_sent: Vec<u8>,
     /// The ENTER_ROM methods its firmware takes: its MCU definition's
     /// `[[rom_entry]]`.
     rom_methods: Vec<u8>,
@@ -197,6 +200,7 @@ impl SimNode {
             rom: SimRom::default(),
             rom_addr: layout.definition().rom_i2c.as_ref().map(|r| r.addr),
             esp_rom: None,
+            raw_sent: Vec::new(),
             rom_methods: layout
                 .definition()
                 .rom_entries
@@ -299,6 +303,7 @@ impl SimNode {
     pub fn reset(&mut self, now_ms: u64) {
         self.boots += 1;
         self.esp_rom = None;
+        self.raw_sent.clear();
         self.core = None;
         self.reboot_after_read = false;
         self.busy_left = 0;
@@ -595,20 +600,29 @@ impl SimNode {
 
     /// Raw bytes arriving on its UART: its ROM serial loader takes them
     /// while it runs (anything else drops them). A loader told to reboot
-    /// resets the node.
+    /// answers, then resets the node.
     pub fn uart_raw_write(&mut self, data: &[u8], now_ms: &mut u64) {
         let Some(rom) = self.esp_rom.as_mut() else {
             return;
         };
         rom.write(&mut self.store.flash(), data, now_ms);
         if rom.rebooted() {
+            let mut last = [0u8; 64];
+            let n = rom.read(&mut last);
             self.reset(*now_ms);
+            self.raw_sent = last[..n].to_vec();
         }
     }
 
     /// Takes up to `buf.len()` bytes its ROM serial loader sent; what is
     /// left over is lost, as on a receiver nobody reads.
     pub fn uart_raw_read(&mut self, buf: &mut [u8]) -> usize {
+        let sent = core::mem::take(&mut self.raw_sent);
+        if !sent.is_empty() {
+            let n = buf.len().min(sent.len());
+            buf[..n].copy_from_slice(&sent[..n]);
+            return n;
+        }
         let Some(rom) = self.esp_rom.as_mut() else {
             return 0;
         };

@@ -983,6 +983,76 @@ impl<T: Transport, C: HostClock> Host<T, C> {
         Ok((RecoverPath::Rom(stats), v))
     }
 
+    /// Rewrites the recovery agent of topology node `node` through its
+    /// ROM serial loader. The node is asked to switch to the loader
+    /// (ENTER_ROM with the method its link names) and the relaying node it
+    /// is linked to carries the loader's bytes (UART_RAW): the agent's body,
+    /// then its header, each checked by the loader's MD5; then the loader
+    /// restarts the node, and its HELLO is awaited.
+    ///
+    /// A node that does not answer ENTER_ROM cannot switch by itself: SYNC
+    /// is then sent for [`AgentAssets::manual_sync_ms`], the time a person
+    /// has to bring it into the loader by hand (0: it is unreachable). A
+    /// node that answers and refuses is left as it is.
+    pub async fn rewrite_agent(
+        &mut self,
+        node: u8,
+        a: &AgentAssets<'_>,
+        on_event: &mut dyn FnMut(Event),
+    ) -> Result<(dagon_romlink::esp::Stats, Version), T::Error> {
+        use crate::serial_rom;
+        use dagon_romlink::esp;
+        self.write = Default::default();
+        let topo = TopologyView::parse(a.topology)?;
+        if usize::from(node) >= topo.node_count() {
+            return Err(Error::Unreachable { node });
+        }
+        let to = self.target_of(&topo, node).map_err(Error::Route)?;
+        let unreachable = Error::Unreachable { node };
+        let Some((relay, hop)) = to.parent() else {
+            return Err(unreachable);
+        };
+        let mcu = topo.node(usize::from(node)).mcu_id;
+        let Some(map) = a.maps.iter().find(|m| m.mcu_id == mcu) else {
+            return Err(unreachable);
+        };
+        let Some(method) = serial_rom::enter_method(&topo, node) else {
+            return Err(unreachable);
+        };
+        let v = serial_rom::check_agent(a.agent, a.pubkey, map)?.version;
+        if !a.confirmed {
+            return Err(Error::RomNotConfirmed { node });
+        }
+        self.report(on_event, node, phase::ROM, 0, v);
+        let enter = crate::request(|b| payload::EnterRom { method }.encode(b));
+        let sync_ms = match self.call(to, Cmd::EnterRom, &enter, REQUEST_MS).await {
+            Ok(_) => esp::SYNC_MS,
+            Err(e @ (Error::Transport(_) | Error::Rejected { .. } | Error::WireVersion { .. })) => {
+                return Err(e)
+            }
+            Err(_) if a.manual_sync_ms == 0 => return Err(unreachable),
+            Err(_) => a.manual_sync_ms,
+        };
+        let regions = serial_rom::regions(a.agent, map);
+        let plan = esp::Plan {
+            flash_bytes: map.flash_bytes,
+            regions: &regions,
+            reboot: true,
+            sync_ms,
+        };
+        let stats = {
+            let mut link = serial_rom::HubSerial::new(self, on_event, node, relay, hop, v);
+            esp::flash(&mut link, &plan).await
+        };
+        let stats = stats.map_err(Error::SerialRom)?;
+        // The loader restarted the node: whatever it boots answers HELLO.
+        if self.await_hello(to, |_| true).await?.is_err() {
+            return Err(Error::Timeout);
+        }
+        self.report(on_event, node, phase::CONFIRM, 100, v);
+        Ok((stats, v))
+    }
+
     /// How a write of topology node `node` would reach it now. Asks the node
     /// HELLO and changes nothing.
     pub async fn write_path(
@@ -1315,6 +1385,25 @@ pub struct RecoverAssets<'a> {
     /// The user was told the node does not answer and its contents will be
     /// rewritten, and went on. Without it the ROM path touches nothing.
     pub rom_confirmed: bool,
+}
+
+/// What [`Host::rewrite_agent`] needs: the current topology binary, the
+/// verifying key, the signed recovery agent image and the maps of the
+/// MCUs with a ROM serial loader (from the Registry).
+#[derive(Clone, Copy, Debug)]
+pub struct AgentAssets<'a> {
+    pub topology: &'a [u8],
+    pub pubkey: &'a [u8; 32],
+    pub agent: &'a [u8],
+    pub maps: &'a [crate::serial_rom::SerialRomMap],
+    /// The user was told the recovery agent will be rewritten, and went
+    /// on. Without it nothing is touched.
+    pub confirmed: bool,
+    /// How long SYNC is sent to a node that does not answer ENTER_ROM,
+    /// while a person brings it into its loader by hand
+    /// ([`MANUAL_SYNC_MS`](crate::serial_rom::MANUAL_SYNC_MS)); 0: such a
+    /// node is unreachable.
+    pub manual_sync_ms: u32,
 }
 
 /// How a write reaches a node ([`Host::write_path`]).

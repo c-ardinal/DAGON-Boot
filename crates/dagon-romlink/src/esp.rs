@@ -21,8 +21,9 @@ use crate::{HostClock, Region};
 
 /// Bytes of flash data in one FLASH_DATA.
 pub const BLOCK: usize = 0x400;
-/// SYNC packets sent before the loader counts as absent.
-pub const SYNC_ATTEMPTS: u32 = 20;
+/// How long SYNC is sent to a node that said it enters the loader
+/// ([`Plan::sync_ms`]).
+pub const SYNC_MS: u32 = 3_000;
 /// How long one SYNC waits for its response.
 pub const SYNC_WAIT_MS: u32 = 100;
 /// Timeout of a command that neither erases nor hashes.
@@ -67,18 +68,25 @@ pub struct Plan<'a> {
     pub regions: &'a [Region<'a>],
     /// FLASH_END asks the loader to reboot the chip.
     pub reboot: bool,
+    /// How long SYNC is sent, one every [`SYNC_WAIT_MS`], before the
+    /// loader counts as absent: [`SYNC_MS`] after ENTER_ROM, longer while
+    /// a person brings the chip into the loader by hand.
+    pub sync_ms: u32,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum EspError {
     Bus(BusError),
-    /// No response to [`SYNC_ATTEMPTS`] SYNC packets: the loader is not
+    /// No response to SYNC within [`Plan::sync_ms`]: the loader is not
     /// running on this stream.
     NoSync,
     /// No response to this command within its time.
     Timeout(u8),
     /// The loader refused this command with this error code.
-    Failed { cmd: u8, code: u8 },
+    Failed {
+        cmd: u8,
+        code: u8,
+    },
     /// A response of the right command that is no response of its kind.
     Malformed(u8),
     /// The loader's MD5 of the region at this address differs.
@@ -268,11 +276,14 @@ impl<L: EspLink> Session<'_, L> {
         }
     }
 
-    async fn sync(&mut self) -> Result<u32, EspError> {
+    async fn sync(&mut self, attempts: u32) -> Result<u32, EspError> {
         let mut payload = [0x55u8; 36];
         payload[..4].copy_from_slice(&[0x07, 0x07, 0x12, 0x20]);
-        for sent in 1..=SYNC_ATTEMPTS {
-            match self.command(cmd::SYNC, 0, &payload, &[], SYNC_WAIT_MS).await {
+        for sent in 1..=attempts {
+            match self
+                .command(cmd::SYNC, 0, &payload, &[], SYNC_WAIT_MS)
+                .await
+            {
                 Ok(_) => return Ok(sent),
                 Err(EspError::Timeout(_) | EspError::Failed { .. } | EspError::Malformed(_)) => {}
                 Err(e) => return Err(e),
@@ -301,11 +312,17 @@ pub async fn flash<L: EspLink>(link: &mut L, plan: &Plan<'_>) -> Result<Stats, E
         out: [0; 2 * (HEADER + 16 + BLOCK) + 2],
     };
     let mut stats = Stats {
-        syncs: s.sync().await?,
+        syncs: s.sync(plan.sync_ms.div_ceil(SYNC_WAIT_MS).max(1)).await?,
         ..Stats::default()
     };
-    s.command(cmd::SPI_ATTACH, 0, words([0, 0]).as_flattened(), &[], REPLY_MS)
-        .await?;
+    s.command(
+        cmd::SPI_ATTACH,
+        0,
+        words([0, 0]).as_flattened(),
+        &[],
+        REPLY_MS,
+    )
+    .await?;
     let params = words([0, plan.flash_bytes, 0x1_0000, 0x1000, 0x100, 0xFFFF]);
     s.command(cmd::SPI_SET_PARAMS, 0, params.as_flattened(), &[], REPLY_MS)
         .await?;
@@ -323,8 +340,14 @@ pub async fn flash<L: EspLink>(link: &mut L, plan: &Plan<'_>) -> Result<Stats, E
             block[..part.len()].copy_from_slice(part);
             let head = words([BLOCK as u32, seq as u32, 0, 0]);
             let check = checksum(&block);
-            s.command(cmd::FLASH_DATA, check, head.as_flattened(), &block, REPLY_MS)
-                .await?;
+            s.command(
+                cmd::FLASH_DATA,
+                check,
+                head.as_flattened(),
+                &block,
+                REPLY_MS,
+            )
+            .await?;
             stats.blocks += 1;
             written += part.len() as u64;
             s.link.progress((written * 100 / total.max(1)) as u8).await;

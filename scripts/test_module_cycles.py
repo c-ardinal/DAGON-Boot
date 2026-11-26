@@ -25,7 +25,6 @@ KNOWN = {
         "defs", "demo", "deploy", "device", "doctor", "extgen", "flash", "genfs", "kept",
         "keystore", "nodebuild", "scaffold", "serve", "simrun", "srcver", "versions",
     ]],
-    "crates/dagon-wasm": [["define", "defs", "host", "kinds", "release_topo"]],
 }
 
 TEST_MOD = re.compile(r"#\[cfg\(test\)\]\s*(?:pub(?:\([^)]*\))?\s+)?mod\s+\w+\s*\{")

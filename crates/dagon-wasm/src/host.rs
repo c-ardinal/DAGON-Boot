@@ -16,6 +16,7 @@ use js_sys::{Array, Object, Promise, Reflect, Uint8Array};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::{future_to_promise, JsFuture};
 
+use crate::js::set;
 use crate::watch::Watch;
 
 #[wasm_bindgen(typescript_custom_section)]
@@ -436,12 +437,10 @@ const fn hex32(s: &str) -> [u8; 32] {
     out
 }
 
-/// Every kind [`refusal`] gives besides a [`reason`].
-pub const REFUSALS: &[&str] = &["topology", "key", "source", "format"];
-
 /// Why dagon-host refuses a release before sending anything: `source`
 /// (signature, digest or CRC), `key` (signed with another key), `topology`
-/// (built for another configuration), `format` (not a release).
+/// (built for another configuration), `format` (not a release); these are
+/// `kinds::REFUSALS`.
 pub fn refusal<E>(e: &Error<E>) -> &'static str {
     use dagon_format::FormatError as F;
     match e {
@@ -711,10 +710,6 @@ impl WasmHost {
             Ok(o.into())
         })
     }
-}
-
-fn set(o: &Object, k: &str, v: JsValue) {
-    Reflect::set(o, &k.into(), &v).expect("plain object");
 }
 
 fn hello_js(h: &HelloResp) -> JsValue {

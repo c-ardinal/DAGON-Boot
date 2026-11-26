@@ -3,7 +3,7 @@
 //! `dagon_format::with_link_kinds!`, so a new kind reaches the page with no
 //! edit here.
 
-use crate::define::set;
+use crate::js::set;
 use dagon_topology::schema::LinkKind as Kind;
 use js_sys::{Array, Object};
 use wasm_bindgen::prelude::*;
@@ -66,14 +66,17 @@ pub fn rule_ids() -> Vec<String> {
         .collect()
 }
 
+/// Every kind `host::refusal` gives besides a reason of dagon-host.
+pub const REFUSALS: &[&str] = &["topology", "key", "source", "format"];
+
 /// Every reason dagon-host gives a node that did not get through
 /// (`dagon_host::REASONS`), then every kind of refused release
-/// ([`crate::host::REFUSALS`]): the page shows its own words for each.
+/// ([`REFUSALS`]): the page shows its own words for each.
 #[wasm_bindgen]
 pub fn failure_reasons() -> Vec<String> {
     dagon_host::REASONS
         .iter()
-        .chain(crate::host::REFUSALS)
+        .chain(REFUSALS)
         .map(|r| r.to_string())
         .collect()
 }
@@ -125,7 +128,7 @@ mod tests {
         let body = &body[..body.find("\n}\n").unwrap()];
         let mut given: Vec<&str> = body.split('"').skip(1).step_by(2).collect();
         given.sort();
-        let mut listed = crate::host::REFUSALS.to_vec();
+        let mut listed = REFUSALS.to_vec();
         listed.sort();
         assert_eq!(listed, given);
         let reasons = failure_reasons();

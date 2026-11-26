@@ -9,6 +9,7 @@ mod define;
 mod defs;
 mod frame;
 mod host;
+mod js;
 mod kinds;
 mod mock;
 mod release_topo;

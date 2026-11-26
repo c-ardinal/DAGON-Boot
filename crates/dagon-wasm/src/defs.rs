@@ -44,8 +44,8 @@ pub fn mcu_connection(mcu: &str) -> JsValue {
     with_registry(|reg| {
         reg.mcu(mcu).map_or(JsValue::NULL, |m| {
             let o = Object::new();
-            crate::define::set(&o, "label", m.connection.label.as_str().into());
-            crate::define::set(&o, "hint", m.connection.hint.as_str().into());
+            crate::js::set(&o, "label", m.connection.label.as_str().into());
+            crate::js::set(&o, "hint", m.connection.hint.as_str().into());
             o.into()
         })
     })
@@ -92,8 +92,8 @@ pub fn coordinator_uart0(mcu: &str) -> JsValue {
         match c.and_then(|c| Some((*c.uart0_tx.first()?, *c.uart0_rx.first()?))) {
             Some((tx, rx)) => {
                 let o = Object::new();
-                crate::define::set(&o, "tx", tx.into());
-                crate::define::set(&o, "rx", rx.into());
+                crate::js::set(&o, "tx", tx.into());
+                crate::js::set(&o, "rx", rx.into());
                 o.into()
             }
             None => JsValue::NULL,

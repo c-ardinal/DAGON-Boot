@@ -109,7 +109,35 @@ impl Default for Liveness {
     }
 }
 
+/// A handle on a [`Lease`] that can only move the deadline of work the
+/// task has started ([`Lease::renewal`]): for the code that runs inside
+/// that work and knows how long its next step takes.
+#[derive(Clone, Copy)]
+pub struct Renewal {
+    owner: &'static Liveness,
+    slot: usize,
+}
+
+impl Renewal {
+    /// The work in progress now has until `budget_ms` after `now_ms`;
+    /// nothing changes for a task that is not busy.
+    pub fn extend(&self, now_ms: u32, budget_ms: u32) {
+        let o = self.owner;
+        if o.state[self.slot].load(Ordering::Acquire) == BUSY {
+            o.deadline[self.slot].store(now_ms.wrapping_add(budget_ms), Ordering::Release);
+        }
+    }
+}
+
 impl Lease {
+    /// See [`Renewal`].
+    pub fn renewal(&self) -> Renewal {
+        Renewal {
+            owner: self.owner,
+            slot: self.slot,
+        }
+    }
+
     /// Starts work that must finish within `budget_ms` of `now_ms`.
     pub fn busy(&self, now_ms: u32, budget_ms: u32) {
         let o = self.owner;

@@ -143,6 +143,12 @@ impl Watchdog for Feeds {
     }
 }
 
+impl crate::store::StoreWatchdog for Feeds {
+    fn erasing(&mut self, _: u32) {
+        self.0 += 1;
+    }
+}
+
 pub(crate) type Store = EspStore<FakeFlash, FakeOta, Feeds>;
 
 pub(crate) fn store() -> Store {

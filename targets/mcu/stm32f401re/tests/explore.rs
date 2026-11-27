@@ -1102,3 +1102,113 @@ fn a_core_over_a_pending_one_whose_record_is_lost_settles_as_the_confirmed_core(
         holds(&m, &broken).unwrap_or_else(|e| panic!("half {half}: {}", e.0));
     }
 }
+
+/// The flash bytes the image written at `base` takes (header, then body).
+fn extent(base: u32) -> std::ops::Range<usize> {
+    let a = (base - STAGE0) as usize;
+    a..a + HEADER_SIZE + BODY
+}
+
+/// The bytes of a state worth turning a bit of: every image slot's header
+/// and body, and each log face's written part with the room of the next
+/// records after it.
+fn flip_sites(cores: Cores, n: &Node) -> Vec<usize> {
+    let mem = n.f.mem.borrow();
+    let mut at: Vec<usize> = Vec::new();
+    for (base, _) in cores.0 {
+        at.extend(extent(*base));
+    }
+    for s in SLOTS.slots.iter() {
+        at.extend(extent(s.header));
+    }
+    for face in LOG.faces {
+        let a = (face - STAGE0) as usize;
+        let bytes = &mem[a..a + LOG.face_len as usize];
+        let end = bytes.iter().rposition(|b| *b != 0xFF).map_or(0, |i| i + 1);
+        at.extend(a..a + (end + 64).min(bytes.len()));
+    }
+    at
+}
+
+/// One bit of the flash turns over while the node is off (a cell that
+/// lost its charge, a write disturbed): in every image slot and in the
+/// written part of the log, from the states an update goes through. Every
+/// bit of every byte of the log, and of the images in the installed state;
+/// in the other states one bit of each image byte, the bit moving with the
+/// byte (`DAGON_EXPLORE_BITS=all`: every bit there too, about 400,000
+/// boots). Whatever stage0 and the boot core then start, it is
+/// never the image holding the changed bit, no broken image gets confirmed,
+/// and nothing panics. (Starting nothing is allowed here: a node whose one
+/// boot core is the changed image has nothing left to start.)
+#[test]
+fn an_image_with_a_flipped_bit_is_never_started() {
+    let v = verifier();
+    for cores in [TWO, ONE] {
+        let broken = broken(cores);
+        let ways: [&[Op]; 6] = [
+            &[],
+            &[Op::App { good: true }],
+            &[Op::App { good: true }, Op::Boot],
+            &[Op::App { good: true }, Op::Boot, Op::Confirm],
+            &[Op::Core { good: true }],
+            &[Op::Core { good: true }, Op::Boot],
+        ];
+        let (mut flips, mut halts) = (0usize, 0usize);
+        let all = std::env::var("DAGON_EXPLORE_BITS").is_ok_and(|v| v == "all");
+        let log_from = (LOG.faces.iter().min().unwrap() - STAGE0) as usize;
+        let log_to = (LOG.faces.iter().max().unwrap() - STAGE0 + LOG.face_len) as usize;
+        for way in ways {
+            let steps: Vec<(Op, Option<Fault>)> = way.iter().map(|op| (*op, None)).collect();
+            let n = walk(cores, &steps);
+            for at in flip_sites(cores, &n) {
+                let every = all || way.is_empty() || (log_from..log_to).contains(&at);
+                let bits = if every {
+                    0..8u8
+                } else {
+                    (at % 8) as u8..(at % 8) as u8 + 1
+                };
+                for bit in bits {
+                    let mut m = n.copy();
+                    m.f.mem.borrow_mut()[at] ^= 1 << bit;
+                    m.running = Running::Down;
+                    flips += 1;
+                    let what = format!("{cores:?} after {way:?}: bit {bit} of byte {at:#x}");
+                    let app_at = |slot: u8| extent(SLOTS.slots[usize::from(slot)].header);
+                    let started = bootcore::start(
+                        &mut m.f.clone(),
+                        &cores.stage0(),
+                        &APPS,
+                        m.cell,
+                        &v,
+                        &mut bootcore::NoDiag,
+                    );
+                    match started {
+                        Ok(Boot::Core(s)) => assert!(
+                            !extent(cores.0[usize::from(s.slot)].0).contains(&at),
+                            "{what}: stage0 starts the changed boot core"
+                        ),
+                        Ok(Boot::App { slot, .. }) => assert!(
+                            !app_at(slot).contains(&at),
+                            "{what}: stage0 starts the changed app"
+                        ),
+                        Err(_) => halts += 1,
+                    }
+                    if boot(cores, &mut m).is_err() {
+                        continue;
+                    }
+                    if let Running::App { slot } = m.running {
+                        assert!(!app_at(slot).contains(&at), "{what}: the changed app runs");
+                    }
+                    let (app, core) = log_state(&m);
+                    for c in [app.confirmed, core.confirmed].into_iter().flatten() {
+                        assert!(
+                            !broken.contains(&c.digest16),
+                            "{what}: a broken image is confirmed"
+                        );
+                    }
+                }
+            }
+        }
+        println!("{cores:?}: {flips} flipped bits, {halts} left stage0 nothing to start");
+    }
+}

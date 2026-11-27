@@ -113,6 +113,9 @@ pub struct Agent<S, X, V, W = writer::App, const L: usize = 1, C = Software> {
     /// STATUS `reset_cause`: what reset the node before this start
     /// ([`Agent::note_reset`]; `payload::reset_cause::NONE` until then).
     reset_cause: u8,
+    /// STATUS `child_resets`: the reset line operations of
+    /// [`Agent::child_control`] since this start, per link.
+    child_resets: [payload::ChildResets; payload::CHILD_RESET_LINKS],
 }
 
 /// A handled request: the length of the reply's body, and the delay of
@@ -200,6 +203,7 @@ impl<
             refusal: [0; REFUSAL_BUF],
             front: CmdSet::EMPTY,
             reset_cause: payload::reset_cause::NONE,
+            child_resets: [payload::ChildResets::default(); payload::CHILD_RESET_LINKS],
         };
         agent.opened();
         agent
@@ -220,6 +224,7 @@ impl<
         self.links = [Requester::NEW; L];
         self.relay = relay::Machine::new();
         self.reset_cause = payload::reset_cause::NONE;
+        self.child_resets = Default::default();
         self.opened();
     }
 
@@ -324,6 +329,12 @@ impl<
         noted(self.relay.pc_up(&mut self.chain, link, addr));
     }
 
+    /// Whether the relay's PC link carries frames (after
+    /// [`Agent::pc_up`], until [`Agent::pc_down`] or a restart).
+    pub fn pc_is_up(&self) -> bool {
+        self.relay.state() == relay::State::Up
+    }
+
     /// A relay's PC link of kind `link` is gone (`relay.pc_down`).
     pub fn pc_down(&mut self, link: u8, addr: u8) {
         noted(self.relay.pc_down(&mut self.chain, link, addr));
@@ -350,8 +361,12 @@ impl<
     }
 
     /// A relay drove the lines of the recovery target on link `link`
-    /// (`relay.child_control`).
+    /// (`relay.child_control`). An operation that reset the target
+    /// (`nrst` low or pulse) counts in STATUS `child_resets`.
     pub fn child_control(&mut self, link: u8, nrst: u8, boot0: u8) {
+        if nrst != payload::nrst::RELEASE {
+            payload::ChildResets::count_in(&mut self.child_resets, link);
+        }
         noted(self.relay.child_control(&mut self.chain, link, nrst, boot0));
     }
 
@@ -611,6 +626,7 @@ impl<
     fn status(&mut self, t: u8) -> Handled {
         let st = StatusResp {
             reset_cause: self.reset_cause,
+            child_resets: self.child_resets,
             ..self.images.target_status(t).ok_or(Status::Unsupported)?
         };
         noted(self.requests.status_asked(&mut self.chain));

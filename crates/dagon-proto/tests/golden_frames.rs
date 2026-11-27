@@ -228,6 +228,7 @@ fn status_vector() {
         last_reason: 0,
         log_generation: 1,
         reset_cause: reset_cause::NONE,
+        child_resets: Default::default(),
     };
     let file = golden(
         "frame_status_resp.bin",
@@ -235,9 +236,11 @@ fn status_vector() {
     );
     let (_, body) = split_status(decode(&file).payload).unwrap();
     assert_eq!(StatusResp::parse(body).unwrap(), s);
-    // A reset cause not reported is left out: the frame of a node that
-    // reports none is the one before the field.
-    assert_eq!(body.len() + 3, StatusResp::MAX_LEN);
+    // A reset cause not reported and child resets not counted are left
+    // out: the frame of a node that reports neither is the one before
+    // the fields.
+    let fields = 3 + 2 + CHILD_RESET_LINKS * 2;
+    assert_eq!(body.len() + fields, StatusResp::MAX_LEN);
     let mut a = vec![1, 0x00, 0x00, 0x00, 0x01]; // A: written, 1.0.0
     a.extend([0xA0; 16]);
     let mut b = vec![3, 0x00, 0x00, 0x01, 0x01]; // B: trying, 1.1.0
@@ -262,8 +265,7 @@ fn status_vector() {
     assert_crc(&file);
 }
 
-/// A reported reset cause is field 7, after the others, and the longest
-/// body.
+/// A reported reset cause is field 7, after the others.
 #[test]
 fn status_resp_reports_the_reset_cause_last() {
     let s = StatusResp {
@@ -272,8 +274,28 @@ fn status_resp_reports_the_reset_cause_last() {
     };
     let mut b = [0u8; StatusResp::MAX_LEN];
     let n = s.encode(&mut b).unwrap();
-    assert_eq!(n, StatusResp::MAX_LEN);
     assert_eq!(&b[n - 3..n], &[0x0E, 1, reset_cause::WATCHDOG]);
+    assert_eq!(StatusResp::parse(&b[..n]).unwrap(), s);
+}
+
+/// A relay's child resets are field 8, packed `link, count` for the
+/// counted links only; with every link counted, the longest body.
+#[test]
+fn status_resp_packs_the_child_resets_after_the_reset_cause() {
+    let entry = |link, count| ChildResets { link, count };
+    let mut s = StatusResp {
+        reset_cause: reset_cause::PIN,
+        ..Default::default()
+    };
+    s.child_resets[0] = entry(2, 3);
+    let mut b = [0u8; StatusResp::MAX_LEN];
+    let n = s.encode(&mut b).unwrap();
+    assert_eq!(&b[n - 4..n], &[0x10, 2, 2, 3]);
+    assert_eq!(StatusResp::parse(&b[..n]).unwrap(), s);
+    s.child_resets = [entry(2, 3), entry(0, 255), entry(9, 1), entry(4, 7)];
+    let n = s.encode(&mut b).unwrap();
+    assert_eq!(n, StatusResp::MAX_LEN);
+    assert_eq!(&b[n - 10..n], &[0x10, 8, 2, 3, 0, 255, 9, 1, 4, 7]);
     assert_eq!(StatusResp::parse(&b[..n]).unwrap(), s);
 }
 

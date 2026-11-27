@@ -52,7 +52,7 @@ usb_postdiv2 = 5
 usb_refdiv = 1
 
 [codec.bootcore]
-flash_bytes = 2912
+flash_bytes = 3097
 ram_bytes = 0
 stack_bytes = 277
 

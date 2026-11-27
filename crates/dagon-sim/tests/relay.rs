@@ -521,6 +521,16 @@ fn i2c_scan_finds_only_present_targets() {
     );
     pc.subctl(&mut relay, nrst::PULSE, boot0::LOW);
     assert_eq!(relay.bus.scan(port), vec![NODE_I2C_ADDR]);
+    // The relay's own STATUS counts both resets on the node's link.
+    let (s, body) = pc.ask(&mut relay, Cmd::Status, &[]);
+    assert_eq!(s, Status::Ok);
+    assert_eq!(
+        StatusResp::parse(&body).unwrap().child_resets[0],
+        dagon_proto::payload::ChildResets {
+            link: link_on(NODE_I2C_PORT),
+            count: 2
+        }
+    );
 
     // Same lines through the port trait, as relay logic would drive them.
     block_on(dagon_port::SubControl::pulse_reset(&mut relay.bus, true)).unwrap();

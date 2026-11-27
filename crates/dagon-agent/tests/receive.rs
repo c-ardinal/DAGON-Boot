@@ -1197,6 +1197,39 @@ fn status_reports_the_reset_the_node_noted() {
     assert_eq!(cause(&mut n, target::APP), reset_cause::NONE);
 }
 
+/// STATUS counts the reset line operations of a relay per link: a low
+/// or a pulse counts, a release does not, the count stays at its limit,
+/// a link beyond the table is not counted, and a restart clears it.
+#[test]
+fn status_counts_the_child_resets_of_a_relay() {
+    use dagon_proto::payload::{nrst, ChildResets, CHILD_RESET_LINKS};
+    fn resets(n: &mut Node) -> [ChildResets; CHILD_RESET_LINKS] {
+        let (_, body, _) = n.call(Cmd::Status, &[]);
+        StatusResp::parse(&body).unwrap().child_resets
+    }
+    let entry = |link, count| ChildResets { link, count };
+    let mut n = Node::new(Probe::default());
+    assert_eq!(resets(&mut n), [ChildResets::default(); CHILD_RESET_LINKS]);
+    n.agent.pc_up(4, 0);
+    n.agent.child_control(3, nrst::PULSE, 0);
+    n.agent.child_control(1, nrst::LOW, 1);
+    n.agent.child_control(1, nrst::RELEASE, 1);
+    n.agent.child_control(3, nrst::PULSE, 0);
+    let got = resets(&mut n);
+    assert_eq!(got[..2], [entry(3, 2), entry(1, 1)]);
+    assert_eq!(got[2..], [ChildResets::default(); 2]);
+    for link in [7, 8, 9] {
+        n.agent.child_control(link, nrst::PULSE, 0);
+    }
+    assert_eq!(resets(&mut n)[2..], [entry(7, 1), entry(8, 1)]);
+    for _ in 0..300 {
+        n.agent.child_control(3, nrst::PULSE, 0);
+    }
+    assert_eq!(resets(&mut n)[0], entry(3, 255));
+    n.agent.restart();
+    assert_eq!(resets(&mut n), [ChildResets::default(); CHILD_RESET_LINKS]);
+}
+
 /// A relay's own work is published as `relay.*` events, in the order the
 /// relay reports it: the PC link, a relayed request, the recovery lines
 /// and raw bus, the PC gone.

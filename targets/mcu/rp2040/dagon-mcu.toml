@@ -298,10 +298,10 @@ ram_bytes = 28_672
 # (scripts/codec_budget.py): the largest figure of the images measured
 # with the pinned Rust, plus 1/16 of it rounded up (the margin the stage0
 # size check leaves), for a toolchain's or a dependency's small changes.
-# Boot cores (no board 2_714 / 260 / 0, the Waveshare board 2_740 / 260 /
+# Boot cores (no board 2_888 / 260 / 0, the Waveshare board 2_914 / 260 /
 # 0 bytes of flash / stack / RAM): the codec keeps no static data.
 [codec.bootcore]
-flash_bytes = 2_912
+flash_bytes = 3_097
 stack_bytes = 277
 ram_bytes = 0
 

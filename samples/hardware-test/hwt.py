@@ -36,8 +36,11 @@ MUTATING = {"deploy", "apply", "rollback", "flash", "provision", "rescue"}
 LINE = re.compile(
     r"^(?P<id>[\w-]+): version (?P<version>\S+)(?P<trial> \(on trial\))?, mcu (?P<mcu>\S+), "
     r"(?:wire (?P<wire>\d+), )?active (?P<active>\d+), confirmed (?P<confirmed>\d+), attempts (?P<attempts>\d+), "
-    r"last reason (?P<reason>\d+), \[(?P<slots>.*)\]$"
+    r"last reason (?P<reason>\d+)(?:, reset (?P<reset>[\w-]+))?"
+    r"(?:, child resets (?P<child>link \d+ x\d+\+?(?: link \d+ x\d+\+?)*))?, \[(?P<slots>.*)\]$"
 )
+# One link of a relay's `child resets` part: `link 2 x3` (`x255+`: the count's limit).
+CHILD_RESET = re.compile(r"link (\d+) x(\d+)")
 SLOT = re.compile(r"([ABF]):(\w+) ([^,\s]+)")
 # `dagon status`' versions line of a node; the boot core part is
 # `A:Confirmed 1.0.0 (running), B:Empty`, or `none (...)` / `unknown`.
@@ -87,6 +90,10 @@ def parse_status(text, coordinator="hub"):
                 "confirmed": int(m["confirmed"]),
                 "attempts": int(m["attempts"]),
                 "last_reason": int(m["reason"]),
+                # The reset cause the node reports (None: it reports none) and
+                # the reset line operations a relay counted, per link id.
+                "reset": m["reset"],
+                "child_resets": {int(l): int(c) for l, c in CHILD_RESET.findall(m["child"] or "")},
                 "slots": slots,
             }
         elif re.match(r"^[\w-]+: (no answer|not reachable)", line.strip()):
@@ -986,6 +993,19 @@ def selftest():
     assert st["seg"]["trial"] and not settled(st["seg"])
     assert st["watch"] is None and not settled(st["watch"])
     assert "boss" in parse_status(text, "boss") and "hub" not in parse_status(text, "boss")
+    assert st["hub"]["reset"] is None and st["hub"]["child_resets"] == {}
+    # The reset cause and a relay's reset line counts, as `dagon status` prints them.
+    text = ("hub: version 1.4.0, mcu 0x0001, wire 1, active 1, confirmed 1, attempts 0, last reason 3, "
+            "reset power-on, child resets link 2 x3 link 3 x255+, [A:Written 1.3.0, B:Confirmed 1.4.0]\n"
+            "seg: version 1.4.1, mcu 0x0002, wire 1, active 1, confirmed 1, attempts 0, last reason 0, "
+            "reset pin, [A:Written 1.3.0, B:Confirmed 1.4.1]\n"
+            "watch: version 1.4.2, mcu 0x0003, wire 1, active 0, confirmed 0, attempts 0, last reason 0, "
+            "reset 9, [A:Confirmed 1.4.2, B:Empty 0.0.0]\n")
+    st = parse_status(text)
+    assert st["hub"]["reset"] == "power-on" and st["hub"]["child_resets"] == {2: 3, 3: 255}, st["hub"]
+    assert st["hub"]["slots"]["B"] == {"state": "Confirmed", "version": "1.4.0"} and settled(st["hub"])
+    assert st["seg"]["reset"] == "pin" and st["seg"]["child_resets"] == {} and settled(st["seg"])
+    assert st["watch"]["reset"] == "9" and settled(st["watch"])
     try:
         unchanged(st, {**st, "hub": {**st["hub"], "active": 0}}, ["hub"])
         raise AssertionError("change not seen")

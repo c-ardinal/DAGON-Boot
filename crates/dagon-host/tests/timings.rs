@@ -6,7 +6,7 @@ use dagon_port::timeout::{
     erase_limit_ms, EraseOp, NodeTimings, TimingError, ERASE_FALLBACK_MS, ERASE_MARGIN_MS,
 };
 use dagon_proto::payload::target;
-use dagon_topology::defs::{Registry, Source};
+use dagon_topology::defs::{Fact, Registry, Source};
 
 /// An MCU no code names: unequal erase units, its own watchdog.
 const NOVA: &str = r#"
@@ -338,18 +338,18 @@ fn op(addr: u32, len: u32, max_ms: u32) -> EraseOp {
 /// for a board flash part (the largest tSE max of their candidate parts).
 const SECTOR_MS: u32 = 500;
 
-/// `n` sectors of 4 KiB from `addr`, each `SECTOR_MS`.
-fn sectors(addr: u32, n: u32) -> Vec<EraseOp> {
-    (0..n)
-        .map(|i| op(addr + i * 0x1000, 0x1000, SECTOR_MS))
-        .collect()
+/// `n` sectors of 4 KiB from `addr`, each `ms`.
+fn sectors(addr: u32, n: u32, ms: u32) -> Vec<EraseOp> {
+    (0..n).map(|i| op(addr + i * 0x1000, 0x1000, ms)).collect()
 }
 
 /// Target, slot, header and body bytes, the planned erase, its limit.
 type Pin = (u8, u8, u32, u32, Vec<EraseOp>, u32);
 
-/// The pinned plans of each built-in MCU's targets and slots.
-fn pins(mcu: &str) -> Vec<Pin> {
+/// The pinned plans of each built-in MCU's targets and slots, a 4 KiB
+/// sector taking `sector_ms` (the MCU's default, or its board's part).
+fn pins(mcu: &str, sector_ms: u32) -> Vec<Pin> {
+    let sectors = |addr: u32, n: u32| sectors(addr, n, sector_ms);
     let lim = |ms: u32| ms + ERASE_MARGIN_MS;
     match mcu {
         // STM32F401: sectors 16 KiB x4, 64 KiB, 128 KiB x3 (unequal units).
@@ -395,7 +395,7 @@ fn pins(mcu: &str) -> Vec<Pin> {
                 512,
                 3_000,
                 sectors(0x1004_8000, 1),
-                lim(SECTOR_MS),
+                lim(sector_ms),
             ),
             (
                 target::APP,
@@ -403,7 +403,7 @@ fn pins(mcu: &str) -> Vec<Pin> {
                 512,
                 3_700,
                 sectors(0x1014_8000, 2),
-                lim(2 * SECTOR_MS),
+                lim(2 * sector_ms),
             ),
             (
                 target::APP,
@@ -411,7 +411,7 @@ fn pins(mcu: &str) -> Vec<Pin> {
                 512,
                 0xF_FE00,
                 sectors(0x1004_8000, 256),
-                lim(256 * SECTOR_MS),
+                lim(256 * sector_ms),
             ),
             (
                 target::BOOTCORE,
@@ -419,7 +419,7 @@ fn pins(mcu: &str) -> Vec<Pin> {
                 512,
                 2_000,
                 sectors(0x1000_8000, 1),
-                lim(SECTOR_MS),
+                lim(sector_ms),
             ),
             (
                 target::BOOTCORE,
@@ -427,7 +427,7 @@ fn pins(mcu: &str) -> Vec<Pin> {
                 512,
                 0x1_FE00,
                 sectors(0x1002_8000, 32),
-                lim(32 * SECTOR_MS),
+                lim(32 * sector_ms),
             ),
         ],
         // ESP32-S3: the detached header's sector first, then the body's
@@ -445,7 +445,7 @@ fn pins(mcu: &str) -> Vec<Pin> {
                     512,
                     3_000,
                     with_header(0x71_0000, 0x11_0000, 1),
-                    lim(2 * SECTOR_MS),
+                    lim(2 * sector_ms),
                 ),
                 (
                     target::APP,
@@ -453,7 +453,7 @@ fn pins(mcu: &str) -> Vec<Pin> {
                     512,
                     0x1_0001,
                     with_header(0x71_1000, 0x41_0000, 17),
-                    lim(18 * SECTOR_MS),
+                    lim(18 * sector_ms),
                 ),
                 (
                     target::APP,
@@ -461,7 +461,7 @@ fn pins(mcu: &str) -> Vec<Pin> {
                     512,
                     0x30_0000,
                     with_header(0x71_0000, 0x11_0000, 768),
-                    lim(769 * SECTOR_MS),
+                    lim(769 * sector_ms),
                 ),
                 (
                     target::AGENT,
@@ -469,7 +469,7 @@ fn pins(mcu: &str) -> Vec<Pin> {
                     512,
                     3_000,
                     with_header(0x71_2000, 0x1_0000, 1),
-                    lim(2 * SECTOR_MS),
+                    lim(2 * sector_ms),
                 ),
                 (
                     target::AGENT,
@@ -477,7 +477,7 @@ fn pins(mcu: &str) -> Vec<Pin> {
                     512,
                     0x10_0000,
                     with_header(0x71_2000, 0x1_0000, 256),
-                    lim(257 * SECTOR_MS),
+                    lim(257 * sector_ms),
                 ),
             ]
         }
@@ -486,9 +486,9 @@ fn pins(mcu: &str) -> Vec<Pin> {
 }
 
 /// Every built-in MCU alone and on each built-in board of it: the
-/// effective regions (a built-in board carries no `[flash]`, so its MCU's),
-/// and the plan and limit of each target and slot; a body one byte past a
-/// slot has no plan.
+/// effective regions (the board's `[flash]` when it names its part, as the
+/// M5StopWatch does, else its MCU's), and the plan and limit of each target
+/// and slot; a body one byte past a slot has no plan.
 #[test]
 fn the_builtin_plans_are_pinned() {
     let reg = Registry::builtin();
@@ -497,10 +497,21 @@ fn the_builtin_plans_are_pinned() {
         let pairs = std::iter::once(None).chain(boards.iter().map(|b| Some(*b)));
         for board in pairs {
             let at = format!("{} on {:?}", m.id, board.map(|b| &b.id));
-            assert_eq!(m.erase_regions_on(board), m.erase_regions_on(None), "{at}");
+            let part = board.and_then(|b| b.flash.as_ref());
+            let regions = part.map_or(m.erase_regions_on(None), |f| Some(&f.erase_regions[..]));
+            assert_eq!(m.erase_regions_on(board), regions, "{at}");
+            assert_eq!(
+                part.map(|f| (f.part.as_str(), f.erase_regions[0].unit_max_ms)),
+                (at == "esp32s3 on Some(\"m5stopwatch\")")
+                    .then_some(("W25Q128JV", Fact::Known(400))),
+                "{at}"
+            );
+            let sector_ms = part.map_or(SECTOR_MS, |f| {
+                f.erase_regions[0].unit_max_ms.value().unwrap()
+            });
             let timings = mcu_timings(m, board).unwrap();
             let layout = timings.erase.as_ref().unwrap();
-            for (t, slot, hdr, body, ops, limit) in pins(&m.id) {
+            for (t, slot, hdr, body, ops, limit) in pins(&m.id, sector_ms) {
                 let plan = layout.plan(t, slot, hdr, body).unwrap();
                 assert_eq!(
                     plan.clone().collect::<Vec<_>>(),

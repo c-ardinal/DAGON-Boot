@@ -219,6 +219,22 @@ steps = [
 ]
 
 [[scenario]]
+id = "watch-x10"
+title = "the watch written ten times over its UART link, each write complete and confirmed"
+steps = [
+  { do = "deploy", version = "2.0.30", nodes = ["watch"] },
+  { do = "deploy", version = "2.0.31", nodes = ["watch"] },
+  { do = "deploy", version = "2.0.32", nodes = ["watch"] },
+  { do = "deploy", version = "2.0.33", nodes = ["watch"] },
+  { do = "deploy", version = "2.0.34", nodes = ["watch"] },
+  { do = "deploy", version = "2.0.35", nodes = ["watch"] },
+  { do = "deploy", version = "2.0.36", nodes = ["watch"] },
+  { do = "deploy", version = "2.0.37", nodes = ["watch"] },
+  { do = "deploy", version = "2.0.38", nodes = ["watch"] },
+  { do = "deploy", version = "2.0.39", nodes = ["watch"] },
+]
+
+[[scenario]]
 id = "final"
 title = "every node on a confirmed known-good version"
 steps = [{ do = "deploy", version = "2.0.17" }]

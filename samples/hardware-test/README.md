@@ -98,7 +98,8 @@ python samples/hardware-test/hwt.py selftest
 
 - `steps.jsonl`: one record per step: time, scenario, command, exit code,
   the status of every node (version, on trial, MCU, active and confirmed
-  slot, attempts, last reason, each slot's state and version), the verdict;
+  slot, attempts, last reason, the reset cause it reports and a relay's
+  reset line counts per link, each slot's state and version), the verdict;
 - `NNN-<scenario>-<step>-<kind>.log`: each CLI call's full output,
   including the harness's answer to the prompt;
 - `results.json`: port and hub identity, PASS / FAIL / SKIPPED per
@@ -128,7 +129,8 @@ back to the other slot; a failing one goes back to the confirmed slot and the
 node still answers, all read from `dagon status`' versions lines; the F401
 erased whole and written again through the hub's ROM path (`rom-recovery`,
 only with `--erase-probe`, else SKIPPED); the hub updating itself ten times
-(`hub-x10`); a final good deploy.
+(`hub-x10`); the watch written ten times over its UART link (`watch-x10`);
+a final good deploy.
 
 Test versions are 2.0.N (the format is major.minor.patch only, no
 pre-release tags). A node's version is its crate's: before each deploy step
@@ -273,6 +275,25 @@ same slot (`active` unchanged). The hub re-enumerates twice per update
 (into its boot core, then into the new app). Restoring after a failure
 uses the last release every node took; there is no other slot to roll
 back to.
+
+## The UART link at another bit rate
+
+The link's bit rate is the project's: `baud` on the watch's link in the
+project's topology file (115200 when left out; the MCU definitions' `bauds`
+list what each end runs, 230400 on both). The harness reads no bit rate, so
+the same scenarios test it:
+
+1. set `baud: 230400` on the watch's link, run `dagon gen`, and write the
+   hub and the watch again the way the setup was first written: each end
+   runs the link at the bit rate it was built with, so both must change
+   before the first scenario;
+2. `hwt.py run ... --only status batch watch-alone interrupt-watch watch-x10 final`;
+3. keep the log folder as the record, with the bit rate in its name
+   (`--out <dir>-230400`).
+
+`watch-x10` writes the watch ten times in a row; a write that fails once in
+several shows there (`results.json` names the failing step, its log holds
+the CLI's whole output).
 
 ## Measurements
 

@@ -210,11 +210,11 @@ kind = "uart"
 # (scripts/codec_budget.py): the largest figure of the images measured
 # with the pinned Rust, plus 1/16 of it rounded up (the margin the stage0
 # size check leaves), for a toolchain's or a dependency's small changes.
-# The Nucleo board's boot core 2_500 / 256 / 0 bytes of flash / stack /
+# The Nucleo board's boot core 2_684 / 256 / 0 bytes of flash / stack /
 # RAM; the one without a board receives nothing and links no codec. The
 # codec keeps no static data.
 [codec.bootcore]
-flash_bytes = 2_657
+flash_bytes = 2_852
 stack_bytes = 272
 ram_bytes = 0
 

@@ -1210,4 +1210,19 @@ mod tests {
         assert!(flash.peek(0x100_0000 - 4, 4).is_some());
         assert!(flash.peek(0x100_0000, 1).is_none());
     }
+
+    /// A host times a node on its MCU's default board (its `[flash]`
+    /// regions when it states them); the simulated node takes that long,
+    /// so an erase never outlasts the wait the host gives it.
+    #[test]
+    fn a_built_in_layout_erases_as_a_host_times_its_default_board() {
+        let reg = dagon_topology::defs::Registry::builtin();
+        for mcu in ["stm32f401re", "rp2040", "esp32s3"] {
+            let host = reg
+                .mcu(mcu)
+                .unwrap()
+                .erase_layout_on(reg.default_board(mcu));
+            assert_eq!(Layout::of(mcu).definition().erase_layout(), host, "{mcu}");
+        }
+    }
 }

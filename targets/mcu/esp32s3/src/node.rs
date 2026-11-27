@@ -480,7 +480,7 @@ impl Link {
             self.agent.link_up(via.code(), NO_ADDR);
         }
         self.agent.request(frame, via.code());
-        self.lease.busy(start, REQUEST_BUDGET_MS);
+        self.lease.busy(|| start, REQUEST_BUDGET_MS);
         self.lease.hold_cpu(start);
         let mut out = [0u8; REPLY_MAX];
         let decided = self.decide(frame, via, &mut out);

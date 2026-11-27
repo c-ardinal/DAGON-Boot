@@ -190,7 +190,7 @@ mod tests {
             TrialWatchdog::new(Count(fed.clone()), Fake(now.clone()), 4000).with_liveness(&L);
         w.end_trial();
         let task = L.register().unwrap();
-        task.busy(0, 100);
+        task.busy(|| 0, 100);
         now.set(99_000);
         w.feed();
         now.set(100_000);
@@ -220,7 +220,7 @@ mod tests {
                 TrialWatchdog::new(Count(fed.clone()), Fake(now.clone()), 4000).with_liveness(l);
             w.end_trial();
             let lease = l.register_preempting().unwrap();
-            lease.busy(0, BUDGET_MS);
+            lease.busy(|| 0, BUDGET_MS);
             for _ in 0..SECTORS {
                 if extend {
                     w.erasing(lease.renewal(), SECTOR_MS, BUDGET_MS);

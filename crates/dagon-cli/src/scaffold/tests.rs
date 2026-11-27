@@ -127,7 +127,7 @@ fn sample_uses_each_packages_template_and_skips_what_is_missing() {
     assert!(watch.contains("dagon-mcu-esp32s3 = { path = "));
     let main = read(&base, "nodes/watch/src/main.rs");
     assert!(main.contains("board::start(") && main.contains("NodeConfig::app(app::dagon())"));
-    assert!(read(&base, "nodes/watch/src/app.rs").contains("lease.busy(node::now_ms()"));
+    assert!(read(&base, "nodes/watch/src/app.rs").contains("lease.busy(node::now_ms"));
     assert!(read(&base, "nodes/watch/rust-toolchain.toml").contains("esp"));
     assert!(read(&base, "nodes/watch/.cargo/config.toml").contains("xtensa-esp32s3-none-elf"));
 
@@ -224,7 +224,7 @@ fn gen_keeps_the_developers_code_and_refreshes_only_generated_parts() {
     assert_eq!(act("nodes/watch/src/main.rs"), "kept");
     // The app's template is beside the changed app.rs, and only there.
     assert_eq!(act("nodes/watch/src/app.rs.new"), "created");
-    assert!(read(&base, "nodes/watch/src/app.rs.new").contains("lease.busy(node::now_ms()"));
+    assert!(read(&base, "nodes/watch/src/app.rs.new").contains("lease.busy(node::now_ms"));
     assert!(!base.join("nodes/watch/src/main.rs.new").exists());
     assert_eq!(act("nodes/watch/src/wiring.rs"), "rewritten");
     assert_eq!(act("nodes/watch/Cargo.toml"), "rewritten");

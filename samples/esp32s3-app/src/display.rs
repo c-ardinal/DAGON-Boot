@@ -204,7 +204,7 @@ pub async fn display_task(p: DisplayPins, lease: Lease, powered: bool, events: n
     let Some(mut panel) = Panel::open(p) else {
         return;
     };
-    lease.busy(node::now_ms(), INIT_BUDGET_MS);
+    lease.busy(node::now_ms, INIT_BUDGET_MS);
     let ready = panel.init().await.is_ok();
     lease.idle();
     if !ready {
@@ -242,7 +242,7 @@ pub async fn display_task(p: DisplayPins, lease: Lease, powered: bool, events: n
 async fn show(panel: &mut Panel, lease: &Lease, s: &Screen) {
     let mut rects = [Rect::default(); MAX_RECTS];
     let k = digits::layout(s.chars(), &mut rects);
-    lease.busy(node::now_ms(), DRAW_BUDGET_MS);
+    lease.busy(node::now_ms, DRAW_BUDGET_MS);
     if panel.draw(&rects[..k]).await.is_ok() {
         if let Some(bar) = s.percent.and_then(screen::bar) {
             let _ = panel.fill(bar, digits::INK);

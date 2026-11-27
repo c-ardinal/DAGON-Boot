@@ -40,7 +40,7 @@ pub fn start(spawner: Spawner, live: &'static Liveness) {
 #[embassy_executor::task]
 async fn work(lease: Lease) {
     loop {
-        lease.busy(node::now_ms(), WORK_BUDGET_MS);
+        lease.busy(node::now_ms, WORK_BUDGET_MS);
         // Your work here.
         lease.idle();
         Timer::after(Duration::from_secs(1)).await;

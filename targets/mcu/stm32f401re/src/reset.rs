@@ -1,7 +1,8 @@
 //! The reset flags (RCC_CSR, RM0368 section 6.3.21): the app reads them
 //! once at its start, then clears them (RMVF), so the next start reports
 //! only the resets since this one. The boot core and stage0 run before
-//! the app and leave the flags as they are.
+//! the app and leave the flags as they are; the boot core's sessions
+//! report the cause the flags name ([`peek`]).
 
 use dagon_port::ResetCause;
 

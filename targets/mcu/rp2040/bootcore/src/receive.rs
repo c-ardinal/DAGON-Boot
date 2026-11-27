@@ -154,6 +154,9 @@ pub fn serve(
         ..node::config(TARGET_TAG, role::NODE)
     };
     let mut agent: Session = Agent::with_links(cfg, VERIFIER, store, chain);
+    // The registers log each reset anew, so this is the reset that
+    // started the boot core.
+    agent.note_reset(dagon_mcu_rp2040::reset::read());
     let mb = if stay.is_some() {
         Mailbox::taken()
     } else {

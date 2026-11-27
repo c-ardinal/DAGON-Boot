@@ -493,7 +493,11 @@ mod tests {
         G.progress(1);
         G.idle(1);
         G.feed();
-        assert_eq!(OPEN.load(Ordering::Relaxed), 0, "a clock reading a preemption can make stale");
+        assert_eq!(
+            OPEN.load(Ordering::Relaxed),
+            0,
+            "a clock reading a preemption can make stale"
+        );
         assert!(MASKED.load(Ordering::Relaxed) >= 5);
     }
 

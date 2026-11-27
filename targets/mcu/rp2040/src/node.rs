@@ -147,7 +147,13 @@ pub(crate) fn open<B: BoardDef, const N: usize>(
     static EVENTS: StaticCell<Events> = StaticCell::new();
     let periods = Periods::new(crate::TRIAL_WDT_MS, crate::CONFIRMED_WDT_MS);
     let now_us: fn() -> u64 = || embassy_time::Instant::now().as_micros();
-    let events = EVENTS.init(Published::new());
+    #[cfg(feature = "masked-time")]
+    let made = Published::timed(dagon_node::masked_time::ring_timing(|| {
+        embassy_time::Instant::now().as_micros()
+    }));
+    #[cfg(not(feature = "masked-time"))]
+    let made = Published::new();
+    let events = EVENTS.init(made);
     let (chain, events) = node_chain(
         events,
         B::extension(),

@@ -215,7 +215,13 @@ pub fn start(
         EspClock.now_us()
     };
     let periods = Periods::new(TRIAL_WDT_MS, CONFIRMED_WDT_MS);
-    let events = EVENTS.init(Published::new());
+    #[cfg(feature = "masked-time")]
+    let made = Published::timed(dagon_node::masked_time::ring_timing(|| {
+        embassy_time::Instant::now().as_micros()
+    }));
+    #[cfg(not(feature = "masked-time"))]
+    let made = Published::new();
+    let events = EVENTS.init(made);
     let board = p.board_extension.take();
     let (chain, events) = node_chain(
         events,

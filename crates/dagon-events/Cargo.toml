@@ -9,6 +9,10 @@ description = "DAGON lifecycle events: state machines whose transitions emit eve
 # The catalogs keep their machines' and transitions' docs: for the hosted
 # tools that print them (dagon-catalog); a firmware image leaves them out.
 catalog-docs = []
+# A build that measures how long DAGON's own code masks interrupts: the
+# ring of recent events times its critical section with the clock its
+# maker hands in (`Published::timed`).
+masked-time = []
 
 [dependencies]
 dagon-format = { path = "../dagon-format" }

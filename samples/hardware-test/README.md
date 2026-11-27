@@ -361,7 +361,9 @@ python samples/hardware-test/measure.py selftest
 
 - `masked-time`: the node's app (dagon.toml `[build.<id>] package`) with
   its MCU package's `masked-time` times every critical section of DAGON's
-  watchdog guard, the only place DAGON's own code masks interrupts, and
+  watchdog guard and of the push into the ring of recent events, the two
+  places DAGON's own code masks interrupts (an ESP32-S3 has no guard, so
+  only the push), and
   keeps the longest in `DAGON_MASKED_MAX_US` (the number timed in
   `DAGON_MASKED_COUNT`). Once the node runs, the script asks you to talk
   to it for a while without writing it (`dagon status` a few times), then
@@ -369,7 +371,9 @@ python samples/hardware-test/measure.py selftest
   on its board's diagnostic LED 180 s after it starts (the display
   backlight on the Waveshare hub; the groups the boot core
   measurements blink, the app still running) and the script asks for
-  the counts. The firmware times the work inside each section, not the
+  the counts. An ESP32-S3 app blinks nothing: read it with `--probe` and
+  `--chip esp32s3` over the chip's built-in USB JTAG (the USB connector
+  the node's usb-cdc link uses). The firmware times the work inside each section, not the
   masking around it, so the value to write is the worst plus a margin:
   twice the worst, at least 10 us more. PASS when a section was timed and
   that value is at most 1000 us; the record gives the

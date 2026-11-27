@@ -194,7 +194,7 @@ class StillTheFirmwares(unittest.TestCase):
             self.assertEqual(cargo["package"]["name"], lib)
             # Kept compiling by the firmware lint.
             self.assertIn(feature, cargo["package"]["metadata"]["dagon"]["lint"]["features"], mcu)
-        self.assertEqual(with_it, ["rp2040", "stm32f401re"])
+        self.assertEqual(with_it, ["esp32s3", "rp2040", "stm32f401re"])
 
     def test_symbols_are_kept_by_name(self):
         sources = "".join(

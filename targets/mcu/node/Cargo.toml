@@ -25,7 +25,7 @@ critical-section = "1"
 [features]
 # masked_time: an app built to measure how long DAGON's own code masks
 # interrupts.
-masked-time = []
+masked-time = ["dagon-events/masked-time"]
 
 [dev-dependencies]
 critical-section = { version = "1", features = ["std"] }

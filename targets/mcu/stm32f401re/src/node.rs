@@ -198,7 +198,13 @@ fn agent(
     static EVENTS: StaticCell<Events> = StaticCell::new();
     let periods = Periods::new(layout::TRIAL_WDT_MS, layout::CONFIRMED_WDT_MS);
     let now_us: fn() -> u64 = || Instant::now().as_micros();
-    let events = EVENTS.init(Published::new());
+    #[cfg(feature = "masked-time")]
+    let made = Published::timed(dagon_node::masked_time::ring_timing(|| {
+        embassy_time::Instant::now().as_micros()
+    }));
+    #[cfg(not(feature = "masked-time"))]
+    let made = Published::new();
+    let events = EVENTS.init(made);
     let (chain, reader) = node_chain(events, board, exts, self_check, now_us, periods);
     let verifier = Ed25519Compact::new(crate::PUBKEY);
     #[allow(unused_mut)]

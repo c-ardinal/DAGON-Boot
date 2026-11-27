@@ -1314,8 +1314,9 @@ below keep code and data to it.
    and the relay port's requests mask for each of their operations, to
    copy one value of a fixed size in or out; the operations that would run
    a closure there (`send_modify`, `try_get_and`) are refused by the same
-   list, so a snapshot is folded outside them. These sections, and the push's, are bounded
-   by the size of the value, not timed by a `masked-time` build.
+   list, so a snapshot is folded outside them. These sections are bounded
+   by the size of the value, not timed by a `masked-time` build. The
+   push's section is timed by this build, as the guard's are.
 3. **Flash operations are hardware facts.** What an erase or program
    stops is the definition's `[execution] flash_op`:
    - `fetch-stall`: single-bank flash the code runs from; instruction

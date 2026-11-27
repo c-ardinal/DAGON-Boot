@@ -548,6 +548,17 @@ impl SimNode {
         Some(out)
     }
 
+    /// This node, as a relay, drove the lines of the recovery target on
+    /// link `link` (`Agent::child_control`).
+    pub fn child_control(&mut self, link: u8, nrst: u8, boot0: u8) {
+        // The request arrived over the PC link, which the simulation
+        // models as USB CDC and reports up no earlier than here.
+        if !self.agent.pc_is_up() {
+            self.agent.pc_up(dagon_port::LinkKind::UsbCdc.code(), 0);
+        }
+        self.agent.child_control(link, nrst, boot0);
+    }
+
     /// Stream links (UART, USB): returns the response frame; a REBOOT reply
     /// is sent before the reset.
     pub fn handle_frame(&mut self, request: &[u8], now_ms: u64) -> Option<Vec<u8>> {

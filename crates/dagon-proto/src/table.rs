@@ -184,7 +184,16 @@ pub mod status {
     /// The cause of the node's last reset (`payload::reset_cause`). Left
     /// out: not reported.
     pub const RESET_CAUSE: FieldSpec = FieldSpec::opt(7, 1, 1);
-    pub const RESP: [FieldSpec; 7] = [
+    /// Bytes of one child reset entry: `link u8`, `count u8`.
+    pub const CHILD_RESET_LEN: u8 = 2;
+    /// The links a relay counts child resets of.
+    pub const CHILD_RESET_LINKS: u8 = 4;
+    /// How often this node, as a relay, drove the reset line of the
+    /// recovery target on each link since it started (SUBCTL `nrst` low or
+    /// pulse), packed. Left out: never.
+    pub const CHILD_RESETS: FieldSpec =
+        FieldSpec::opt(8, 0, CHILD_RESET_LINKS * CHILD_RESET_LEN).packed(CHILD_RESET_LEN);
+    pub const RESP: [FieldSpec; 8] = [
         SLOTS,
         ACTIVE,
         CONFIRMED,
@@ -192,6 +201,7 @@ pub mod status {
         LAST_REASON,
         LOG_GENERATION,
         RESET_CAUSE,
+        CHILD_RESETS,
     ];
 }
 

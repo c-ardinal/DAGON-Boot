@@ -424,6 +424,7 @@ pub struct SlotInfo {
 }
 
 const SLOT_LEN: usize = status::SLOT_LEN as usize;
+const CHILD_RESET_LEN: usize = status::CHILD_RESET_LEN as usize;
 
 /// STATUS response body. Slots are A, B, factory.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
@@ -441,6 +442,40 @@ pub struct StatusResp {
     /// The cause of the node's last reset ([`reset_cause`]; 0 not
     /// reported, left out on the wire).
     pub reset_cause: u8,
+    /// The reset line operations this node, as a relay, did on its
+    /// recovery targets since it started ([`ChildResets`]; an entry of
+    /// count 0 is unused, and all unused are left out on the wire).
+    pub child_resets: [ChildResets; CHILD_RESET_LINKS],
+}
+
+/// The links a relay counts child resets of (`status::CHILD_RESET_LINKS`).
+pub const CHILD_RESET_LINKS: usize = status::CHILD_RESET_LINKS as usize;
+
+/// STATUS `child_resets` entry: SUBCTL drove the reset line of the
+/// recovery target on link `link` low (`nrst::LOW` or `nrst::PULSE`)
+/// `count` times since the relay started; the count stays at 255.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub struct ChildResets {
+    pub link: u8,
+    pub count: u8,
+}
+
+impl ChildResets {
+    /// Counts one reset of the target on `link` in `all`: in the link's
+    /// entry, or in the first unused one. A link beyond
+    /// [`CHILD_RESET_LINKS`] is not counted.
+    pub fn count_in(all: &mut [ChildResets], link: u8) {
+        let at = all
+            .iter()
+            .position(|c| c.count != 0 && c.link == link)
+            .or_else(|| all.iter().position(|c| c.count == 0));
+        if let Some(c) = at.and_then(|i| all.get_mut(i)) {
+            *c = ChildResets {
+                link,
+                count: c.count.saturating_add(1),
+            };
+        }
+    }
 }
 
 /// STATUS `reset_cause` codes: what reset the node last, as its MCU
@@ -474,7 +509,8 @@ pub mod reset_cause {
 
 impl StatusResp {
     /// The longest body this crate writes.
-    pub const MAX_LEN: usize = 2 + 3 * SLOT_LEN + 4 * 3 + 6 + 3;
+    pub const MAX_LEN: usize =
+        2 + 3 * SLOT_LEN + 4 * 3 + 6 + 3 + 2 + status::CHILD_RESETS.max as usize;
     /// The image slot entries (A, B) before the factory entry: the most
     /// slots an image kind can have on the wire. A kind with fewer sends the
     /// others as empty.
@@ -495,6 +531,15 @@ impl StatusResp {
             };
         }
         let generation = val(&p, &status::LOG_GENERATION)?;
+        let mut child_resets = [ChildResets::default(); CHILD_RESET_LINKS];
+        let sent = p.field(&status::CHILD_RESETS).unwrap_or(&[]);
+        for (c, x) in child_resets
+            .iter_mut()
+            .zip(sent.chunks_exact(CHILD_RESET_LEN))
+        {
+            let [link, count] = at(x, 0)?;
+            *c = ChildResets { link, count };
+        }
         Ok(StatusResp {
             slots,
             active: byte(&p, &status::ACTIVE, Self::NO_SLOT)?,
@@ -503,6 +548,7 @@ impl StatusResp {
             last_reason: byte(&p, &status::LAST_REASON, 0)?,
             log_generation: generation.map_or(0, u32::from_le_bytes),
             reset_cause: byte(&p, &status::RESET_CAUSE, reset_cause::NONE)?,
+            child_resets,
         })
     }
     pub fn encode(&self, out: &mut [u8]) -> Result<usize, FrameError> {
@@ -525,6 +571,15 @@ impl StatusResp {
                 &[self.reset_cause],
                 &[reset_cause::NONE],
             )?;
+        let mut resets = [0u8; CHILD_RESET_LINKS * CHILD_RESET_LEN];
+        let mut n = 0;
+        for c in self.child_resets.iter().filter(|c| c.count != 0) {
+            if let Some(x) = resets.get_mut(n..n + CHILD_RESET_LEN) {
+                x.copy_from_slice(&[c.link, c.count]);
+                n += CHILD_RESET_LEN;
+            }
+        }
+        w.field_unless(&status::CHILD_RESETS, resets.get(..n).unwrap_or(&[]), &[])?;
         Ok(w.len())
     }
 }
@@ -1846,6 +1901,7 @@ mod tests {
             active: 0,
             confirmed: 0xFF,
             reset_cause: reset_cause::PIN,
+            child_resets: [ChildResets { link: 1, count: 1 }; CHILD_RESET_LINKS],
             ..Default::default()
         };
         assert_eq!(s.encode(&mut b).unwrap(), StatusResp::MAX_LEN);

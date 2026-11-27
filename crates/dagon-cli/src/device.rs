@@ -82,11 +82,31 @@ fn reset_of(st: &StatusResp) -> String {
     }
 }
 
+/// `, child resets link 2 x3` for the reset line operations a relay
+/// counts since it started, per link id (`x255+`: the count's limit);
+/// nothing for a node that counts none.
+fn child_resets_of(st: &StatusResp) -> String {
+    let all: Vec<String> = st
+        .child_resets
+        .iter()
+        .filter(|c| c.count != 0)
+        .map(|c| {
+            let most = if c.count == u8::MAX { "+" } else { "" };
+            format!("link {} x{}{most}", c.link, c.count)
+        })
+        .collect();
+    if all.is_empty() {
+        String::new()
+    } else {
+        format!(", child resets {}", all.join(" "))
+    }
+}
+
 fn show_state(name: &str, s: &NodeState, rows: Option<&Rows>) {
     let st = &s.status;
     let slots = slots_of(st, rows.map(|r| &r.app));
     println!(
-        "{name}: version {}{}, mcu {:#06x}, wire {}, active {}, confirmed {}, attempts {}, last reason {}{}, [{}]",
+        "{name}: version {}{}, mcu {:#06x}, wire {}, active {}, confirmed {}, attempts {}, last reason {}{}{}, [{}]",
         s.hello.active_version,
         if s.hello.trial { " (on trial)" } else { "" },
         s.hello.mcu_id,
@@ -96,6 +116,7 @@ fn show_state(name: &str, s: &NodeState, rows: Option<&Rows>) {
         st.attempts,
         st.last_reason,
         reset_of(st),
+        child_resets_of(st),
         slots
     );
     if let Some(w) = crate::versions::wire_warning(name, s.hello.proto_ver) {
@@ -814,6 +835,22 @@ mod tests {
         assert_eq!(of(reset_cause::WATCHDOG), ", reset watchdog");
         assert_eq!(of(reset_cause::PIN), ", reset pin");
         assert_eq!(of(200), ", reset 200");
+    }
+
+    #[test]
+    fn status_lists_the_child_resets_a_relay_counts() {
+        use dagon_proto::payload::ChildResets;
+        let mut st = StatusResp::default();
+        assert_eq!(child_resets_of(&st), "");
+        st.child_resets[0] = ChildResets { link: 2, count: 3 };
+        st.child_resets[1] = ChildResets {
+            link: 5,
+            count: 255,
+        };
+        assert_eq!(
+            child_resets_of(&st),
+            ", child resets link 2 x3 link 5 x255+"
+        );
     }
 
     #[test]

@@ -854,7 +854,18 @@ impl Serving<'_> {
             _ => Nrst::Pulse,
         };
         match self.bus.set_lines(line, s.boot0 == boot0::HIGH) {
-            Ok(()) => (Status::Ok, Vec::new()),
+            Ok(()) => {
+                // The wired node's link, as the firmware relay tells its
+                // agent (0 for a table without that port).
+                let link = self.bus.sub.and_then(|(port, _)| {
+                    self.links
+                        .iter()
+                        .find(|l| l.port == port && l.kind == LinkKind::I2c)
+                });
+                self.node
+                    .child_control(link.map_or(0, |l| l.id), s.nrst, s.boot0);
+                (Status::Ok, Vec::new())
+            }
             Err(_) => (dagon_proto::table::subctl::LINES_FAILED, Vec::new()),
         }
     }

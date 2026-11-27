@@ -47,3 +47,5 @@ links:
 | `nrst` | 整数 | 任意 | 対向ノードのリセットを駆動する、このノードのGPIO。`control.kind: full`の場合に使用します。 |
 | `boot` | 整数 | 任意 | 対向ノードの起動ピンを駆動する、このノードのGPIO。`control.kind: full`の場合に使用します。 |
 <!-- end of generated table -->
+
+中継ノードは、ROM復旧リンク（`control.rom_entry`がROMのI2Cローダーの名称）ごとに、ポートとローダーのアドレスで復旧対象を区別します。`nrst`と`boot`を記述した対象には、ボードがそのGPIOに配線した線だけを使用します。

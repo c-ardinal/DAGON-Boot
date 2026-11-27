@@ -1338,36 +1338,20 @@ pub fn check_release<'a, E>(
 
 /// An STM32F401 on I2C whose link enters the ROM loader through NRST/BOOT0.
 /// The ROM map for `node` when it is reached through its ROM I2C loader:
-/// `roms` has a map for its MCU, and a ROM I2C link joins it to a relay
-/// built for its loader's address: the address of that relay's ROM
-/// recovery peer ([`TopologyView::rom_peer`], the relay's choice too). A
-/// relay with several ROM links reaches every peer whose loader answers at
-/// that one address.
-fn rom_map<'m>(topo: &TopologyView<'_>, node: u8, roms: &'m [RomMap]) -> Option<&'m RomMap> {
+/// `roms` has a map for its MCU, and a relay recovers the node
+/// ([`TopologyView::rom_peers`], the rule every target of the relay is
+/// built by too): a ROM I2C link joins the two, on any of the relay's
+/// ports.
+pub fn rom_map<'m>(topo: &TopologyView<'_>, node: u8, roms: &'m [RomMap]) -> Option<&'m RomMap> {
     if (node as usize) >= topo.node_count() {
         return None;
     }
-    let map_of = |n: u8| {
-        let mcu = topo.node(usize::from(n)).mcu_id;
-        roms.iter().find(|m| m.mcu_id == mcu)
-    };
-    let map = map_of(node)?;
-    let has_loader = |w: McuId| roms.iter().any(|m| m.mcu_id == w);
-    let linked = |r: u8| {
-        (0..topo.link_count())
-            .map(|i| topo.link(i))
-            .filter(|l| l.reaches_rom_i2c())
-            .any(|l| l.other(r).is_some_and(|e| e.node == node))
-    };
+    let mcu = topo.node(usize::from(node)).mcu_id;
+    let map = roms.iter().find(|m| m.mcu_id == mcu)?;
+    let loader = |w: McuId| roms.iter().find(|m| m.mcu_id == w).map(|m| m.addr);
     let relayed = (0..topo.node_count())
         .filter_map(|r| u8::try_from(r).ok())
-        .any(|r| {
-            linked(r)
-                && topo
-                    .rom_peer(r, has_loader)
-                    .and_then(map_of)
-                    .is_some_and(|p| p.addr == map.addr)
-        });
+        .any(|r| topo.rom_peers(r, loader).any(|p| p.node == node));
     relayed.then_some(map)
 }
 

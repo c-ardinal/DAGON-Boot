@@ -64,3 +64,5 @@ links:
 | `nrst` | integer | no | This node's GPIO driving the other node's reset, for `control.kind: full`. |
 | `boot` | integer | no | This node's GPIO driving the other node's boot pin, for `control.kind: full`. |
 <!-- end of generated table -->
+
+A relay tells its recovery targets apart by port and loader address, one per ROM recovery link (`control.rom_entry` naming a ROM I2C loader). A target that gives `nrst` and `boot` uses only lines its board wires on those GPIOs.

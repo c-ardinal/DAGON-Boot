@@ -799,8 +799,8 @@ fn the_relay_serves_the_pc_over_its_links() {
     run(&clock, &bus, workers, scenario.as_mut());
 }
 
-/// A relay whose package has no recovery loader address (no node on its
-/// recovery lines, `RECOVERY_ROM_ADDR` None) is built without a recovery:
+/// A relay whose package has no recovery target (its topology gives it no
+/// node to recover, `RECOVERY_TARGETS` empty) is built without a recovery:
 /// SUBCTL and I2C_RAW answer E_UNSUPPORTED, and the bus is never touched.
 #[test]
 fn a_relay_without_a_recovery_answers_i2c_raw_unsupported() {

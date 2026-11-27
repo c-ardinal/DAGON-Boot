@@ -24,8 +24,8 @@ mod timings;
 pub use dagon_romlink::esp::{EspError, Stats as SerialRomStats};
 pub use dagon_romlink::{RomError, Stats as RomStats};
 pub use ops::{
-    agent_digest, app_digest, check_release, reason, AgentAssets, ConfirmOutcome, Discovery,
-    NodeOutcome, NodeState, Outcome, RecoverAssets, RecoverPath, Silence, WritePath,
+    agent_digest, app_digest, check_release, reason, rom_map, AgentAssets, ConfirmOutcome,
+    Discovery, NodeOutcome, NodeState, Outcome, RecoverAssets, RecoverPath, Silence, WritePath,
     HUB_RECONNECT_MS, REASONS,
 };
 pub use percent::{transfer_percent, trial_percent};

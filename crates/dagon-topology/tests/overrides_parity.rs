@@ -112,10 +112,22 @@ fn the_host_times_and_maps_each_node_by_its_overridden_definition() {
     }
 }
 
+/// The nodes the host takes the ROM path to, of those the relay `hub`
+/// recovers in the compiled `t`.
+fn host_rom_nodes(reg: &Registry, t: &dagon_topology::Topology) -> Vec<String> {
+    let roms = dagon_host::rom::rom_maps(reg);
+    let bin = dagon_topology::compile_with(reg, t).unwrap();
+    let view = dagon_format::topology::TopologyView::parse(&bin).unwrap();
+    (0..view.node_count())
+        .filter(|&i| dagon_host::rom_map(&view, i as u8, &roms).is_some())
+        .map(|i| t.nodes[i].id.clone())
+        .collect()
+}
+
 /// The hub's first ROM link reaches an MCU with `[rom_i2c]` but no APP
 /// log, so no first install through its loader; the second, one with a
-/// full map. `dagon gen` and the host pick the same ROM recovery peer, the
-/// second, by the one rule (`McuDef::has_rom_loader`).
+/// full map. `dagon gen` and the host take the same node, the second, by
+/// the one rule (`McuDef::has_rom_loader`).
 #[test]
 fn gen_and_the_host_skip_a_rom_peer_without_a_full_map() {
     let p = project("rom-peer");
@@ -126,18 +138,101 @@ fn gen_and_the_host_skip_a_rom_peer_without_a_full_map() {
     let reg = loaded(&p);
     assert!(reg.mcu(BUILTIN.0).unwrap().rom_i2c.is_some());
     let t = topology();
-    let gen = dagon_topology::recovery_peer_mcu(&reg, &t, "hub");
-    assert_eq!(gen.as_deref(), Some(SYNTHETIC.0));
-    let roms = dagon_host::rom::rom_maps(&reg);
-    let bin = dagon_topology::compile_with(&reg, &t).unwrap();
-    let view = dagon_format::topology::TopologyView::parse(&bin).unwrap();
-    let hub = (0..view.node_count())
-        .find(|&i| view.node(i).mcu_id == reg.mcu("rp2040").unwrap().mcu_id())
-        .unwrap();
-    let peer = view
-        .rom_peer(hub as u8, |w| roms.iter().any(|m| m.mcu_id == w))
-        .unwrap();
-    assert_eq!(view.node(usize::from(peer)).mcu_id, synthetic_mcu_id());
+    let gen = dagon_topology::recovery_targets(&reg, &t, "hub");
+    assert_eq!(gen.len(), 1, "{gen:?}");
+    assert_eq!(gen[0].nodes, ["seg2"]);
+    assert_eq!((gen[0].port.as_str(), gen[0].rom_addr), ("i2c0", ROM_ADDR));
+    // Only seg's link names the hub's lines.
+    assert_eq!(gen[0].lines, None);
+    assert_eq!(host_rom_nodes(&reg, &t), ["seg2"]);
+}
+
+/// Two loaders at one address on one bus are one target of the relay,
+/// with the lines of the link that names them; the host takes the ROM
+/// path to both nodes.
+#[test]
+fn nodes_whose_loaders_share_a_port_and_address_are_one_target() {
+    let p = project("rom-shared");
+    let reg = loaded(&p);
+    let t = topology();
+    let gen = dagon_topology::recovery_targets(&reg, &t, "hub");
+    assert_eq!(gen.len(), 1, "{gen:?}");
+    assert_eq!(gen[0].nodes, ["seg", "seg2"]);
+    assert_eq!(gen[0].lines, Some((18, 28)));
+    assert_eq!(host_rom_nodes(&reg, &t), ["seg", "seg2"]);
+    for n in ["seg", "seg2"] {
+        assert!(dagon_topology::recovery_targets(&reg, &t, n).is_empty());
+    }
+}
+
+/// With a ROM link on each of the hub's two I2C buses, `dagon gen` gives
+/// the relay one target per bus, each with its port, its loader's address
+/// and its own lines, and the host takes the ROM path to the node of
+/// each: the relay's build and the host agree on every target.
+#[test]
+fn gen_and_the_host_agree_on_a_target_on_each_of_two_buses() {
+    let p = project("rom-two-buses");
+    // The hub's board gains a second I2C bus on its header.
+    let board = "\n[board_override.\"waveshare-rp2040-touch-lcd-1.28\"]\n\
+                 header = [{ pin = \"GPIO16\" }, { pin = \"GPIO17\" }, { pin = \"GPIO18\" }, \
+                 { pin = \"GPIO26\" }, { pin = \"GPIO27\" }, { pin = \"GPIO28\" }, \
+                 { pin = \"GPIO6\" }, { pin = \"GPIO7\" }]\n\
+                 i2c = [{ controller = \"i2c0\", sda = \"GPIO16\", scl = \"GPIO17\" }, \
+                 { controller = \"i2c1\", sda = \"GPIO6\", scl = \"GPIO7\" }]\n";
+    let toml = std::fs::read_to_string(&p.toml).unwrap();
+    std::fs::write(&p.toml, toml + board).unwrap();
+    let reg = loaded(&p);
+    let second = "  - { id: i2c-second, kind: i2c, controller: i2c1, sda: 6, scl: 7, \
+                  speed_hz: 400000, pullups: external }\nlinks:\n";
+    let yaml = TOPOLOGY
+        .replacen("links:\n", second, 1)
+        .replacen(
+            "    bus: i2c-main\n    ends:\n      - { node: hub, port: i2c0 }",
+            "    bus: i2c-second\n    ends:\n      - { node: hub, port: i2c1, nrst: 26, boot: 27 }",
+            1,
+        )
+        .replacen("kind: cooperative", "kind: full", 1);
+    assert!(yaml.contains("i2c-second\n    ends"), "{yaml}");
+    let t = dagon_topology::parse_str(&yaml).unwrap();
+    let report = dagon_topology::check_with(&reg, &t);
+    assert_eq!(report.errors().count(), 0, "{}", report.to_json());
+    let gen = dagon_topology::recovery_targets(&reg, &t, "hub");
+    let found: Vec<_> = gen
+        .iter()
+        .map(|g| (&g.nodes[..], g.port.as_str(), g.rom_addr, g.lines))
+        .collect();
+    let seg = ["seg".to_string()];
+    let seg2 = ["seg2".to_string()];
+    assert_eq!(
+        found,
+        [
+            (&seg[..], "i2c0", ROM_ADDR, Some((18, 28))),
+            (&seg2[..], "i2c1", ROM_ADDR, Some((26, 27))),
+        ]
+    );
+    assert_eq!(host_rom_nodes(&reg, &t), ["seg", "seg2"]);
+    // The relay's build takes both from the list `dagon gen` writes: the
+    // relay link of each port, as the hub's definition numbers it.
+    let dir = p.dir.join("boot-hub");
+    std::fs::create_dir_all(&dir).unwrap();
+    let list = dagon_topology::recovery_file_text(&gen);
+    std::fs::write(dir.join("mcu.toml"), mcu_file_text(&reg, "rp2040").unwrap()).unwrap();
+    std::fs::write(dir.join("recovery.toml"), list).unwrap();
+    let rs = dagon_topology::defs::boot_folder::recovery_targets_of(&dir);
+    let link = |port: &str| {
+        let m = reg.mcu("rp2040").unwrap();
+        m.relay_links.iter().find(|l| l.port == port).unwrap().id
+    };
+    for (port, lines) in [
+        ("i2c0", "nrst: Some(18), boot: Some(28)"),
+        ("i2c1", "nrst: Some(26), boot: Some(27)"),
+    ] {
+        let row = format!(
+            "link: {}, rom_addr: {ROM_ADDR:#04x}, {lines} }}",
+            link(port)
+        );
+        assert!(rs.contains(&row), "{port}: {rs}");
+    }
 }
 
 #[test]

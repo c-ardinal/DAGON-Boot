@@ -71,9 +71,12 @@ pub fn start<const N: usize>(
         "downlinks: only i2c and uart on this board"
     );
     let wants = |k: Kind| downlinks.contains(&k);
-    // The STM32 recovery lines belong to the I2C downlink (ROM path).
+    // The STM32 recovery lines belong to the I2C downlink (ROM path): the
+    // node on bus `child-i2c`.
+    let lines = wants(Kind::I2c)
+        .then(|| dagon_mcu_rp2040::relay::RecoveryLines::on_i2c0(io.sub_ctl.lines()));
     let links = dagon_mcu_rp2040::relay::Links {
-        lines: wants(Kind::I2c).then(|| io.sub_ctl.lines()),
+        lines: [lines, None],
         uart: wants(Kind::Uart).then(|| downlink_uart(io.sub_uart)),
         i2c: wants(Kind::I2c).then(|| downlink_i2c(io.sub_i2c)),
         ..dagon_mcu_rp2040::relay::Links::none()

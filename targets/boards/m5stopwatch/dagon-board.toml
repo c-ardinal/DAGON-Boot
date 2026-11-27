@@ -81,6 +81,17 @@ max_transfer = 64
 regs = [{ name = "sys_cmd", reg = 0x0C }]
 writable = ["sys_cmd"]
 
+# The board's flash and its erase times, which replace the MCU's default.
+# Winbond W25Q128JV datasheet Revision G, 9.6 "AC Electrical
+# Characteristics": Sector Erase Time (4KB) tSE max 400 ms, over the part's
+# whole range (2.7 V to 3.6 V, -40 C to +85 C for the IQ grade, 9.2). DAGON
+# erases 4 KiB sectors only, so the block and chip erase times are not used.
+[flash]
+part = "W25Q128JV"
+erase_regions = [
+    { start = 0x0, len = 0x100_0000, unit = 0x1000, unit_max_ms = 400 },
+]
+
 # The recovery agent for the factory partition ships with this package.
 [[part]]
 name = "factory"

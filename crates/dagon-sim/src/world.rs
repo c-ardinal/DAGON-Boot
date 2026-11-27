@@ -19,7 +19,13 @@ use dagon_topology::schema::{Link, LinkKind, Node, Topology};
 use crate::{Layout, SimFlash, SimLink, SimNode, SimRelay};
 
 /// The flash and layout the simulator models a node of `def` with.
-fn modelled(def: &McuDef, seed: u64) -> Result<(SimFlash, Layout), String> {
+fn modelled(
+    def: &McuDef,
+    board: Option<&dagon_topology::defs::BoardDef>,
+    seed: u64,
+) -> Result<(SimFlash, Layout), String> {
+    let on = crate::mcu::on_board(def, board);
+    let def = on.as_ref().unwrap_or(def);
     if def.watchdog.is_none() {
         return Err(format!(
             "MCU definition {} has no [watchdog] trial_attempts",
@@ -56,7 +62,8 @@ fn node_of(
     let def = reg
         .mcu(&n.mcu)
         .ok_or_else(|| format!("node {}: no MCU definition {}", n.id, n.mcu))?;
-    let (flash, layout) = modelled(def, seed).map_err(|e| format!("node {}: {e}", n.id))?;
+    let (flash, layout) =
+        modelled(def, reg.node_board(n), seed).map_err(|e| format!("node {}: {e}", n.id))?;
     let cfg = Config {
         mcu_id: def.mcu_id(),
         port_kind: def.port.wire(),

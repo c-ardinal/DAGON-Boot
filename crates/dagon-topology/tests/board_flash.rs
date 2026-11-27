@@ -7,10 +7,13 @@
 use dagon_topology::defs::codegen::erase_regions_rs;
 use dagon_topology::defs::{Registry, Source};
 
-/// A synthetic ESP32-S3 board carrying a slower 4 KiB-sector part.
+/// A synthetic ESP32-S3 board carrying a slower 4 KiB-sector part, and one
+/// that names no part.
 const BOARD: &str = "format = 1\n[board.slow-s3]\nformat = 4\nproduct = \"Slow S3\"\nmcu = \"esp32s3\"\n\
                      flash_bytes = 0x100_0000\ndrawing = \"pico\"\n[board.slow-s3.flash]\npart = \"X\"\n\
-                     erase_regions = [{ start = 0x0, len = 0x100_0000, unit = 0x1000, unit_max_ms = 900 }]\n";
+                     erase_regions = [{ start = 0x0, len = 0x100_0000, unit = 0x1000, unit_max_ms = 900 }]\n\
+                     [board.plain-s3]\nformat = 4\nproduct = \"Plain S3\"\nmcu = \"esp32s3\"\n\
+                     flash_bytes = 0x100_0000\ndrawing = \"pico\"\n";
 
 const FIXTURE: &str =
     include_str!("../../../targets/mcu/esp32s3/tests/fixtures/flash_board_def.rs");
@@ -44,9 +47,24 @@ fn the_generated_regions_are_the_loaders_effective_regions() {
         .collect();
     assert_eq!(rows, [(0x0, 0x100_0000, 0x1000, 900)]);
     // A board without [flash] gets its MCU's regions generated the same way.
-    let plain = reg.board("m5stopwatch").unwrap();
+    let plain = reg.board("plain-s3").unwrap();
     assert_eq!(
         erase_regions_rs(m.erase_regions_on(Some(plain)).unwrap()),
         erase_regions_rs(m.erase_regions_on(None).unwrap())
     );
+    // The M5StopWatch names its part: the W25Q128JV's sector erase time,
+    // checked against its datasheet, replaces the MCU's unverified default.
+    let watch = reg.board("m5stopwatch").unwrap();
+    let rows: Vec<u32> = m
+        .erase_layout_on(Some(watch))
+        .unwrap()
+        .regions
+        .iter()
+        .map(|r| r.unit_max_ms)
+        .collect();
+    assert_eq!(rows, [400]);
+    assert!(m
+        .open_facts_on(Some(watch))
+        .iter()
+        .all(|f| !f.key.contains("erase_regions")));
 }

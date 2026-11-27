@@ -316,6 +316,9 @@ fn update_mode(
             trial_attempts: TRIAL_ATTEMPTS,
         };
         let mut agent: Agent<_, _, _, BootCore> = Agent::for_writer(cfg, VERIFIER, store, chain);
+        // The reset flags as they stand: the app's start clears them, so
+        // this names the resets since the app last started.
+        agent.note_reset(dagon_mcu_stm32f401re::reset::peek());
         let first = stay.as_ref();
         serve(
             &mut port,

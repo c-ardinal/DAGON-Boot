@@ -246,9 +246,17 @@ impl<F: Flash, O: Otadata, W: StoreWatchdog> SlotStore for EspStore<F, O, W> {
             .unwrap_or([None, None]);
         let selected = counted.iter().flatten().max_by_key(|c| c.seq);
         let view = selected.and_then(|c| selected_view(running, c.slot, Some(c.state)));
-        let mut trying = false;
+        // A running OTA slot no bootable entry selects (its entry was lost
+        // to a failed erase or program): the next reset does not start it
+        // again, so it is reported as an app still on trial, with the slot
+        // the 2nd stage falls back to.
+        let mut trying = running != SLOT_FACTORY
+            && !counted
+                .iter()
+                .flatten()
+                .any(|c| c.bootable() && c.slot == running);
         if let Some(v) = view {
-            trying = v.slot == running && v.state == SlotState::Trying;
+            trying |= v.slot == running && v.state == SlotState::Trying;
             // An erase withdraws the selection (otadata keeps no digest),
             // so a selected slot still holds the image it was selected
             // with.

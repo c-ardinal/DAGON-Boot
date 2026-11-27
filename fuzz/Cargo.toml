@@ -1,0 +1,42 @@
+# Fuzz targets for the readers of bytes from outside: frames and their
+# requests off a link, a release file, an image header and the state log's
+# records off the flash. Run with cargo-fuzz on a nightly toolchain
+# (fuzz/README.md); the nightly workflow runs each for a fixed time.
+[package]
+name = "dagon-fuzz"
+version = "0.0.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+dagon-proto = { path = "../crates/dagon-proto" }
+dagon-format = { path = "../crates/dagon-format" }
+
+# Its own workspace: built only by cargo-fuzz.
+[workspace]
+
+[[bin]]
+name = "frame"
+path = "fuzz_targets/frame.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "release_file"
+path = "fuzz_targets/release_file.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "flash_records"
+path = "fuzz_targets/flash_records.rs"
+test = false
+doc = false
+bench = false

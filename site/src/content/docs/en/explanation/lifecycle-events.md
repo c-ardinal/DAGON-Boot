@@ -1367,8 +1367,12 @@ below keep code and data to it.
    `unit_max_ms` over every planned erase unit, the plan the host waits
    for ([erase and trial waits](/en/reference/definitions/#erase-and-trial-waits)).
    An app in a state that cannot take this stall refuses the write in
-   `accept_update` (section 3). [Limitations](/en/explanation/limitations/)
-   says what is known of the longest time of the work that is not an erase.
+   `accept_update` (section 3). The longest requests that erase nothing
+   are XFER_END and SET_PENDING, each a digest over the image written:
+   the limit over a full slot is the MCU definition's `[execution]
+   request_max_ms`.
+   [Limitations](/en/explanation/limitations/) says how far that value is
+   established.
 
 ### 11.2 Per MCU
 

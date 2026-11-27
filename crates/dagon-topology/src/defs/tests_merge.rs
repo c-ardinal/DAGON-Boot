@@ -734,6 +734,7 @@ fn open_facts_are_the_execution_facts_not_checked_on_the_nodes_flash() {
         m.open_facts_on(None),
         [
             open("execution.masked_max_us", None),
+            open("execution.request_max_ms", None),
             open("execution.erase_regions[0].unit_max_ms", Some(450)),
         ]
     );
@@ -743,14 +744,25 @@ fn open_facts_are_the_execution_facts_not_checked_on_the_nodes_flash() {
     let r = load("open-board", &format!("{mcu}{flash}")).unwrap();
     let m = r.mcu("esp32s3").unwrap();
     let b = r.board("m5stopwatch");
-    assert_eq!(m.open_facts_on(b), [open("execution.masked_max_us", None)]);
+    assert_eq!(
+        m.open_facts_on(b),
+        [
+            open("execution.masked_max_us", None),
+            open("execution.request_max_ms", None),
+        ]
+    );
     let r = load(
         "open-none",
         "[mcu_override.esp32s3.execution]\nmasked_max_us = 20\n\
+         request_max_ms = { unverified = 700 }\n\
          [[mcu_override.esp32s3.execution.erase_regions]]\nstart = 0x0\nunit_max_ms = 450\n",
     )
     .unwrap();
-    assert_eq!(r.mcu("esp32s3").unwrap().open_facts_on(None), []);
+    // A value not checked against its source stays open; a checked one closes.
+    assert_eq!(
+        r.mcu("esp32s3").unwrap().open_facts_on(None),
+        [open("execution.request_max_ms", Some(700))]
+    );
     assert_eq!(
         open("k", None).to_string() + " / " + &open("k", Some(5)).to_string(),
         "k is unmeasured / k = 5 is not checked against its source"

@@ -405,6 +405,7 @@ fn the_schema_walk_finds_arrays_and_variants_through_failures() {
         ("execution.erase_regions", Kind::Tables),
         ("writer", Kind::Variant),
         ("execution.masked_max_us", Kind::Variant),
+        ("execution.request_max_ms", Kind::Variant),
         ("connection", Kind::Field),
         ("writers", Kind::Map),
     ] {

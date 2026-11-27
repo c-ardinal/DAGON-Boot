@@ -835,6 +835,16 @@ fn constants_rs(t: &toml::Table) -> String {
     out += "/// `MASKED_MAX_US` is checked against its source.\n";
     out += &format!("pub const MASKED_MAX_US_KNOWN: bool = {masked_known};\n");
 
+    let (request, request_known) = t
+        .get("execution")
+        .and_then(|e| e.get("request_max_ms"))
+        .map_or((None, false), |v| fact(v, "request_max_ms"));
+    out += "/// Longest one request that erases nothing keeps the providing task,\n";
+    out += "/// ms (`[execution] request_max_ms`); `None` while it is not measured.\n";
+    out += &format!("pub const REQUEST_MAX_MS: Option<u32> = {request:?};\n");
+    out += "/// `REQUEST_MAX_MS` is checked against its source.\n";
+    out += &format!("pub const REQUEST_MAX_MS_KNOWN: bool = {request_known};\n");
+
     out += &erase_layout_rs(t);
     out += &relay_links_rs(t);
     out += &links_rs(t);
@@ -1671,6 +1681,22 @@ mod tests {
         );
         assert!(
             rs.contains("pub const ERASE_UNIT_MAX_MS_KNOWN: bool = false;\n"),
+            "{rs}"
+        );
+        // Left out, the longest request is unmeasured; stated, it is carried.
+        assert!(
+            rs.contains("pub const REQUEST_MAX_MS: Option<u32> = None;\n")
+                && rs.contains("pub const REQUEST_MAX_MS_KNOWN: bool = false;\n"),
+            "{rs}"
+        );
+        let stated = DEF.replace(
+            "masked_max_us = 50",
+            "masked_max_us = 50\nrequest_max_ms = 700",
+        );
+        let rs = definition_rs(&stated);
+        assert!(
+            rs.contains("pub const REQUEST_MAX_MS: Option<u32> = Some(700);\n")
+                && rs.contains("pub const REQUEST_MAX_MS_KNOWN: bool = true;\n"),
             "{rs}"
         );
     }

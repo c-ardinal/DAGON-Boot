@@ -89,6 +89,7 @@ line = "thumbv6m-none-eabi"
 erased_value = 255
 flash_op = "xip-off-masked"
 masked_max_us = "unmeasured"
+request_max_ms = "unmeasured"
 write_unit = 1
 
 [[execution.erase_regions]]

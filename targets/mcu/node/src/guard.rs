@@ -231,21 +231,19 @@ impl<D: Dog, const N: usize> Guard<D, N> {
     }
 
     fn busy_ms(&self, task: usize, ms: u64) {
-        let now = (self.now_ms)();
-        self.with_state(|s| s.live.busy(task, now, ms));
+        self.with_state(|s| s.live.busy(task, (self.now_ms)(), ms));
     }
 
     /// `task` waits for its next piece of work.
     pub fn idle(&self, task: usize) {
-        let now = (self.now_ms)();
-        self.with_state(|s| s.live.idle(task, now));
+        self.with_state(|s| s.live.idle(task, (self.now_ms)()));
     }
 
     /// Feeds if every task is alive and the trial policy allows it. The
     /// only way the watchdog is fed.
     pub fn feed(&self) {
-        let now = (self.now_ms)();
         self.with_state(|s| {
+            let now = (self.now_ms)();
             let allowed = !s.on_trial
                 || match self.trial {
                     Trial::FeedUntilMs(end) => now < end,
@@ -283,7 +281,9 @@ impl<D: Dog, const N: usize> Guard<D, N> {
     /// The guard's state, shared by DAGON's tasks and the app's. The one
     /// place the MCU packages' own code masks interrupts (the published
     /// events' ring is the other reviewed one): the closures above
-    /// update a few fields or feed the watchdog (a register write), well inside
+    /// read the clock (inside the section, so that no preempting task's
+    /// work falls between a reading and the update it stamps), update a
+    /// few fields or feed the watchdog (a register write), well inside
     /// `[execution] masked_max_us`; none reaches the flash. An app built
     /// with `masked-time` times each ([`crate::masked_time`]).
     #[allow(clippy::disallowed_methods)]
@@ -453,5 +453,129 @@ mod tests {
                 .unwrap(),
             [Set(9_000), Feed, Feed]
         );
+    }
+
+    /// A task's clock reading and the update it stamps are one critical
+    /// section. Were the clock read before it, a preempting task that
+    /// worked in between would leave the reading stale: a background
+    /// task's deadline would start that much in the past, and a feed
+    /// would be withheld from a task still inside its limit.
+    #[test]
+    fn every_operation_reads_the_clock_inside_its_critical_section() {
+        extern crate std;
+        use core::sync::atomic::AtomicU32;
+        use std::sync::mpsc;
+        use std::time::Duration;
+        // The hosted critical section is one lock: while the guard holds
+        // it, another thread's call into the guard does not return.
+        static G: Guard<Count, 2> = Guard::new(
+            [Level::Preempting, Level::Background],
+            Trial::NeverFeed,
+            || {
+                let (done, wait) = mpsc::channel();
+                std::thread::spawn(move || {
+                    G.with_dog(|_| ());
+                    let _ = done.send(());
+                });
+                if wait.recv_timeout(Duration::from_millis(100)).is_ok() {
+                    OPEN.fetch_add(1, Ordering::Relaxed);
+                } else {
+                    MASKED.fetch_add(1, Ordering::Relaxed);
+                }
+                0
+            },
+        );
+        static MASKED: AtomicU32 = AtomicU32::new(0);
+        static OPEN: AtomicU32 = AtomicU32::new(0);
+        G.install(Count::default(), false);
+        G.busy(1);
+        G.busy_for(1, 10);
+        G.progress(1);
+        G.idle(1);
+        G.feed();
+        assert_eq!(OPEN.load(Ordering::Relaxed), 0, "a clock reading a preemption can make stale");
+        assert!(MASKED.load(Ordering::Relaxed) >= 5);
+    }
+
+    /// Every way a preempting task's requests fall into a background
+    /// task's work, by real time: a background task that reports within
+    /// its limit of its own running time is never the reason a feed is
+    /// withheld, however long the preempting work between its reports;
+    /// one that stops reporting stops the feeding once its limit of its
+    /// own running time has passed.
+    #[test]
+    fn a_background_task_is_judged_by_its_own_running_time_in_every_schedule() {
+        extern crate std;
+        use std::cell::Cell;
+        use std::vec::Vec;
+        std::thread_local! {
+            static T: Cell<u64> = const { Cell::new(0) };
+        }
+        const PC: usize = 0;
+        const LCD: usize = 1;
+        // One step of the schedule: the display works for `Lcd(ms)` and
+        // reports, or a request preempts it for `Pc(ms)` (the serving
+        // task renews its own deadline in pieces within its limit).
+        #[derive(Clone, Copy, Debug)]
+        enum Step {
+            Lcd(u64),
+            Pc(u64),
+        }
+        let lcd = [1, BUSY_LIMIT_MS / 2, BUSY_LIMIT_MS - 1];
+        let pc = [0, 1, BUSY_LIMIT_MS - 1, 3 * BUSY_LIMIT_MS];
+        let mut steps = Vec::new();
+        steps.extend(lcd.map(Step::Lcd));
+        steps.extend(pc.map(Step::Pc));
+        const LEN: u32 = 5;
+        for schedule in 0..steps.len().pow(LEN) {
+            for stuck in [false, true] {
+                T.set(0);
+                let g = Guard::new(
+                    [Level::Preempting, Level::Background],
+                    Trial::NeverFeed,
+                    || T.get(),
+                );
+                g.install(Count::default(), false);
+                let feeds = |g: &Guard<Count, 2>| {
+                    let before = fed(g);
+                    g.feed();
+                    fed(g) > before
+                };
+                g.busy(LCD);
+                // The display's own running time since its last report.
+                let mut ran = 0;
+                let mut plan = schedule;
+                for _ in 0..LEN {
+                    let step = steps[plan % steps.len()];
+                    plan /= steps.len();
+                    let why = std::format!("schedule {schedule}, stuck {stuck}, at {step:?}");
+                    match step {
+                        Step::Lcd(ms) => {
+                            T.set(T.get() + ms);
+                            ran += ms;
+                            if !stuck {
+                                assert!(feeds(&g), "{why}: within its limit");
+                                g.busy(LCD);
+                                ran = 0;
+                            }
+                        }
+                        Step::Pc(ms) => {
+                            g.busy(PC);
+                            let mut left = ms;
+                            while left > 0 {
+                                let piece = left.min(BUSY_LIMIT_MS - 1);
+                                T.set(T.get() + piece);
+                                left -= piece;
+                                // The pre-request feed of the serving task.
+                                assert_eq!(feeds(&g), ran < BUSY_LIMIT_MS, "{why}: while serving");
+                                g.busy(PC);
+                            }
+                            g.idle(PC);
+                        }
+                    }
+                    assert_eq!(feeds(&g), ran < BUSY_LIMIT_MS, "{why}: ran {ran} ms");
+                }
+            }
+        }
     }
 }

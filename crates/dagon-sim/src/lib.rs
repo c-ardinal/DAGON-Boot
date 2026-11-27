@@ -201,8 +201,8 @@ pub fn sample_hub(seed: u64) -> SimRelay {
     let mut watch = SimNode::new(
         watch_config(),
         pk,
-        SimFlash::esp32s3_4m(seed ^ 2),
-        Layout::ESP32S3_WATCH,
+        SimFlash::esp32s3(seed ^ 2),
+        Layout::of("esp32s3"),
     );
     watch
         .store()

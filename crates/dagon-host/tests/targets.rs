@@ -338,8 +338,8 @@ fn watch(seed: u64, max: u16) -> SimNode {
     let mut n = SimNode::new(
         cfg,
         sample::PUBKEY,
-        SimFlash::esp32s3_4m(seed),
-        Layout::ESP32S3_WATCH,
+        SimFlash::esp32s3(seed),
+        Layout::of("esp32s3"),
     );
     n.provision(sample::WATCH_1_0_0, 0).unwrap();
     n

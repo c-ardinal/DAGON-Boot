@@ -74,8 +74,10 @@ impl Layout {
     /// The kind S layout built-in MCU definition `mcu` gives: `[layout]
     /// stage0` as the `bootcore` region, the first `app_log` face as `log`,
     /// the app slots, the agent slot as `factory`, and the boot core slots
-    /// with `bootcore_log` as `cores`. Panics for an MCU the built-in
-    /// definitions lack or give no kind S layout (no stage0 or app log).
+    /// with `bootcore_log` as `cores`; for a definition with a partition
+    /// table and no stage0, the layout its partitions give
+    /// ([`Layout::of_partitions`]). Panics for an MCU the built-in
+    /// definitions lack or that gives neither.
     pub fn of(mcu: &str) -> Layout {
         static MADE: Mutex<Vec<Layout>> = Mutex::new(Vec::new());
         let mut made = MADE.lock().unwrap_or_else(PoisonError::into_inner);
@@ -83,17 +85,18 @@ impl Layout {
             return *l;
         }
         let l = Layout::of_def(simulated_mcu(mcu))
-            .unwrap_or_else(|| panic!("no kind S layout in MCU definition {mcu}"));
+            .unwrap_or_else(|| panic!("no layout the simulator models in MCU definition {mcu}"));
         made.push(l);
         l
     }
 
-    /// [`Layout::of`] for one definition; `None` without a stage0 or an
-    /// app log.
+    /// [`Layout::of`] for one definition; `None` without a stage0 and an
+    /// app log, or the partitions [`Layout::of_partitions`] reads.
     fn of_def(m: &'static dagon_topology::defs::McuDef) -> Option<Layout> {
         use dagon_topology::defs::ImageKind;
-        let stage0 = m.layout.stage0?;
-        let app_log = m.layout.app_log?;
+        let (Some(stage0), Some(app_log)) = (m.layout.stage0, m.layout.app_log) else {
+            return Layout::of_partitions(m);
+        };
         let slots_of = |kind: ImageKind| -> &'static [(u32, u32)] {
             let mut v: Vec<_> = m.slots.iter().filter(|s| s.image == kind).collect();
             v.sort_by_key(|s| s.binding.wire());
@@ -120,9 +123,56 @@ impl Layout {
         })
     }
 
-    /// The kind S layout the given definition `def` gives (a project's
-    /// own, its overrides included), as [`Layout::of`] reads a built-in
-    /// one; `None` without a stage0 or an app log. The simulated node reads
+    /// The layout a definition whose boot stage is the vendor's gives
+    /// through its partition table (ESP-IDF's names), simplified to kind S
+    /// semantics: the app slots are the app slot's partition and the other
+    /// `ota_N` partitions, in flash order (header inline at the slot start
+    /// in this model); `factory` is the agent slot's partition; `bootcore`
+    /// is the flash before the first partition, where the vendor's loader
+    /// and the table are. The definition names no state log, since the
+    /// vendor's boot stage selects by `otadata`: the model keeps its log
+    /// in the first erase unit of that partition. `None` without those
+    /// partitions.
+    fn of_partitions(m: &'static dagon_topology::defs::McuDef) -> Option<Layout> {
+        use dagon_topology::defs::ImageKind;
+        let region = |kind: ImageKind| {
+            let s = m.slots.iter().find(|s| s.image == kind)?;
+            Some((s.start, s.size))
+        };
+        let app = region(ImageKind::App)?;
+        let mut slots: Vec<(u32, u32)> = m
+            .partition_table
+            .iter()
+            .filter(|p| p.name.starts_with("ota_"))
+            .map(|p| (p.offset, p.size))
+            .collect();
+        if !slots.contains(&app) {
+            slots.push(app);
+        }
+        slots.sort_unstable();
+        let otadata = m.partition_table.iter().find(|p| p.name == "otadata")?;
+        let unit = m
+            .execution
+            .as_ref()?
+            .erase_regions
+            .iter()
+            .find(|r| (r.start..r.start + r.len).contains(&otadata.offset))?
+            .unit;
+        let first = m.partition_table.iter().map(|p| p.offset).min()?;
+        Some(Layout {
+            mcu: m.id.as_str(),
+            def: None,
+            bootcore: (0, first),
+            log: (otadata.offset, unit),
+            slots: Box::leak(slots.into_boxed_slice()),
+            factory: region(ImageKind::Agent),
+            cores: None,
+        })
+    }
+
+    /// The layout the given definition `def` gives (a project's own, its
+    /// overrides included), as [`Layout::of`] reads a built-in one; `None`
+    /// when it gives none the simulator models. The simulated node reads
     /// its boot attempts, ROM loader address and erase plan from `def`,
     /// which is kept for the rest of the program.
     pub fn of_definition(def: &dagon_topology::defs::McuDef) -> Option<Layout> {
@@ -137,18 +187,6 @@ impl Layout {
     pub fn definition(&self) -> &'static dagon_topology::defs::McuDef {
         self.def.unwrap_or_else(|| simulated_mcu(self.mcu))
     }
-
-    /// ESP32-S3 watch (4 MiB modelled): loader, selection data, two OTA
-    /// slots and a factory slot. Simplified to kind S semantics.
-    pub const ESP32S3_WATCH: Layout = Layout {
-        mcu: "esp32s3",
-        def: None,
-        bootcore: (0x0000_0000, 0x1_0000),
-        log: (0x0001_0000, 0x1000),
-        slots: &[(0x0011_0000, 0x10_0000), (0x0021_0000, 0x10_0000)],
-        factory: Some((0x0031_0000, 0x0F_0000)),
-        cores: None,
-    };
 }
 
 impl Layout {
@@ -1153,5 +1191,23 @@ mod tests {
             (c.log.faces, c.log.face_len),
             ([0x1000_4000, 0x1000_5000], 0x1000)
         );
+    }
+
+    /// The ESP32-S3's layout comes from its partition table: the OTA
+    /// partitions as the app slots, the factory partition for the agent,
+    /// the model's state log in `otadata`, and the vendor's loader and the
+    /// table before the first partition. Its flash is the whole chip the
+    /// definition gives.
+    #[test]
+    fn a_vendor_boot_stages_layout_comes_from_its_partitions() {
+        let esp = Layout::of("esp32s3");
+        assert_eq!(esp.bootcore, (0, 0xD000));
+        assert_eq!(esp.log, (0xD000, 0x1000));
+        assert_eq!(esp.slots, &[(0x11_0000, 0x30_0000), (0x41_0000, 0x30_0000)]);
+        assert_eq!(esp.factory, Some((0x1_0000, 0x10_0000)));
+        assert_eq!(esp.cores, None);
+        let flash = crate::SimFlash::esp32s3(1);
+        assert!(flash.peek(0x100_0000 - 4, 4).is_some());
+        assert!(flash.peek(0x100_0000, 1).is_none());
     }
 }

@@ -121,8 +121,8 @@ pub fn demo_sim(key: &KeyPair, fail: Option<&str>, seed: u64) -> Result<SimRelay
     let mut watch = SimNode::new(
         watch_config(),
         pk,
-        SimFlash::esp32s3_4m(seed ^ 2),
-        Layout::ESP32S3_WATCH,
+        SimFlash::esp32s3(seed ^ 2),
+        Layout::of("esp32s3"),
     );
     let w = img(key, &WATCH, 0, OLD, WATCH_LEN)?;
     watch

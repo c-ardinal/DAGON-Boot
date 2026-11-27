@@ -8,9 +8,13 @@
 //! masked_max_us` is the worst value plus a margin (samples/hardware-test
 //! measure.py gives it).
 //!
-//! Not timed: the push of a record into the ring of recent events
+//! The push of a record into the ring of recent events
 //! (`dagon_events::Recent`, the other reviewed function that masks: at
-//! most three copies of one record), and the embassy-sync `Channel` and
+//! most three copies of one record) is timed the same way, by a ring the
+//! MCU package makes with [`ring_timing`]: an MCU package without the
+//! guard (the ESP32-S3) times that section alone.
+//!
+//! Not timed: the embassy-sync `Channel` and
 //! `Watch` operations of the published events and the relay port, which
 //! mask to copy one bounded value each and run no closure (`clippy.toml`
 //! in `targets/mcu`, `crates/dagon-relay` and `crates/dagon-events`
@@ -56,6 +60,13 @@ pub fn digits(mut n: u32) -> ([u8; 10], usize) {
     }
     out[..len].reverse();
     (out, len)
+}
+
+/// How the ring of recent events times its critical section into the
+/// same records as the guard's: `now_us` gives microseconds since boot.
+#[cfg(feature = "masked-time")]
+pub fn ring_timing(now_us: fn() -> u64) -> dagon_events::Timing {
+    dagon_events::Timing { now_us, note }
 }
 
 /// Records one section of `us` microseconds. Loads and stores only: the

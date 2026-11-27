@@ -120,7 +120,16 @@ fn flash_err<T>(r: Result<T, dagon_port::FlashError>) -> Result<T, StoreError> {
     r.map_err(|_| StoreError::Flash)
 }
 
-impl<F: Flash, O: Otadata, W: Watchdog> EspStore<F, O, W> {
+/// The watchdog the store works under: fed between its bounded operations,
+/// and told of each planned erase before it starts.
+pub trait StoreWatchdog: Watchdog {
+    /// One erase taking at most `max_ms` (its region's `unit_max_ms`)
+    /// starts now: the task serving the request stays inside its deadline
+    /// for that long, then a feed.
+    fn erasing(&mut self, max_ms: u32);
+}
+
+impl<F: Flash, O: Otadata, W: StoreWatchdog> EspStore<F, O, W> {
     /// `regions`: what the board erases in (`BoardDef::erase_regions`).
     pub fn new(flash: F, ota: O, wdt: W, regions: &'static [EraseRegion]) -> Self {
         Self {
@@ -200,7 +209,7 @@ impl<F: Flash, O: Otadata, W: Watchdog> EspStore<F, O, W> {
     }
 }
 
-impl<F: Flash, O: Otadata, W: Watchdog> SlotStore for EspStore<F, O, W> {
+impl<F: Flash, O: Otadata, W: StoreWatchdog> SlotStore for EspStore<F, O, W> {
     type Transition = Transition;
 
     /// Slots with a header are Written; otadata then sets the selected
@@ -237,9 +246,17 @@ impl<F: Flash, O: Otadata, W: Watchdog> SlotStore for EspStore<F, O, W> {
             .unwrap_or([None, None]);
         let selected = counted.iter().flatten().max_by_key(|c| c.seq);
         let view = selected.and_then(|c| selected_view(running, c.slot, Some(c.state)));
-        let mut trying = false;
+        // A running OTA slot no bootable entry selects (its entry was lost
+        // to a failed erase or program): the next reset does not start it
+        // again, so it is reported as an app still on trial, with the slot
+        // the 2nd stage falls back to.
+        let mut trying = running != SLOT_FACTORY
+            && !counted
+                .iter()
+                .flatten()
+                .any(|c| c.bootable() && c.slot == running);
         if let Some(v) = view {
-            trying = v.slot == running && v.state == SlotState::Trying;
+            trying |= v.slot == running && v.state == SlotState::Trying;
             // An erase withdraws the selection (otadata keeps no digest),
             // so a selected slot still holds the image it was selected
             // with.
@@ -307,7 +324,7 @@ impl<F: Flash, O: Otadata, W: Watchdog> SlotStore for EspStore<F, O, W> {
 
     /// Takes the slot out of the otadata selection, then erases the planned
     /// units: the header sector first (the slot then has no image), then
-    /// the body's blocks, feeding between operations.
+    /// the body's blocks, announcing each to the watchdog.
     fn erase_planned(
         &mut self,
         t: u8,
@@ -331,7 +348,7 @@ impl<F: Flash, O: Otadata, W: Watchdog> SlotStore for EspStore<F, O, W> {
             self.agent_copy = None;
         }
         for op in plan {
-            self.wdt.feed();
+            self.wdt.erasing(op.max_ms);
             flash_err(self.flash.erase(op.addr, op.len))?;
         }
         self.wdt.feed();

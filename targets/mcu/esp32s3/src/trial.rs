@@ -9,7 +9,7 @@
 use dagon_events::Clock;
 use dagon_port::Watchdog;
 
-use crate::liveness::Liveness;
+use crate::liveness::{Liveness, Renewal};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Status {
@@ -52,6 +52,18 @@ impl<W: Watchdog, C: Clock> TrialWatchdog<W, C> {
     /// Milliseconds since boot, wrapping (the [`Liveness`] time base).
     pub fn now_ms(&mut self) -> u32 {
         (self.clock.now_us() / 1000) as u32
+    }
+
+    /// One planned erase of at most `max_ms` starts inside the request
+    /// `lease`'s task serves: its deadline moves to the end of that erase plus
+    /// `after_ms` (what the rest of the request may take), then a feed
+    /// through the gate. A request's own budget cannot hold a slot's whole
+    /// erase at the flash part's worst case (`unit_max_ms` a sector, 3 MiB
+    /// of them), so each erase extends it; a request that stops making
+    /// progress is still overdue `after_ms` after its last erase.
+    pub fn erasing(&mut self, lease: Renewal, max_ms: u32, after_ms: u32) {
+        lease.extend(self.now_ms(), max_ms.saturating_add(after_ms));
+        self.feed();
     }
 
     /// Running on trial: no feeding until [`TrialWatchdog::end_trial`].
@@ -187,5 +199,53 @@ mod tests {
         task.idle();
         w.feed();
         assert_eq!(fed.get(), 102);
+    }
+
+    /// A 3 MiB slot of 4 KiB sectors, each taking the W25Q128JV's worst
+    /// 400 ms, is 307 s of erasing: over the 120 s one request has. Fed
+    /// only against the request's own deadline the watchdog would reset the
+    /// chip mid-erase; each planned erase extending the deadline keeps it
+    /// fed, and a request that then hangs is overdue one budget later.
+    #[test]
+    fn a_slot_erase_at_the_parts_worst_case_stays_fed() {
+        const SECTORS: u32 = 769;
+        const SECTOR_MS: u32 = 400;
+        const BUDGET_MS: u32 = 120_000;
+        const { assert!(SECTORS * SECTOR_MS > BUDGET_MS) };
+        static PLAIN: Liveness = Liveness::new();
+        static EXTENDED: Liveness = Liveness::new();
+        let run = |l: &'static Liveness, extend: bool| {
+            let (fed, now) = (Rc::new(Cell::new(0)), Rc::new(Cell::new(0)));
+            let mut w =
+                TrialWatchdog::new(Count(fed.clone()), Fake(now.clone()), 4000).with_liveness(l);
+            w.end_trial();
+            let lease = l.register_preempting().unwrap();
+            lease.busy(0, BUDGET_MS);
+            for _ in 0..SECTORS {
+                if extend {
+                    w.erasing(lease.renewal(), SECTOR_MS, BUDGET_MS);
+                } else {
+                    w.feed();
+                }
+                now.set(now.get() + u64::from(SECTOR_MS) * 1000);
+            }
+            (fed.get() - 100, lease, now)
+        };
+        let (fed, ..) = run(&PLAIN, false);
+        assert_eq!(
+            fed,
+            BUDGET_MS / SECTOR_MS,
+            "fed past the request's deadline"
+        );
+        let (fed, lease, now) = run(&EXTENDED, true);
+        assert_eq!(fed, SECTORS, "an erase went unfed");
+        // The request hangs after its last erase: overdue one budget later.
+        let end = now.get() / 1000;
+        assert!(!EXTENDED.overdue(end as u32 + BUDGET_MS - 1));
+        assert!(EXTENDED.overdue(end as u32 + BUDGET_MS));
+        // Outside a request an erase's word changes nothing.
+        lease.idle();
+        lease.renewal().extend(0, 1);
+        assert!(!EXTENDED.overdue(u32::MAX / 2));
     }
 }

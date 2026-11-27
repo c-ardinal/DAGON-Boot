@@ -1314,8 +1314,9 @@ below keep code and data to it.
    and the relay port's requests mask for each of their operations, to
    copy one value of a fixed size in or out; the operations that would run
    a closure there (`send_modify`, `try_get_and`) are refused by the same
-   list, so a snapshot is folded outside them. These sections, and the push's, are bounded
-   by the size of the value, not timed by a `masked-time` build.
+   list, so a snapshot is folded outside them. These sections are bounded
+   by the size of the value, not timed by a `masked-time` build. The
+   push's section is timed by this build, as the guard's are.
 3. **Flash operations are hardware facts.** What an erase or program
    stops is the definition's `[execution] flash_op`:
    - `fetch-stall`: single-bank flash the code runs from; instruction
@@ -1359,6 +1360,15 @@ below keep code and data to it.
    checked against its source) or `"unmeasured"` (no value). Tools and
    documents report the last two as not established; a check that needs a
    value uses an unverified one; none is relied on in a release.
+8. **One request stops the app's tasks.** The serving task runs above the
+   app's tasks and handles one request synchronously: meanwhile the app's
+   thread-mode tasks and the interrupts below the serving task do not run.
+   The longest is a request that erases a slot: its limit is the sum of
+   `unit_max_ms` over every planned erase unit, the plan the host waits
+   for ([erase and trial waits](/en/reference/definitions/#erase-and-trial-waits)).
+   An app in a state that cannot take this stall refuses the write in
+   `accept_update` (section 3). [Limitations](/en/explanation/limitations/)
+   says what is known of the longest time of the work that is not an erase.
 
 ### 11.2 Per MCU
 
@@ -1401,7 +1411,10 @@ the host retries.
 | Watchdog feeding (once confirmed, gated by liveness) | the link task | Priority2 |
 | The app's tasks | thread mode | lowest |
 
-Each flash operation masks interrupts for one erase unit; the slot store feeds the watchdog between units. The UART receive
+Each flash operation masks interrupts for one erase unit; the slot store feeds the watchdog between units. A request's deadline moves,
+at each erase unit, to that unit's `unit_max_ms` plus the request's own
+budget from then (a whole slot's erase at the part's worst case is longer
+than one request's budget). The UART receive
 FIFO keeps what fits; a frame cut by the stall is dropped by the 20 ms
 gap rule and the requester retries. USB Serial/JTAG NAKs the host
 meanwhile.

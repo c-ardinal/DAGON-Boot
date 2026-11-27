@@ -10,7 +10,7 @@ publish = false
 mcu = "esp32s3"
 # Firmware clippy runs in CI (scripts/ci_crates.py --firmware-lint); the
 # target is .cargo/config.toml's, the toolchain rust-toolchain.toml's.
-lint = { features = ["", "conform"] }
+lint = { features = ["", "conform", "masked-time"] }
 
 # DAGON on the ESP32-S3 (kind V, behind the ESP-IDF 2nd stage with rollback):
 # flash and otadata slot store, watchdog and liveness, boot selection, link
@@ -40,6 +40,11 @@ hal = [
 panic-reset = ["hal"]
 # Conformance build: answers CONF_RUN (node-side tests) in front of the agent.
 conform = ["dep:dagon-conform"]
+# An app built to measure how long DAGON's own code masks interrupts
+# (dagon-node's masked_time): the longest in DAGON_MASKED_MAX_US, for the
+# chip's built-in USB JTAG to read. This MCU's own code has no guard, so
+# the one section timed is the push into the ring of recent events.
+masked-time = ["hal", "dagon-node/masked-time"]
 
 [dependencies]
 dagon-agent = { path = "../../../crates/dagon-agent" }

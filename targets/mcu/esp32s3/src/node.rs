@@ -70,7 +70,7 @@ use esp_hal::{
 use esp_rtos::embassy::InterruptExecutor;
 use static_cell::StaticCell;
 
-use crate::liveness::{Lease, Liveness};
+use crate::liveness::{Lease, Liveness, Renewal};
 use crate::rom::{self, Method, Step};
 use crate::serve::{self, Next, Then};
 use crate::store::{EspStore, Otadata};
@@ -81,7 +81,8 @@ use crate::Version;
 pub const LINK_PRIORITY: Priority = Priority::Priority2;
 /// The link task wakes at least this often to feed the watchdog.
 const FEED_PERIOD: Duration = Duration::from_millis(500);
-/// Time one request may take, a full slot erase included.
+/// Time one request may take; each planned erase inside it adds its own
+/// worst case ([`crate::trial::TrialWatchdog::erasing`]).
 const REQUEST_BUDGET_MS: u32 = 120_000;
 
 /// Everything DAGON owns on the chip, handed over by the board crate.
@@ -214,7 +215,13 @@ pub fn start(
         EspClock.now_us()
     };
     let periods = Periods::new(TRIAL_WDT_MS, CONFIRMED_WDT_MS);
-    let events = EVENTS.init(Published::new());
+    #[cfg(feature = "masked-time")]
+    let made = Published::timed(dagon_node::masked_time::ring_timing(|| {
+        embassy_time::Instant::now().as_micros()
+    }));
+    #[cfg(not(feature = "masked-time"))]
+    let made = Published::new();
+    let events = EVENTS.init(made);
     let board = p.board_extension.take();
     let (chain, events) = node_chain(
         events,
@@ -256,9 +263,10 @@ async fn link_task(p: NodePeripherals<'static>, start: Start, liveness: &'static
 
 type Wdt = TrialWatchdog<RtcWatchdog, EspClock>;
 
-/// The slot store's handle on the trial watchdog the link task holds.
+/// The slot store's handle on the trial watchdog the link task holds, and
+/// on that task's lease.
 #[derive(Clone, Copy)]
-struct SharedWdt(&'static RefCell<Wdt>);
+struct SharedWdt(&'static RefCell<Wdt>, Renewal);
 
 impl Watchdog for SharedWdt {
     fn start(&mut self, timeout_ms: u32) {
@@ -266,6 +274,14 @@ impl Watchdog for SharedWdt {
     }
     fn feed(&mut self) {
         self.0.borrow_mut().feed();
+    }
+}
+
+impl crate::store::StoreWatchdog for SharedWdt {
+    fn erasing(&mut self, max_ms: u32) {
+        self.0
+            .borrow_mut()
+            .erasing(self.1, max_ms, REQUEST_BUDGET_MS);
     }
 }
 
@@ -358,7 +374,13 @@ impl Link {
             TrialWatchdog::new(rwdt, EspClock, CONFIRMED_WDT_MS).with_liveness(liveness),
         ));
         let regions = p.board.erase_regions();
-        let mut store = EspStore::new(EspFlash::new(storage), boot, SharedWdt(wdt), regions);
+        let lease = liveness.register_preempting()?;
+        let mut store = EspStore::new(
+            EspFlash::new(storage),
+            boot,
+            SharedWdt(wdt, lease.renewal()),
+            regions,
+        );
         let trial = trying(&mut store);
         if trial {
             wdt.borrow_mut().begin_trial();
@@ -413,7 +435,7 @@ impl Link {
             uart,
             usb,
             board,
-            lease: liveness.register_preempting()?,
+            lease,
         })
     }
 

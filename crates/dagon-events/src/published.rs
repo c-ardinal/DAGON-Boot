@@ -53,6 +53,20 @@ pub struct Recent<const N: usize> {
     /// Records lost and not yet reported; its lock is the critical
     /// section of [`Recent::push`].
     unreported: Mutex<Cs, Cell<u32>>,
+    /// Times the critical section of [`Recent::push`] ([`Timing`]).
+    #[cfg(any(test, feature = "masked-time"))]
+    timing: Option<Timing>,
+}
+
+/// How a measuring build times the critical section of [`Recent::push`]:
+/// `now_us` gives microseconds since boot, `note` takes each section's
+/// length. Both run with interrupts masked, so they only read a clock and
+/// store a few words.
+#[cfg(any(test, feature = "masked-time"))]
+#[derive(Clone, Copy)]
+pub struct Timing {
+    pub now_us: fn() -> u64,
+    pub note: fn(u64),
 }
 
 impl<const N: usize> Recent<N> {
@@ -64,17 +78,30 @@ impl<const N: usize> Recent<N> {
         Recent {
             ring: Channel::new(),
             unreported: Mutex::new(Cell::new(0)),
+            #[cfg(any(test, feature = "masked-time"))]
+            timing: None,
         }
+    }
+
+    /// [`Recent::new`] whose critical section is timed with `timing`.
+    #[cfg(any(test, feature = "masked-time"))]
+    pub const fn timed(timing: Timing) -> Self {
+        let mut ring = Self::new();
+        ring.timing = Some(timing);
+        ring
     }
 
     /// One critical section over the check for a full ring, the removal
     /// of its oldest record and the send: a reader that preempted between
     /// them would make room and still lose the next record. Inside it: at
     /// most three ring operations, each a copy of one [`EventRecord`],
-    /// and a counter; no caller's code.
+    /// and a counter; no caller's code but, in a measuring build, the
+    /// two functions of its [`Timing`] around them.
     #[allow(clippy::disallowed_methods)]
     pub(crate) fn push(&self, mut rec: EventRecord) {
         self.unreported.lock(|u| {
+            #[cfg(any(test, feature = "masked-time"))]
+            let started = self.timing.map(|t| (t.now_us)());
             let mut lost = u.get();
             if self.ring.is_full() {
                 if let Ok(oldest) = self.ring.try_receive() {
@@ -90,6 +117,10 @@ impl<const N: usize> Recent<N> {
                 lost = lost.saturating_add(1);
             }
             u.set(lost);
+            #[cfg(any(test, feature = "masked-time"))]
+            if let (Some(t), Some(started)) = (self.timing, started) {
+                (t.note)((t.now_us)().saturating_sub(started));
+            }
         });
     }
 
@@ -147,6 +178,17 @@ impl<S: Snapshot, const N: usize> Published<S, N> {
         Published {
             latest: Watch::new(),
             recent: Recent::new(),
+            seq: AtomicU32::new(0),
+        }
+    }
+
+    /// [`Published::new`] whose ring of recent events times its critical
+    /// section with `timing` ([`Recent::timed`]).
+    #[cfg(any(test, feature = "masked-time"))]
+    pub const fn timed(timing: Timing) -> Self {
+        Published {
+            latest: Watch::new(),
+            recent: Recent::timed(timing),
             seq: AtomicU32::new(0),
         }
     }
@@ -222,6 +264,36 @@ mod tests {
 
     const PUSHES: usize = 8;
     const RING: usize = 2;
+
+    /// A ring made with a [`Timing`] hands the length of each push's
+    /// critical section to `note`, full ring or not; one made without
+    /// times nothing.
+    #[test]
+    fn a_timed_ring_notes_the_length_of_each_push() {
+        use core::sync::atomic::AtomicU64;
+        static NOW: AtomicU64 = AtomicU64::new(0);
+        static COUNT: AtomicU32 = AtomicU32::new(0);
+        static LAST: AtomicU64 = AtomicU64::new(0);
+        let noted = || (COUNT.load(Ordering::Relaxed), LAST.load(Ordering::Relaxed));
+        let timing = Timing {
+            // Each reading of the clock is 7 us after the one before.
+            now_us: || NOW.fetch_add(7, Ordering::Relaxed),
+            note: |us| {
+                COUNT.fetch_add(1, Ordering::Relaxed);
+                LAST.store(us, Ordering::Relaxed);
+            },
+        };
+        let plain: Recent<RING> = Recent::new();
+        plain.push(EventRecord::default());
+        assert_eq!(noted(), (0, 0));
+        let ring: Recent<RING> = Recent::timed(timing);
+        for _ in 0..RING + 1 {
+            ring.push(EventRecord::default());
+        }
+        assert_eq!(noted(), (RING as u32 + 1, 7));
+        assert_eq!(ring.try_take().map(|r| r.dropped), Some(0));
+        assert_eq!(ring.try_take().map(|r| r.dropped), Some(1));
+    }
 
     /// A reader that runs between any two pushes (a push is one critical
     /// section, so nowhere inside one), taking any number of records

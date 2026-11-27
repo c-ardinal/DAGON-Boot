@@ -18,6 +18,8 @@ on:
       - crates/dagon-retained-model/**
       - crates/dagon-format/**
       - crates/dagon-core/**
+      - crates/dagon-proto/**
+      - fuzz/**
       - Cargo.lock
       - .github/workflows/nightly.yml
 
@@ -47,3 +49,31 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
       - name: Full profile
         run: cargo test -p dagon-retained-model --release --locked -- --ignored
+
+  # The readers of bytes from outside (fuzz/README.md), each for a fixed
+  # time from an empty corpus. cargo-fuzz needs a nightly toolchain (the
+  # newest: this repository's files name no dates).
+  fuzz:
+    name: fuzz the readers of outside bytes, 5 minutes each
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.event_name == 'schedule' && 'develop' || github.ref }}
+      - name: Nightly Rust and cargo-fuzz
+        run: |
+          rustup toolchain install nightly --profile minimal
+          cargo install cargo-fuzz --locked --version 0.13.2
+      - name: Fuzz
+        working-directory: fuzz
+        run: |
+          for target in frame release_file flash_records; do
+            cargo +nightly fuzz run "$target" -- -max_total_time=300
+          done
+      - name: Keep what failed
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-artifacts
+          path: fuzz/artifacts

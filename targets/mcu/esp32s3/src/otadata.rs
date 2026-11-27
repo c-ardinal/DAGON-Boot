@@ -193,7 +193,8 @@ pub enum ConfirmStep {
     Done,
     /// Rewrite this sector with this entry (same seq, state Valid).
     Write(usize, [u8; ENTRY_LEN]),
-    /// The selected entry for `running` is Aborted, Invalid or unknown.
+    /// The selected entry for `running` is Aborted, Invalid or unknown, or
+    /// no bootable entry selects the running OTA slot.
     Refused,
 }
 
@@ -205,7 +206,17 @@ pub fn confirm_entry(current: &[[u8; ENTRY_LEN]; 2], running: u8) -> ConfirmStep
         .filter_map(|i| Counted::of(&current[i]).map(|c| (i, c)))
         .max_by_key(|(_, c)| c.seq);
     let Some((i, c)) = selected.filter(|(_, c)| c.slot == running) else {
-        return ConfirmStep::Done;
+        // A running OTA slot no bootable entry selects has nothing to mark
+        // Valid: its entry was lost, and the next reset falls back.
+        let backed = current
+            .iter()
+            .filter_map(Counted::of)
+            .any(|c| c.bootable() && c.slot == running);
+        return if running == SLOT_FACTORY || backed {
+            ConfirmStep::Done
+        } else {
+            ConfirmStep::Refused
+        };
     };
     match c.state {
         raw::VALID | raw::UNDEFINED => ConfirmStep::Done,
@@ -530,7 +541,12 @@ mod tests {
         }
         assert_eq!(confirm_entry(&[BLANK, valid_b], SLOT_B), ConfirmStep::Done);
         // Booted as the fallback, or factory: nothing to confirm.
-        assert_eq!(confirm_entry(&[BLANK, pv_b], SLOT_A), ConfirmStep::Done);
+        let valid_a = entry(1, raw::VALID, seq_crc(1).to_le_bytes());
+        assert_eq!(confirm_entry(&[valid_a, pv_b], SLOT_A), ConfirmStep::Done);
+        // The running slot's own entry is lost (a failed erase or program):
+        // nothing to mark Valid, and the next reset does not start it.
+        assert_eq!(confirm_entry(&[BLANK, pv_b], SLOT_A), ConfirmStep::Refused);
+        assert_eq!(confirm_entry(&[BLANK, BLANK], SLOT_B), ConfirmStep::Refused);
         assert_eq!(
             confirm_entry(&[BLANK, BLANK], SLOT_FACTORY),
             ConfirmStep::Done

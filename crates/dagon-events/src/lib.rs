@@ -38,6 +38,8 @@ pub use extension::{
     RebootRequest, TrialInfo, UpdateOffer, DECISIONS, DECISION_BOUND_MS,
 };
 pub use ports::{InTree, Port, PortDefault, Service, Trust, PORTS};
+#[cfg(any(test, feature = "masked-time"))]
+pub use published::Timing;
 pub use published::{Latest, Published, Reader, Recent, Snapshot, WATCHERS};
 
 /// The `event` contract's number: the catalog kinds, their codes and the

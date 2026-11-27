@@ -141,12 +141,15 @@ impl Site {
 /// The whole flash (the slots, the dagon partition and otadata), only the
 /// erase units written to kept, with a power loss: operations from number
 /// `cut.0` on do nothing and fail (the one at `cut.0` lands half when the
-/// way says so).
+/// way says so). Or with one failed operation and the power left on
+/// (`stay`): operation number `cut.0` alone lands not at all, or half, and
+/// answers an error; the ones after it land.
 #[derive(Clone)]
 struct Cut {
     pages: Rc<RefCell<BTreeMap<u32, Vec<u8>>>>,
     ops: Rc<RefCell<usize>>,
     cut: Option<(usize, Way)>,
+    stay: bool,
     /// The site of every erase and write asked for, in order.
     trace: Rc<RefCell<Vec<Site>>>,
 }
@@ -157,6 +160,7 @@ impl Cut {
             pages: Rc::default(),
             ops: Rc::default(),
             cut: None,
+            stay: false,
             trace: Rc::default(),
         }
     }
@@ -168,12 +172,26 @@ impl Cut {
             pages: Rc::new(RefCell::new(self.pages.borrow().clone())),
             ops: Rc::default(),
             cut,
+            stay: false,
             trace: Rc::default(),
         }
     }
 
+    /// As [`Cut::copy`], operation `fail.0` failing with the power left on.
+    fn failing(&self, fail: (usize, Way)) -> Self {
+        Cut {
+            stay: true,
+            ..self.copy(Some(fail))
+        }
+    }
+
     fn powered(&self) -> bool {
-        self.cut.is_none_or(|(n, _)| *self.ops.borrow() <= n)
+        self.stay || self.cut.is_none_or(|(n, _)| *self.ops.borrow() <= n)
+    }
+
+    /// Whether the operation the fault is at was asked for.
+    fn reached(&self) -> bool {
+        self.cut.is_none_or(|(n, _)| *self.ops.borrow() > n)
     }
 
     /// Counts one operation at `site`: `Ok(true)` it lands whole,
@@ -183,7 +201,7 @@ impl Cut {
         let n = *self.ops.borrow();
         *self.ops.borrow_mut() += 1;
         match self.cut {
-            Some((c, _)) if n > c => Err(FlashError::Hw),
+            Some((c, _)) if n > c && !self.stay => Err(FlashError::Hw),
             Some((c, Way::Half)) if n == c => Ok(false),
             Some((c, Way::None)) if n == c => Err(FlashError::Hw),
             _ => Ok(true),
@@ -518,6 +536,15 @@ impl Node {
             .is_some_and(|s| s.state == SlotState::Trying)
     }
 
+    /// Whether a bootable otadata entry selects the running slot.
+    fn backed(&self) -> bool {
+        let entries = otadata::read_entries(&mut self.f.copy(None)).unwrap();
+        entries
+            .iter()
+            .filter_map(Counted::of)
+            .any(|c| c.bootable() && c.slot == self.running)
+    }
+
     /// Whether the host's own checks let `act` happen.
     fn takes(&self, act: Act) -> bool {
         let st = self.status();
@@ -528,7 +555,10 @@ impl Node {
                     && st.slots[usize::from(s)].state != SlotState::Empty
                     && !self.trying()
             }
-            Act::Confirm => self.trying(),
+            // A trial whose otadata entry a failed operation destroyed is
+            // not one the host can confirm (CONFIRM is refused; the next
+            // reset falls back).
+            Act::Confirm => self.trying() && self.backed(),
             Act::Boot => true,
         }
     }
@@ -665,8 +695,10 @@ fn inventory() -> Vec<Site> {
 
 /// Every state within [`DEPTH`] acts of `start`, each act also cut at each
 /// of its flash operations both ways and followed by the reset the power
-/// coming back is. Returns the states checked and the cuts made.
-fn explore(start: Node) -> (usize, Coverage) {
+/// coming back is; with `stay`, each act instead with one of its flash
+/// operations failing both ways and the node left running. Returns the
+/// states checked and the faults made.
+fn explore(start: Node, stay: bool) -> (usize, Coverage) {
     let mut seen = HashSet::new();
     let mut queue = VecDeque::new();
     let mut cover = Coverage::default();
@@ -705,18 +737,26 @@ fn explore(start: Node) -> (usize, Coverage) {
             let mut runs = vec![(whole_run, next)];
             for (n, site) in sites.iter().enumerate() {
                 for way in WAYS {
+                    let f = if stay {
+                        node.f.failing((n, way))
+                    } else {
+                        node.f.copy(Some((n, way)))
+                    };
                     let mut cut = Node {
-                        f: node.f.copy(Some((n, way))),
+                        f,
                         running: node.running,
                     };
                     let mut next = path.clone();
                     next.push((act, Some((n, way))));
                     step(&mut cut, &next);
-                    assert!(!cut.f.powered(), "operation {n} of {act:?} not reached");
-                    // The power comes back: a reset on what the flash holds.
+                    assert!(cut.f.reached(), "operation {n} of {act:?} not reached");
+                    assert_eq!(cut.f.powered(), stay, "{act:?} cut at {n}");
                     cut.f = cut.f.copy(None);
-                    cut.running = second_stage(&cut.f)
-                        .unwrap_or_else(|Broke(why)| panic!("{why}\nafter {next:?}"));
+                    if !stay {
+                        // The power comes back: a reset on what the flash holds.
+                        cut.running = second_stage(&cut.f)
+                            .unwrap_or_else(|Broke(why)| panic!("{why}\nafter {next:?}"));
+                    }
                     *cover.0.entry(*site).or_default().entry(way).or_default() += 1;
                     runs.push((cut, next));
                 }
@@ -765,7 +805,7 @@ fn every_state_of_a_node_boots_a_whole_app_and_takes_an_update() {
     let mut cover = Coverage::default();
     let mut checked = 0;
     for start in [Node::new(), installed()] {
-        let (n, c) = explore(start);
+        let (n, c) = explore(start, false);
         checked += n;
         for (s, m) in c.0 {
             for (w, k) in m {
@@ -796,4 +836,44 @@ fn every_state_of_a_node_boots_a_whole_app_and_takes_an_update() {
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(format!("{dir}/esp32s3.md"), body).unwrap();
     }
+}
+
+/// A flash operation that fails with the power left on (the part answers
+/// an error, nothing or half of the operation landed): any one operation
+/// of any act, the node left running what it ran. V1 to V3 hold from
+/// there, as after a power loss.
+#[test]
+fn a_failed_flash_operation_leaves_a_node_that_takes_an_update() {
+    let (mut checked, mut fails) = (0, 0);
+    for start in [Node::new(), installed()] {
+        let (n, c) = explore(start, true);
+        checked += n;
+        fails += c.0.values().flat_map(|m| m.values()).sum::<usize>();
+    }
+    eprintln!("{checked} states, {fails} failed operations");
+    assert!(fails > 0);
+}
+
+/// The otadata entry of an app on trial is lost to a failed erase while
+/// the host confirms it: the app keeps running, STATUS still says it is on
+/// trial with factory as what the next reset starts, a repeated CONFIRM is
+/// refused, and the reset starts factory.
+#[test]
+fn a_trial_whose_entry_a_failed_erase_destroyed_is_not_reported_confirmed() {
+    let mut n = Node::new();
+    for act in [Act::Transfer(0), Act::SetPending(0), Act::Boot] {
+        assert!(matches!(n.run(act), Ok(Some(Status::Ok) | None)), "{act:?}");
+    }
+    assert!(n.trying() && n.backed());
+    n.f = n.f.failing((0, Way::Half));
+    assert!(matches!(n.run(Act::Confirm), Ok(Some(st)) if st != Status::Ok));
+    n.f = n.f.copy(None);
+    let st = n.status();
+    assert_eq!((st.active, st.confirmed), (0, SLOT_FACTORY));
+    assert_eq!(st.slots[0].state, SlotState::Trying);
+    assert!(matches!(n.run(Act::Confirm), Ok(Some(st)) if st != Status::Ok));
+    n.holds().unwrap_or_else(|Broke(why)| panic!("{why}"));
+    n.run(Act::Boot)
+        .unwrap_or_else(|Broke(why)| panic!("{why}"));
+    assert_eq!(n.running, SLOT_FACTORY);
 }

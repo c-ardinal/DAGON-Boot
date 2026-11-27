@@ -5,7 +5,7 @@ resolver = "2"
 members = ["crates/*"]
 # targets/mcu/build is its own workspace (the MCU packages' build helper,
 # which dagon-topology also uses for the node folders' hashes).
-exclude = ["targets/esp32s3-*", "targets/mcu/build"]
+exclude = ["targets/esp32s3-*", "targets/mcu/build", "fuzz"]
 
 [workspace.package]
 edition = "2021"

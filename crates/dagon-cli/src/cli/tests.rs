@@ -944,3 +944,18 @@ fn headings_cover_every_visible_command_once_in_markdown_order() {
         assert!(at(&w[0]) < at(&w[1]), "{} before {}", w[0], w[1]);
     }
 }
+
+/// The help names the hub by the USB IDs fixed in one place
+/// (`dagon_proto::usb_id`): changing the IDs there fails here until the
+/// help text follows.
+#[test]
+fn the_help_names_the_usb_ids_the_hub_is_found_by() {
+    let ids = format!(
+        "{:04x}:{:04x}",
+        dagon_proto::usb_id::VID,
+        dagon_proto::usb_id::PID
+    );
+    for text in [HUB_PORT, AFTER_HELP] {
+        assert!(text.contains(&ids), "{text}");
+    }
+}

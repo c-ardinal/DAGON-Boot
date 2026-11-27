@@ -21,6 +21,14 @@ pub const PROTO_VERSION: u8 = 0x02;
 pub const HEADER_LEN: usize = 8;
 pub const CRC_LEN: usize = 4;
 
+/// The USB identity a hub's CDC interface shows and the host tools look
+/// for: the one place the IDs are fixed. `c0de:cafe` is a test ID, not an
+/// assigned one (site/src/content/docs/en/explanation/limitations.md).
+pub mod usb_id {
+    pub const VID: u16 = 0xC0DE;
+    pub const PID: u16 = 0xCAFE;
+}
+
 /// Bits of a frame's `flags` byte. A frame with neither `RESP` nor `EVENT`
 /// is a request.
 pub mod flags {

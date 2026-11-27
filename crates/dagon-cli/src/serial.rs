@@ -7,8 +7,8 @@ use dagon_host::{Host, HostClock, Transport};
 use serialport::{SerialPort, SerialPortType};
 
 /// USB IDs and product string of the hub's CDC interface.
-pub const HUB_VID: u16 = 0xC0DE;
-pub const HUB_PID: u16 = 0xCAFE;
+pub const HUB_VID: u16 = dagon_proto::usb_id::VID;
+pub const HUB_PID: u16 = dagon_proto::usb_id::PID;
 pub const HUB_PRODUCT: &str = "DAGON hub";
 /// Ignored by USB CDC; set for adapters that care.
 const BAUD: u32 = 115_200;

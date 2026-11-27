@@ -62,5 +62,7 @@ links:
 | `node_pins` | table | no | This node's I2C pins by MCU pin name (`{ sda: PB4, scl: PA8 }`), on an end with `addr` (V-01): one of its board's I2C pairs (V-07). |
 | `pins` | table | no | This node's UART pins as GPIO numbers (`{ tx: 26, rx: 27 }`); a UART link names them on at least one end, and a link of any other kind on none (V-01). |
 | `nrst` | integer | no | This node's GPIO driving the other node's reset, for `control.kind: full`. |
-| `boot` | integer | no | This node's GPIO driving the other node's boot pin, for `control.kind: full`. A relay tells its recovery targets apart by port and loader address, one per ROM recovery link (`rom_entry` naming a ROM I2C loader). A target that gives `nrst` and `boot` uses only lines its board wires on those GPIOs. |
+| `boot` | integer | no | This node's GPIO driving the other node's boot pin, for `control.kind: full`. |
 <!-- end of generated table -->
+
+A relay tells its recovery targets apart by port and loader address, one per ROM recovery link (`control.rom_entry` naming a ROM I2C loader). A target that gives `nrst` and `boot` uses only lines its board wires on those GPIOs.

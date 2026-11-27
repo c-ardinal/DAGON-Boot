@@ -657,8 +657,8 @@ mod tests {
             ),
             _ => (
                 dagon_sim::watch_config(),
-                SimFlash::esp32s3_4m(1),
-                Layout::ESP32S3_WATCH,
+                SimFlash::esp32s3(1),
+                Layout::of("esp32s3"),
                 sample::WATCH_1_0_0,
             ),
         };

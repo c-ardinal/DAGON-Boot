@@ -21,7 +21,7 @@ impl Wire {
     fn new(rom: Option<SimEspRom>) -> Self {
         Wire {
             rom,
-            flash: SimFlash::esp32s3_4m(1),
+            flash: SimFlash::esp32s3(1),
             now_ms: 0,
             progress: Vec::new(),
             corrupt: None,
@@ -80,7 +80,7 @@ fn image(len: usize, salt: u8) -> Vec<u8> {
 
 fn plan<'a>(regions: &'a [Region<'a>]) -> Plan<'a> {
     Plan {
-        flash_bytes: 0x40_0000,
+        flash_bytes: 0x100_0000,
         regions,
         reboot: true,
         sync_ms: esp::SYNC_MS,
@@ -191,7 +191,7 @@ fn a_block_damaged_on_the_wire_is_refused_by_its_checksum() {
 fn a_region_past_the_flash_size_is_refused() {
     let data = image(16, 4);
     let regions = [Region {
-        addr: 0x3F_FFF8,
+        addr: 0xFF_FFF8,
         data: &data,
     }];
     let mut w = Wire::new(Some(SimEspRom::started(b"")));

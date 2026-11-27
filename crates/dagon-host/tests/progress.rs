@@ -190,8 +190,8 @@ fn config(c: &Connected) -> (Config, SimFlash, Layout) {
         ),
         _ => (
             dagon_sim::watch_config(),
-            SimFlash::esp32s3_4m(1),
-            Layout::ESP32S3_WATCH,
+            SimFlash::esp32s3(1),
+            Layout::of("esp32s3"),
         ),
     };
     cfg.target_tag = target_tag(&connected_tag(c));

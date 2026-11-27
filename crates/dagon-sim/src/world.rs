@@ -5,10 +5,9 @@
 //! What the simulator models bounds it: the node the PC is connected to
 //! relays over the links updating runs over (I2C and UART; a node that
 //! relays as a node is on a UART link), to nodes whose definitions give
-//! a kind S flash layout (`[layout]` with `stage0` and `app_log`) or are
-//! the one the fixed vendor-stage2 layout models
-//! ([`Layout::ESP32S3_WATCH`]). A topology outside that is refused by name,
-//! never simulated as something else.
+//! a kind S flash layout (`[layout]` with `stage0` and `app_log`) or the
+//! partitions of a vendor boot stage (`Layout::of_definition`). A topology
+//! outside that is refused by name, never simulated as something else.
 
 use dagon_agent::Config;
 use dagon_format::header::target_tag;
@@ -27,26 +26,22 @@ fn modelled(def: &McuDef, seed: u64) -> Result<(SimFlash, Layout), String> {
             def.id
         ));
     }
-    if let Some(layout) = Layout::of_definition(def) {
-        // One byte at a time: the finest any chip programs, so every write
-        // of DAGON's (whole `write_unit`s) and of a ROM loader is in units.
-        let flash = SimFlash::of_definition(def, 1, seed)
-            .ok_or_else(|| format!("MCU definition {} has no [execution]", def.id))?;
-        return Ok((flash, layout));
-    }
-    let fixed = Layout::ESP32S3_WATCH;
-    if def.id == fixed.mcu {
-        let def: &'static McuDef = Box::leak(Box::new(def.clone()));
-        let layout = Layout {
-            def: Some(def),
-            ..fixed
-        };
-        return Ok((SimFlash::esp32s3_4m(seed), layout));
-    }
-    Err(format!(
-        "the simulator models no flash layout for MCU {} (its definition has no [layout] stage0 and app_log)",
-        def.id
-    ))
+    let Some(layout) = Layout::of_definition(def) else {
+        return Err(format!(
+            "the simulator models no flash layout for MCU {} (its definition has neither [layout] stage0 and app_log nor the partitions of a vendor boot stage)",
+            def.id
+        ));
+    };
+    // With a stage0, one byte at a time: the finest any chip programs, so
+    // every write of DAGON's (whole `write_unit`s) and of a ROM loader is
+    // in units. A vendor boot stage's flash takes whole `write_unit`s.
+    let write = match (def.layout.stage0, def.execution.as_ref()) {
+        (None, Some(e)) => e.write_unit,
+        _ => 1,
+    };
+    let flash = SimFlash::of_definition(def, write, seed)
+        .ok_or_else(|| format!("MCU definition {} has no [execution]", def.id))?;
+    Ok((flash, layout))
 }
 
 /// Node `n` with an empty flash, answering frames of up to `payload` bytes.

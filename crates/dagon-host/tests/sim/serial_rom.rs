@@ -28,10 +28,10 @@ fn sample() -> (Sim, Host<Sim, Sim>) {
 /// The simulated watch keeps its recovery agent as the layout gives it:
 /// the header right before the body.
 fn sim_map() -> SerialRomMap {
-    let (base, len) = Layout::ESP32S3_WATCH.factory.unwrap();
+    let (base, len) = Layout::of("esp32s3").factory.unwrap();
     SerialRomMap {
         mcu_id: image::mcu_id_of("esp32s3").unwrap(),
-        flash_bytes: 0x40_0000,
+        flash_bytes: 0x100_0000,
         agent: RomSlot {
             header: base,
             load: base + HEADER_SIZE as u32,
@@ -84,7 +84,7 @@ fn with_watch<R>(s: &Sim, f: impl FnOnce(&mut SimNode) -> R) -> R {
 
 /// What the watch's factory slot holds, `len` bytes from its start.
 fn factory(s: &Sim, len: usize) -> Vec<u8> {
-    let (base, _) = Layout::ESP32S3_WATCH.factory.unwrap();
+    let (base, _) = Layout::of("esp32s3").factory.unwrap();
     with_watch(s, |w| w.flash().peek(base, len as u32).unwrap().to_vec())
 }
 

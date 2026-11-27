@@ -57,7 +57,7 @@ ALLOWED = {
         "the banner the simulated ROM serial loader prints, as the chip's ROM prints it",
     ),
     "crates/dagon-sim/src/flash.rs": (
-        4,
+        5,
         "the simulator's fixed sample flashes",
     ),
     "crates/dagon-sim/src/lib.rs": (
@@ -69,12 +69,8 @@ ALLOWED = {
         "the simulator's fixed sample ROM loader (its default chip's erase times)",
     ),
     "crates/dagon-sim/src/store.rs": (
-        3,
+        1,
         "the simulator's fixed sample layouts",
-    ),
-    "crates/dagon-sim/src/world.rs": (
-        2,
-        "the one vendor-stage2 layout and flash the simulator models, picked by the id its fixed layout carries",
     ),
     "web/src/app/sample.ts": (
         8,

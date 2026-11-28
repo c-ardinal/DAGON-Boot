@@ -199,7 +199,7 @@ impl McuDef {
     }
 
     /// The time limits of a node of this MCU on `board`: its effective
-    /// erase layout and the MCU's `[watchdog]` trial;
+    /// erase layout and the MCU's `[watchdog]` trial and start;
     /// [`NodeTimings::FALLBACK`] without `[watchdog]`.
     pub fn timings_on(&self, board: Option<&BoardDef>) -> NodeTimings<OwnedLayout> {
         match self.watchdog {
@@ -207,6 +207,7 @@ impl McuDef {
                 erase: self.erase_layout_on(board),
                 trial_ms: w.trial_ms,
                 trial_attempts: w.trial_attempts,
+                start_ms: w.start_ms.unwrap_or(dagon_port::timeout::START_FALLBACK_MS),
             },
             None => NodeTimings::FALLBACK,
         }

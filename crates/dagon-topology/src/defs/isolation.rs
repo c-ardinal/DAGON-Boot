@@ -359,6 +359,14 @@ pub struct Watchdog {
     /// Boots the boot stage gives a pending image before it rolls back
     /// (the boot core's limit, or the vendor second stage's).
     pub trial_attempts: u8,
+    /// The longest from a reset until the image the boot stages start
+    /// answers (stage0's and the boot core's checks, the image's start),
+    /// ms: with `trial_attempts` and `trial_ms`, how long a host waits
+    /// after REBOOT for a full rollback
+    /// (`dagon_port::timeout::NodeTimings::reboot_wait_ms`). Left out:
+    /// `dagon_port::timeout::START_FALLBACK_MS`.
+    #[serde(default)]
+    pub start_ms: Option<u32>,
     /// The watchdog-reset flag the lockup fuse needs (a part the design no
     /// longer has; the limitations page lists it), as a fact: where it comes from, or `none`.
     pub flag: Fact<WatchdogFlag>,
@@ -1004,6 +1012,9 @@ pub(super) fn watchdog(m: &McuDef) -> Result<(), String> {
     }
     fail(w.trial_attempts == 0, || {
         "watchdog.trial_attempts must be above 0".into()
+    })?;
+    fail(w.start_ms == Some(0), || {
+        "watchdog.start_ms must be above 0".into()
     })
 }
 

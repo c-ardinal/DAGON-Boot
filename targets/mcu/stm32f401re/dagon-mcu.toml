@@ -231,6 +231,13 @@ confirmed_ms = 8_000
 range_ms = { min = 1, max = 32_768 }
 # The boot core starts a pending image this many times before it rolls back.
 trial_attempts = 3
+# The longest from a reset until the image the boot stages start answers:
+# stage0's signature check of the boot core, the boot core's check of the
+# app, the app's start. On the NUCLEO-F401RE a boot core that fails its own
+# check took about 31 s from REBOOT until the confirmed core's app answered
+# HELLO, three trials of 8 s included (hardware test core-seg, GitHub issue
+# #150): about 1.75 s for each of the four starts. 2.5 s leaves room above it.
+start_ms = 2_500
 # The lockup fuse's watchdog-reset flag: RCC_CSR IWDGRSTF/WWDGRSTF (RM0368,
 # RCC clock control & status register), set by a watchdog reset, kept over
 # every reset but a power reset, cleared by writing RMVF. Unverified

@@ -1430,9 +1430,97 @@ fn the_relay_refuses_what_it_cannot_carry_before_forwarding() {
     run(&clock, &bus, workers, scenario.as_mut());
 }
 
+/// A link worker that never ends its exchange (a driver that does not
+/// return): the relay answers E_TIMEOUT itself while the PC still waits for
+/// the answer (the RELAY's timeout plus `REQUEST_MS`), and goes on serving.
+#[test]
+fn a_stuck_link_worker_is_answered_for_before_the_pc_gives_up() {
+    struct Stuck;
+    impl NodeLink for Stuck {
+        fn link_id(&self) -> u8 {
+            BUS
+        }
+        fn max_payload(&self) -> usize {
+            max_payload::I2C
+        }
+        fn hello_timeout_ms(&self) -> u16 {
+            50
+        }
+        async fn exchange(
+            &mut self,
+            _: u8,
+            _: &[u8],
+            _: u16,
+            _: &mut [u8],
+        ) -> Result<usize, Status> {
+            poll_fn(|_| Poll::<()>::Pending).await;
+            unreachable!()
+        }
+    }
+    let (bus, _) = sample_bus();
+    let clock = VirtualClock::default();
+    let port: Port<[u8; frame_len(max_payload::I2C)]> = Port::new(&LINKS[0]);
+    let links = [LinkRoute {
+        link: LINKS[0],
+        port: Some(&port),
+    }];
+    let (requests, replies) = (Frames::new(), Frames::new());
+    let (own, _app) = agent();
+    let relay: Relay<'_, _, SimLines<'_>, _, _> = Relay {
+        agent: own,
+        links: &links,
+        recovery: &mut [],
+        watch: NoWatchdog,
+        clock: clock.clone(),
+        config: Config::default(),
+    };
+    let up = ScriptedPc {
+        requests: &requests,
+        replies: &replies,
+        frame: Vec::new(),
+        max: max_payload::USB,
+    };
+    let pc = Pc {
+        requests: &requests,
+        replies: &replies,
+        seq: Cell::new(0),
+    };
+    let scenario = async {
+        for round in 0..3u64 {
+            let t0 = clock.now_ms();
+            let (status, _) = pc.hello(BUS, NODE_I2C_ADDR).await;
+            let took = clock.now_ms() - t0;
+            assert_eq!(status, Status::Timeout, "round {round}");
+            assert!(
+                took < 300 + u64::from(dagon_port::timeout::REQUEST_MS),
+                "round {round}: answered after {took} ms"
+            );
+        }
+        // Its own requests are still answered.
+        assert_eq!(pc.show().await, Status::Ok);
+    };
+    let serving = async move {
+        serve(relay, up).await;
+    };
+    let worker = async {
+        let mut l = Stuck;
+        run_link(&mut l, &port, NoWatchdog, task::link(0)).await;
+    };
+    let (mut serving, mut worker, mut scenario) = (
+        std::pin::pin!(serving),
+        std::pin::pin!(worker),
+        std::pin::pin!(scenario),
+    );
+    let workers: Vec<Pin<&mut dyn Future<Output = ()>>> = vec![serving.as_mut(), worker.as_mut()];
+    run(&clock, &bus, workers, scenario.as_mut());
+}
+
 #[test]
 fn the_defaults_are_the_relays_values() {
     let c = Config::default();
-    assert_eq!((c.raw_timeout_ms, c.port_margin_ms), (1_000, 1_000));
+    assert_eq!(
+        (c.raw_timeout_ms, c.port_margin_ms),
+        (1_000, dagon_port::timeout::RELAY_ANSWER_MARGIN_MS)
+    );
     assert_eq!((task::PC, task::link(0), task::count(2)), (0, 1, 3));
 }

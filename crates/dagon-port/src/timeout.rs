@@ -9,7 +9,7 @@
 //! | XFER_END, SET_PENDING, CONFIRM (verify or write state) | [`VERIFY_MS`] |
 //! | a node-side conformance test, from CONF_RUN to its result | [`NodeTimings::conf_deadline_s`], asked for every [`CONF_POLL_MS`] |
 //! | whole image transfer | [`transfer_ms`]: size / link floor ([`link_limits`]) + [`TRANSFER_MARGIN_MS`] |
-//! | REBOOT until the expected HELLO (also covers a full rollback) | [`REBOOT_WAIT_MS`] |
+//! | REBOOT until the expected HELLO (also covers a full rollback) | [`NodeTimings::reboot_wait_ms`]: the delay the app may ask, every trial boot and the boot after them ([`NodeTimings::start_ms`] each) + [`REBOOT_MARGIN_MS`] |
 //!
 //! The node and the host plan an erase with the same two functions
 //! ([`erase_ranges`], [`plan_erase`]) on the same [`EraseLayout`], so the
@@ -22,6 +22,12 @@ pub const REQUEST_MS: u32 = 300;
 /// How long a relay waits for a node when the RELAY request names no
 /// timeout: the plain-response wait.
 pub const RELAY_WAIT_MS: u16 = REQUEST_MS as u16;
+/// How much longer than a RELAY's own timeout a relaying node waits for
+/// its link worker before it answers E_TIMEOUT itself. A requester waits
+/// [`REQUEST_MS`] longer than the timeout it names, so the relay's answer,
+/// whatever its link worker does, arrives while the requester still waits:
+/// a late answer would meet the requester's next request on a busy link.
+pub const RELAY_ANSWER_MARGIN_MS: u32 = REQUEST_MS / 3;
 pub const VERIFY_MS: u32 = 5_000;
 /// Pause between CONF_RESULT polls while a node-side test runs.
 pub const CONF_POLL_MS: u32 = 1_000;
@@ -31,7 +37,16 @@ pub const CONF_MARGIN_S: u32 = 10;
 pub const CONF_WRITE_MS: u32 = 500;
 /// The signature checks of CT-07 in software on the slowest MCU.
 pub const CONF_SIGN_MS: u32 = 20_000;
-pub const REBOOT_WAIT_MS: u32 = 30_000;
+/// Added to a node's rollback in [`NodeTimings::reboot_wait_ms`]: the
+/// reboot delay before the reset and a HELLO poll that just missed it.
+pub const REBOOT_MARGIN_MS: u32 = 2_000;
+/// A node's start ([`NodeTimings::start_ms`]) when its definition gives
+/// none (`[watchdog] start_ms`).
+pub const START_FALLBACK_MS: u32 = 2_000;
+/// The longest a host waits for a node after REBOOT
+/// ([`NodeTimings::reboot_wait_ms`]); a definition that needs more is
+/// refused.
+pub const REBOOT_WAIT_MAX_MS: u32 = 600_000;
 pub const TRANSFER_MARGIN_MS: u32 = 30_000;
 /// Lowest accepted effective transfer speed on I2C, bytes per second.
 pub const I2C_FLOOR_BPS: u32 = 10_000;
@@ -323,13 +338,18 @@ impl<R: AsRef<[EraseRegion]>, S: AsRef<[SlotLayout]>> EraseLayout<R, S> {
 
 /// A node's own time limits, from its MCU definition: its erase layout
 /// (`[execution] erase_regions` and `[[slot_layout]]`), its trial period
-/// (`[watchdog] trial_ms`) and the boots a pending image gets
-/// (`[watchdog] trial_attempts`).
+/// (`[watchdog] trial_ms`), the boots a pending image gets
+/// (`[watchdog] trial_attempts`) and how long one start takes
+/// (`[watchdog] start_ms`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct NodeTimings<L = EraseLayout> {
     pub erase: Option<L>,
     pub trial_ms: u32,
     pub trial_attempts: u8,
+    /// The longest from a reset until the image the boot stages start
+    /// answers: stage0's and the boot core's checks and the image's own
+    /// start ([`START_FALLBACK_MS`] without a definition value).
+    pub start_ms: u32,
 }
 
 /// The [`NodeTimings::check`] rule a node's timings break.
@@ -341,9 +361,9 @@ pub enum TimingError {
     /// `sum(CONFIRM_RETRY_MS) + NODE_POLL_MS + 2 * REQUEST_MS < trial_ms`:
     /// the CONFIRM retries must fit one trial.
     ConfirmMissesTrial,
-    /// `REBOOT_WAIT_MS >= trial_attempts * (trial_ms + 1000) + 2000`: the
-    /// wait for the new HELLO must cover a full local rollback.
-    RebootWaitMissesRollback,
+    /// [`NodeTimings::reboot_wait_ms`] `<= REBOOT_WAIT_MAX_MS`: the wait
+    /// for the new HELLO, which covers a full rollback, must end.
+    RebootWaitTooLong,
 }
 
 impl core::fmt::Display for TimingError {
@@ -355,8 +375,8 @@ impl core::fmt::Display for TimingError {
             Self::ConfirmMissesTrial => {
                 "the CONFIRM retries + NODE_POLL_MS + 2 x REQUEST_MS must be below watchdog.trial_ms"
             }
-            Self::RebootWaitMissesRollback => {
-                "REBOOT_WAIT_MS must cover watchdog.trial_attempts x (watchdog.trial_ms + 1000) + 2000"
+            Self::RebootWaitTooLong => {
+                "watchdog.trial_ms / 2 + watchdog.trial_attempts x (watchdog.trial_ms + watchdog.start_ms) + watchdog.start_ms + REBOOT_MARGIN_MS must be at most REBOOT_WAIT_MAX_MS"
             }
         })
     }
@@ -370,7 +390,32 @@ impl<L> NodeTimings<L> {
         erase: None,
         trial_ms: 8_000,
         trial_attempts: 3,
+        start_ms: START_FALLBACK_MS,
     };
+
+    /// How long a host waits after REBOOT for the node's HELLO: the delay
+    /// the app may ask before the reset (at most half the shorter watchdog
+    /// period, `dagon_events::Watchdog::reboot_delay_max_ms`, so at most
+    /// `trial_ms` / 2), every boot of a full rollback, each trial ended by
+    /// the watchdog (`trial_attempts` x (`trial_ms` + `start_ms`)), then the
+    /// start of the image it goes back to (`start_ms`), plus
+    /// [`REBOOT_MARGIN_MS`]. `None` past `u32`.
+    pub fn reboot_wait(&self) -> Option<u32> {
+        let trial = u64::from(self.trial_ms) + u64::from(self.start_ms);
+        let ms = trial
+            .checked_mul(self.trial_attempts.into())?
+            .checked_add(u64::from(self.trial_ms / 2))?
+            .checked_add(u64::from(self.start_ms))?
+            .checked_add(u64::from(REBOOT_MARGIN_MS))?;
+        u32::try_from(ms).ok()
+    }
+
+    /// [`NodeTimings::reboot_wait`], at most [`REBOOT_WAIT_MAX_MS`] (the
+    /// most a definition that passes [`NodeTimings::check`] needs).
+    pub fn reboot_wait_ms(&self) -> u32 {
+        self.reboot_wait()
+            .map_or(REBOOT_WAIT_MAX_MS, |ms| ms.min(REBOOT_WAIT_MAX_MS))
+    }
 
     /// Whether the host's fixed waits fit this node's trial: each rule in
     /// `u64`, an overflow failing the rule it occurs in.
@@ -384,13 +429,9 @@ impl<L> NodeTimings<L> {
         if retries + poll >= trial {
             return Err(TimingError::ConfirmMissesTrial);
         }
-        let rollback = trial
-            .checked_add(1_000)
-            .and_then(|t| t.checked_mul(self.trial_attempts.into()))
-            .and_then(|t| t.checked_add(2_000));
-        match rollback {
-            Some(ms) if u64::from(REBOOT_WAIT_MS) >= ms => Ok(()),
-            _ => Err(TimingError::RebootWaitMissesRollback),
+        match self.reboot_wait() {
+            Some(ms) if ms <= REBOOT_WAIT_MAX_MS => Ok(()),
+            _ => Err(TimingError::RebootWaitTooLong),
         }
     }
 }
@@ -451,12 +492,18 @@ impl<R: AsRef<[EraseRegion]>, S: AsRef<[SlotLayout]>> NodeTimings<EraseLayout<R,
             erase: self.erase.as_ref().map(EraseLayout::borrowed),
             trial_ms: self.trial_ms,
             trial_attempts: self.trial_attempts,
+            start_ms: self.start_ms,
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_relay_answers_while_the_requester_still_waits() {
+        const { assert!(super::RELAY_ANSWER_MARGIN_MS < super::REQUEST_MS) };
+    }
+
     use super::*;
 
     fn erasing(unit_max_ms: u32) -> NodeTimings<EraseLayout<[EraseRegion; 1], [SlotLayout; 0]>> {
@@ -467,6 +514,7 @@ mod tests {
             }),
             trial_ms: 8_000,
             trial_attempts: 3,
+            start_ms: START_FALLBACK_MS,
         }
     }
 
@@ -717,6 +765,7 @@ mod tests {
             erase: None,
             trial_ms,
             trial_attempts,
+            start_ms: START_FALLBACK_MS,
         }
     }
 
@@ -739,16 +788,43 @@ mod tests {
             Err(TimingError::ConfirmMissesTrial)
         );
         assert_eq!(timings(retries + poll + 1, 1).check(), Ok(()));
-        // attempts x (trial + 1000) + 2000 = REBOOT_WAIT_MS exactly.
-        let trial = (REBOOT_WAIT_MS - 2_000) / 4 - 1_000;
+        // trial / 2 + 4 x (trial + start) + start + margin: the longest
+        // trial within the most, and one ms more past it.
+        let start = START_FALLBACK_MS;
+        let trial = (REBOOT_WAIT_MAX_MS - REBOOT_MARGIN_MS - 5 * start) * 2 / 9;
+        assert!(timings(trial, 4).reboot_wait_ms() <= REBOOT_WAIT_MAX_MS);
         assert_eq!(timings(trial, 4).check(), Ok(()));
         assert_eq!(
             timings(trial + 1, 4).check(),
-            Err(TimingError::RebootWaitMissesRollback)
+            Err(TimingError::RebootWaitTooLong)
         );
         assert_eq!(
             timings(trial, 5).check(),
-            Err(TimingError::RebootWaitMissesRollback)
+            Err(TimingError::RebootWaitTooLong)
+        );
+    }
+
+    /// The wait after REBOOT covers a full rollback of the node's own
+    /// definition: each trial and each start, the last start included.
+    #[test]
+    fn the_reboot_wait_covers_every_start_of_a_rollback() {
+        let t = NodeTimings {
+            start_ms: 2_500,
+            ..timings(8_000, 3)
+        };
+        assert_eq!(
+            t.reboot_wait_ms(),
+            4_000 + 3 * (8_000 + 2_500) + 2_500 + REBOOT_MARGIN_MS
+        );
+        // A slower start waits longer: the wait is the definition's.
+        let slower = NodeTimings {
+            start_ms: 5_000,
+            ..t
+        };
+        assert!(slower.reboot_wait_ms() > t.reboot_wait_ms());
+        assert_eq!(
+            timings(u32::MAX, u8::MAX).reboot_wait_ms(),
+            REBOOT_WAIT_MAX_MS
         );
     }
 
@@ -756,15 +832,15 @@ mod tests {
     fn the_largest_values_a_definition_accepts_fail_without_overflow() {
         assert_eq!(
             timings(u32::MAX, u8::MAX).check(),
-            Err(TimingError::RebootWaitMissesRollback)
+            Err(TimingError::RebootWaitTooLong)
         );
         assert_eq!(
             timings(u32::MAX, 1).check(),
-            Err(TimingError::RebootWaitMissesRollback)
+            Err(TimingError::RebootWaitTooLong)
         );
         assert_eq!(
             timings(8_000, u8::MAX).check(),
-            Err(TimingError::RebootWaitMissesRollback)
+            Err(TimingError::RebootWaitTooLong)
         );
     }
 }

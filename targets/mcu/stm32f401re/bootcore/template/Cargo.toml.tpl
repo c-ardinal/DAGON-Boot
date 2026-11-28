@@ -23,6 +23,11 @@ test = false
 no-confirm = ["dagon-stm32f401re-bootcore/no-confirm"]
 # Linked for boot core slot B (a release carries a core for each slot).
 slot-b = ["dagon-stm32f401re-bootcore/slot-b"]
+# Measuring builds, written once by samples/hardware-test/measure.py: the
+# microseconds from the boot core's start to the end of its listen window,
+# or to its boot decision, kept for a probe to read.
+listen-time = ["dagon-stm32f401re-bootcore/listen-time"]
+decide-time = ["dagon-stm32f401re-bootcore/decide-time"]
 
 [dependencies]
 {{dep:dagon-stm32f401re-bootcore}}

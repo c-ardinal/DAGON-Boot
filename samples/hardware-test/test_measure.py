@@ -174,12 +174,27 @@ class StillTheFirmwares(unittest.TestCase):
         for name in ["listen-time", "decide-time"]:
             m = measure.MEASUREMENTS[name]
             for mcu, folder in cores:
+                # The boot crate's own feature (its stamp keeps a default
+                # line of its own features) reaches the boot core library's.
+                own = measure.feature_of(m, mcu)
+                self.assertNotIn("/", own)
+                tpl = (folder / "bootcore/template/Cargo.toml.tpl").read_text(encoding="utf-8")
+                self.assertIn(f'\n{own} = ["dagon-{mcu}-bootcore/{own}"]\n', tpl, mcu)
                 cargo = tomllib.loads((folder / "bootcore/Cargo.toml").read_text(encoding="utf-8"))
-                lib, feature = measure.feature_of(m, mcu).split("/")
-                self.assertEqual(cargo["package"]["name"], lib)
-                self.assertIn(feature, cargo["features"], mcu)
+                self.assertEqual(cargo["package"]["name"], f"dagon-{mcu}-bootcore")
+                self.assertIn(own, cargo["features"], mcu)
                 # Kept compiling by the firmware lint.
-                self.assertIn(feature, cargo["package"]["metadata"]["dagon"]["lint"]["features"], mcu)
+                self.assertIn(own, cargo["package"]["metadata"]["dagon"]["lint"]["features"], mcu)
+
+    def test_the_boot_core_builds_where_measure_looks(self):
+        flash = (REPO / "crates/dagon-cli/src/flash.rs").read_text(encoding="utf-8")
+        self.assertIn('cfg.base.join("out/boot/target")', flash)
+        self.assertEqual(measure.elf_folder("p", "n", measure.MEASUREMENTS["listen-time"]),
+                         Path("p/out/boot/target"))
+
+    def test_the_stamp_keeps_a_default_of_own_features(self):
+        src = (REPO / "crates/dagon-topology/src/defs/boot_folder.rs").read_text(encoding="utf-8")
+        self.assertIn("without_own_default(&without_own_version(&manifest", src)
 
     def test_the_app_packages_have_the_masking_build(self):
         m = measure.MEASUREMENTS["masked-time"]
@@ -296,13 +311,25 @@ class Runs(unittest.TestCase):
     def test_boot_core_without_a_probe_takes_the_led_groups(self):
         proj = self.project({"kind": "uf2-drive"}, mcu="rp2040")
         boot = proj / "boot/n/Cargo.toml"
-        boot.write_text('[package]\nname = "n"\n\n[features]\n')
-        rel = proj / "out/flash/target/bootcore/thumb/release"
+        boot.write_text('[package]\nname = "n"\n\n[features]\nlisten-time = ["c/listen-time"]\n')
+        rel = proj / "out/boot/target/thumb/release"
         rel.mkdir(parents=True)
-        (rel / "bootcore").write_bytes(elf32({"DAGON_LISTEN_US": 0x20000010}))
-        self.assertEqual(self.run_it(self.args(proj, drive="E:"), name="listen-time", answer="5 2"), 0)
+        (rel / "boot").write_bytes(elf32({"DAGON_LISTEN_US": 0x20000010}))
+        self.boot_flashes = []
+        flash_seen = self.run_it(self.args(proj, drive="E:"), name="listen-time", answer="5 2")
+        self.assertEqual(flash_seen, 0)
+        self.assertEqual(boot.read_text(), '[package]\nname = "n"\n\n[features]\nlisten-time = ["c/listen-time"]\n')
         self.assertEqual(self.reads, [])
         self.assertIn(b'"listen_us": 52000', next((self.root / "rec").glob("*/result.json")).read_bytes())
+
+    def test_a_boot_crate_without_the_feature_is_refused_before_any_write(self):
+        proj = self.project({"kind": "probe-rs", "chip": "STM32F401RETx"})
+        boot = proj / "boot/n/Cargo.toml"
+        boot.write_text('[package]\nname = "n"\n\n[features]\nslot-b = []\n')
+        self.assertEqual(self.run_it(self.args(proj), name="decide-time"), 1)
+        self.assertEqual(self.flashes, [])
+        result = next((self.root / "rec").glob("*/result.json")).read_text()
+        self.assertIn("run `dagon gen`", result)
 
     def app(self, proj):
         """The node's app crate, `[build.n] package = "app"`, built."""

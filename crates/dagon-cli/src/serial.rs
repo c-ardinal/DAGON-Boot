@@ -12,8 +12,14 @@ pub const HUB_PID: u16 = dagon_proto::usb_id::PID;
 pub const HUB_PRODUCT: &str = "DAGON hub";
 /// Ignored by USB CDC; set for adapters that care.
 const BAUD: u32 = 115_200;
-/// How long one read waits for bytes.
+/// How long one read waits for bytes (also the port's bound on one write
+/// call, which [`write_within`] repeats).
 const READ_WAIT: Duration = Duration::from_millis(10);
+/// How long a request's bytes may wait for the hub to take them: a hub
+/// takes the next request once it answered the last, and answers within
+/// what the host waits (`dagon_port::timeout::RELAY_ANSWER_MARGIN_MS`), so
+/// one plain request's time is the most it stays busy.
+const WRITE_WAIT: Duration = Duration::from_millis(dagon_port::timeout::REQUEST_MS as u64);
 
 /// Name of the first port that looks like the hub.
 pub fn find_hub() -> Result<String, String> {
@@ -67,13 +73,36 @@ impl Serial {
             .ok_or_else(|| io::Error::from(io::ErrorKind::NotConnected))
     }
 
-    /// Drops the port after an I/O error so the next reopen starts clean.
+    /// Drops the port after an I/O error so the next reopen starts clean;
+    /// a timeout leaves it (the hub is busy, not gone: the next request,
+    /// to it or to another node, goes over the same port).
     fn check<T>(&mut self, r: io::Result<T>) -> io::Result<T> {
-        if r.is_err() {
+        if r.as_ref()
+            .is_err_and(|e| e.kind() != io::ErrorKind::TimedOut)
+        {
             self.port = None;
         }
         r
     }
+}
+
+/// Writes all of `bytes` to `w`, whose own write gives up after
+/// [`READ_WAIT`] (`TimedOut`, e.g. Windows' ERROR_SEM_TIMEOUT while the
+/// hub takes no bytes), trying again until `wait` has passed. No flush
+/// follows, as before: Windows' `FlushFileBuffers` waits on the hub
+/// without a timeout.
+fn write_within(w: &mut dyn Write, mut bytes: &[u8], wait: Duration) -> io::Result<()> {
+    let start = Instant::now();
+    while !bytes.is_empty() {
+        match w.write(bytes) {
+            Ok(0) => return Err(io::ErrorKind::WriteZero.into()),
+            Ok(n) => bytes = &bytes[n..],
+            Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
+            Err(e) if e.kind() == io::ErrorKind::TimedOut && start.elapsed() < wait => {}
+            Err(e) => return Err(e),
+        }
+    }
+    Ok(())
 }
 
 impl Transport for Serial {
@@ -88,7 +117,9 @@ impl Transport for Serial {
     }
 
     async fn write(&mut self, bytes: &[u8]) -> io::Result<()> {
-        let r = self.port().and_then(|p| p.write_all(bytes));
+        let r = self
+            .port()
+            .and_then(|p| write_within(p.as_mut(), bytes, WRITE_WAIT));
         self.check(r)
     }
 
@@ -123,4 +154,58 @@ pub fn host(port: Option<&str>) -> Result<SerialHost, String> {
     let mut h = Host::new(Serial::open(port)?, Wall(Instant::now()));
     h.note = Some(Box::new(|line| println!("{line}")));
     Ok(h)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A port whose writes time out `busy` times, then take `step` bytes
+    /// each.
+    struct Busy {
+        busy: usize,
+        step: usize,
+        got: Vec<u8>,
+    }
+
+    impl Write for Busy {
+        fn write(&mut self, b: &[u8]) -> io::Result<usize> {
+            if self.busy > 0 {
+                self.busy -= 1;
+                return Err(io::ErrorKind::TimedOut.into());
+            }
+            let n = b.len().min(self.step);
+            self.got.extend_from_slice(&b[..n]);
+            Ok(n)
+        }
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    /// A hub busy for a few of the port's write bounds still gets the whole
+    /// request; one that takes nothing for the whole wait ends in a timeout.
+    #[test]
+    fn a_write_waits_out_a_busy_hub_within_its_bound() {
+        // What the port gives on Windows while the hub takes no bytes.
+        #[cfg(windows)]
+        assert_eq!(
+            io::Error::from_raw_os_error(121).kind(),
+            io::ErrorKind::TimedOut
+        );
+        let mut w = Busy {
+            busy: 3,
+            step: 5,
+            got: Vec::new(),
+        };
+        write_within(&mut w, b"0123456789ab", Duration::from_secs(5)).unwrap();
+        assert_eq!(w.got, b"0123456789ab");
+        let mut gone = Busy {
+            busy: usize::MAX,
+            step: 1,
+            got: Vec::new(),
+        };
+        let e = write_within(&mut gone, b"x", Duration::from_millis(20)).unwrap_err();
+        assert_eq!(e.kind(), io::ErrorKind::TimedOut);
+    }
 }

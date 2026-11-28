@@ -25,6 +25,11 @@ diag = ["dagon-rp2040-bootcore/diag"]
 no-confirm = ["dagon-rp2040-bootcore/no-confirm"]
 # Linked for boot core slot B (a release carries a core for each slot).
 slot-b = ["dagon-rp2040-bootcore/slot-b"]
+# Measuring builds, written once by samples/hardware-test/measure.py: the
+# microseconds from the boot core's start to the end of its listen window,
+# or to its boot decision, kept for a probe to read.
+listen-time = ["dagon-rp2040-bootcore/listen-time"]
+decide-time = ["dagon-rp2040-bootcore/decide-time"]
 
 [dependencies]
 {{dep:dagon-rp2040-bootcore}}

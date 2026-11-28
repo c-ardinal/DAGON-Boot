@@ -8,6 +8,10 @@
 //! - every bus transaction is given up at that deadline ([`Pace::until`]),
 //!   so a stuck bus ends in a timeout, never a wait without end (a pause
 //!   between two tries may end one poll past it);
+//! - the tries end at the deadline by the clock too: a transaction that
+//!   fails at once, without waiting for the bus (a driver left in an
+//!   aborted state), would otherwise be tried again for good, as
+//!   [`Pace::until`] gives up only a transaction still waiting;
 //! - a response that is no whole frame is refused; the start of a frame of
 //!   another wire version is handed over (the node's refusal).
 
@@ -36,7 +40,9 @@ pub trait Pace {
     fn now_ms(&self) -> u64;
     /// Waits `ms`.
     async fn pause(&mut self, ms: u32);
-    /// `f`, given up when the clock reaches `until_ms` first (`None`).
+    /// `f`, given up when the clock reaches `until_ms` while it still waits
+    /// (`None`); an `f` that is done when polled is taken whatever the
+    /// clock reads (embassy-time's `with_deadline`).
     async fn until<T>(&mut self, until_ms: u64, f: impl Future<Output = T>) -> Option<T>;
 }
 
@@ -138,6 +144,15 @@ impl<I: I2cBus, P: Pace> I2cLink<I, P> {
     pub async fn ask_hello(&mut self, addr: u8, seq: u8) -> Result<HelloResp, NoHello> {
         NodeLink::ask_hello(self, addr, seq).await
     }
+
+    /// E_TIMEOUT once the clock reached the request's deadline: the bound
+    /// on the tries, whether or not a transaction ever waited.
+    fn within_deadline(&self) -> Result<(), LinkError> {
+        if self.pace.now_ms() >= self.deadline {
+            return Err(LinkError::Timeout);
+        }
+        Ok(())
+    }
 }
 
 /// `raw` is the I2C_RAW transfer ([`I2cLink::rom`]).
@@ -193,6 +208,7 @@ impl<I: I2cBus, P: Pace> Link for I2cLink<I, P> {
     async fn read_frame(&mut self) -> Result<&[u8], LinkError> {
         loop {
             self.pace.pause(MAILBOX_POLL_MS).await;
+            self.within_deadline()?;
             let mut st = [0u8; STATE_LEN];
             if self
                 .pace
@@ -235,6 +251,7 @@ impl<I: I2cBus, P: Pace> Link for I2cLink<I, P> {
             .is_err()
         {
             self.pace.pause(MAILBOX_POLL_MS).await;
+            self.within_deadline()?;
         }
         Ok(())
     }
@@ -334,8 +351,10 @@ mod tests {
         }
     }
 
-    /// A clock the test's bus advances; a transaction that has not ended
-    /// by the deadline (a stuck one, or one that ends past it) is given up.
+    /// A clock the test's bus advances. As embassy-time's `with_deadline`
+    /// on the boards: a transaction still waiting at the deadline (a stuck
+    /// one) is given up, one that is done when polled is taken, past the
+    /// deadline too (this bus's transactions are all done at once).
     struct Clock(Rc<Cell<u64>>);
 
     impl Pace for Clock {
@@ -349,8 +368,8 @@ mod tests {
             let mut f = pin!(f);
             let clock = &self.0;
             poll_fn(|cx| match f.as_mut().poll(cx) {
-                Poll::Ready(v) if clock.get() <= until_ms => Poll::Ready(Some(v)),
-                _ => {
+                Poll::Ready(v) => Poll::Ready(Some(v)),
+                Poll::Pending => {
                     clock.set(clock.get().max(until_ms));
                     Poll::Ready(None)
                 }
@@ -424,6 +443,25 @@ mod tests {
         assert!(l.bus.requests.is_empty());
         // The pause before the next try may end past the deadline.
         assert!((50..=50 + u64::from(MAILBOX_POLL_MS)).contains(&clock.get()));
+    }
+
+    /// Every try fails at once, as a driver left in an aborted state does
+    /// (no transaction waits, so `until` gives none up): the tries still
+    /// end at the deadline, by the clock, for the write and for the polls.
+    #[test]
+    fn tries_that_fail_at_once_end_at_the_deadline() {
+        let (mut l, clock) = link(Bus {
+            nacks: usize::MAX,
+            ..Bus::default()
+        });
+        assert_eq!(exchange(&mut l, 40), Err(Status::Timeout));
+        assert!((40..=40 + u64::from(MAILBOX_POLL_MS)).contains(&clock.get()));
+        let (mut l, clock) = link(Bus {
+            deaf: usize::MAX / 2,
+            ..Bus::default()
+        });
+        assert_eq!(exchange(&mut l, 40), Err(Status::Timeout));
+        assert!((40..=40 + u64::from(MAILBOX_POLL_MS)).contains(&clock.get()));
     }
 
     #[test]

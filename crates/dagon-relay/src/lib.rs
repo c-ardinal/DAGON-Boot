@@ -38,7 +38,9 @@ pub struct Config {
     /// Bound on one I2C_RAW request at the link worker.
     pub raw_timeout_ms: u16,
     /// How much longer than a request's own timeout [`serve`] waits for
-    /// the link worker's answer.
+    /// the link worker's answer
+    /// ([`dagon_port::timeout::RELAY_ANSWER_MARGIN_MS`]: less than the
+    /// requester waits beyond it).
     pub port_margin_ms: u32,
 }
 
@@ -46,7 +48,7 @@ impl Default for Config {
     fn default() -> Self {
         Config {
             raw_timeout_ms: 1_000,
-            port_margin_ms: 1_000,
+            port_margin_ms: dagon_port::timeout::RELAY_ANSWER_MARGIN_MS,
         }
     }
 }

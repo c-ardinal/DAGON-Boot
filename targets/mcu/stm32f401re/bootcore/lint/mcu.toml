@@ -983,6 +983,7 @@ source = "internal"
 [watchdog]
 confirmed_ms = 8000
 kind = "iwdg"
+start_ms = 2500
 trial_attempts = 3
 trial_ms = 8000
 

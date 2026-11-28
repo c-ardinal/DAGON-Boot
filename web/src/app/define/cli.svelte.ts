@@ -105,7 +105,22 @@ export function parseLayout(v: unknown): { layout: Layout } | { refused: string 
 /** How saving the 構成 to the project's YAML went. */
 export type SaveResult = 'saved' | 'invalid' | 'busy' | 'failed';
 
-export type JobKind = 'build' | 'sign' | 'release' | 'gen' | 'flash' | 'conform' | 'ai_topology' | string;
+export type JobKind = 'build' | 'sign' | 'release' | 'gen' | 'flash' | 'conform' | 'ai_topology' | 'ai_port' | string;
+
+/** POST /v1/ai/port: the board the agent ports DAGON to (`dagon ai port`). */
+export interface PortRequest {
+  mcu: string;
+  board: string;
+  /** `S`: DAGON's own boot stages; `V`: on the vendor's second stage. */
+  kind: 'S' | 'V';
+  /** What the user says of the board (its parts, its pins); left out when empty. */
+  description?: string;
+}
+
+/** An id as serve takes it for an MCU or a board (`dagon ai port`: letters, digits, `-`, `_`, `.`, up to 32, no `.` first). */
+export const PORT_ID = /^(?!\.)[A-Za-z0-9._-]{1,32}$/;
+/** The longest board description serve takes, in UTF-8 bytes. */
+export const DESCRIPTION_MAX_BYTES = 32 * 1024;
 export type JobState = 'queued' | 'running' | 'question' | 'succeeded' | 'failed' | 'cancelled' | 'unknown';
 
 export interface Job {
@@ -306,10 +321,15 @@ export class Cli {
     const lock = ({ gen: 'gen', build: 'build', sign: 'build', release: 'release', flash: 'flash' } as const)[kind as 'gen'];
     if (lock && this.guard(lock)) return null;
     const r = await this.json<{ job: number }>(route, { body });
-    const job: Job = { id: r.job, kind, state: 'queued', target, stage: '', percent: null, lines: [], result: null, question: null, started: this.d.now(), ended: null };
+    return this.track(kind, r.job, target);
+  }
+
+  /** Lists the job serve has taken as `id`, with what serve said of it before its number was known here. */
+  private track(kind: JobKind, id: number, target: string): Job {
+    const job: Job = { id, kind, state: 'queued', target, stage: '', percent: null, lines: [], result: null, question: null, started: this.d.now(), ended: null };
     this.jobs = [job, ...this.jobs];
-    const said = this.early.filter((e) => e.job === r.job);
-    this.early = this.early.filter((e) => e.job !== r.job);
+    const said = this.early.filter((e) => e.job === id);
+    this.early = this.early.filter((e) => e.job !== id);
     said.forEach((e) => this.event(e));
     return this.jobs[0];
   }
@@ -361,6 +381,23 @@ export class Cli {
 
   flash(node: string): Promise<Job | null> {
     return this.start('flash', 'POST /v1/flash', { node }, node);
+  }
+
+  /**
+   * POST /v1/ai/port: the agent ports DAGON to a board in the project's DAGON
+   * clone. The agent edits files and runs commands there without asking, so
+   * serve takes it only with `accept`, which the caller sends once the user
+   * has agreed to that. `refused` is serve's reason when it does not take it.
+   */
+  async aiPort(req: PortRequest): Promise<Job | { refused: string }> {
+    const description = req.description?.trim();
+    const body = { mcu: req.mcu, board: req.board, kind: req.kind, ...(description ? { description } : {}), accept: true };
+    const r = await this.call('POST /v1/ai/port', { body });
+    if (!r.ok) {
+      const said = (await r.json().catch(() => null)) as { error?: unknown } | null;
+      return { refused: typeof said?.error === 'string' ? said.error : String(r.status) };
+    }
+    return this.track('ai_port', ((await r.json()) as { job: number }).job, `${req.mcu} · ${req.board}`);
   }
 
   async answer(job: Job, text: string): Promise<void> {

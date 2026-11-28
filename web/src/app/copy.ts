@@ -1219,6 +1219,7 @@ export const MENU = {
   rollback: '前のバージョンへの復元',
   applyProposal: 'DAGONの案の反映',
   cli: 'CLIの接続とAPIキーの表示',
+  port: 'エージェントによるボード移植',
   /** The view toggle, in the menu only while the bar is too narrow to hold it. */
   viewTable: '表形式の表示',
   viewGraph: 'グラフ形式の表示',
@@ -1250,6 +1251,7 @@ export const MENU = {
     talk: 'DAGONの会話ウィンドウを表示します',
     apply: 'DAGONが提示した構成の変更案を構成に反映します',
     cli: 'dagon serveとの接続と登録したAPIキーを表示します',
+    port: '連携したエージェントが、DAGONを新規のボードへ移植します',
     unlink: 'AIのエージェントとの接続と同意を取消します',
     help: 'よくある問題の原因と対処方法',
     keys: 'キーボードでの操作の一覧',
@@ -1306,6 +1308,60 @@ export const SKELETON = {
   startFailed: 'dagon serveが受付を拒否しました',
   retry: '再生成',
   cancel: '中止',
+} as const;
+
+/** ボード移植 (`dagon ai port`): the linked agent ports DAGON to a board in the project's DAGON clone. */
+export const PORT = {
+  title: 'ボード移植',
+  state: {
+    running: '… 移植中',
+    done: '✓ 完了',
+    failed: '! 失敗',
+    cancelled: '中止',
+  },
+  intro: '連携したエージェントが、プロジェクトの参照するDAGONのソースで、指定のボードへの移植と適合試験を実行します。',
+  mcu: 'MCUのID',
+  board: 'ボードのID',
+  idNote: '英数字と「-」「_」「.」の最大32文字（MCUとボードの定義のID）',
+  idBad: '英数字と「-」「_」「.」の1〜32文字で入力してください',
+  kind: '移植の種類',
+  kinds: { S: 'DAGONのブート段階を使用', V: 'ベンダーの2nd stageを使用' },
+  description: 'ボードの説明（任意）',
+  descriptionNote: 'フラッシュの部品、接続ピン、データシートの記載など、エージェントへの補足情報',
+  descriptionBad: '説明は32 KiB以内で入力してください',
+  consent: {
+    heading: '同意事項',
+    items: [
+      'エージェントは、DAGONのソースのフォルダでファイルの変更とコマンドの実行を、確認なしで実施します',
+      '移植は最長6時間継続し、連携したAPIキーの利用料金が発生します',
+      'ソースのファイルとコマンドの出力をエージェントの提供元へ送信します',
+    ],
+    agree: '上記の全項目に同意',
+  },
+  start: '移植の開始',
+  startWhy: 'IDの入力と同意の後に開始が可能です',
+  cancel: '移植の中止',
+  log: '作業記録',
+  logNone: 'エージェントの開始を待機中です。',
+  report: 'エージェントの報告',
+  figures: (turns: number, usd: number | null) => (usd === null ? `${turns}ターン` : `${turns}ターン、${usd.toFixed(2)} USD`),
+  after: '報告の合格数を確認後、エージェントがDAGONのソースに作成した作業用ブランチ（名称の先頭がport/）の変更をレビューし、プロジェクトの参照するDAGONのソースへ統合してください。統合後のdagon serveの再起動で、移植したボードが部品の一覧へ追加されます。',
+  cancelled: '移植を中止しました。作業用ブランチ（名称の先頭がport/）に途中までの変更が残存する場合があります。',
+  fail: {
+    fix: '理由の解消後に再度開始してください。下記の手順でエージェントのプログラムから実行する方法もあります。',
+  },
+  retry: '入力への復帰',
+  /** The same port without `dagon ai port`: the skill run from the agent's own program. */
+  manual: {
+    heading: 'エージェントのプログラムでの実行手順',
+    steps: ['DAGONのソースのフォルダでDAGONのプラグインを導入済のエージェントのプログラムを起動', '下記のコマンドを入力（MCUのID、ボードのID、種類の順）', '完了後に作業用ブランチ（名称の先頭がport/）の変更をレビューして統合し、dagon serveを再起動'],
+    command: (mcu: string, board: string, kind: string) => `/dagon:dagon-port ${mcu || '<mcu>'} ${board || '<board>'} ${kind}`,
+  },
+  /** Why the page cannot start the port itself. */
+  off: {
+    noFeature: 'このdagon serveはボード移植に非対応です。下記の手順で実行が可能です。',
+    notLinked: 'DAGONと未連携です。メニューの「DAGONとの連携」でAPIキーの接続方法と連携するか、下記の手順で実行してください。',
+  },
 } as const;
 
 export const NOTICE = {

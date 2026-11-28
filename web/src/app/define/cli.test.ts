@@ -48,6 +48,10 @@ function fake(opts: { status?: number; hash?: string } = {}) {
         if (path.endsWith('/proj')) return Response.json({ error: 'the folder is not empty' }, { status: 409 });
         return Response.json({ open: true, path, name: path.split('/').pop() });
       }
+      if (url === '/v1/ai/port') {
+        const b = JSON.parse(String(init.body)) as { kind: string };
+        return b.kind === 'S' ? Response.json({ job: 77 }, { status: 202 }) : Response.json({ error: 'the port kind must be S or V' }, { status: 400 });
+      }
       if (init.method === 'POST' && ['/v1/gen', '/v1/build', '/v1/sign', '/v1/release', '/v1/flash'].includes(url)) return Response.json({ job: calls.length }, { status: 202 });
       return Response.json({});
     }) as unknown as typeof fetch,
@@ -160,6 +164,23 @@ describe('dagon serve link', () => {
     cli.event({ type: 'job.result', job: job.id, data: { files: 6 } });
     cli.event({ type: 'job.state', job: job.id, state: 'succeeded' });
     expect(cli.jobs[0]).toMatchObject({ state: 'succeeded', result: { files: 6 }, ended: 1000 });
+  });
+
+  test('ボード移植: the request carries accept and no empty description; the job is listed with what serve said early; a refusal is its reason', async () => {
+    const f = fake();
+    const cli = new Cli(f.deps);
+    await cli.connect();
+    // Serve may speak of the job before its number has come back.
+    cli.event({ type: 'job.log', job: 77, lines: ['[Read] targets/README.md'] });
+    const job = await cli.aiPort({ mcu: 'rp2040', board: 'pico', kind: 'S', description: '  ' });
+    expect(f.calls[f.calls.length - 1]).toMatchObject({ url: '/v1/ai/port', method: 'POST', body: JSON.stringify({ mcu: 'rp2040', board: 'pico', kind: 'S', accept: true }) });
+    expect(job).toMatchObject({ id: 77, kind: 'ai_port', target: 'rp2040 · pico', lines: ['[Read] targets/README.md'] });
+    expect(cli.jobs[0]).toBe(job);
+    await cli.aiPort({ mcu: 'rp2040', board: 'pico', kind: 'S', description: ' W25Q16 on GPIO1 ' });
+    expect(JSON.parse(String(f.calls[f.calls.length - 1].body))).toMatchObject({ description: 'W25Q16 on GPIO1', accept: true });
+    const before = cli.jobs.length;
+    expect(await cli.aiPort({ mcu: 'rp2040', board: 'pico', kind: 'X' as 'S' })).toEqual({ refused: 'the port kind must be S or V' });
+    expect(cli.jobs).toHaveLength(before);
   });
 
   test('the coordinator hand-over: device.need closes the page side, then tells serve it was released; device.returned gives it back', async () => {

@@ -2,8 +2,8 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { describe, expect, test } from 'vitest';
 import { topo_parse } from '../wasm/pkg/dagon_wasm.js';
 import { ROUTES, request, requestFile } from '../request.ts';
-import { AGENT } from './copy.ts';
-import type { Cli } from './define/cli.svelte.ts';
+import { AGENT, PORT } from './copy.ts';
+import { DESCRIPTION_MAX_BYTES, PORT_ID, type Cli } from './define/cli.svelte.ts';
 import { fromYaml, toYaml, withDefaults, type Topo } from './define/model.ts';
 import { SAMPLE_YAML } from './sample.ts';
 
@@ -20,6 +20,29 @@ describe('every agent error code the server defines has a Console text', () => {
   test.each(codes)('%s', (code) => {
     const e = (AGENT.errors as Record<string, { text: string } | undefined>)[code];
     expect(e?.text, `${code} has no text in copy.ts`).toBeTruthy();
+  });
+});
+
+describe('ボード移植: the page checks and says what `dagon ai port` does', () => {
+  const port = text('crates/dagon-cli/src/ai/port.rs');
+  const num = (name: string): number => Number(new RegExp(`const ${name}: \\w+ = (\\d+)`).exec(port)?.[1]);
+
+  test('the longest description is the server\'s', () => {
+    expect(port).toContain('const MAX_DESCRIPTION: usize = 32 * 1024;');
+    expect(DESCRIPTION_MAX_BYTES).toBe(32 * 1024);
+  });
+
+  test('the hours the consent names are the hours a run gets', () => {
+    expect(num('HOURS')).toBeGreaterThan(0);
+    expect(PORT.consent.items.join('')).toContain(`最長${num('HOURS')}時間`);
+  });
+
+  test('the id rule refuses what the server\'s refuses', () => {
+    const rule = text('crates/dagon-cli/src/values.rs');
+    expect(rule).toContain("(1..=32).contains(&s.len())");
+    expect(rule).toContain("b.is_ascii_alphanumeric() || b == b'-' || b == b'_' || b == b'.'");
+    expect(rule).toContain("!s.starts_with('.')");
+    for (const bad of ['', '.x', 'a b', 'x'.repeat(33)]) expect(PORT_ID.test(bad)).toBe(false);
   });
 });
 

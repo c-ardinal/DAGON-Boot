@@ -2,7 +2,7 @@
   // DAGON Console: the page's parts put together. Each part lives in its own module
   // (src/app/console/); this file builds them, ties them to each other and lays out the screen.
   import { tick, untrack } from 'svelte';
-  import { BUILD, CANVAS, CONFIRM, DEFINE, DRAWER, HUB, HUB_TOGGLE, MENU, PARTS, SAVE, SHEET, SHEET_CLOSE, SKELETON, SKIP, STATUS, WRITE, CLI_STATE, fill as fillIn } from './app/copy.ts';
+  import { BUILD, CANVAS, CONFIRM, DEFINE, DRAWER, HUB, HUB_TOGGLE, MENU, PARTS, PORT, SAVE, SHEET, SHEET_CLOSE, SKELETON, SKIP, STATUS, WRITE, CLI_STATE, fill as fillIn } from './app/copy.ts';
   import { fade, rise } from './app/motion.ts';
   import type { Action } from './app/machine.ts';
   import { imageRows, previousVersion, rollbackOff } from './app/slots.ts';
@@ -15,6 +15,7 @@
   import { DEMO_SITE } from './app/site.ts';
   import { AgentLink } from './app/console/agentLink.svelte.ts';
   import { BuildFlow } from './app/console/buildFlow.svelte.ts';
+  import { PortFlow } from './app/console/portFlow.svelte.ts';
   import { DefineView, DRAG_PX } from './app/console/defineView.svelte.ts';
   import { Feedback } from './app/console/feedback.svelte.ts';
   import { HubPort } from './app/console/hubPort.svelte.ts';
@@ -41,6 +42,7 @@
   import LinkDialog from './screens/LinkDialog.svelte';
   import Menu from './screens/Menu.svelte';
   import Restart from './screens/Restart.svelte';
+  import PortModal from './screens/PortModal.svelte';
   import SkeletonModal from './screens/SkeletonModal.svelte';
   import SplitButton from './screens/SplitButton.svelte';
   import StartScreen from './screens/Start.svelte';
@@ -115,6 +117,8 @@
       void writes.loadVersions();
     },
   });
+  /** ボード移植: the linked agent ports DAGON to a board (serve's ai_port job). */
+  const porting = new PortFlow({ cli, noAnswer: SKELETON.startFailed });
   let graph = $state<ReturnType<typeof Graph>>();
   let dagon = $state<ReturnType<typeof Dagon>>();
   const dv = new DefineView({ d, cli, ws, build, stopped, dropTarget: (x, y) => graph?.dropTarget(x, y) });
@@ -319,6 +323,7 @@
         applyProposal: () => agentLink.applyProposal(agentLink.lastProposal, document.body),
         link: () => void agentLink.openLink(document.querySelector('[aria-controls="menu"]')),
         cli: openCli,
+        port: () => porting.show(),
         unlink: () => ((ws.menuOpen = false), void agentLink.unlink()),
         help: (keys) => ((helpKeys = keys), (helpOpen = true)),
         copyLog: () => void feedback.copy(feedback.notes.map((n) => `${n.at} ${n.text}`).join('\n'), copied),
@@ -645,6 +650,19 @@
       oncancel={() => build.skeletonJob && void cli.cancel(build.skeletonJob)}
       onretry={() => void build.makeSkeleton(SKELETON.startFailed)}
       onmore={() => ((feedback.drawerTab = 'jobs'), (build.skeleton = null))}
+    />
+  {/if}
+  {#if porting.open}
+    <PortModal
+      job={porting.job}
+      refused={porting.refused}
+      sending={porting.sending}
+      off={!cli.has('ai_port') ? PORT.off.noFeature : !agentLinked ? PORT.off.notLinked : null}
+      onstart={(r) => void porting.start(r)}
+      oncancel={() => void porting.cancel()}
+      onretry={() => porting.retry()}
+      onclose={() => porting.close()}
+      onmore={() => ((feedback.drawerTab = 'jobs'), porting.close())}
     />
   {/if}
 {/if}

@@ -22,6 +22,13 @@ pub const REQUEST_MS: u32 = 300;
 /// How long a relay waits for a node when the RELAY request names no
 /// timeout: the plain-response wait.
 pub const RELAY_WAIT_MS: u16 = REQUEST_MS as u16;
+/// How much longer than a RELAY's own timeout a relaying node waits for
+/// its link worker before it answers E_TIMEOUT itself. A requester waits
+/// [`REQUEST_MS`] longer than the timeout it names, so the relay's answer,
+/// whatever its link worker does, arrives while the requester still waits:
+/// a late answer would meet the requester's next request on a busy link.
+pub const RELAY_ANSWER_MARGIN_MS: u32 = REQUEST_MS / 3;
+const _: () = assert!(RELAY_ANSWER_MARGIN_MS < REQUEST_MS);
 pub const VERIFY_MS: u32 = 5_000;
 /// Pause between CONF_RESULT polls while a node-side test runs.
 pub const CONF_POLL_MS: u32 = 1_000;

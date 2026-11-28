@@ -103,6 +103,14 @@ impl Link for &'static mut UartUp {
             UartUp::Pio1(l) => l.write_frame(frame).await,
         }
     }
+    /// The reply has left the line before a REBOOT's reset.
+    async fn flush(&mut self) -> Result<(), LinkError> {
+        match &mut **self {
+            UartUp::Hw(l) => l.flush().await,
+            UartUp::Pio0(l) => l.flush().await,
+            UartUp::Pio1(l) => l.flush().await,
+        }
+    }
 }
 
 impl UartUp {

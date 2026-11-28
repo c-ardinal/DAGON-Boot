@@ -68,7 +68,25 @@ pub struct PioStream<'d, P: PioInstance, const TX: usize, const RX: usize> {
     pub rx: PioUartRx<'d, P, RX>,
 }
 
-impl<P: PioInstance, const TX: usize, const RX: usize> StreamPort for PioStream<'_, P, TX, RX> {
+/// A PIO block's registers, for the TX state machine's state the PIO UART
+/// driver does not give (`PioStream::drain`).
+pub trait PioRegs: PioInstance {
+    fn regs() -> embassy_rp::pac::pio::Pio;
+}
+
+impl PioRegs for embassy_rp::peripherals::PIO0 {
+    fn regs() -> embassy_rp::pac::pio::Pio {
+        embassy_rp::pac::PIO0
+    }
+}
+
+impl PioRegs for embassy_rp::peripherals::PIO1 {
+    fn regs() -> embassy_rp::pac::pio::Pio {
+        embassy_rp::pac::PIO1
+    }
+}
+
+impl<P: PioRegs, const TX: usize, const RX: usize> StreamPort for PioStream<'_, P, TX, RX> {
     async fn read(&mut self, buf: &mut [u8], timeout_ms: u32) -> Result<usize, BusError> {
         let Some(first) = buf.first_mut() else {
             return Ok(0);
@@ -88,6 +106,23 @@ impl<P: PioInstance, const TX: usize, const RX: usize> StreamPort for PioStream<
                 .await
                 .map_err(|_| BusError::Timeout)?;
         }
+        Ok(())
+    }
+    /// The write returns with up to four bytes in the TX FIFO: waits until
+    /// the FIFO is empty and the TX program stalls on its next `pull` (the
+    /// last byte's data bits sent, the line at the stop level), then a stop
+    /// bit's time (1 ms covers every rate from 1000 bit/s).
+    async fn drain(&mut self) -> Result<(), BusError> {
+        let pio = P::regs();
+        let sm = 1u8 << TX;
+        while pio.fstat().read().txempty() & sm == 0 {
+            Timer::after_micros(50).await;
+        }
+        pio.fdebug().write(|w| w.set_txstall(sm));
+        while pio.fdebug().read().txstall() & sm == 0 {
+            Timer::after_micros(50).await;
+        }
+        Timer::after_millis(1).await;
         Ok(())
     }
 }

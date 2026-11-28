@@ -19,7 +19,7 @@ use dagon_proto::{frame_len, max_payload};
 use embassy_rp::i2c::Instance;
 use embassy_rp::i2c_slave::{Command, I2cSlave};
 use embassy_rp::uart::BufferedUart;
-use embassy_time::{with_timeout, Duration, Instant};
+use embassy_time::{with_timeout, Duration, Instant, Timer};
 
 const I2C_FRAME: usize = frame_len(max_payload::I2C);
 const UART_FRAME: usize = frame_len(max_payload::UART);
@@ -229,7 +229,19 @@ impl<S: StreamPort> Link for UartTarget<S> {
             _ => Err(LinkError::Closed),
         }
     }
+    /// Returns once the reply has left the line (a REBOOT's reset comes
+    /// right after it).
+    async fn flush(&mut self) -> Result<(), LinkError> {
+        match with_timeout(DRAIN_TIMEOUT, self.port.drain()).await {
+            Ok(Ok(())) => Ok(()),
+            _ => Err(LinkError::Closed),
+        }
+    }
 }
+
+/// Bound on a UART's last bytes leaving the line: the 32-byte FIFO at 9600
+/// bit/s takes 34 ms.
+const DRAIN_TIMEOUT: Duration = Duration::from_millis(100);
 
 /// A hardware UART as a byte stream.
 pub struct HwUart(pub BufferedUart);
@@ -248,6 +260,14 @@ impl StreamPort for HwUart {
         use embedded_io_async::Write;
         self.0.write_all(data).await.map_err(|_| BusError::Io)?;
         self.0.flush().await.map_err(|_| BusError::Io)
+    }
+    /// The write leaves the bytes in the UART's FIFO: waits until the UART
+    /// no longer sends (its BUSY flag, FIFO and shift register).
+    async fn drain(&mut self) -> Result<(), BusError> {
+        while self.0.busy() {
+            Timer::after_micros(50).await;
+        }
+        Ok(())
     }
 }
 

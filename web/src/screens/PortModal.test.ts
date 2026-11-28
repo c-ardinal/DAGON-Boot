@@ -50,9 +50,9 @@ describe('ボード移植 modal', () => {
   });
 
   test('done: the agent\'s report, its figures and what to do next', () => {
-    const b = html({ job: job({ state: 'succeeded', result: { ok: true, text: 'conformance 12/12', turns: 41, cost_usd: 3.456 } }) });
+    const b = html({ job: job({ state: 'succeeded', result: { ok: true, text: 'conformance passed', turns: 41, cost_usd: 3.456 } }) });
     expect(b).toContain(PORT.state.done);
-    expect(b).toContain('conformance 12/12');
+    expect(b).toContain('conformance passed');
     expect(b).toContain(PORT.figures(41, 3.456));
     expect(b).toContain(PORT.after);
     expect(PORT.figures(41, null)).not.toContain('USD');

@@ -28,7 +28,6 @@ pub const RELAY_WAIT_MS: u16 = REQUEST_MS as u16;
 /// whatever its link worker does, arrives while the requester still waits:
 /// a late answer would meet the requester's next request on a busy link.
 pub const RELAY_ANSWER_MARGIN_MS: u32 = REQUEST_MS / 3;
-const _: () = assert!(RELAY_ANSWER_MARGIN_MS < REQUEST_MS);
 pub const VERIFY_MS: u32 = 5_000;
 /// Pause between CONF_RESULT polls while a node-side test runs.
 pub const CONF_POLL_MS: u32 = 1_000;
@@ -497,6 +496,11 @@ impl<R: AsRef<[EraseRegion]>, S: AsRef<[SlotLayout]>> NodeTimings<EraseLayout<R,
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_relay_answers_while_the_requester_still_waits() {
+        assert!(super::RELAY_ANSWER_MARGIN_MS < super::REQUEST_MS);
+    }
+
     use super::*;
 
     fn erasing(unit_max_ms: u32) -> NodeTimings<EraseLayout<[EraseRegion; 1], [SlotLayout; 0]>> {

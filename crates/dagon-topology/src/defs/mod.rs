@@ -731,7 +731,7 @@ pub struct McuDef {
     /// image before it rolls back: the boot core's limit, or the vendor second stage's), `start_ms`
     /// (optional: the longest from a reset until the image the boot stages start answers, ms, with
     /// its source in a comment; a host waits `trial_attempts` x (`trial_ms` + `start_ms`) +
-    /// `start_ms` + 2 s after REBOOT; 2000 when left out). An app may
+    /// `start_ms` + 2000 ms after REBOOT; 2000 when left out). An app may
     /// delay a reboot by at most half the shorter period. The MCU package's build turns
     /// `trial_attempts` into the constant its boot core and its agent use. `flag` (required): the
     /// watchdog-reset flag the lockup fuse needs (set by a watchdog reset, kept over every later

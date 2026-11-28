@@ -125,8 +125,15 @@ def check_plan(text, version, nodes, release):
     if not heads or not text.endswith(PROMPT):
         return "no deploy plan before the prompt"
     count, path = PLAN_HEAD.match(lines[heads[-1]]).groups()
-    rows = [PLAN_NODE.match(l) for l in lines[heads[-1] + 1:-1]]
-    if None in rows or int(count) != len(rows):
+    # The node lines follow the head directly; the CLI may print warnings
+    # (definition facts not checked) between them and the prompt.
+    rows = []
+    for l in lines[heads[-1] + 1:-1]:
+        m = PLAN_NODE.match(l)
+        if not m:
+            break
+        rows.append(m)
+    if int(count) != len(rows):
         return "plan node lines do not match its count"
     ids = [r[1] for r in rows]
     if sorted(ids) != sorted(nodes):
@@ -1333,6 +1340,11 @@ def selftest_plan():
     assert "version" in check_plan(other, "2.0.7", ["seg", "hub"], rel)
     extra = good.replace("2 node(s)", "3 node(s)")
     assert check_plan(extra, "2.0.7", ["seg", "hub"], rel)
+    warned = good.replace(PROMPT, "warning: 1 definition fact(s) not checked against their source "
+                          "(`dagon release --checked-facts` refuses them):\n"
+                          "  node 'seg' (stm32f401re): execution.masked_max_us is unmeasured\n" + PROMPT)
+    assert check_plan(warned, "2.0.7", ["hub", "seg"], rel) is None, "a warning after the plan is not part of it"
+    assert check_plan(warned.replace("2 node(s)", "3 node(s)"), "2.0.7", ["seg", "hub"], rel)
     old = good.replace("deploy to 2 node(s)", "deploy 2.0.7 to 2 node(s)")
     assert check_plan(old, "2.0.7", ["seg", "hub"], rel), "an older CLI's plan is not taken"
 

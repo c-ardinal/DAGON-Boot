@@ -384,7 +384,9 @@ python samples/hardware-test/measure.py selftest
   measurements blink, the app still running) and the script asks for
   the counts. An ESP32-S3 app blinks nothing: read it with `--probe` and
   `--chip esp32s3` over the chip's built-in USB JTAG (the USB connector
-  the node's usb-cdc link uses). The firmware times the work inside each section, not the
+  the node's usb-cdc link uses), and name the serial port the node is
+  written through with `--port` (without a terminal `dagon flash` chooses
+  none among several). The firmware times the work inside each section, not the
   masking around it, so the value to write is the worst plus a margin:
   twice the worst, at least 10 us more. PASS when a section was timed and
   that value is at most 1000 us; the record gives the

@@ -405,6 +405,8 @@ def flash_command(a, writer):
         cmd += ["--probe", a.probe]
     if writer.get("kind") != "probe-rs" and getattr(a, "drive", None):
         cmd += ["--drive", a.drive]
+    if writer.get("kind") == "espflash" and getattr(a, "port", None):
+        cmd += ["--port", a.port]
     return cmd
 
 
@@ -544,6 +546,7 @@ def main(argv=None):
         s.add_argument("--probe", help="probe-rs probe selector (reads the value; writes through it only on a probe-rs writer)")
         s.add_argument("--chip", help="probe-rs chip to read (default: the probe-rs writer's)")
         s.add_argument("--drive", help="UF2 drive the node is written through (a UF2 writer)")
+        s.add_argument("--port", help="serial port the node is written through (an espflash writer)")
         s.add_argument("--out", help="record folder (default ~/dagon-measure)")
     r = sub.add_parser("restore")
     r.add_argument("--project", required=True)

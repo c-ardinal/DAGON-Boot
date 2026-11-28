@@ -8,7 +8,9 @@
 # whose `match` prefixes starts its path; the rest, the literal pools and
 # the padding are `other`. Fat LTO inlines code into its caller (the
 # verifier into dagon_format's verify_header), so a change can move bytes
-# between parts. Measured at 24,476 bytes when this budget was set.
+# between parts. Measured at 24,476 bytes when this budget was set, and
+# 26,240 with the CPU clock raised for the checks (`clock`, mcu-package
+# 7,989 bytes, its limit raised by 1,024 bytes taken from four parts).
 
 [image]
 max_bytes = 30720
@@ -20,34 +22,34 @@ nm = ["xtensa-esp-elf-nm", "xtensa-esp32s3-elf-nm"]
 
 [ram]
 # Static RAM (allocated, writable sections: .data, .bss, .uninit); the
-# stack is not counted. Stage0 keeps its state on the stack: measured 0 to
-# 4 bytes.
+# stack is not counted. Stage0 keeps its state on the stack, but for the
+# ROM's clock it hands back (`clock`): measured 12 bytes.
 max_bytes = 256
 
 [[part]]
 name = "verifier"
 match = ["dagon_ed25519"]
-max_bytes = 2304
+max_bytes = 2048
 
 [[part]]
 name = "sha2"
 match = ["sha2", "digest", "hybrid_array", "block_buffer"]
-max_bytes = 3072
+max_bytes = 2816
 
 [[part]]
 name = "dagon-core"
 match = ["dagon_core"]
-max_bytes = 5120
+max_bytes = 4864
 
 [[part]]
 name = "dagon-format"
 match = ["dagon_format"]
-max_bytes = 5888
+max_bytes = 5632
 
 [[part]]
 name = "mcu-package"
 match = ["dagon_esp32s3_stage0", "dagon_mcu_esp32s3", "dagon_port", "stage0_start"]
-max_bytes = 7424
+max_bytes = 8448
 
 [[part]]
 name = "other"

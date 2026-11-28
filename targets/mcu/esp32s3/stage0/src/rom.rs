@@ -18,12 +18,10 @@ extern "C" {
     pub fn esp_rom_spiflash_erase_sector(sector: u32) -> i32;
     pub fn software_reset() -> !;
 
-    pub fn rom_Cache_Suspend_ICache() -> u32;
-    pub fn Cache_Resume_ICache(autoload: u32);
-    pub fn rom_Cache_Suspend_DCache() -> u32;
-    pub fn Cache_Resume_DCache(autoload: u32);
-    pub fn Cache_Invalidate_ICache_All();
-    pub fn Cache_Invalidate_DCache_All();
+    pub fn Cache_Disable_ICache() -> u32;
+    pub fn Cache_Enable_ICache(autoload: u32);
+    pub fn Cache_Disable_DCache() -> u32;
+    pub fn Cache_Enable_DCache(autoload: u32);
     pub fn Cache_MMU_Init();
     pub fn Cache_Ibus_MMU_Set(
         ext: u32,
@@ -48,6 +46,12 @@ extern "C" {
     pub fn ets_sha_starts(ctx: *mut u32, sha512_t: u16) -> i32;
     pub fn ets_sha_update(ctx: *mut u32, input: *const u8, len: u32, update_ctx: bool);
     pub fn ets_sha_finish(ctx: *mut u32, out: *mut u8) -> i32;
+
+    pub fn ets_delay_us(us: u32);
+    pub fn ets_update_cpu_frequency(mhz: u32);
+    pub fn ets_get_cpu_frequency() -> u32;
+    pub fn rom_i2c_writeReg(block: u8, host_id: u8, reg: u8, data: u8);
+    pub fn rom_i2c_writeReg_Mask(block: u8, host_id: u8, reg: u8, msb: u8, lsb: u8, data: u8);
 }
 
 /// Writes the peripheral register at `addr`.

@@ -3,8 +3,10 @@
 //! signature checked with the same small verifier and the same decision
 //! as on the other MCUs (`dagon_core::bootcore::start_handed`).
 //!
-//! It holds the watchdogs, sets the ROM's flash driver up and decides from
-//! the boot core log, the app log and the retained cell:
+//! It holds the watchdogs, runs the CPU at 80 MHz from the BBPLL while it
+//! checks (`clock`; back on the ROM's clock before an image starts), sets
+//! the ROM's flash driver and the mapped reads up and decides from the
+//! boot core log, the app log and the retained cell:
 //!
 //! - a whole START_APP request the boot core left: the app decision once
 //!   (its BOOT_ATTEMPT and ROLLBACK records written here); the app it
@@ -38,6 +40,7 @@ compile_error!(
      build with the `qemu-layout` feature for the emulator test"
 );
 
+mod clock;
 mod flash;
 mod load;
 #[cfg(feature = "measure")]
@@ -114,6 +117,7 @@ pub extern "C" fn stage0_start() -> ! {
         }
     }
     wdt::hold();
+    clock::raise();
     #[cfg(feature = "measure")]
     let begun = measure::begin();
     flash::attach();

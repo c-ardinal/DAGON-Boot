@@ -64,6 +64,7 @@ pub fn start<F: Flash>(flash: &mut F, p: &Plan) -> Result<core::convert::Infalli
         }
     }
     map(p)?;
+    crate::clock::hand_back();
     // SAFETY: the entry point lies in code just copied or mapped (the
     // plan refuses any other), called as the ROM calls an image's entry.
     let entry: extern "C" fn() -> ! = unsafe { core::mem::transmute(p.entry as usize) };
@@ -72,11 +73,15 @@ pub fn start<F: Flash>(flash: &mut F, p: &Plan) -> Result<core::convert::Infalli
 
 fn map(p: &Plan) -> Result<(), Refused> {
     // SAFETY: the ROM's cache and MMU functions in the order ESP-IDF's 2nd
-    // stage calls them; nothing runs from the external flash meanwhile
-    // (stage0 runs from internal SRAM).
+    // stage calls them (`set_cache_and_start_app`): both caches disabled
+    // (which also drops every tag), the MMU table cleared and set, the
+    // buses opened, both caches enabled. Suspending a cache instead keeps
+    // its tags and forbids an MMU change (ESP-IDF `rom/cache.h`), and
+    // resuming one the ROM never enabled leaves it off. Nothing runs from
+    // the external flash meanwhile (stage0 runs from internal SRAM).
     unsafe {
-        let d = rom::rom_Cache_Suspend_DCache();
-        let i = rom::rom_Cache_Suspend_ICache();
+        let d = rom::Cache_Disable_DCache();
+        let i = rom::Cache_Disable_ICache();
         rom::Cache_MMU_Init();
         for m in p.maps() {
             let (v, f, n) = m.pages();
@@ -90,10 +95,8 @@ fn map(p: &Plan) -> Result<(), Refused> {
         }
         rom::reg_write(DCACHE_CTRL1, rom::reg_read(DCACHE_CTRL1) & !SHUT_BUSES);
         rom::reg_write(ICACHE_CTRL1, rom::reg_read(ICACHE_CTRL1) & !SHUT_BUSES);
-        rom::Cache_Invalidate_ICache_All();
-        rom::Cache_Invalidate_DCache_All();
-        rom::Cache_Resume_ICache(i);
-        rom::Cache_Resume_DCache(d);
+        rom::Cache_Enable_ICache(i);
+        rom::Cache_Enable_DCache(d);
     }
     Ok(())
 }

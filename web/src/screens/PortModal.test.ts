@@ -82,6 +82,16 @@ describe('ボード移植 modal', () => {
     }
   });
 
+  test('a cancelled job ends the run: what is left, a way back to the form, and it can be closed', () => {
+    const b = html({ job: job({ state: 'cancelled', lines: ['[Bash] step 1'] }) });
+    expect(b).toContain(PORT.state.cancelled);
+    expect(b).toContain(PORT.cancelled);
+    expect(b).not.toContain(PORT.state.running);
+    expect(b).not.toContain(PORT.cancel + '<');
+    expect(b).toContain(PORT.retry);
+    expect(b).toContain(`aria-label="${NOTICE.close}"`);
+  });
+
   test('the id rule is serve\'s: letters, digits, "-", "_" and ".", up to 32', () => {
     for (const ok of ['rp2040', 'nucleo-f401re', 'a.b_c', 'x'.repeat(32)]) expect(PORT_ID.test(ok)).toBe(true);
     for (const bad of ['', 'x'.repeat(33), 'a b', 'ボード', 'a/b', '.hidden']) expect(PORT_ID.test(bad)).toBe(false);

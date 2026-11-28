@@ -39,7 +39,9 @@
       ? 'failed'
       : job?.state === 'succeeded'
         ? 'done'
-        : job || sending
+        : job?.state === 'cancelled'
+          ? 'cancelled'
+          : job || sending
           ? 'running'
           : 'form',
   );
@@ -48,6 +50,8 @@
       ? ({ text: PORT.state.done, kind: 'ok' } as const)
       : phase === 'failed'
         ? ({ text: PORT.state.failed, kind: 'error' } as const)
+        : phase === 'cancelled'
+          ? ({ text: PORT.state.cancelled, kind: 'info' } as const)
         : phase === 'running'
           ? ({ text: PORT.state.running, kind: 'active' } as const)
           : null,
@@ -111,6 +115,8 @@
     {#if typeof result?.turns === 'number'}<p class="note">{PORT.figures(result.turns, result.cost_usd ?? null)}</p>{/if}
     <h3>{NOTICE.after}</h3>
     <p>{PORT.after}</p>
+  {:else if phase === 'cancelled'}
+    <p>{PORT.cancelled}</p>
   {:else}
     <h3>{NOTICE.reason}</h3>
     <pre translate="no">{reason}</pre>
@@ -123,7 +129,7 @@
       <button class="button-primary" data-control="port-start" aria-disabled={!ready} title={ready ? undefined : PORT.startWhy} onclick={() => ready && onstart({ mcu, board, kind, description })}>{PORT.start}</button>
     {:else if phase === 'running' && job}
       <button class="button-secondary" onclick={oncancel}>{PORT.cancel}</button>
-    {:else if phase === 'failed'}
+    {:else if phase === 'failed' || phase === 'cancelled'}
       <button class="button-primary" onclick={onretry}>{PORT.retry}</button>
     {/if}
   {/snippet}

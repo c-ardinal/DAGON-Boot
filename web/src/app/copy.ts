@@ -1317,6 +1317,7 @@ export const PORT = {
     running: '… 移植中',
     done: '✓ 完了',
     failed: '! 失敗',
+    cancelled: '中止',
   },
   intro: '連携したエージェントが、プロジェクトの参照するDAGONのソースで、指定のボードへの移植と適合試験を実行します。',
   mcu: 'MCUのID',
@@ -1344,7 +1345,8 @@ export const PORT = {
   logNone: 'エージェントの開始を待機中です。',
   report: 'エージェントの報告',
   figures: (turns: number, usd: number | null) => (usd === null ? `${turns}ターン` : `${turns}ターン、${usd.toFixed(2)} USD`),
-  after: '報告の合格数を確認後、DAGONのソースの変更をレビューしてください。移植したボードは、dagon serveの再起動後に部品の一覧へ追加されます。',
+  after: '報告の合格数を確認後、エージェントがDAGONのソースに作成した作業用ブランチ（名称の先頭がport/）の変更をレビューし、プロジェクトの参照するDAGONのソースへ統合してください。統合後のdagon serveの再起動で、移植したボードが部品の一覧へ追加されます。',
+  cancelled: '移植を中止しました。作業用ブランチ（名称の先頭がport/）に途中までの変更が残存する場合があります。',
   fail: {
     fix: '理由の解消後に再度開始してください。下記の手順でエージェントのプログラムから実行する方法もあります。',
   },
@@ -1352,7 +1354,7 @@ export const PORT = {
   /** The same port without `dagon ai port`: the skill run from the agent's own program. */
   manual: {
     heading: 'エージェントのプログラムでの実行手順',
-    steps: ['DAGONのソースのフォルダでDAGONのプラグインを導入済のエージェントのプログラムを起動', '下記のコマンドを入力（MCUのID、ボードのID、種類の順）', '完了後にdagon serveを再起動'],
+    steps: ['DAGONのソースのフォルダでDAGONのプラグインを導入済のエージェントのプログラムを起動', '下記のコマンドを入力（MCUのID、ボードのID、種類の順）', '完了後に作業用ブランチ（名称の先頭がport/）の変更をレビューして統合し、dagon serveを再起動'],
     command: (mcu: string, board: string, kind: string) => `/dagon:dagon-port ${mcu || '<mcu>'} ${board || '<board>'} ${kind}`,
   },
   /** Why the page cannot start the port itself. */

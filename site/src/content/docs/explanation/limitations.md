@@ -79,7 +79,7 @@ description: "DAGONの設計上の範囲外、利用者の責任範囲、設計�
 - `Sandbox`: 実行時のサンドボックスは存在しません（Service ABI、Entry Gate、Operation Cancellation、Fault Unwind、Lockup Fuse、Reset Cleanup、SandboxArch）。定義の検査と保護マップの生成は実装済みです。
 <!-- end of generated list -->
 <!-- generated from site/scripts/architecture.py: python site/scripts/gen.py -->
-- AI Agent Link: DAGON Consoleにボード移植の開始画面は存在しません。開始方法はCLIの`dagon ai port`と`POST /v1/ai/port`です。移植の実行は模擬プログラムとの試験と、実機なしの起動確認だけで、実機での完走は未確認です。
+- AI Agent Link: ボード移植の開始方法は、DAGON Consoleのメニュー「エージェントによるボード移植」、CLIの`dagon ai port`、`POST /v1/ai/port`です。移植の実行は模擬プログラムとの試験と、実機なしの起動確認だけで、実機での完走は未確認です。
 - Boot Action Interpreter: コードに存在しません。
 - Retained Codecs: ファームウェアに保持形式のコーデックは存在しません。構成本体の形式は`dagon-format`の形式（先頭32バイト、ノード40バイト）で、[保持と永続の形式](/explanation/retained-formats/)の3.1に記載しています。ノードは構成を保存しません。構成はホストのパッケージにだけ存在し、ターゲット3（旧来の構成の保存先）は予約番号として残存し、どのノードも受理しません。
 - ROM Loader Client: ESP32-S3のROMシリアルローダー経由の書込（`dagon recover`）は、模擬ローダーとの試験だけです。実機では、ENTER_ROM後にローダーがリンクのUARTで受信すること、中継ノードのUARTがローダーの応答を欠落なく受信することが未確認です。

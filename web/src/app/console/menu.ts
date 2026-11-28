@@ -50,6 +50,7 @@ export interface MenuContext {
     applyProposal(): void;
     link(): void;
     cli(): void;
+    port(): void;
     unlink(): void;
     help(keys: boolean): void;
     copyLog(): void;
@@ -113,6 +114,7 @@ export function consoleMenu(c: MenuContext): MenuGroup[] {
           : [{ label: AGENT.menuLink, hint: MENU.hint.link, control: 'link', off: c.simulated ? MENU.off.demo : null, run: run.link }]),
         ...(c.markShown ? [{ label: MENU.moveMark, hint: MENU.hint.moveMark, key: 'Alt+矢印', run: run.moveMark }] : []),
         { label: MENU.cli, hint: MENU.hint.cli, off: c.simulated ? MENU.off.demo : null, run: run.cli },
+        { label: MENU.port, hint: MENU.hint.port, off: c.simulated ? MENU.off.demo : c.noProject ? MENU.off.noProject : null, run: run.port },
         ...(c.agentLinked ? [{ label: AGENT.menuUnlink, hint: MENU.hint.unlink, danger: true, run: () => run.confirm(CONFIRM.unlink, run.unlink) }] : []),
       ],
     },

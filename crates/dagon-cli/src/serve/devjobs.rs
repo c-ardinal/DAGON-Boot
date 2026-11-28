@@ -245,13 +245,20 @@ mod tests {
         let state = |s: &str| server.job_json(id).unwrap()["state"] == s;
         // One read of the state per step: two reads could straddle a
         // change (queued, then running) and stop the wait early.
+        // The wait ends at the change, so its limit costs nothing when the
+        // job moves; it is long enough for a loaded machine, where the
+        // job's thread has waited more than 10 s for its turn.
         let wait = |busy: &[&str]| {
             let t = std::time::Instant::now();
-            while t.elapsed() < std::time::Duration::from_secs(10) {
+            loop {
                 let now = server.job_json(id).unwrap()["state"].clone();
                 if !busy.iter().any(|b| now == *b) {
                     break;
                 }
+                assert!(
+                    t.elapsed() < std::time::Duration::from_secs(120),
+                    "the job is still {now} after 120 s"
+                );
                 std::thread::sleep(std::time::Duration::from_millis(10));
             }
         };

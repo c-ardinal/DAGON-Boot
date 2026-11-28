@@ -28,6 +28,8 @@ connected; a DAGON project for it (`topology.yaml` as
   to the coordinator (see More than three nodes).
 - `measure.py`: the measurements the firmware has a measuring build for
   (see Measurements); `test_measure.py` its tests without hardware.
+- `esp_stage0.py`: the ESP32-S3 stage0 run (see ESP32-S3 stage0 run);
+  `test_esp_stage0.py` its tests without hardware.
 - `test_hwt.py`: runs `hwt.py selftest` under unittest (CI runs it).
 
 ## Usage
@@ -443,3 +445,63 @@ Records go to `<out>/<yyyymmdd-hhmmss>/` (default `~/dagon-measure/`):
 read) and `result.json` (the value, its limit, PASS / FAIL, whether the
 normal build went back). Exit code: 0 PASS, 1 FAIL with the normal build
 back, 2 the normal build could not be written back.
+
+## ESP32-S3 stage0 run
+
+DAGON's own ESP32-S3 stage0 (`targets/mcu/esp32s3/stage0`) boots in
+Espressif's QEMU in CI; its place in the MCU definition waits for what
+only the board shows: the real CPU clock while stage0 runs, the RTC slow
+clock's rate, the time of the signature check and of the body hash, where
+the ROM's text output appears, and which RTC STORE registers and which
+RTC slow memory an app leaves alone (the place of the retained cell).
+`esp_stage0.py` runs stage0's measuring build (feature `measure`) on the
+M5StopWatch with the test boot core and app of the emulator test, which
+write what stage0 recorded on the ROM's text output.
+
+```sh
+# once: stage0's measuring build, the test images and the flash images
+# (needs the esp toolchain, as for the node's own firmware); with
+# --app-image, your app as an ESP app image (espflash save-image) as well
+python samples/hardware-test/esp_stage0.py prepare [--app-image <file>]
+# the run: backup, each image, the backup written back
+python samples/hardware-test/esp_stage0.py run --port <COMn> [--manual-reset]
+# after a stopped run: the backup written back
+python samples/hardware-test/esp_stage0.py restore --port <COMn>
+# no hardware
+python samples/hardware-test/esp_stage0.py selftest
+```
+
+It needs `espflash` and pyserial (`pip install pyserial`). The node is
+connected by its USB connector alone; nothing else is wired.
+
+- First the whole flash is read into `backup.bin` (`espflash read-flash`,
+  the size `espflash board-info` gives); an existing backup is kept, so a
+  second run never backs up the test images.
+- Each image is written raw from 0x0 (`espflash write-bin`): `good` (the
+  test boot core asks for the test app, which starts), `bad-signature`
+  (the app's signature broken: stage0 refuses it and the boot core stays
+  in recovery mode) and, with `--app-image`, `own-app` (your app in APP
+  slot A, signed with the test key). After each write the node is reset
+  through the USB Serial/JTAG lines (with `--manual-reset` you press the
+  board's reset when asked) and its output is read for 8 s. `good` and
+  `own-app` are started twice: the second start's record shows what the
+  first left (the STORE registers, the RTC slow memory changed below the
+  record), and with `own-app` your app runs 20 s before that reset. Your
+  app runs under the confirmed watchdog period (4 s): an app that does not
+  feed the RTC watchdog is reset after it.
+- At the end the backup is written back, also on a failure or Ctrl-C.
+
+PASS when stage0 is at most 30 KiB, the test app starts with its start
+within the trial watchdog period (4 s) and the app with a broken
+signature is refused. Records go to `<out>/<yyyymmdd-hhmmss>/` (default
+`~/dagon-measure/esp-stage0/`): each start's output (`good.txt`,
+`good-2.txt`, ...) and `result.json` (each record with the CPU clock and
+the RTC slow clock against the 16 MHz system timer, the times of the
+checks, the hash time of a full 3 MiB slot at the measured rate, the STORE
+registers in use, and the verdict). No output at all is a result too: the
+ROM then writes on UART0 only (GPIO43 TX, GPIO44 RX), which needs a
+USB-serial adapter. Exit code: 0 PASS, 1 FAIL with the backup back, 2
+the backup could not be written back.
+
+The images carry the RFC 8032 test key and stage0's emulator layout
+(`stage0/src/qemu_layout.rs`), so they serve this run only.

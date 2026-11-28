@@ -41,7 +41,7 @@ ALLOWED = {
         "the chip name of the ESP-IDF image format esptool writes (its own list of chips, not DAGON's)",
     ),
     "crates/dagon-cli/src/esp_image_qemu.rs": (
-        5,
+        6,
         "the vendor QEMU's machine name and the ESP32-S3 boot stage the QEMU check runs (a test bench of that one chip)",
     ),
     "crates/dagon-cli/src/esp_image_qemu_bootcore.rs": (

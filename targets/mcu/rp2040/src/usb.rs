@@ -33,8 +33,8 @@ bind_interrupts!(struct UsbIrqs {
 });
 
 /// DAGON's USB vendor and product ID (the host tools look for these).
-pub const USB_VID: u16 = 0xc0de;
-pub const USB_PID: u16 = 0xcafe;
+pub const USB_VID: u16 = dagon_proto::usb_id::VID;
+pub const USB_PID: u16 = dagon_proto::usb_id::PID;
 pub const USB_PACKET: u16 = 64;
 
 const USB_WRITE_TIMEOUT: Duration = Duration::from_millis(500);

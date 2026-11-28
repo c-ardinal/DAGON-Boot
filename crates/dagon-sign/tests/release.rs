@@ -249,7 +249,7 @@ fn registry_with_facts() -> dagon_topology::defs::Registry {
         "format = 1\n[mcu_override.rp2040.execution]\nmasked_max_us = \"unmeasured\"\n\
          [[mcu_override.rp2040.execution.erase_regions]]\nstart = 0x1000_0000\n\
          unit_max_ms = { unverified = 450 }\n\
-         [mcu_override.stm32f401re.execution]\nmasked_max_us = 20\n",
+         [mcu_override.stm32f401re.execution]\nmasked_max_us = 20\nrequest_max_ms = 700\n",
     );
     for (start, ms) in [
         (0x0800_0000u32, 800),
@@ -282,14 +282,15 @@ fn release_reports_and_can_refuse_facts_not_checked() {
         open,
         [
             "node 'hub' (rp2040): execution.masked_max_us is unmeasured",
+            "node 'hub' (rp2040): execution.request_max_ms is unmeasured",
             "node 'hub' (rp2040): execution.erase_regions[0].unit_max_ms = 450 \
              is not checked against its source",
         ]
     );
     let e = r.require_checked_facts().unwrap_err();
     assert_eq!((e.check, e.code), ("RB-06", "R-FACT"));
-    assert!(e.message.starts_with("2 fact(s)"), "{e}");
-    assert!(e.message.contains(&open[1]), "{e}");
+    assert!(e.message.starts_with("3 fact(s)"), "{e}");
+    assert!(e.message.contains(&open[2]), "{e}");
 
     let r = build(&[f401_app(1), f401_app(0)]);
     assert!(r.open_facts.is_empty(), "{:?}", r.open_facts);

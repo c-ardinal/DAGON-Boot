@@ -742,7 +742,9 @@ pub struct McuDef {
     pub watchdog: Option<Watchdog>,
     /// Hardware facts of the execution model
     /// (site/src/content/docs/en/explanation/lifecycle-events.md, "Execution model"): `masked_max_us`
-    /// (longest DAGON's own code masks interrupts, 1..=1000), `flash_op` (what an erase or program
+    /// (longest DAGON's own code masks interrupts, 1..=1000), `request_max_ms` (longest one request
+    /// that erases nothing keeps the providing task: the digest of a full slot in XFER_END or
+    /// SET_PENDING; unmeasured when left out), `flash_op` (what an erase or program
     /// stops: `fetch-stall`, `xip-off-masked`, `cache-off-masked`), `write_unit` (required: the
     /// bytes one flash write covers, a power of two dividing every erase unit), `erased_value`
     /// (required: the byte erased flash reads as), `erase_regions = [{ start, len,

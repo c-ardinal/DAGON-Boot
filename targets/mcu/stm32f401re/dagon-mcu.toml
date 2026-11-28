@@ -251,6 +251,11 @@ flag = { unverified = "register" }
 # board.
 [execution]
 masked_max_us = "unmeasured"
+# The longest one request that erases nothing keeps the providing task
+# (the digest over a full slot in XFER_END or SET_PENDING) is to be
+# measured on the board
+# (samples/hardware-test/README.md, "Request time").
+request_max_ms = "unmeasured"
 flash_op = "fetch-stall"
 # A program writes a 32-bit word at a time (FLASH_CR PSIZE x32, as
 # embassy-stm32 0.6 sets it), and erased flash reads 0xFF (RM0368, Flash

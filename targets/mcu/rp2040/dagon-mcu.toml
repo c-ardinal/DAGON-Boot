@@ -351,6 +351,11 @@ flag = { unverified = "package" }
 # code is to be measured on the board.
 [execution]
 masked_max_us = "unmeasured"
+# The longest one request that erases nothing keeps the providing task
+# (the digest over a full slot in XFER_END or SET_PENDING) is to be
+# measured on the board
+# (samples/hardware-test/README.md, "Request time").
+request_max_ms = "unmeasured"
 flash_op = "xip-off-masked"
 # The QSPI NOR page program writes any number of bytes from 1 to 256
 # (W25Q080 datasheet, Page Program 02h; embassy-rp 0.10 flash::WRITE_SIZE

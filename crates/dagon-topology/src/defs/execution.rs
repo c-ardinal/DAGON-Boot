@@ -1,6 +1,7 @@
 //! `[execution]` and `[conformance]` of an MCU definition: what a flash
 //! operation stops on this MCU, how long one erase may take, how long
-//! DAGON's own code may mask interrupts, and the flash a conformance build
+//! DAGON's own code may mask interrupts, how long one request that erases
+//! nothing may keep the providing task, and the flash a conformance build
 //! may destroy. Hardware facts the MCU package's build turns into
 //! constants (the design's execution model).
 
@@ -56,6 +57,13 @@ pub enum Unmeasured {
     Unmeasured,
 }
 
+impl<T> Fact<T> {
+    /// The fact a definition leaves out: no value yet.
+    pub fn unmeasured() -> Self {
+        Fact::Unmeasured(Unmeasured::Unmeasured)
+    }
+}
+
 impl<T: Copy> Fact<T> {
     /// The value, checked or not; `None` when unmeasured.
     pub fn value(self) -> Option<T> {
@@ -91,8 +99,9 @@ impl std::fmt::Display for OpenFact {
 
 impl McuDef {
     /// The `[execution]` facts firmware for this MCU on `board` is built
-    /// with that are not checked against their source: the masking budget
-    /// and every effective erase time (the board's `[flash]` when it has
+    /// with that are not checked against their source: the masking budget,
+    /// the longest request that erases nothing and every effective erase
+    /// time (the board's `[flash]` when it has
     /// one). They are what the MCU package's `MASKED_MAX_US_KNOWN` and
     /// `ERASE_UNIT_MAX_MS_KNOWN` say; empty without `[execution]`.
     pub fn open_facts_on(&self, board: Option<&BoardDef>) -> Vec<OpenFact> {
@@ -107,6 +116,7 @@ impl McuDef {
         };
         if let Some(e) = &self.execution {
             note("execution.masked_max_us".into(), e.masked_max_us);
+            note("execution.request_max_ms".into(), e.request_max_ms);
         }
         let flash = board.and_then(|b| Some((b.id.as_str(), b.flash.as_ref()?)));
         let (key, regions) = match flash {
@@ -135,6 +145,13 @@ pub struct Execution {
     /// Longest DAGON's own code masks interrupts (a critical section of
     /// its own, never a flash operation), in microseconds.
     pub masked_max_us: Fact,
+    /// Longest one request that erases nothing keeps the task that
+    /// provides DAGON, in milliseconds: the app's thread-mode tasks and
+    /// lower interrupts wait that long (execution model, rule 8). The
+    /// longest are XFER_END and SET_PENDING, each a digest over a full
+    /// slot. Left out, it is unmeasured.
+    #[serde(default = "Fact::unmeasured")]
+    pub request_max_ms: Fact,
     pub flash_op: FlashOp,
     /// Bytes one flash write covers: every write starts and ends on a
     /// multiple of it (a power of two dividing every erase unit).
@@ -200,6 +217,9 @@ pub(super) fn execution(m: &McuDef) -> Result<(), String> {
         masked.is_some_and(|v| v == 0 || v > MASKED_MAX_US_LIMIT),
         || format!("execution.masked_max_us must be 1..={MASKED_MAX_US_LIMIT}"),
     )?;
+    fail(e.request_max_ms.value() == Some(0), || {
+        "execution.request_max_ms must be above 0".into()
+    })?;
     erase_regions(&e.erase_regions, m, "execution.erase_regions")?;
     let unit = e.write_unit;
     fail(!unit.is_power_of_two(), || {

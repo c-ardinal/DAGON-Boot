@@ -114,6 +114,7 @@ pub const ROWS: &[Row] = &[
     row(Mcu, "execution.erase_regions", Keyed(&["start"])),
     row(Mcu, "execution.erase_regions.unit_max_ms", Whole),
     row(Mcu, "execution.masked_max_us", Whole),
+    row(Mcu, "execution.request_max_ms", Whole),
     row(Mcu, "watchdog.flag", Whole),
     row(Mcu, "writer", Whole),
     // The setups are checked as a set (one internal, no two alike).

@@ -339,6 +339,7 @@ pub const MCU: &[Requirement<McuCheck>] = &[
         engine: "execution model (flash operations, masking budget)",
         fields: &[
             "execution.masked_max_us",
+            "execution.request_max_ms",
             "execution.write_unit",
             "execution.erased_value",
             "execution.erase_regions[].start",
@@ -347,7 +348,7 @@ pub const MCU: &[Requirement<McuCheck>] = &[
             "execution.erase_regions[].unit_max_ms",
             "execution.erase_regions[].unit_max_ms.unverified",
         ],
-        rule: "each fact a number (checked against its source), { unverified = N } or \"unmeasured\" (unit_max_ms needs a number either way); masked_max_us 1..=MASKED_MAX_US_LIMIT; at least one erase region; each region's len a whole number of units >= 1, start + len <= 2^32, no two overlapping; unit_max_ms >= 1, and 2 x unit_max_ms <= watchdog.trial_ms and watchdog.confirmed_ms; write_unit a power of two dividing every region's unit",
+        rule: "each fact a number (checked against its source), { unverified = N } or \"unmeasured\" (unit_max_ms needs a number either way); masked_max_us 1..=MASKED_MAX_US_LIMIT; request_max_ms >= 1 (unmeasured when left out); at least one erase region; each region's len a whole number of units >= 1, start + len <= 2^32, no two overlapping; unit_max_ms >= 1, and 2 x unit_max_ms <= watchdog.trial_ms and watchdog.confirmed_ms; write_unit a power of two dividing every region's unit",
         check: execution::execution,
     },
     Requirement {

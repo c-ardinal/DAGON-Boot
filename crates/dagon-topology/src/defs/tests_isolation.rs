@@ -97,6 +97,7 @@ header = "inline"
 
 [execution]
 masked_max_us = 50
+request_max_ms = 700
 flash_op = "fetch-stall"
 write_unit = 4
 erased_value = 0xFF
@@ -421,6 +422,13 @@ scratch = {conformance}
     let unmeasured = isolated("masked_max_us = 50", "masked_max_us = \"unmeasured\"");
     let m = parse_mcu_text(&unmeasured, &[]).unwrap();
     assert_eq!(m.execution.unwrap().masked_max_us.value(), None);
+    // The longest request: stated, unmeasured when left out, never 0.
+    let m = parse_mcu_text(&isolated("", ""), &[]).unwrap();
+    assert_eq!(m.execution.unwrap().request_max_ms.value(), Some(700));
+    let m = parse_mcu_text(&isolated("request_max_ms = 700\n", ""), &[]).unwrap();
+    assert_eq!(m.execution.unwrap().request_max_ms.value(), None);
+    let e = mcu_err(&isolated("request_max_ms = 700", "request_max_ms = 0"));
+    assert!(e.contains("request_max_ms must be above 0"), "{e}");
 }
 
 /// `[execution] erase_regions` and `[[slot_layout]]`: regions are whole

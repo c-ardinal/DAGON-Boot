@@ -17,7 +17,7 @@ fn release_area(name: &str, nodes: &[&str]) -> (PathBuf, ReleaseBuildArgs) {
          [mcu_override.rp2040.execution]\nmasked_max_us = \"unmeasured\"\n\
          [[mcu_override.rp2040.execution.erase_regions]]\nstart = 0x1000_0000\n\
          unit_max_ms = { unverified = 450 }\n\
-         [mcu_override.stm32f401re.execution]\nmasked_max_us = 20\n",
+         [mcu_override.stm32f401re.execution]\nmasked_max_us = 20\nrequest_max_ms = 700\n",
     );
     for (start, ms) in [
         (0x0800_0000u32, 800),
@@ -84,7 +84,7 @@ fn checked_facts_refuses_a_release_whose_nodes_hold_facts_not_checked() {
 
     args.checked_facts = true;
     let e = release_build(&args).unwrap_err();
-    assert!(e.starts_with("RB-06 R-FACT: 2 fact(s)"), "{e}");
+    assert!(e.starts_with("RB-06 R-FACT: 3 fact(s)"), "{e}");
     assert!(
         e.contains("node 'hub' (rp2040): execution.masked_max_us is unmeasured"),
         "{e}"

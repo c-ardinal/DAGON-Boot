@@ -190,6 +190,11 @@ flag = "unmeasured"
 # code is to be measured on the board.
 [execution]
 masked_max_us = "unmeasured"
+# The longest one request that erases nothing keeps the providing task
+# (the digest over a full slot in XFER_END or SET_PENDING) is to be
+# measured on the board
+# (samples/hardware-test/README.md, "Request time").
+request_max_ms = "unmeasured"
 flash_op = "cache-off-masked"
 # The ROM SPI flash write takes 4-byte aligned words (esp-storage 0.10,
 # FlashStorage::WORD_SIZE), and erased NOR flash reads 0xFF.

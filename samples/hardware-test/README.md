@@ -114,6 +114,17 @@ python samples/hardware-test/hwt.py selftest
 Exit code: 0 all passed, 1 a scenario failed and the restore succeeded,
 2 the restore failed or could not be verified.
 
+### Request time
+
+The verify under `times` is the round trip of XFER_END: the node's digest
+over the image it wrote, plus one exchange over the links. It is the
+longest request that erases nothing (SET_PENDING runs the same digest
+and adds one record to the state log), and it grows with the image. The
+value for the MCU definition's `[execution] request_max_ms` is that
+figure for a full slot: the longest verify times the slot's capacity
+(`[[slot_layout]] capacity`) divided by the length of the image written,
+rounded up. It is an upper figure, as the erase is.
+
 ## Scenarios
 
 status; batch update of all three; seg alone; watch alone; manual rollback

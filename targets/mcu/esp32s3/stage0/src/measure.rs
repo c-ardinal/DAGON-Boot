@@ -78,18 +78,19 @@ fn systimer() -> u32 {
 
 /// The RTC main timer, low word (RTC slow clock ticks).
 fn rtc_time() -> u32 {
+    // The ESP32-S3 has no valid flag for this latch (ESP-IDF's
+    // `rtc_cntl_ll_get_rtc_time` reads at once), and the latch takes up
+    // to a few slow clock cycles: wait until the word moves past the
+    // sample latched before this request.
+    let before = reg_read(TIME_LOW0);
     reg_write(TIME_UPDATE, 1 << 31);
-    // The latch takes a few slow clock cycles; the low word is read
-    // after the counter settles.
-    let mut last = reg_read(TIME_LOW0);
-    for _ in 0..100 {
+    for _ in 0..10_000 {
         let now = reg_read(TIME_LOW0);
-        if now == last {
-            break;
+        if now != before {
+            return now;
         }
-        last = now;
     }
-    last
+    reg_read(TIME_LOW0)
 }
 
 fn word(at: u32) -> u32 {

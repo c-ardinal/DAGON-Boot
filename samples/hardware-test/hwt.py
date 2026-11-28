@@ -163,6 +163,52 @@ def erase_command(chip, probe):
     return ["probe-rs", "erase", "--chip", chip, "--probe", probe]
 
 
+# dagon-format header.rs: an image header is 512 bytes starting with MAGIC,
+# signed over its first 0x1C0 bytes, the signature after them.
+HEADER_SIZE, HEADER_MAGIC, SIGNATURE_AT = 512, b"DGIM", 0x1C0
+
+
+def spoiled_header(img):
+    """The header of the image `img` with one byte of its signature
+    flipped: it still parses as a header, and its signature verifies under
+    no key."""
+    expect(len(img) >= HEADER_SIZE and img[:4] == HEADER_MAGIC, "not a DAGON image")
+    head = bytearray(img[:HEADER_SIZE])
+    head[SIGNATURE_AT] ^= 0xFF
+    return bytes(head)
+
+
+def spoil_commands(chip, probe, address, file):
+    """probe-rs writing `file` from `address` (the erase unit it starts is
+    erased first) through the probe `probe` only, then resetting the chip."""
+    head = ["--chip", chip, "--probe", probe]
+    return [["probe-rs", "download", *head, "--binary-format", "bin",
+             "--base-address", f"{address:#010x}", str(file)],
+            ["probe-rs", "reset", *head]]
+
+
+def level_command(chip, probe, address):
+    """probe-rs reading the 32-bit word at `address` (a port's output data
+    register) through the probe `probe`."""
+    return ["probe-rs", "read", "--chip", chip, "--probe", probe, "b32", f"{address:#010x}", "1"]
+
+
+def read_word(text):
+    """The one word `probe-rs read b32 <address> 1` printed (an address
+    ending in ':' before it is skipped); None when it printed none."""
+    for tok in text.split():
+        t = tok[2:] if tok.lower().startswith("0x") else tok
+        if not tok.endswith(":") and re.fullmatch(r"[0-9a-fA-F]{1,8}", t):
+            return int(t, 16)
+    return None
+
+
+def probe_run(cmd, cwd):
+    """Runs one probe-rs command; (rc, output)."""
+    r = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=300)
+    return r.returncode, r.stdout + r.stderr
+
+
 def rom_limits(src=ROMLINK):
     """dagon-romlink's limits by name (ROM_LIMITS), read from its source;
     {} without the repo next to this sample."""
@@ -333,6 +379,7 @@ class Run:
         self.wrote = False  # a MUTATING command has been started (set only by cli())
         self.erase_probe = getattr(a, "erase_probe", None)  # probe-rs selector; None: no erase
         self.erased = set()  # nodes this run erased (silent until written through their ROM)
+        self.spoiled = set()  # nodes a slot of which this run spoiled (until a ROM write)
         self.lines = []  # the last CLI call's output lines, (ms from its start, line)
         self.times = []  # every image write the CLI timed (write_times)
 
@@ -478,6 +525,8 @@ class Run:
         before = self.status(f"{name}-before")
         if kind == "erase":
             return self.erase(name, s, before)
+        if kind == "spoil":
+            return self.spoil(name, s, before)
         if kind == "status":
             bad = [k for k in self.nodes if not settled(before[k])]
             if bad:
@@ -540,6 +589,74 @@ class Run:
         expect(st[node] is None, f"{node} still answers after the erase: {core(st[node])}")
         unchanged(before, st, [k for k in self.nodes if k != node])
         return " ".join(cmd), r.returncode, log, st, f"{node} erased, silent"
+
+    def spoil(self, name, s, before):
+        """Writes a header whose signature does not verify over the start of
+        one slot of the node through its debug probe (`[setup.spoil]` names
+        the slots; `[setup.erase]` the chip; `--erase-probe` the probe) and
+        resets it. `what = "core"`: the boot core slot it runs from; stage0
+        must not start that core, and the node still answers on its confirmed
+        app. `what = "app"`: its confirmed app slot, after the core: stage0
+        has nothing to start, the node answers nothing and its halt light
+        (`light`: a port's output register and bit) is seen both on and off.
+        Only a ROM write (or the probe) brings the node back from either."""
+        node, what = s["node"], s["what"]
+        chip = self.setup.get("erase", {}).get(node, {}).get("chip")
+        cfg = self.setup.get("spoil", {}).get(node)
+        expect(chip and cfg, f"no [setup.erase.{node}] chip or [setup.spoil.{node}]")
+        expect(self.erase_probe, "spoil without --erase-probe")
+        n = before[node]
+        expect(settled(n), f"{node}: not on a confirmed version; not spoiled")
+        if what == "core":
+            slot = n["boot"] and n["boot"]["running"]
+            expect(slot, f"{node}: no running boot core in its versions line")
+        else:
+            expect(what == "app" and node in self.spoiled, f"{node}: spoil its core before its app")
+            slot = "AB"[n["confirmed"]]
+        files = {}
+        for f in ("bootcore.img", "stage0.bin"):
+            files[f] = provision_dir(self.project) / node / f
+            expect(files[f].is_file() and files[f].stat().st_size > 0,
+                   f"{files[f]} missing or empty: the ROM write that ends this needs it")
+        bad = self.out / f"{name}.bin"
+        bad.write_bytes(spoiled_header(files["bootcore.img"].read_bytes()))
+        self.wrote = True
+        self.spoiled.add(node)
+        if what == "app":
+            self.erased.add(node)
+        self.n += 1
+        log = self.out / f"{self.n:03d}-{name}.log"
+        cmds = spoil_commands(chip, self.erase_probe, cfg[what][slot], bad)
+        text = ""
+        for cmd in cmds:
+            rc, out = probe_run(cmd, self.project)
+            text += f"$ {' '.join(cmd)}\n{out}\n# rc={rc} end {now()}\n"
+            log.write_text(text, encoding="utf-8")
+            expect(rc == 0, f"{cmd[1]} rc={rc} (see {log.name})")
+        shown = " && ".join(" ".join(c) for c in cmds)
+        if what == "core":
+            time.sleep(self.setup["poll_s"])
+            st = self.wait_settled({node: n["version"]}, f"{name}-after")
+            expect(st[node]["active"] == n["active"], f"{node}: active slot changed")
+            unchanged(before, st, [k for k in self.nodes if k != node])
+            return shown, 0, log, st, f"{node}: boot core slot {slot} spoiled, still on {n['version']}"
+        st = self.status(f"{name}-after")
+        expect(st[node] is None, f"{node} still answers with no core and no app: {core(st[node])}")
+        unchanged(before, st, [k for k in self.nodes if k != node])
+        light = cfg["light"]
+        levels = []
+        for _ in range(light.get("samples", 40)):
+            cmd = level_command(chip, self.erase_probe, light["at"])
+            rc, out = probe_run(cmd, self.project)
+            word = read_word(out) if rc == 0 else None
+            expect(word is not None, f"{' '.join(cmd)}: rc={rc}, no word read")
+            levels.append(word >> light["bit"] & 1)
+        (self.out / f"{log.stem}-light.json").write_text(json.dumps(
+            {"at": light["at"], "bit": light["bit"], "levels": levels}), encoding="utf-8")
+        expect(0 in levels and 1 in levels,
+               f"{node}: halt light never changed in {len(levels)} reads (level {levels[0]})")
+        return shown, 0, log, st, (f"{node}: app slot {slot} spoiled, silent, halt light on in "
+                                   f"{sum(levels)} of {len(levels)} reads")
 
     def deploy(self, name, s, before):
         nodes = s.get("nodes", self.nodes)
@@ -607,6 +724,7 @@ class Run:
                 expect(settled(st[k]) and st[k]["version"] == v and st[k]["active"] == 0,
                        f"{k}: want {v} confirmed in slot A, got {core(st[k])}")
                 self.erased.discard(k)
+                self.spoiled.discard(k)
             else:
                 check_on(st, k, v, flipped_from=before[k]["active"])
         unchanged(before, st, [k for k in self.nodes if k not in nodes])
@@ -714,6 +832,10 @@ class Run:
             if silent:  # only a ROM write brings them back; restore writes nothing
                 raise Fail(f"{silent} erased by this run and silent: write each with "
                            "`dagon deploy <node>` (ROM loader) or `dagon flash <node>` (probe)")
+            spoiled = sorted(self.spoiled)
+            if spoiled:  # the node answers on its app; its boot core does not check out
+                raise Fail(f"{spoiled}: boot core spoiled by this run: write each with "
+                           "`dagon flash <node>` (probe)")
             st = self.wait_settled({k: None for k in self.nodes}, "restore-wait")
             self.check_identity("restore")
             if self.good:
@@ -1014,6 +1136,7 @@ def selftest():
     selftest_times()
     selftest_rom()
     selftest_rom_run()
+    selftest_spoil()
     selftest_one_slot()
     selftest_tamper()
     selftest_plan()
@@ -1283,6 +1406,146 @@ def selftest_rom_run():
             erase_command = real
 
 
+def selftest_spoil():
+    """The spoiled header, the probe commands, the slots of `[setup.spoil]`
+    against the MCU definition, and the spoil steps against the fake CLI:
+    the core first (the node still answers), then the app (silent, its
+    light seen on and off), then the ROM deploy; refusals write nothing."""
+    img = HEADER_MAGIC + bytes(range(256)) * 3
+    bad = spoiled_header(img)
+    assert len(bad) == HEADER_SIZE and bad[:SIGNATURE_AT] == img[:SIGNATURE_AT]
+    assert [i for i in range(HEADER_SIZE) if bad[i] != img[i]] == [SIGNATURE_AT]
+    for not_image in (b"DGIM", b"XXXX" + bytes(600)):
+        try:
+            spoiled_header(not_image)
+            raise AssertionError("spoiled something that is no image")
+        except Fail:
+            pass
+    assert spoil_commands("STM32F401RETx", "0483:374b:X", 0x0801_0000, "bad.bin") == [
+        ["probe-rs", "download", "--chip", "STM32F401RETx", "--probe", "0483:374b:X",
+         "--binary-format", "bin", "--base-address", "0x08010000", "bad.bin"],
+        ["probe-rs", "reset", "--chip", "STM32F401RETx", "--probe", "0483:374b:X"]]
+    assert level_command("STM32F401RETx", "P", 0x4002_0014)[-3:] == ["b32", "0x40020014", "1"]
+    assert read_word("0x40020014: 0x00000020\n") == 0x20 and read_word("00000000") == 0
+    assert read_word("error\n") is None
+
+    data = tomllib.loads((HERE / "hwt.toml").read_text(encoding="utf-8"))
+    sc = next(s for s in data["scenario"] if s["id"] == "spoiled-core")
+    assert sc["needs"] == "erase-probe", sc
+    assert [(st["do"], st.get("what")) for st in sc["steps"]] == [
+        ("spoil", "core"), ("spoil", "app"), ("deploy", None)], sc
+    node = sc["steps"][0]["node"]
+    assert sc["steps"][2]["rom"] == [node] == sc["steps"][2]["nodes"]
+    spoil = data["setup"]["spoil"][node]
+    assert node in data["setup"]["erase"] and set(spoil) == {"core", "app", "light"}
+    # The slots are the MCU definition's (read when this sample is in the repo).
+    definition = HERE.parent.parent / "targets" / "mcu" / "stm32f401re" / "dagon-mcu.toml"
+    if definition.is_file():
+        slots = tomllib.loads(definition.read_text(encoding="utf-8"))["slot"]
+        for what, image in (("core", "bootcore"), ("app", "app")):
+            want = {s["binding"].upper(): s["at"] for s in slots if s["image"] == image}
+            assert spoil[what] == want, (what, spoil[what], want)
+
+    setup = {"nodes": ["seg", "hub"], "coordinator": "hub", "hub_usb": "VID_C0DE",
+             "status_tries": 1, "poll_s": 0, "settle_timeout_s": 0,
+             "erase": {"seg": {"chip": "STM32F401RETx"}},
+             "spoil": {"seg": {"core": {"A": 0x0801_0000, "B": 0x0806_0000},
+                               "app": {"A": 0x0802_0000, "B": 0x0804_0000},
+                               "light": {"at": 0x4002_0014, "bit": 5, "samples": 4}}}}
+    one = {"version": "2.0.1", "active": 1, "slots": {"A": ["Written", "1.0.0"], "B": ["Confirmed", "2.0.1"]}}
+    global probe_run
+    real = probe_run
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        state = tmp / "state.json"
+        fake = [sys.executable, __file__, "_fake-dagon", str(state)]
+        (tmp / "seg").mkdir()
+        (tmp / "seg" / "Cargo.toml").write_text('[package]\nname = "seg"\nversion = "2.0.1"\n')
+        (tmp / "dagon.toml").write_text('format = 1\n[build.seg]\npackage = "seg"\n')
+        boot = tmp / "out" / "provision" / "seg"
+        release = tmp / "out" / "deploy" / "v2.0.19.dgb"
+        ran, light = [], {"levels": [0, 1, 0, 0]}
+
+        def fake_probe(cmd, cwd):
+            ran.append(cmd)
+            if cmd[1] == "read":
+                return 0, f"{cmd[-2]}: {light['levels'][len([c for c in ran if c[1] == 'read']) - 1] << 5:#010x}\n"
+            if cmd[1] == "download" and cmd[-2] in ("0x08020000", "0x08040000"):
+                st = json.loads(state.read_text())  # no core, no app: silent
+                st.setdefault("silent", []).append("seg")
+                state.write_text(json.dumps(st))
+            return 0, ""
+
+        def fresh(probe="0483:374b:X", core="A:Written 0.1.0, B:Confirmed 2.1.1 (running)"):
+            ran.clear()
+            seg = dict(one) | ({"core": core} if core else {})
+            state.write_text(json.dumps({"coordinator": "hub", "mcu": "0x0001", "calls": [],
+                                         "deploy_version": "2.0.19", "release": str(release),
+                                         "nodes": {"seg": seg, "hub": dict(one)}}))
+            a = argparse.Namespace(project=tmp, dagon=None, key="k", port="COMX", out=tmp / "o",
+                                   dagon_argv=fake, erase_probe=probe,
+                                   port_identity=lambda port: "USB\\VID_C0DE&PID_CAFE\\1")
+            r = Run(a, setup)
+            r.start_state = r.check_identity("start")
+            return r
+
+        probe_run = fake_probe
+        try:
+            core_step = {"do": "spoil", "node": "seg", "what": "core"}
+            app_step = {"do": "spoil", "node": "seg", "what": "app"}
+            r = fresh()
+            try:
+                r.step("s", 0, core_step)
+                raise AssertionError("spoiled without the files the ROM write needs")
+            except Fail as e:
+                assert "bootcore.img" in str(e) and not ran and not r.wrote, e
+            boot.mkdir(parents=True)
+            (boot / "bootcore.img").write_bytes(img)
+            (boot / "stage0.bin").write_bytes(b"s0")
+            try:
+                r.step("s", 1, app_step)
+                raise AssertionError("spoiled the app before the core")
+            except Fail as e:
+                assert "before its app" in str(e) and not ran, e
+            for probe, core, why in ((None, "A:Written 0.1.0, B:Confirmed 2.1.1 (running)", "--erase-probe"),
+                                     ("P", None, "no running boot core")):
+                r = fresh(probe, core)
+                try:
+                    r.step("s", 0, core_step)
+                    raise AssertionError(f"spoiled: {why}")
+                except Fail as e:
+                    assert why in str(e) and not ran and not r.wrote, e
+
+            r = fresh()
+            cmd, rc, log, st, note = r.step("s", 0, core_step)
+            # The running core is in slot B, at the definition's address.
+            assert [c[1] for c in ran] == ["download", "reset"] and ran[0][-2] == "0x08060000", ran
+            assert Path(ran[0][-1]).read_bytes() == bad and r.spoiled == {"seg"} and not r.erased
+            assert settled(st["seg"]) and "slot B spoiled, still on 2.0.1" in note, (st, note)
+            rec = r.restore()
+            assert "boot core spoiled by this run" in rec["result"], rec
+            cmd, rc, log, st, note = r.step("s", 1, app_step)
+            # The confirmed app is in slot B too.
+            assert ran[2][-2] == "0x08040000" and [c[1] for c in ran[4:]] == ["read"] * 4, ran
+            assert st["seg"] is None and r.erased == {"seg"} and "on in 1 of 4 reads" in note, note
+            assert json.loads((r.out / f"{log.stem}-light.json").read_text())["levels"] == [0, 1, 0, 0]
+            step = {"do": "deploy", "version": "2.0.19", "nodes": ["seg"], "rom": ["seg"]}
+            cmd, rc, log, st, note = r.step("s", 2, step)
+            assert st["seg"]["version"] == "2.0.19" and not r.erased and not r.spoiled, st
+
+            # A light that never changes is no halt pattern.
+            light["levels"] = [1, 1, 1, 1]
+            r = fresh()
+            r.step("s", 0, core_step)
+            try:
+                r.step("s", 1, app_step)
+                raise AssertionError("a steady light passed")
+            except Fail as e:
+                assert "never changed in 4 reads" in str(e), e
+        finally:
+            probe_run = real
+
+
 def selftest_one_slot():
     """A one-slot node is on the new version in the same slot; the setup
     file runs every node in place, with no step that needs a second slot."""
@@ -1390,6 +1653,8 @@ def fake_dagon(argv):
             print(f"{'hub' if k == st['coordinator'] else k}: version {n['version']}, "
                   f"mcu {st['mcu']}, wire 1, active {n['active']}, confirmed {n['active']}, "
                   f"attempts 0, last reason 0, [{slots}, F:Empty 0.0.0]")
+            if "core" in n:
+                print(f"{k}: versions: stage0 0.1.0; boot core {n['core']}; app; wire 1; mcu 0x0002")
     elif args[0] == "rollback":
         n = nodes[args[args.index("--node") + 1]]
         other = 1 - n["active"]

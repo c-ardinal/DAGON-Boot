@@ -23,6 +23,14 @@ sync = { seg = "f401-app", watch = "esp32s3-app" }
 # Nodes a run may erase whole through their debug probe (probe-rs chip name),
 # with `run --erase-probe <VID:PID[:serial]>` only: the F401's ST-LINK.
 erase = { seg = { chip = "STM32F401RETx" } }
+# Slots a run may spoil through the same probe (`spoil` steps): each boot
+# core and app slot's start (the MCU definition's [[slot]] `at`), and the
+# board's halt light as the probe reads it (NUCLEO-F401RE: PA5, bit 5 of
+# GPIOA's output data register at 0x4002_0014; RM0368 section 8.4.6).
+[setup.spoil.seg]
+core = { A = 0x0801_0000, B = 0x0806_0000 }
+app = { A = 0x0802_0000, B = 0x0804_0000 }
+light = { at = 0x4002_0014, bit = 5, samples = 40 }
 
 # Versions: a node's version is its crate's ([package] version in the
 # Cargo.toml of its [build.<id>] package). Each deploy step sets it there for
@@ -77,6 +85,15 @@ erase = { seg = { chip = "STM32F401RETx" } }
 #                                             frames, longest round trip) go to <log>-rom.json,
 #                                             checked against dagon-romlink's FRAME_TIMEOUT_MS
 #                                             and ATTEMPTS
+#   spoil    node what                       a header whose signature does not verify, written
+#                                             over the start of a slot through the probe
+#                                             ([setup.spoil], --erase-probe), then a reset
+#            what = "core"                    the boot core slot the node runs from: the node
+#                                             still answers on its confirmed app (stage0 did
+#                                             not start that core)
+#            what = "app"                     its confirmed app slot, after its core: it
+#                                             answers nothing and its halt light is read both
+#                                             on and off; a ROM deploy step must follow
 #   skip     reason                          recorded as SKIPPED
 #
 # A scenario with needs = "erase-probe" is SKIPPED when run has no --erase-probe.
@@ -200,6 +217,16 @@ needs = "erase-probe"
 steps = [
   { do = "erase", node = "seg" },
   { do = "deploy", version = "2.0.18", nodes = ["seg"], rom = ["seg"] },
+]
+
+[[scenario]]
+id = "spoiled-core"
+title = "F401 boot core with a signature that does not verify is never started; with no app either, stage0 halts"
+needs = "erase-probe"
+steps = [
+  { do = "spoil", node = "seg", what = "core" },
+  { do = "spoil", node = "seg", what = "app" },
+  { do = "deploy", version = "2.0.19", nodes = ["seg"], rom = ["seg"] },
 ]
 
 [[scenario]]

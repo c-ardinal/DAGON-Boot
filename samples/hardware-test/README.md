@@ -139,7 +139,9 @@ three times; each boot core with a release, for seg and the coordinator (`core-s
 back to the other slot; a failing one goes back to the confirmed slot and the
 node still answers, all read from `dagon status`' versions lines; the F401
 erased whole and written again through the hub's ROM path (`rom-recovery`,
-only with `--erase-probe`, else SKIPPED); the hub updating itself ten times
+only with `--erase-probe`, else SKIPPED); the F401's running boot core, then
+its app, given a signature that does not verify (`spoiled-core`, only with
+`--erase-probe`); the hub updating itself ten times
 (`hub-x10`); the watch written ten times over its UART link (`watch-x10`);
 a final good deploy.
 
@@ -166,6 +168,16 @@ crates from this DAGON: run `dagon gen` first.
 
 ## Not automated
 
+- A pending boot core whose signature does not verify, so that stage0 goes
+  back to the confirmed one: nothing writes such a core through the CLI
+  (`dagon apply` refuses it), and the probe cannot write it between the
+  record and the reset. The choice is tested on the host
+  (`dagon_core::bootcore`); on hardware, `core-seg` and `core-hub` show the
+  way back from a core that fails its own check.
+- The number of blinks of a halt code: on the NUCLEO-F401RE one blink
+  lasts 20 ms (`[boot] halt` period 100 ms), too short to count by eye or
+  through the probe. `spoiled-core` shows that the light blinks; a logic
+  analyser on PA5 shows the count (7: the signature).
 - Interrupting by resetting the coordinator: the CLI has no command that resets the
   coordinator on its own; the interrupt is the CLI killed mid-transfer.
 
@@ -200,6 +212,32 @@ on the new version in slot A, confirmed, and the hub and watch unchanged.
 A failure after the erase leaves the seg silent; the restore then writes
 nothing and exits 2. Write the seg again with `dagon deploy seg` (ROM
 loader) or `dagon flash seg` (ST-LINK).
+
+## A boot core that does not verify
+
+Stage0 starts a boot core only when its header's signature verifies under
+the key in stage0's own flash. `spoiled-core` shows it on the seg, with the
+same probe and the same conditions as `rom-recovery` (`--erase-probe`, a
+confirmed seg, `bootcore.img` and `stage0.bin` of its first write):
+
+1. `spoil` with `what = "core"` writes 512 bytes over the start of the boot
+   core slot the seg runs from (`probe-rs download`, which erases that
+   slot's sector first) and resets it: the header of `bootcore.img` with
+   one byte of its signature flipped. Stage0 must not start that core. The
+   seg still answers, on the same confirmed app in the same slot: stage0
+   started the app itself.
+2. `spoil` with `what = "app"` does the same to the confirmed app slot.
+   Stage0 has nothing to start: the seg answers nothing, and its halt
+   light (PA5, read through the probe as bit 5 of GPIOA's output register,
+   40 times) is seen both on and off. `<nn>-spoiled-core-1-spoil-light.json`
+   holds the levels read.
+3. The ROM deploy of `rom-recovery` writes the seg whole again.
+
+The slots and the light are `[setup.spoil.seg]` of `hwt.toml`; the selftest
+compares the slots with the MCU definition. A failure after step 1 leaves a
+seg that answers without a boot core that checks out: the restore writes
+nothing and exits 2; write the seg again with `dagon flash seg`. After step
+2 it is as after an erase.
 
 ## More than three nodes
 

@@ -1,7 +1,7 @@
 import { render } from 'svelte/server';
 import { describe, expect, test } from 'vitest';
 import { NOTICE, PORT } from '../app/copy.ts';
-import { PORT_DESCRIPTION_MAX, PORT_ID, type Job } from '../app/define/cli.svelte.ts';
+import { DESCRIPTION_MAX_BYTES, PORT_ID, type Job } from '../app/define/cli.svelte.ts';
 import PortModal from './PortModal.svelte';
 
 const job = (p: Partial<Job>): Job => ({ id: 3, kind: 'ai_port', state: 'running', target: 'rp2040 · pico', stage: 'port', percent: null, lines: [], result: null, question: null, started: 0, ended: null, ...p });
@@ -85,6 +85,6 @@ describe('ボード移植 modal', () => {
   test('the id rule is serve\'s: letters, digits, "-", "_" and ".", up to 32', () => {
     for (const ok of ['rp2040', 'nucleo-f401re', 'a.b_c', 'x'.repeat(32)]) expect(PORT_ID.test(ok)).toBe(true);
     for (const bad of ['', 'x'.repeat(33), 'a b', 'ボード', 'a/b', '.hidden']) expect(PORT_ID.test(bad)).toBe(false);
-    expect(PORT_DESCRIPTION_MAX).toBe(32 * 1024);
+    expect(DESCRIPTION_MAX_BYTES).toBe(32 * 1024);
   });
 });

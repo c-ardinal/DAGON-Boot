@@ -1,6 +1,6 @@
 <script lang="ts">
   import { NOTICE, PORT } from '../app/copy.ts';
-  import { jobReason, PORT_DESCRIPTION_MAX, PORT_ID, type Job, type PortRequest } from '../app/define/cli.svelte.ts';
+  import { jobReason, DESCRIPTION_MAX_BYTES, PORT_ID, type Job, type PortRequest } from '../app/define/cli.svelte.ts';
   import Modal from './Modal.svelte';
 
   interface Props {
@@ -29,7 +29,7 @@
   let agreed = $state(false);
 
   const idBad = (v: string) => v !== '' && !PORT_ID.test(v);
-  const tooLong = $derived(new TextEncoder().encode(description).length > PORT_DESCRIPTION_MAX);
+  const tooLong = $derived(new TextEncoder().encode(description).length > DESCRIPTION_MAX_BYTES);
   const ready = $derived(PORT_ID.test(mcu) && PORT_ID.test(board) && !tooLong && agreed && !sending);
 
   /** The agent's own end: its report, and whether it finished its run. */

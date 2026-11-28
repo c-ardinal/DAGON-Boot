@@ -3,7 +3,7 @@ import { describe, expect, test } from 'vitest';
 import { topo_parse } from '../wasm/pkg/dagon_wasm.js';
 import { ROUTES, request, requestFile } from '../request.ts';
 import { AGENT, PORT } from './copy.ts';
-import { PORT_DESCRIPTION_MAX, PORT_ID, type Cli } from './define/cli.svelte.ts';
+import { DESCRIPTION_MAX_BYTES, PORT_ID, type Cli } from './define/cli.svelte.ts';
 import { fromYaml, toYaml, withDefaults, type Topo } from './define/model.ts';
 import { SAMPLE_YAML } from './sample.ts';
 
@@ -29,7 +29,7 @@ describe('ボード移植: the page checks and says what `dagon ai port` does', 
 
   test('the longest description is the server\'s', () => {
     expect(port).toContain('const MAX_DESCRIPTION: usize = 32 * 1024;');
-    expect(PORT_DESCRIPTION_MAX).toBe(32 * 1024);
+    expect(DESCRIPTION_MAX_BYTES).toBe(32 * 1024);
   });
 
   test('the hours the consent names are the hours a run gets', () => {

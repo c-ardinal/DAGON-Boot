@@ -120,7 +120,7 @@ export interface PortRequest {
 /** An id as serve takes it for an MCU or a board (`dagon ai port`: letters, digits, `-`, `_`, `.`, up to 32, no `.` first). */
 export const PORT_ID = /^(?!\.)[A-Za-z0-9._-]{1,32}$/;
 /** The longest board description serve takes, in UTF-8 bytes. */
-export const PORT_DESCRIPTION_MAX = 32 * 1024;
+export const DESCRIPTION_MAX_BYTES = 32 * 1024;
 export type JobState = 'queued' | 'running' | 'question' | 'succeeded' | 'failed' | 'cancelled' | 'unknown';
 
 export interface Job {

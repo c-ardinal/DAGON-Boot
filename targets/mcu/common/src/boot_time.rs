@@ -1,7 +1,10 @@
 //! How long a boot core's steps take, measured on the node: a boot core
 //! built to measure one step keeps the microseconds it took in a record a
 //! debug probe reads by symbol, then stays where it is ([`hold`]) instead
-//! of booting, its watchdog fed, so the value is still there when read.
+//! of booting, its watchdog fed, so the value is still there when read
+//! and the probe can still reach the core (a pause between feeds: a loop
+//! that only stores to the watchdog keeps the core on its system bus, and
+//! an STM32F401's SWD access then waits for ever, `SwdDpWait`).
 //!
 //! - [`DAGON_LISTEN_US`] (boot core feature `listen-time`): from the boot
 //!   core's start to the end of its listen window, when no STAY came.
@@ -28,12 +31,14 @@ pub fn keep(record: &AtomicU32, us: u64) {
     record.store(u32::try_from(us).unwrap_or(u32::MAX), Ordering::Relaxed);
 }
 
-/// Keeps `us` in `record` and stays, calling `feed` (the watchdog) for
-/// ever.
-pub fn hold(record: &AtomicU32, us: u64, mut feed: impl FnMut()) -> ! {
+/// Keeps `us` in `record` and stays, calling `feed` (the watchdog) then
+/// `pause` (a wait well within the watchdog's period that leaves the bus
+/// to the debug probe, such as a cycle-counted delay) for ever.
+pub fn hold(record: &AtomicU32, us: u64, mut feed: impl FnMut(), mut pause: impl FnMut()) -> ! {
     keep(record, us);
     loop {
         feed();
+        pause();
     }
 }
 

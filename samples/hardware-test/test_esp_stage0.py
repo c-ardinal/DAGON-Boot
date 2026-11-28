@@ -1,6 +1,7 @@
 """Host tests of esp_stage0.py (no board): the reading of the ROM text
 output, the values and the verdict, and the commands it runs."""
 
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -121,10 +122,46 @@ class Commands(unittest.TestCase):
             a = SimpleNamespace(out=d, port="COM7", manual_reset=False, listen_seconds=0, app_seconds=0)
             rc = e.measure(a, run=run, hear=lambda *x, **k: next(heard))
             self.assertEqual(rc, 0)
-            backup = str(Path(d) / "backup.bin")
+            backup = str(Path(d).resolve() / "backup.bin")
             self.assertTrue(ran[0].startswith("board-info"))
             self.assertTrue(ran[1].startswith("read-flash"))
             self.assertEqual(ran[-1], "write-bin " + backup)
+
+    def test_a_write_that_fails_part_way_is_followed_by_the_backup(self):
+        with tempfile.TemporaryDirectory() as d:
+            images = Path(d) / "images"
+            images.mkdir()
+            for n in ("good.bin", "bad-signature.bin"):
+                (images / n).write_bytes(b"\xff")
+            (images / "stage0.bin").write_bytes(b"\0" * 25_392)
+            ran = []
+
+            def run(cmd, cwd=None, env=None, capture=False):
+                ran.append(cmd[1] + " " + cmd[-1])
+                if cmd[1] == "read-flash":
+                    Path(cmd[-1]).write_bytes(b"\xff")
+                if cmd[1] == "write-bin" and cmd[-1].endswith("good.bin"):
+                    raise SystemExit("espflash exited 1")
+                return "Flash size: 16MB" if capture else ""
+
+            a = SimpleNamespace(out=d, port="COM7", manual_reset=False, listen_seconds=0, app_seconds=0)
+            rc = e.measure(a, run=run, hear=lambda *x, **k: [])
+            self.assertEqual(rc, 1)
+            self.assertEqual(ran[-1], "write-bin " + str(Path(d).resolve() / "backup.bin"))
+
+    def test_a_relative_output_folder_is_given_to_the_image_build_whole(self):
+        with tempfile.TemporaryDirectory() as d:
+            seen = []
+            here = Path.cwd()
+            try:
+                os.chdir(d)
+                e.prepare(SimpleNamespace(out="rel", app_image=None),
+                          run=lambda cmd, cwd=None, env=None: seen.append(env))
+            finally:
+                os.chdir(here)
+            out = Path(seen[-1]["DAGON_STAGE0_HW_OUT"])
+            self.assertTrue(out.is_absolute())
+            self.assertEqual(out, Path(d).resolve() / "rel" / "images")
 
 
 if __name__ == "__main__":

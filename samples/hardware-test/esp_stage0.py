@@ -194,7 +194,8 @@ def run_cmd(cmd, cwd=None, env=None, capture=False):
 
 
 def out_dir(a):
-    return Path(a.out or Path.home() / "dagon-measure" / "esp-stage0")
+    # Absolute: the image build runs in the repository root.
+    return Path(a.out or Path.home() / "dagon-measure" / "esp-stage0").resolve()
 
 
 def prepare(a, run=run_cmd):
@@ -292,8 +293,9 @@ def measure(a, run=run_cmd, hear=listen):
         if (images / "own-app.bin").exists():
             cases.append(("own-app", 2))
         for name, starts in cases:
-            write(a, images / f"{name}.bin", run)
+            # A write that fails part way has already changed the flash.
             wrote = True
+            write(a, images / f"{name}.bin", run)
             # Each start after the first shows what the one before left
             # (the RTC STORE words, the RTC slow memory an app changed).
             for i in range(starts):

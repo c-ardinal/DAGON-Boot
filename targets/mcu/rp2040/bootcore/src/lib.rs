@@ -131,7 +131,10 @@ fn led_init() {
 #[cfg(any(feature = "listen-time", feature = "decide-time"))]
 fn measured(record: &core::sync::atomic::AtomicU32, us: u64) -> ! {
     if board_def::BOOT_LED_GPIO.is_none() {
-        boot_time::hold(record, us, feed)
+        // A millisecond between feeds, well within the trial period.
+        boot_time::hold(record, us, feed, || {
+            cortex_m::asm::delay(led::cycles_per_ms())
+        })
     }
     boot_time::keep(record, us);
     with_wdt(Watchdog::stop);

@@ -300,14 +300,27 @@ def parse_words(text):
     return words
 
 
-def probe_read(chip, probe, address, count=1):
+def read_command(chip, probe, address, count=1):
+    """probe-rs reading `count` 32-bit words from `address`."""
     cmd = ["probe-rs", "read", "--chip", chip]
     if probe:
         cmd += ["--probe", probe]
-    cmd += ["b32", hex(address), str(count)]
-    r = subprocess.run(cmd, capture_output=True, text=True)
+    return cmd + ["b32", hex(address), str(count)]
+
+
+def probe_read(chip, probe, address, count=1, run=subprocess.run):
+    """The words read, and the command that read them. No read under
+    reset follows a failure: an ST-LINK connected under reset was seen to
+    go on driving the node's reset line afterwards (issue #159), so that
+    is left to the person, who can unplug the probe afterwards."""
+    cmd = read_command(chip, probe, address, count)
+    r = run(cmd, capture_output=True, text=True)
     if r.returncode != 0:
-        raise SystemExit(f"{' '.join(cmd)} failed: {r.stderr.strip()}")
+        raise SystemExit(
+            f"{' '.join(cmd)} failed: {r.stderr.strip()}\n"
+            "the node may keep a plain connection out: read it by hand with "
+            "--connect-under-reset, then plug the probe in again"
+        )
     words = parse_words(r.stdout)
     if len(words) < count:
         raise SystemExit(f"{' '.join(cmd)}: expected {count} words, got: {r.stdout.strip()}")

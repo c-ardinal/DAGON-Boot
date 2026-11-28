@@ -168,9 +168,9 @@ fn the_definitions_give_the_world_and_the_targets_of_a_node_behind_a_relaying_no
     let mid = block_on(h.hello(at("mid"))).unwrap();
     let leaf = block_on(h.hello(at("leaf"))).unwrap();
     assert_ne!(mid.mcu_id, leaf.mcu_id, "two nodes answered, not one twice");
-    // With the built-in definitions the RP2040 does not relay as a node:
-    // the leaf is not in the part updating reaches.
+    // The built-in RP2040 relays as a node too: the leaf is in the part
+    // updating reaches, through mid.
     let builtin = dagon_topology::defs::Registry::builtin();
     let targets = dagon_host::node_targets(builtin, &t, "hub").unwrap();
-    assert!(targets.iter().all(|(n, _)| n != "leaf"));
+    assert!(targets.iter().any(|(n, _)| n == "leaf"));
 }

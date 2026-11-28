@@ -217,7 +217,7 @@ describe('define document', () => {
   });
 
   test('hops the firmware does not run are known, and reported as 使用不可の接続 (◇)', () => {
-    expect(linkKinds('rp2040')).toEqual({ up: [LinkKind.UsbCdc], down: [LinkKind.I2c, LinkKind.Uart] });
+    expect(linkKinds('rp2040')).toEqual({ up: [LinkKind.UsbCdc, LinkKind.Uart], down: [LinkKind.I2c, LinkKind.Uart] });
     const doc = fromYaml(SAMPLE_YAML);
     const [hub, seg] = ['hub', 'seg'].map((id) => doc.topo.nodes.find((n) => n.id === id));
     expect(hopAvailable(LinkKind.I2c, hub, seg)).toBe(true);

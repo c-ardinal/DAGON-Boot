@@ -501,6 +501,8 @@ jobs:
         run: |
           cargo test -p dagon-cli --bin dagon --locked -- --ignored new_gen_build_rp2040_hub_by_mcu
           cargo test -p dagon-cli --bin dagon --locked -- --ignored new_gen_build_f401_node_by_mcu
+          cargo test -p dagon-cli --bin dagon --locked -- --ignored new_gen_build_rp2040_relaying_node_by_mcu
+          cargo test -p dagon-cli --bin dagon --locked -- --ignored new_gen_build_rp2040_relaying_node_on_its_board
 
   web:
     runs-on: ubuntu-24.04

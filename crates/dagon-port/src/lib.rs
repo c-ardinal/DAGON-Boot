@@ -277,6 +277,12 @@ pub trait StreamPort {
     /// Reads at least one byte, waiting up to `timeout_ms`; returns the count.
     async fn read(&mut self, buf: &mut [u8], timeout_ms: u32) -> Result<usize, BusError>;
     async fn write(&mut self, data: &[u8]) -> Result<(), BusError>;
+    /// Returns once every byte written has left the line (the hardware's
+    /// FIFO and shift register empty), so a reset right after cuts no
+    /// reply. Default: at once (a port whose write already waits for it).
+    async fn drain(&mut self) -> Result<(), BusError> {
+        Ok(())
+    }
 }
 
 /// Hub: master on the shared I2C bus. `addr` is the 7-bit address.

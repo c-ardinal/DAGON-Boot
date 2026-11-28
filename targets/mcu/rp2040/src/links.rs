@@ -24,8 +24,11 @@ pub use dagon_mcu_common::i2c_link::I2C_FRAME;
 use dagon_port::{BusError, I2cBus, StreamPort};
 use embassy_rp::i2c::Instance as I2cInstance;
 use embassy_rp::i2c::{self, AbortReason, Async};
+use embassy_rp::interrupt::typelevel::Binding;
 use embassy_rp::pio::Instance as PioInstance;
-use embassy_rp::pio_programs::uart::{PioUartRx, PioUartTx};
+use embassy_rp::pio::{self, Pio, PioPin};
+use embassy_rp::pio_programs::uart::{PioUartRx, PioUartRxProgram, PioUartTx, PioUartTxProgram};
+use embassy_rp::Peri;
 use embassy_time::{with_deadline, with_timeout, Duration, Instant, Timer};
 
 /// Bound on one byte entering the PIO UART TX FIFO.
@@ -65,7 +68,25 @@ pub struct PioStream<'d, P: PioInstance, const TX: usize, const RX: usize> {
     pub rx: PioUartRx<'d, P, RX>,
 }
 
-impl<P: PioInstance, const TX: usize, const RX: usize> StreamPort for PioStream<'_, P, TX, RX> {
+/// A PIO block's registers, for the TX state machine's state the PIO UART
+/// driver does not give (`PioStream::drain`).
+pub trait PioRegs: PioInstance {
+    fn regs() -> embassy_rp::pac::pio::Pio;
+}
+
+impl PioRegs for embassy_rp::peripherals::PIO0 {
+    fn regs() -> embassy_rp::pac::pio::Pio {
+        embassy_rp::pac::PIO0
+    }
+}
+
+impl PioRegs for embassy_rp::peripherals::PIO1 {
+    fn regs() -> embassy_rp::pac::pio::Pio {
+        embassy_rp::pac::PIO1
+    }
+}
+
+impl<P: PioRegs, const TX: usize, const RX: usize> StreamPort for PioStream<'_, P, TX, RX> {
     async fn read(&mut self, buf: &mut [u8], timeout_ms: u32) -> Result<usize, BusError> {
         let Some(first) = buf.first_mut() else {
             return Ok(0);
@@ -86,6 +107,49 @@ impl<P: PioInstance, const TX: usize, const RX: usize> StreamPort for PioStream<
                 .map_err(|_| BusError::Timeout)?;
         }
         Ok(())
+    }
+    /// The write returns with up to four bytes in the TX FIFO: waits until
+    /// the FIFO is empty and the TX program stalls on its next `pull` (the
+    /// last byte's data bits sent, the line at the stop level), then a stop
+    /// bit's time (1 ms covers every rate from 1000 bit/s).
+    async fn drain(&mut self) -> Result<(), BusError> {
+        let pio = P::regs();
+        let sm = 1u8 << TX;
+        while pio.fstat().read().txempty() & sm == 0 {
+            Timer::after_micros(50).await;
+        }
+        pio.fdebug().write(|w| w.set_txstall(sm));
+        while pio.fdebug().read().txstall() & sm == 0 {
+            Timer::after_micros(50).await;
+        }
+        Timer::after_millis(1).await;
+        Ok(())
+    }
+}
+
+impl<P: PioInstance> PioStream<'static, P, 0, 1> {
+    /// The PIO UART of `pio` on pins `tx`, `rx` at `baud` bit/s: state
+    /// machine 0 sends, 1 receives. The PIO runs it for the life of the
+    /// app (it is never released).
+    pub fn on(
+        pio: Peri<'static, P>,
+        tx: Peri<'static, impl PioPin>,
+        rx: Peri<'static, impl PioPin>,
+        irqs: impl Binding<P::Interrupt, pio::InterruptHandler<P>>,
+        baud: u32,
+    ) -> Self {
+        let Pio {
+            mut common,
+            sm0,
+            sm1,
+            ..
+        } = Pio::new(pio, irqs);
+        let tx_prog = PioUartTxProgram::new(&mut common);
+        let rx_prog = PioUartRxProgram::new(&mut common);
+        let tx = PioUartTx::new(baud, &mut common, sm0, tx, &tx_prog);
+        let rx = PioUartRx::new(baud, &mut common, sm1, rx, &rx_prog);
+        core::mem::forget(common);
+        PioStream { tx, rx }
     }
 }
 

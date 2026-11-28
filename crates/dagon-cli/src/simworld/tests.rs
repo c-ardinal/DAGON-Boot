@@ -334,7 +334,19 @@ fn a_node_behind_a_node_that_relays_is_updated_through_it() {
         lines[1].starts_with("update PASS: hub, mid, leaf"),
         "{lines:#?}"
     );
-    // With the built-in definitions the leaf is skipped: the run is the hub and mid.
+    // A tampered image for the leaf is refused at the end of both hops, and
+    // the node between recovers from a cut write and from an unconfirmed
+    // app as a node the hub reaches directly does.
+    let (r, lines) = sim(
+        &reg,
+        &yaml,
+        &["leaf=tamper", "mid=power-cut", "mid=no-confirm"],
+    );
+    assert_eq!(r, Ok(()), "{lines:#?}");
+    assert!(lines[2].starts_with("leaf tamper PASS"), "{lines:#?}");
+    assert!(lines[3].starts_with("mid power-cut PASS"), "{lines:#?}");
+    assert!(lines[4].starts_with("mid no-confirm PASS"), "{lines:#?}");
+    // The built-in RP2040 relays as a node as well: the leaf is in the run.
     let t = dagon_topology::parse_str(&yaml).unwrap();
     let part = dagon_topology::cut_with(Registry::builtin(), &t)
         .topology
@@ -342,5 +354,8 @@ fn a_node_behind_a_node_that_relays_is_updated_through_it() {
     let mut lines = Vec::new();
     let r = run(Registry::builtin(), &part, &[], &mut |l| lines.push(l));
     assert_eq!(r, Ok(()), "{lines:#?}");
-    assert!(lines[1].starts_with("update PASS: hub, mid"), "{lines:#?}");
+    assert!(
+        lines[1].starts_with("update PASS: hub, mid, leaf"),
+        "{lines:#?}"
+    );
 }

@@ -202,9 +202,11 @@ min_period = 20
 fast_ppm = 0
 slow_ppm = 1_000_000
 
-# Link kinds the firmware implements (src/kinds.rs LINK_KINDS).
+# Link kinds the firmware implements (src/kinds.rs LINK_KINDS). Up: USB CDC,
+# and a UART from the node nearer the PC (src/relay.rs `Uplink::Uart`, a node
+# that relays as a node).
 [links]
-up = ["usb-cdc"]
+up = ["usb-cdc", "uart"]
 down = ["i2c", "uart"]
 
 # How the boot core receives when the app does not answer: it waits the
@@ -285,14 +287,19 @@ addressing = { fixed = 0xFF }
 max_payload = 1024
 
 # Static RAM (.bss + .data) of the relay firmware (examples/relay.rs, every
-# link wired; scripts/relay_ram.py): 26_824 bytes measured with the pinned
+# link wired, the USB uplink; scripts/relay_ram.py): 27_304 bytes measured with the pinned
 # Rust, plus 1/16 of it (the margin the stage0 size check leaves), rounded up
 # to 256 bytes. The margin takes a toolchain's or a dependency's small
 # changes. Each link's port and worker are static whether a board wires the
 # link or not: the second I2C bus and the second PIO UART are 8_688 bytes
-# of it.
+# of it. A node on a UART uplink holds that link in a static of its board's
+# instead of the USB device's buffers (src/relay.rs `Uplink::Uart`).
+# relays_as_node: a node with role node serves its uplink UART with the
+# relay (src/relay.rs `Uplink::Uart`), so the nodes linked behind it are
+# reached through it.
 [relay]
-ram_bytes = 28_672
+ram_bytes = 29_184
+relays_as_node = true
 
 # What the wire codec (dagon_proto) may take in each image
 # (scripts/codec_budget.py): the largest figure of the images measured

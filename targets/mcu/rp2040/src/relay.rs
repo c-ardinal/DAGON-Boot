@@ -1,4 +1,5 @@
-//! The relay ([`dagon_relay`]) on an RP2040: the PC link over USB CDC, its
+//! The relay ([`dagon_relay`]) on an RP2040: the PC link ([`Uplink`]: USB
+//! CDC on a coordinator, a UART on a node that relays as a node), its
 //! I2C buses (DAGON mailbox, and I2C_RAW to an STM32 ROM loader) and PIO
 //! UARTs as its links, as many of them as the board wires, and the NRST /
 //! BOOT0 lines of an STM32 node. This
@@ -20,12 +21,17 @@ use dagon_relay::{
     run_link, serve, task, Config, LinkRoute, Liveness, OwnAgent, Port, Recovery, RelayClock,
 };
 use embassy_executor::Spawner;
+use embassy_rp::interrupt::typelevel::Binding;
 use embassy_rp::peripherals::{I2C0, I2C1, PIO0, PIO1, USB};
 use embassy_rp::Peri;
 use embassy_time::{Instant, Timer};
 use heapless::Vec;
 use static_cell::StaticCell;
 
+use dagon_mcu_common::link::{Kind, Link, LinkError, Reconnect};
+use dagon_proto::max_payload;
+
+use crate::boot_links::{HwUart, UartTarget};
 use crate::links::{I2cLink, PioStream, RpI2c};
 use crate::node::{self, App, AppAgent, AppEvents, BoardDef, DagonParts};
 use crate::sub::SubLines;
@@ -47,11 +53,125 @@ pub const fn levels<const N: usize>() -> [Level; N] {
     crate::watchdog::levels::<N>(TASKS)
 }
 
-/// The links the board wires, one field per relay link of the MCU
+/// The link to the node nearer the PC, which the relay serves as its PC
+/// link (`dagon_relay::serve` takes any [`Link`]).
+pub enum Uplink {
+    /// USB CDC: the relay builds the device from [`DagonParts::usb`] (a
+    /// coordinator, and a node reached over USB).
+    Usb,
+    /// A UART from the node nearer the PC (a node that relays as a node,
+    /// `[relay] relays_as_node`): requests arrive on it and their replies
+    /// leave on it; [`DagonParts::usb`] stays unused. Made by
+    /// [`Uplink::uart`], which keeps the link in a static (its frame buffer
+    /// is 2 KiB), so only a node wired this way holds one and the PC task
+    /// holds a reference.
+    Uart(&'static mut UartUp),
+}
+
+/// The UART of an [`Uplink::Uart`], by the port its link end names: the
+/// hardware UART (`uart0`, `uart1`), or a PIO's state machines 0 (TX) and
+/// 1 (RX) (`pio-uart` on PIO0, `pio-uart1` on PIO1). A PIO taken for the
+/// uplink is not the downlink of that port too: the board wires one of
+/// them.
+pub enum UartUp {
+    Hw(UartTarget<HwUart>),
+    Pio0(UartTarget<PioStream<'static, PIO0, 0, 1>>),
+    Pio1(UartTarget<PioStream<'static, PIO1, 0, 1>>),
+}
+
+impl Link for &'static mut UartUp {
+    fn max_payload(&self) -> usize {
+        max_payload::UART
+    }
+    fn reconnect(&self) -> Reconnect {
+        Reconnect::Persistent
+    }
+    fn kind(&self) -> Kind {
+        Kind::Uart
+    }
+    async fn read_frame(&mut self) -> Result<&[u8], LinkError> {
+        match &mut **self {
+            UartUp::Hw(l) => l.read_frame().await,
+            UartUp::Pio0(l) => l.read_frame().await,
+            UartUp::Pio1(l) => l.read_frame().await,
+        }
+    }
+    async fn write_frame(&mut self, frame: &[u8]) -> Result<(), LinkError> {
+        match &mut **self {
+            UartUp::Hw(l) => l.write_frame(frame).await,
+            UartUp::Pio0(l) => l.write_frame(frame).await,
+            UartUp::Pio1(l) => l.write_frame(frame).await,
+        }
+    }
+    /// The reply has left the line before a REBOOT's reset.
+    async fn flush(&mut self) -> Result<(), LinkError> {
+        match &mut **self {
+            UartUp::Hw(l) => l.flush().await,
+            UartUp::Pio0(l) => l.flush().await,
+            UartUp::Pio1(l) => l.flush().await,
+        }
+    }
+}
+
+impl UartUp {
+    /// The hardware UART `uart` (its pins and speed set by the board).
+    pub fn hw(uart: embassy_rp::uart::BufferedUart) -> Self {
+        UartUp::Hw(UartTarget::new(HwUart(uart)))
+    }
+    /// The hardware UART `uart` on pins `tx`, `rx` at `baud` bit/s, its
+    /// buffers in this package's static (a frame's worth to receive). Call
+    /// once.
+    pub fn hw_on<T: embassy_rp::uart::Instance>(
+        uart: Peri<'static, T>,
+        tx: Peri<'static, impl embassy_rp::uart::TxPin<T>>,
+        rx: Peri<'static, impl embassy_rp::uart::RxPin<T>>,
+        irq: impl Binding<T::Interrupt, embassy_rp::uart::BufferedInterruptHandler<T>>,
+        baud: u32,
+    ) -> Self {
+        static BUFS: StaticCell<([u8; 64], [u8; 2048])> = StaticCell::new();
+        let (tb, rb) = BUFS.init(([0; 64], [0; 2048]));
+        let mut c = embassy_rp::uart::Config::default();
+        c.baudrate = baud;
+        Self::hw(embassy_rp::uart::BufferedUart::new(
+            uart, tx, rx, irq, tb, rb, c,
+        ))
+    }
+    /// PIO0's PIO UART (port `pio-uart`).
+    pub fn pio0(stream: PioStream<'static, PIO0, 0, 1>) -> Self {
+        UartUp::Pio0(UartTarget::new(stream))
+    }
+    /// PIO1's PIO UART (port `pio-uart1`).
+    pub fn pio1(stream: PioStream<'static, PIO1, 0, 1>) -> Self {
+        UartUp::Pio1(UartTarget::new(stream))
+    }
+}
+
+impl Uplink {
+    /// The uplink `uart`, kept in this package's static. Call once: a
+    /// second call panics (there is one uplink).
+    pub fn uart(uart: UartUp) -> Self {
+        static UP: StaticCell<UartUp> = StaticCell::new();
+        Uplink::Uart(UP.init(uart))
+    }
+
+    /// The largest payload a request on it carries: what the node's agent
+    /// tells the host in HELLO, so the host's chunks fit the link.
+    const fn max_payload(&self) -> usize {
+        match self {
+            Uplink::Usb => max_payload::USB,
+            Uplink::Uart(_) => max_payload::UART,
+        }
+    }
+}
+
+/// The links the board wires: the [`Uplink`] (USB from [`Links::none`]),
+/// and one field per relay link of the MCU
 /// definition (any may be absent; requests for an absent one answer
 /// E_UNSUPPORTED). A board names the links it wires and takes the rest
 /// from [`Links::none`].
 pub struct Links {
+    /// The link to the node nearer the PC.
+    pub up: Uplink,
     /// Port `i2c0`.
     pub i2c: Option<I2cLink<RpI2c<'static, I2C0>>>,
     /// Port `i2c1`.
@@ -99,6 +219,7 @@ impl Links {
     /// No link wired.
     pub const fn none() -> Self {
         Links {
+            up: Uplink::Usb,
             i2c: None,
             i2c1: None,
             uart: None,
@@ -114,7 +235,7 @@ pub struct Setup {
     pub tag: &'static str,
     /// The role it reports ([`role`]), from its definition.
     pub role: u8,
-    /// USB product name shown on the host.
+    /// USB product name shown on the host (an [`Uplink::Usb`]'s).
     pub name: &'static str,
     /// The app's self-check, extensions and who confirms.
     pub app: App,
@@ -298,8 +419,7 @@ pub fn start<B: BoardDef, const N: usize>(
         parts.watchdog,
         guard,
         task::PC,
-        setup.tag,
-        setup.role,
+        node::config(setup.tag, setup.role, links.up.max_payload()),
         setup.app,
     );
     let watch = RpWatch(guard);
@@ -354,7 +474,13 @@ pub fn start<B: BoardDef, const N: usize>(
         config: setup.relay,
     };
     let high = crate::exec::start();
-    high.spawn(pc_task(parts.usb, setup.name, serial, relay).expect("task pool"));
+    let up = Up {
+        usb: parts.usb,
+        link: links.up,
+        product: setup.name,
+        serial,
+    };
+    high.spawn(pc_task(up, relay).expect("task pool"));
     if let Some(i2c) = links.i2c {
         high.spawn(i2c0_task(i2c, watch).expect("task pool"));
     }
@@ -373,21 +499,32 @@ pub fn start<B: BoardDef, const N: usize>(
     events
 }
 
-/// Runs inside the high-priority executor: builds the USB device there
-/// (its types stay in that executor), starts it, then serves the PC.
-#[embassy_executor::task]
-async fn pc_task(
+/// What the PC task serves the PC on: the [`Uplink`], and the USB
+/// peripheral with the device's names for an [`Uplink::Usb`].
+struct Up {
     usb: Peri<'static, USB>,
+    link: Uplink,
     product: &'static str,
     serial: &'static str,
-    relay: RpRelay,
-) -> ! {
-    let (device, link) = crate::usb::new(usb, product, serial);
-    // SAFETY: awaited directly inside this embassy task, whose context
-    // comes from the interrupt executor running it.
-    let spawner = unsafe { Spawner::for_current_executor() }.await;
-    spawner.spawn(crate::usb::run(device).expect("task pool"));
-    serve(relay, link).await
+}
+
+/// Runs inside the high-priority executor and serves the PC on the
+/// uplink. USB: builds the device there (its types stay in that executor)
+/// and starts it first. One task for either uplink, so the relay's state
+/// is held once whichever the board wires.
+#[embassy_executor::task]
+async fn pc_task(up: Up, relay: RpRelay) -> ! {
+    match up.link {
+        Uplink::Usb => {
+            let (device, link) = crate::usb::new(up.usb, up.product, up.serial);
+            // SAFETY: awaited directly inside this embassy task, whose
+            // context comes from the interrupt executor running it.
+            let spawner = unsafe { Spawner::for_current_executor() }.await;
+            spawner.spawn(crate::usb::run(device).expect("task pool"));
+            serve(relay, link).await
+        }
+        Uplink::Uart(link) => serve(relay, link).await,
+    }
 }
 
 #[embassy_executor::task]

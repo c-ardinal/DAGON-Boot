@@ -552,7 +552,7 @@ mod tests {
             .find(|m| m["id"] == "my-m0")
             .unwrap();
         assert_eq!(m0["writer"], "uf2-drive");
-        assert_eq!(m0["links"]["up"], json!(["usb-cdc"]));
+        assert_eq!(m0["links"]["up"], json!(["usb-cdc", "uart"]));
 
         let plain = system.replace("\\\\", "\\");
         let home = std::env::var("USERPROFILE")

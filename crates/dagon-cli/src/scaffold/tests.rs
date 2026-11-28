@@ -1070,6 +1070,78 @@ clock = { source = { crystal_hz = 12_000_000 } }
     }
 }
 
+/// An RP2040 board with a 12 MHz crystal (a UART link needs one on each
+/// end, V-26), its header holding the pins [`relaying_node`] names.
+const RP2040_WITH_CRYSTAL: &str = "[board.rp2040-with-crystal]
+format = 4
+product = \"An RP2040 board with a 12 MHz crystal\"
+mcu = \"rp2040\"
+flash_bytes = 0x40_0000
+drawing = \"generic\"
+header = [{ pin = \"GPIO0\" }, { pin = \"GPIO1\" }, { pin = \"GPIO4\" }, { pin = \"GPIO5\" }, { pin = \"GPIO26\" }, { pin = \"GPIO27\" }]
+clock = { source = { crystal_hz = 12_000_000 } }
+";
+
+/// hub - mid - leaf over UART links: mid an RP2040 with role node, reached
+/// on its port `mid_port` (pins 0/1 on `uart0`, 26/27 on `pio-uart`, 4/5
+/// on `pio-uart1`) and relaying to leaf
+/// over its PIO UART when `with_leaf`. Both RP2040s on `board`.
+fn relaying_node(board: &str, mid_port: &str, with_leaf: bool) -> String {
+    let rp = |id: &str, role: &str| {
+        format!("  - id: {id}\n    mcu: rp2040\n    board: {board}\n    role: {role}\n    port: self-boot\n    flash_map: rp2040-4m\n    tag: {id}\n")
+    };
+    let mid_pins = match mid_port {
+        "uart0" => "{ tx: 0, rx: 1 }",
+        "pio-uart" => "{ tx: 26, rx: 27 }",
+        _ => "{ tx: 4, rx: 5 }",
+    };
+    let mut yaml = format!(
+        "dagon: 2\nname: relaying\nnodes:\n{}{}",
+        rp("hub", "coordinator"),
+        rp("mid", "node")
+    );
+    if with_leaf {
+        yaml.push_str("  - id: leaf\n    mcu: esp32s3\n    board: m5stopwatch\n    role: node\n    port: vendor-stage2\n    flash_map: esp32s3-16m\n    max_attempts: 1\n    tag: leaf\n");
+    }
+    yaml.push_str(&format!("links:\n  - kind: uart\n    iface: pio-uart\n    ends:\n      - {{ node: hub, port: pio-uart, pins: {{ tx: 26, rx: 27 }} }}\n      - {{ node: mid, port: {mid_port}, pins: {mid_pins} }}\n    baud: 115200\n    control:\n      kind: cooperative\n      rom_entry: force-download-boot\n"));
+    if with_leaf {
+        yaml.push_str("  - kind: uart\n    iface: pio-uart\n    ends:\n      - { node: mid, port: pio-uart, pins: { tx: 26, rx: 27 } }\n      - { node: leaf, port: uart0 }\n    baud: 115200\n    control:\n      kind: cooperative\n      rom_entry: force-download-boot\n");
+        yaml.push_str("update:\n  order: [leaf, mid, hub]\n");
+    } else {
+        yaml.push_str("update:\n  order: [mid, hub]\n");
+    }
+    yaml
+}
+
+/// An RP2040 node reached over UART, from its MCU package's template: its
+/// relay serves that UART as its PC link, on the hardware UART0 and on a
+/// PIO with a PIO UART down to the next node.
+#[test]
+#[ignore = "builds firmware for the RP2040"]
+fn new_gen_build_rp2040_relaying_node_by_mcu() {
+    for (port, leaf, name) in [
+        ("uart0", true, "e2e-mcu-mid-uart0"),
+        ("pio-uart1", false, "e2e-mcu-mid-pio1"),
+    ] {
+        let topology = relaying_node("rp2040-with-crystal", port, leaf);
+        if let Err(log) = build_project(&topology, "mid", name, RP2040_WITH_CRYSTAL) {
+            panic!("{port}: {log}");
+        }
+    }
+}
+
+/// The same node on the Waveshare board, reached on its bus `child-uart`
+/// (the PIO UART its boot core receives on): the board's start serves it
+/// as the relay's PC link.
+#[test]
+#[ignore = "builds firmware for the RP2040"]
+fn new_gen_build_rp2040_relaying_node_on_its_board() {
+    let topology = relaying_node("waveshare-rp2040-touch-lcd-1.28", "pio-uart", false);
+    if let Err(log) = build_project(&topology, "mid", "e2e-board-mid", "") {
+        panic!("{log}");
+    }
+}
+
 #[test]
 #[ignore = "builds firmware for the STM32F401RE"]
 fn new_gen_build_f401_node_by_mcu() {
@@ -1993,6 +2065,63 @@ fn mcu_templates_wire_the_links_the_topology_names() {
     let w = wiring_placeholders(reg, &many, n);
     assert!(render("plain {{node}}", n, &hops, &w, &src, Path::new(".")).is_ok());
     assert!(render("{{down_i2c}}", n, &hops, &w, &src, Path::new(".")).is_err());
+    // A node reached over UART: the port its end names picks the
+    // peripheral, and the pins and speed are its link's.
+    let reg_board = {
+        let d = tmp("up-uart-wiring");
+        std::fs::create_dir_all(&d).unwrap();
+        let toml = d.join("dagon.toml");
+        std::fs::write(&toml, format!("format = 1\n{RP2040_WITH_CRYSTAL}")).unwrap();
+        let r =
+            dagon_topology::defs::Registry::load(&[dagon_topology::defs::Source::Project(&toml)])
+                .unwrap();
+        let _ = std::fs::remove_dir_all(&d);
+        r
+    };
+    let render_for_in =
+        |reg: &dagon_topology::defs::Registry, t: &Topology, id: &str, text: &str| {
+            let n = t.node(id).unwrap();
+            let hops = hop_placeholders(reg, t, n).unwrap();
+            render(
+                text,
+                n,
+                &hops,
+                &wiring_placeholders(reg, t, n),
+                &src,
+                Path::new("."),
+            )
+            .unwrap()
+        };
+    for (port, ctl, hw, pio) in [
+        ("uart0", "UART0", "all()", "any()"),
+        ("pio-uart1", "PIO1", "any()", "all()"),
+    ] {
+        let up =
+            dagon_topology::parse_str(&relaying_node("rp2040-with-crystal", port, port == "uart0"))
+                .unwrap();
+        let mid = up.node("mid").unwrap();
+        let w = wiring_placeholders(&reg_board, &up, mid).unwrap();
+        let get = |k: &str| w.iter().find(|(p, _)| p == k).unwrap().1.clone();
+        assert_eq!(get("{{if_up_uart}}"), "all()", "{port}");
+        assert_eq!(
+            (get("{{up_ctl}}"), get("{{if_up_hw}}"), get("{{if_up_pio}}")),
+            (ctl.into(), hw.into(), pio.into()),
+            "{port}"
+        );
+        assert_eq!(get("{{up_baud}}"), "115200");
+        let rendered = render_for_in(&reg_board, &up, "mid", &tpl("rp2040"));
+        assert!(!rendered.contains("{{"), "{rendered}");
+        assert!(rendered.contains(&format!("p.{ctl}, p.PIN_")), "{rendered}");
+        // The hub is reached over USB: its uplink code is left out.
+        let hub = up.node("hub").unwrap();
+        let w = wiring_placeholders(&reg_board, &up, hub).unwrap();
+        assert!(w.contains(&("{{if_up_uart}}".into(), "any()".into())));
+    }
+    // A PIO UART up and down both on PIO0: refused by name.
+    let both =
+        dagon_topology::parse_str(&relaying_node("rp2040-with-crystal", "pio-uart", true)).unwrap();
+    let e = wiring_placeholders(&reg_board, &both, both.node("mid").unwrap()).unwrap_err();
+    assert!(e.contains("both take PIO0"), "{e}");
     // No template of an MCU package names a board fact of its own.
     for mcu in ["rp2040", "stm32f401re"] {
         for fact in [
@@ -2013,7 +2142,7 @@ fn mcu_templates_wire_the_links_the_topology_names() {
 /// (both enums come from `dagon_format::with_link_kinds!`), and the kinds
 /// each MCU offers up and down (its table's "Yes" cells).
 const FW_OFFERS: [(&str, &[&str], &[&str]); 3] = [
-    ("rp2040", &["usb-cdc"], &["uart", "i2c"]),
+    ("rp2040", &["usb-cdc", "uart"], &["uart", "i2c"]),
     ("stm32f401re", &["i2c"], &[]),
     ("esp32s3", &["usb-cdc", "uart"], &[]),
 ];

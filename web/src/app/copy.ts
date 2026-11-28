@@ -1346,13 +1346,13 @@ export const PORT = {
   figures: (turns: number, usd: number | null) => (usd === null ? `${turns}ターン` : `${turns}ターン、${usd.toFixed(2)} USD`),
   after: '報告の合格数を確認後、DAGONのソースの変更をレビューしてください。移植したボードは、dagon serveの再起動後に部品の一覧へ追加されます。',
   fail: {
-    fix: '理由の解消後に再度開始してください。下記の手順でClaude Codeから実行する方法もあります。',
+    fix: '理由の解消後に再度開始してください。下記の手順でエージェントのプログラムから実行する方法もあります。',
   },
   retry: '入力への復帰',
   /** The same port without `dagon ai port`: the skill run from the agent's own program. */
   manual: {
-    heading: 'Claude Codeでの実行手順',
-    steps: ['DAGONのソースのフォルダでClaude Codeを起動', '下記のコマンドを入力（MCUのID、ボードのID、種類の順）', '完了後にdagon serveを再起動'],
+    heading: 'エージェントのプログラムでの実行手順',
+    steps: ['DAGONのソースのフォルダでDAGONのプラグインを導入済のエージェントのプログラムを起動', '下記のコマンドを入力（MCUのID、ボードのID、種類の順）', '完了後にdagon serveを再起動'],
     command: (mcu: string, board: string, kind: string) => `/dagon:dagon-port ${mcu || '<mcu>'} ${board || '<board>'} ${kind}`,
   },
   /** Why the page cannot start the port itself. */

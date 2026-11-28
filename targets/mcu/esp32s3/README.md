@@ -136,7 +136,7 @@ and the node tag from the generated `wiring.rs`.
 ## API notes
 
 - Task liveness is deadline based: a task announces work with
-  `Lease::busy(now, budget_ms)` and ends it with `Lease::idle()`; there is no
+  `Lease::busy(now_ms, budget_ms)` (`now_ms` reads the clock) and ends it with `Lease::idle()`; there is no
   bare `feed()`. A task that waits without a deadline is not blamed, a task
   stuck past its budget stops the watchdog feeding.
 - There is no `UserIo` bundle: the app keeps the peripherals returned by
@@ -245,7 +245,7 @@ ESP-IDF 2nd stage cannot be recovered this way.
   attempt).
 - Once confirmed the link task feeds it (every 500 ms and during long flash
   work), but only while every task in the `Liveness` registry is within the
-  deadline it announced (`Lease::busy(now, budget)` before a piece of work,
+  deadline it announced (`Lease::busy(now_ms, budget)` before a piece of work,
   `Lease::idle()` when waiting). A task stuck in its work stops the feeding
   and the watch resets instead of hanging. The link task announces a budget
   for each request and is registered as preempting: only while it holds the

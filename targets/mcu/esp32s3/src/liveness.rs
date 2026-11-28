@@ -46,6 +46,9 @@ pub struct Liveness {
     holding: AtomicBool,
     /// Start of that section (ms, wrapping).
     hold_since: AtomicU32,
+    /// Synchronous sections ended so far (wrapping): what [`Lease::busy`]
+    /// compares to notice one that ended while it worked.
+    sections: AtomicU32,
 }
 
 /// One task's registration.
@@ -62,6 +65,7 @@ impl Liveness {
             preempting: AtomicU8::new(NONE),
             holding: AtomicBool::new(false),
             hold_since: AtomicU32::new(0),
+            sections: AtomicU32::new(0),
         }
     }
 
@@ -138,11 +142,23 @@ impl Lease {
         }
     }
 
-    /// Starts work that must finish within `budget_ms` of `now_ms`.
-    pub fn busy(&self, now_ms: u32, budget_ms: u32) {
+    /// Starts work that must finish within `budget_ms` of now, as
+    /// `now_ms` reads it (milliseconds since boot, wrapping). The reading
+    /// and the deadline it stamps cannot be one step here, so a
+    /// synchronous section of the preempting task that ended in between
+    /// (it moved the deadlines of that moment, not this one) is noticed
+    /// and the clock read again: the task gets its whole budget from the
+    /// time it runs, not from a reading taken before the section.
+    pub fn busy(&self, now_ms: impl Fn() -> u32, budget_ms: u32) {
         let o = self.owner;
-        o.deadline[self.slot].store(now_ms.wrapping_add(budget_ms), Ordering::Release);
-        o.state[self.slot].store(BUSY, Ordering::Release);
+        loop {
+            let sections = o.sections.load(Ordering::Acquire);
+            o.deadline[self.slot].store(now_ms().wrapping_add(budget_ms), Ordering::Release);
+            o.state[self.slot].store(BUSY, Ordering::Release);
+            if o.sections.load(Ordering::Acquire) == sections {
+                return;
+            }
+        }
     }
 
     /// Back to waiting for an event: no deadline.
@@ -174,6 +190,7 @@ impl Lease {
         for i in (0..MAX_TASKS).filter(|&i| i != self.slot) {
             o.deadline[i].fetch_add(held, Ordering::AcqRel);
         }
+        o.sections.fetch_add(1, Ordering::AcqRel);
         o.holding.store(false, Ordering::Release);
         held
     }
@@ -203,13 +220,13 @@ mod tests {
         let a = L.register().unwrap();
         let b = L.register().unwrap();
         assert!(!L.overdue(1_000));
-        a.busy(1_000, 500);
+        a.busy(|| 1_000, 500);
         assert!(!L.overdue(1_499));
         assert!(L.overdue(1_500));
         a.idle();
         assert!(!L.overdue(9_999));
         // Deadlines across the u32 wrap.
-        b.busy(u32::MAX - 10, 100);
+        b.busy(|| u32::MAX - 10, 100);
         assert!(!L.overdue(u32::MAX));
         assert!(!L.overdue(50));
         assert!(L.overdue(89));
@@ -225,8 +242,8 @@ mod tests {
         assert!(L.register_preempting().is_none());
         // Demo starts 500 ms of work, then the link erases for 5 s without
         // yielding: the demo cannot run meanwhile.
-        demo.busy(1_000, 500);
-        link.busy(1_100, 30_000);
+        demo.busy(|| 1_000, 500);
+        link.busy(|| 1_100, 30_000);
         link.hold_cpu(1_100);
         assert!(!L.overdue(1_600));
         assert!(!L.overdue(6_000));
@@ -239,7 +256,7 @@ mod tests {
         link.idle();
         // A link stuck inside a section is caught on its own deadline.
         demo.idle();
-        link.busy(7_000, 1_000);
+        link.busy(|| 7_000, 1_000);
         link.hold_cpu(7_000);
         assert!(L.overdue(8_000));
         link.release_cpu(8_000);
@@ -250,10 +267,10 @@ mod tests {
         static L: Liveness = Liveness::new();
         let link = L.register_preempting().unwrap();
         let demo = L.register().unwrap();
-        demo.busy(1_000, 500);
+        demo.busy(|| 1_000, 500);
         assert!(L.overdue(1_600));
         // The link starts a long erase after the demo is already stuck.
-        link.busy(1_600, 30_000);
+        link.busy(|| 1_600, 30_000);
         link.hold_cpu(1_600);
         assert!(L.overdue(1_700), "excused while the link holds the CPU");
         assert!(L.overdue(10_000));
@@ -276,15 +293,45 @@ mod tests {
         assert!(L.overdue(6_500));
     }
 
+    /// The preempting task takes the CPU for a whole section between a
+    /// task's clock reading and the deadline it stamps with it: the task
+    /// still gets its budget from the time it runs again.
+    #[test]
+    fn a_section_between_the_clock_reading_and_the_deadline_costs_no_budget() {
+        use core::cell::Cell;
+        static L: Liveness = Liveness::new();
+        let link = L.register_preempting().unwrap();
+        let demo = L.register().unwrap();
+        let readings = Cell::new(0);
+        demo.busy(
+            || {
+                readings.set(readings.get() + 1);
+                if readings.get() > 1 {
+                    return 9_000;
+                }
+                // Read at 1 000 ms; an 8 s erase preempts before the store.
+                link.busy(|| 1_000, 30_000);
+                link.hold_cpu(1_000);
+                link.release_cpu(9_000);
+                link.idle();
+                1_000
+            },
+            500,
+        );
+        assert_eq!(readings.get(), 2);
+        assert!(!L.overdue(9_499));
+        assert!(L.overdue(9_500));
+    }
+
     #[test]
     fn awaiting_the_reply_does_not_excuse_a_stuck_task() {
         static L: Liveness = Liveness::new();
         let link = L.register_preempting().unwrap();
         let demo = L.register().unwrap();
-        demo.busy(1_000, 500);
+        demo.busy(|| 1_000, 500);
         // Short synchronous handling, then 5 s waiting for the reply to
         // leave: the demo could run but does not.
-        link.busy(1_000, 30_000);
+        link.busy(|| 1_000, 30_000);
         link.hold_cpu(1_000);
         assert_eq!(link.release_cpu(1_050), 50);
         assert!(!L.overdue(1_549));

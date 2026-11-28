@@ -95,7 +95,7 @@ async fn main(spawner: Spawner) {
 #[embassy_executor::task]
 async fn heartbeat(lease: Lease) {
     loop {
-        lease.busy(node::now_ms(), BEAT_BUDGET_MS);
+        lease.busy(node::now_ms, BEAT_BUDGET_MS);
         BEATS.fetch_add(1, Ordering::Relaxed);
         lease.idle();
         Timer::after(BEAT_PERIOD).await;

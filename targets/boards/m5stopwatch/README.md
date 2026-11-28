@@ -49,7 +49,7 @@ async fn main(spawner: embassy_executor::Spawner) {
     // `Confirm::Own`.
     let _events = board::start(armed, dagon_pins!(p), NodeConfig::app(node::App::new(self_check)), &LIVENESS);
     // your tasks: take a lease with LIVENESS.register(), then
-    // lease.busy(node::now_ms(), budget_ms) before work, lease.idle() after
+    // lease.busy(node::now_ms, budget_ms) before work, lease.idle() after
 }
 ```
 

@@ -300,33 +300,31 @@ def parse_words(text):
     return words
 
 
-def read_command(chip, probe, address, count=1, under_reset=False):
-    """probe-rs reading `count` 32-bit words from `address`; `under_reset`
-    connects with the reset line held (the RAM keeps its value through it)."""
+def read_command(chip, probe, address, count=1):
+    """probe-rs reading `count` 32-bit words from `address`."""
     cmd = ["probe-rs", "read", "--chip", chip]
     if probe:
         cmd += ["--probe", probe]
-    if under_reset:
-        cmd += ["--connect-under-reset"]
     return cmd + ["b32", hex(address), str(count)]
 
 
 def probe_read(chip, probe, address, count=1, run=subprocess.run):
-    """The words read, and the command that read them. A build that holds
-    its record may keep a plain connection out (an STM32F401's SWD at
-    `SwdDpWait`): the read is tried once more connected under reset."""
-    errors = []
-    for under_reset in (False, True):
-        cmd = read_command(chip, probe, address, count, under_reset)
-        r = run(cmd, capture_output=True, text=True)
-        if r.returncode != 0:
-            errors.append(f"{' '.join(cmd)} failed: {r.stderr.strip()}")
-            continue
-        words = parse_words(r.stdout)
-        if len(words) < count:
-            raise SystemExit(f"{' '.join(cmd)}: expected {count} words, got: {r.stdout.strip()}")
-        return words[:count], cmd
-    raise SystemExit("\n".join(errors))
+    """The words read, and the command that read them. No read under
+    reset follows a failure: an ST-LINK connected under reset was seen to
+    go on driving the node's reset line afterwards (issue #159), so that
+    is left to the person, who can unplug the probe afterwards."""
+    cmd = read_command(chip, probe, address, count)
+    r = run(cmd, capture_output=True, text=True)
+    if r.returncode != 0:
+        raise SystemExit(
+            f"{' '.join(cmd)} failed: {r.stderr.strip()}\n"
+            "the node may keep a plain connection out: read it by hand with "
+            "--connect-under-reset, then plug the probe in again"
+        )
+    words = parse_words(r.stdout)
+    if len(words) < count:
+        raise SystemExit(f"{' '.join(cmd)}: expected {count} words, got: {r.stdout.strip()}")
+    return words[:count], cmd
 
 
 # ---- verdicts ----------------------------------------------------------

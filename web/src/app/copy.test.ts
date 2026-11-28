@@ -158,8 +158,8 @@ describe('the shown strings', () => {
 
 describe('copy', () => {
   // The list is for the operate mode's guidance and results; the define mode's CLI screens
-  // (CLI連携, 作業, 署名とリリース, プロジェクト, 書込) name signing and the like by design.
-  const DEFINE_CLI = ['CLI_NAV', 'CLI_LINK', 'JOBS', 'FLASH'];
+  // (CLI連携, 作業, 署名とリリース, プロジェクト, 書込, ボード移植) name signing and the like by design.
+  const DEFINE_CLI = ['CLI_NAV', 'CLI_LINK', 'JOBS', 'FLASH', 'PORT'];
   test.each(copy.FORBIDDEN_WORDS)('no screen text uses %s', (word) => {
     // 確定 is allowed only as a slot value in the slot section.
     // 確定 only as a slot value and in the trial choice; フラッシュ only in V-16's name.

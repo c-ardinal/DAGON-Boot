@@ -40,6 +40,7 @@ export const ROUTES = [
   'GET /v1/fs',
   'POST /v1/gen',
   'POST /v1/flash',
+  'POST /v1/ai/port',
 ] as const;
 
 export type Route = (typeof ROUTES)[number];

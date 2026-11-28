@@ -201,6 +201,8 @@ const ITEMS: Record<string, { query?: string; check: (p: Page) => Promise<void> 
       await expect(p.locator('.float.sheet')).toBeVisible();
     },
   },
+  // The stand-in has no project in serve for the agent to port in; the screen itself is PortModal.test's.
+  'DAGON/エージェントによるボード移植': { check: (p) => offWithReason(p, 'DAGON', 'エージェントによるボード移植') },
   'DAGON/DAGONとの対話': {
     query: 'sim&agent=linked',
     check: async (p) => {

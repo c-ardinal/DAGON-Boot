@@ -403,10 +403,51 @@ fn without_own_version(text: &str, start: &str) -> String {
     out
 }
 
+/// `text`, a boot crate's manifest, without the `default = [...]` line of
+/// its `[features]` when that line names only features the same table
+/// declares: a choice among them, which the host check's graph (every
+/// feature) already holds, so a measuring build (samples/hardware-test,
+/// measure.py) needs no new check. A default line that names anything else
+/// (a dependency's feature, an undeclared name) stays and counts.
+fn without_own_default(text: &str) -> String {
+    let declared: Vec<String> = text
+        .parse::<toml::Table>()
+        .ok()
+        .and_then(|t| {
+            let f = t.get("features")?.as_table()?;
+            Some(f.keys().filter(|k| *k != "default").cloned().collect())
+        })
+        .unwrap_or_default();
+    let own = |line: &str| {
+        line.parse::<toml::Table>()
+            .ok()
+            .filter(|t| t.len() == 1)
+            .and_then(|t| t.get("default")?.as_array().cloned())
+            .is_some_and(|a| {
+                a.iter()
+                    .all(|v| v.as_str().is_some_and(|s| declared.iter().any(|d| d == s)))
+            })
+    };
+    let mut out = String::with_capacity(text.len());
+    let (mut inside, mut done) = (false, false);
+    for line in text.split_inclusive('\n') {
+        let bare = line.trim();
+        if bare.starts_with('[') {
+            inside = bare == "[features]";
+        } else if inside && !done && own(bare) {
+            done = true;
+            continue;
+        }
+        out.push_str(line);
+    }
+    out
+}
+
 impl BootFolder {
     /// The stamp of the boot crate's current inputs: SHA-256 over its
-    /// `Cargo.toml` and `Cargo.lock` (empty when there is none), both
-    /// without the crate's own version, and each
+    /// `Cargo.toml` (without a default line of its own features,
+    /// [`without_own_default`]) and `Cargo.lock` (empty when there is
+    /// none), both without the crate's own version, and each
     /// trusted extension's id and source hash, which must equal what
     /// dagon.toml declares. The host check writes it after the graph
     /// passed ([`BootFolder::check_graph`]); the boot core's build
@@ -428,7 +469,7 @@ impl BootFolder {
             .trim_end()
             .to_string();
         for text in [
-            without_own_version(&manifest, "[package]"),
+            without_own_default(&without_own_version(&manifest, "[package]")),
             without_own_version(&read("Cargo.lock"), &name),
         ] {
             sha.update(&(text.len() as u64).to_le_bytes());
@@ -733,6 +774,24 @@ mod tests {
         std::fs::remove_dir_all(&d).unwrap();
     }
 
+    /// A measuring build chooses among the crate's own features in its
+    /// default line: the check `dagon gen` made over every feature still
+    /// holds. A default that reaches a dependency's feature does not.
+    #[test]
+    fn choosing_own_features_by_default_keeps_the_stamp() {
+        let (d, f) = project("default", "", "\n[features]\nlisten-time = []\n");
+        std::fs::write(f.dir.join(STAMP_FILE), stamp_text(&f.stamp().unwrap())).unwrap();
+        let manifest = f.dir.join("Cargo.toml");
+        let text = std::fs::read_to_string(&manifest).unwrap();
+        let switch = |line: &str| {
+            std::fs::write(&manifest, text.replace("[features]\n", &format!("[features]\n{line}\n"))).unwrap();
+            BootFolder::read(&f.dir).unwrap().verify_stamp()
+        };
+        switch("default = [\"listen-time\"]").unwrap();
+        assert!(switch("default = [\"boot-show/x\"]").is_err());
+        std::fs::remove_dir_all(&d).unwrap();
+    }
+
     /// The crate's own version is the developer's to raise: it changes no
     /// graph, so the check `dagon gen` made still holds. Another package's
     /// version in the lock file does change the graph.
@@ -775,6 +834,31 @@ mod tests {
         );
         let lock = "[[package]]\nname = \"n\"\n\n[[package]]\nname = \"x\"\nversion = \"1\"\n";
         assert_eq!(without_own_version(lock, "name = \"n\""), lock);
+    }
+
+    /// A default line of the crate's own features is left out; one that
+    /// names a dependency's feature or an undeclared name counts.
+    #[test]
+    fn only_a_default_of_the_crate_s_own_features_is_left_out() {
+        let base = "[package]\nname = \"n\"\n\n[features]\nlisten-time = [\"c/listen-time\"]\nslot-b = []\n";
+        let with = |line: &str| base.replace("[features]\n", &format!("[features]\n{line}\n"));
+        for own in [
+            "default = [\"listen-time\"]",
+            "default = [\"listen-time\", \"slot-b\"]  # measuring",
+            "default = []",
+        ] {
+            assert_eq!(without_own_default(&with(own)), base, "{own}");
+        }
+        for other in [
+            "default = [\"c/listen-time\"]",
+            "default = [\"decide-time\"]",
+            "default = [\"listen-time\", \"c/no-confirm\"]",
+        ] {
+            assert_eq!(without_own_default(&with(other)), with(other), "{other}");
+        }
+        // Only inside [features].
+        let elsewhere = "[package]\nname = \"n\"\n[x]\ndefault = []\n";
+        assert_eq!(without_own_default(elsewhere), elsewhere);
     }
 
     /// A project with the boot folder of node `n` and one extension.

@@ -19,7 +19,12 @@ A measuring build is switched on by naming its feature in the `default`
 features of the package `dagon flash` builds (the node's stage0 in the
 DAGON source, or the node's boot crate) for the one write, then put back
 byte for byte; a copy waits beside the file until then (`restore` puts
-back any copy a stopped run left).
+back any copy a stopped run left). A boot crate's build refuses a manifest
+its dependency graph was not checked for (`graph.stamp`, `dagon gen`), but
+a default line that names only the crate's own features keeps the check
+(every feature was checked): the boot core's measuring builds are switched
+on through the boot crate's own `listen-time` and `decide-time`, which
+`dagon gen` writes into it.
 """
 
 import argparse
@@ -41,8 +46,9 @@ BACKUP = ".measure-backup"
 # goes: "stage0" is targets/mcu/<mcu>/stage0 in the DAGON source, "boot" the
 # node's boot crate (<project>/boot/<id>), "app" the node's app crate
 # (dagon.toml `[build.<id>] package`). `part` is the folder dagon flash
-# builds that part in (<project>/out/flash/target/<part>); the app builds in
-# its own crate's target folder.
+# builds that part in (<project>/out/flash/target/<part>); the boot core
+# builds in the boot crate's target folder (<project>/out/boot/target), the
+# app in its own crate's.
 MEASUREMENTS = {
     "stage0-verify": {
         "package": "stage0",
@@ -56,14 +62,14 @@ MEASUREMENTS = {
     # The boot core's measuring builds wait out stage0's check first.
     "listen-time": {
         "package": "boot",
-        "feature": "{bootcore}/listen-time",
+        "feature": "listen-time",
         "part": "bootcore",
         "symbols": ["DAGON_LISTEN_US"],
         "wait_s": 35,
     },
     "decide-time": {
         "package": "boot",
-        "feature": "{bootcore}/decide-time",
+        "feature": "decide-time",
         "part": "bootcore",
         "symbols": ["DAGON_DECIDE_US"],
         # Stage0's check and the decision's check of the app.
@@ -202,14 +208,25 @@ def package_file(project, node, m, mcu):
 
 def elf_folder(project, node, m):
     """Where the measuring build's ELF is: the app crate's target folder,
-    else the part's folder under out/flash/target."""
+    the boot crate's (out/boot/target), else the part's folder under
+    out/flash/target."""
     if m["package"] == "app":
         return app_dir(project, node) / "target"
+    if m["package"] == "boot":
+        return Path(project) / "out" / "boot" / "target"
     return Path(project) / "out" / "flash" / "target" / m["part"]
 
 
 def feature_of(m, mcu):
     return m["feature"].format(bootcore=f"dagon-{mcu}-bootcore", mcu=mcu)
+
+
+def declares(path, feature):
+    """Refuses a boot crate whose [features] lacks `feature`: one `dagon gen`
+    wrote before the boot core template declared it."""
+    have = tomllib.loads(Path(path).read_text(encoding="utf-8")).get("features", {})
+    if feature not in have:
+        raise SystemExit(f"{path}: no feature {feature}: run `dagon gen` so the boot crate declares it")
 
 
 # ---- the built ELF -----------------------------------------------------
@@ -451,7 +468,10 @@ def measure(a, name, flash=run_flash, read=probe_read, wait=time.sleep, ask=inpu
     result = {"measurement": name, "node": a.node, "mcu": mcu}
     wrote = False
     try:
-        with Switched(package_file(a.project, a.node, m, mcu), feature_of(m, mcu)):
+        package = package_file(a.project, a.node, m, mcu)
+        if m["package"] == "boot":
+            declares(package, feature_of(m, mcu))
+        with Switched(package, feature_of(m, mcu)):
             wrote = True
             write()
         elf = newest_elf(part)

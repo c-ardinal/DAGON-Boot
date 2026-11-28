@@ -404,9 +404,13 @@ python samples/hardware-test/measure.py selftest
   rounded up, one blink group per decimal digit, most significant first,
   ten blinks for a 0, groups apart by a short dark gap and the whole
   number repeated after a long dark pause. The script asks for the counts
-  in order (`5 2` is 52 ms). Their feature goes into the node's boot crate
-  (`boot/<id>/Cargo.toml`). They wait out stage0's check first, which
-  takes seconds on an RP2040 without a crystal.
+  in order (`5 2` is 52 ms). Their feature goes into the default line of
+  the node's boot crate (`boot/<id>/Cargo.toml`), which declares
+  `listen-time` and `decide-time` itself: such a line keeps the boot
+  crate's checked dependency graph (`graph.stamp`), as the check covered
+  every feature. A boot crate written before it declared them is refused
+  before any write: run `dagon gen` first. They wait out stage0's check
+  first, which takes seconds on an RP2040 without a crystal.
 
 - `masked-time`: the node's app (dagon.toml `[build.<id>] package`) with
   its MCU package's `masked-time` times every critical section of DAGON's

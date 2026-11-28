@@ -9,7 +9,7 @@
 //! | XFER_END, SET_PENDING, CONFIRM (verify or write state) | [`VERIFY_MS`] |
 //! | a node-side conformance test, from CONF_RUN to its result | [`NodeTimings::conf_deadline_s`], asked for every [`CONF_POLL_MS`] |
 //! | whole image transfer | [`transfer_ms`]: size / link floor ([`link_limits`]) + [`TRANSFER_MARGIN_MS`] |
-//! | REBOOT until the expected HELLO (also covers a full rollback) | [`NodeTimings::reboot_wait_ms`]: every trial boot and the boot after them ([`NodeTimings::start_ms`] each) + [`REBOOT_MARGIN_MS`] |
+//! | REBOOT until the expected HELLO (also covers a full rollback) | [`NodeTimings::reboot_wait_ms`]: the delay the app may ask, every trial boot and the boot after them ([`NodeTimings::start_ms`] each) + [`REBOOT_MARGIN_MS`] |
 //!
 //! The node and the host plan an erase with the same two functions
 //! ([`erase_ranges`], [`plan_erase`]) on the same [`EraseLayout`], so the
@@ -376,7 +376,7 @@ impl core::fmt::Display for TimingError {
                 "the CONFIRM retries + NODE_POLL_MS + 2 x REQUEST_MS must be below watchdog.trial_ms"
             }
             Self::RebootWaitTooLong => {
-                "watchdog.trial_attempts x (watchdog.trial_ms + watchdog.start_ms) + watchdog.start_ms + REBOOT_MARGIN_MS must be at most REBOOT_WAIT_MAX_MS"
+                "watchdog.trial_ms / 2 + watchdog.trial_attempts x (watchdog.trial_ms + watchdog.start_ms) + watchdog.start_ms + REBOOT_MARGIN_MS must be at most REBOOT_WAIT_MAX_MS"
             }
         })
     }
@@ -393,15 +393,18 @@ impl<L> NodeTimings<L> {
         start_ms: START_FALLBACK_MS,
     };
 
-    /// How long a host waits after REBOOT for the node's HELLO: every boot
-    /// of a full rollback, each trial ended by the watchdog
-    /// (`trial_attempts` x (`trial_ms` + `start_ms`)), then the start of
-    /// the image it goes back to (`start_ms`), plus [`REBOOT_MARGIN_MS`].
-    /// `None` past `u32`.
+    /// How long a host waits after REBOOT for the node's HELLO: the delay
+    /// the app may ask before the reset (at most half the shorter watchdog
+    /// period, `dagon_events::Watchdog::reboot_delay_max_ms`, so at most
+    /// `trial_ms` / 2), every boot of a full rollback, each trial ended by
+    /// the watchdog (`trial_attempts` x (`trial_ms` + `start_ms`)), then the
+    /// start of the image it goes back to (`start_ms`), plus
+    /// [`REBOOT_MARGIN_MS`]. `None` past `u32`.
     pub fn reboot_wait(&self) -> Option<u32> {
         let trial = u64::from(self.trial_ms) + u64::from(self.start_ms);
         let ms = trial
             .checked_mul(self.trial_attempts.into())?
+            .checked_add(u64::from(self.trial_ms / 2))?
             .checked_add(u64::from(self.start_ms))?
             .checked_add(u64::from(REBOOT_MARGIN_MS))?;
         u32::try_from(ms).ok()
@@ -498,7 +501,7 @@ impl<R: AsRef<[EraseRegion]>, S: AsRef<[SlotLayout]>> NodeTimings<EraseLayout<R,
 mod tests {
     #[test]
     fn a_relay_answers_while_the_requester_still_waits() {
-        assert!(super::RELAY_ANSWER_MARGIN_MS < super::REQUEST_MS);
+        const { assert!(super::RELAY_ANSWER_MARGIN_MS < super::REQUEST_MS) };
     }
 
     use super::*;
@@ -785,10 +788,11 @@ mod tests {
             Err(TimingError::ConfirmMissesTrial)
         );
         assert_eq!(timings(retries + poll + 1, 1).check(), Ok(()));
-        // attempts x (trial + start) + start + margin = the most exactly.
+        // trial / 2 + 4 x (trial + start) + start + margin: the longest
+        // trial within the most, and one ms more past it.
         let start = START_FALLBACK_MS;
-        let trial = (REBOOT_WAIT_MAX_MS - REBOOT_MARGIN_MS - start) / 4 - start;
-        assert_eq!(timings(trial, 4).reboot_wait_ms(), REBOOT_WAIT_MAX_MS);
+        let trial = (REBOOT_WAIT_MAX_MS - REBOOT_MARGIN_MS - 5 * start) * 2 / 9;
+        assert!(timings(trial, 4).reboot_wait_ms() <= REBOOT_WAIT_MAX_MS);
         assert_eq!(timings(trial, 4).check(), Ok(()));
         assert_eq!(
             timings(trial + 1, 4).check(),
@@ -810,7 +814,7 @@ mod tests {
         };
         assert_eq!(
             t.reboot_wait_ms(),
-            3 * (8_000 + 2_500) + 2_500 + REBOOT_MARGIN_MS
+            4_000 + 3 * (8_000 + 2_500) + 2_500 + REBOOT_MARGIN_MS
         );
         // A slower start waits longer: the wait is the definition's.
         let slower = NodeTimings {

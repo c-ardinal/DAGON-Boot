@@ -88,7 +88,9 @@ impl Serial {
 
 /// Writes all of `bytes` to `w`, whose own write gives up after
 /// [`READ_WAIT`] (`TimedOut`, e.g. Windows' ERROR_SEM_TIMEOUT while the
-/// hub takes no bytes), trying again until `wait` has passed.
+/// hub takes no bytes), trying again until `wait` has passed. No flush
+/// follows, as before: Windows' `FlushFileBuffers` waits on the hub
+/// without a timeout.
 fn write_within(w: &mut dyn Write, mut bytes: &[u8], wait: Duration) -> io::Result<()> {
     let start = Instant::now();
     while !bytes.is_empty() {
@@ -100,7 +102,7 @@ fn write_within(w: &mut dyn Write, mut bytes: &[u8], wait: Duration) -> io::Resu
             Err(e) => return Err(e),
         }
     }
-    w.flush()
+    Ok(())
 }
 
 impl Transport for Serial {

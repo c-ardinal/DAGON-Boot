@@ -292,7 +292,7 @@ fn a_definition_breaking_a_timing_rule_is_refused_naming_its_mcu() {
     for (trial, attempts, rule) in [
         (900, 1, TimingError::PollMissesTrial),
         (3_000, 1, TimingError::ConfirmMissesTrial),
-        // 20 x (32 + 2) s + 2 s + 2 s: past REBOOT_WAIT_MAX_MS.
+        // 16 s + 20 x (32 + 2) s + 2 s + 2 s: past REBOOT_WAIT_MAX_MS.
         (32_000, 20, TimingError::RebootWaitTooLong),
     ] {
         let reg = registry(
@@ -343,7 +343,7 @@ fn the_reboot_wait_follows_the_definition_s_start() {
         assert_eq!(node.start_ms, start, "{name}");
         assert_eq!(
             node.reboot_wait_ms(),
-            3 * (8_000 + start) + start + dagon_port::timeout::REBOOT_MARGIN_MS,
+            4_000 + 3 * (8_000 + start) + start + dagon_port::timeout::REBOOT_MARGIN_MS,
             "{name}"
         );
     }

@@ -103,6 +103,19 @@ fn SysTick() {}
 /// the watchdog again: a quarter of the period it runs with.
 const FEED_EVERY_MS: u32 = board::TRIAL_WDT_MS / 4;
 
+/// A measuring build's wait between feeds while it holds its record
+/// (`boot_time::hold`): a cycle-counted delay of [`FEED_EVERY_MS`], which
+/// fetches only instructions, so the debug probe reads the record
+/// (a loop of watchdog stores alone kept SWD at `SwdDpWait`).
+#[cfg(any(feature = "listen-time", feature = "decide-time"))]
+fn hold_pause() {
+    cortex_m::asm::delay(
+        FEED_EVERY_MS
+            .saturating_mul(1000)
+            .saturating_mul(CYCLES_PER_US),
+    );
+}
+
 /// The board's `[boot]` values (build.rs, from the node's boot folder).
 #[allow(dead_code)]
 mod board_def {
@@ -209,7 +222,12 @@ pub fn run<E: Extension>(chain: E, limits: &'static [BootExtension], link_addr: 
             update_mode(port, flash, &mut clock, Some(stay))
         }
         #[cfg(feature = "listen-time")]
-        boot_time::hold(&boot_time::DAGON_LISTEN_US, clock.now_us(), iwdg::feed);
+        boot_time::hold(
+            &boot_time::DAGON_LISTEN_US,
+            clock.now_us(),
+            iwdg::feed,
+            hold_pause,
+        );
     }
     let mut chain = compose_boot(chain, clock, limits);
     #[cfg(feature = "decide-time")]
@@ -230,6 +248,7 @@ pub fn run<E: Extension>(chain: E, limits: &'static [BootExtension], link_addr: 
         &boot_time::DAGON_DECIDE_US,
         u64::from(DWT::cycle_count().wrapping_sub(deciding) / CYCLES_PER_US),
         iwdg::feed,
+        hold_pause,
     );
     // The decision verified the app it starts under this core's key.
     let healthy = !cfg!(feature = "no-confirm") && matches!(decision, Decision::Boot { .. });

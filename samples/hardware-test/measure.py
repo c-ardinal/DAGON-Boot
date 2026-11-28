@@ -300,18 +300,33 @@ def parse_words(text):
     return words
 
 
-def probe_read(chip, probe, address, count=1):
+def read_command(chip, probe, address, count=1, under_reset=False):
+    """probe-rs reading `count` 32-bit words from `address`; `under_reset`
+    connects with the reset line held (the RAM keeps its value through it)."""
     cmd = ["probe-rs", "read", "--chip", chip]
     if probe:
         cmd += ["--probe", probe]
-    cmd += ["b32", hex(address), str(count)]
-    r = subprocess.run(cmd, capture_output=True, text=True)
-    if r.returncode != 0:
-        raise SystemExit(f"{' '.join(cmd)} failed: {r.stderr.strip()}")
-    words = parse_words(r.stdout)
-    if len(words) < count:
-        raise SystemExit(f"{' '.join(cmd)}: expected {count} words, got: {r.stdout.strip()}")
-    return words[:count], cmd
+    if under_reset:
+        cmd += ["--connect-under-reset"]
+    return cmd + ["b32", hex(address), str(count)]
+
+
+def probe_read(chip, probe, address, count=1, run=subprocess.run):
+    """The words read, and the command that read them. A build that holds
+    its record may keep a plain connection out (an STM32F401's SWD at
+    `SwdDpWait`): the read is tried once more connected under reset."""
+    errors = []
+    for under_reset in (False, True):
+        cmd = read_command(chip, probe, address, count, under_reset)
+        r = run(cmd, capture_output=True, text=True)
+        if r.returncode != 0:
+            errors.append(f"{' '.join(cmd)} failed: {r.stderr.strip()}")
+            continue
+        words = parse_words(r.stdout)
+        if len(words) < count:
+            raise SystemExit(f"{' '.join(cmd)}: expected {count} words, got: {r.stdout.strip()}")
+        return words[:count], cmd
+    raise SystemExit("\n".join(errors))
 
 
 # ---- verdicts ----------------------------------------------------------

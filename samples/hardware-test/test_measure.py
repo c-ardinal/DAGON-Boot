@@ -82,6 +82,41 @@ class Switch(unittest.TestCase):
             self.assertEqual((boot / "Cargo.toml").read_text(), "original")
 
 
+class ProbeRead(unittest.TestCase):
+    """A read a plain connection cannot make is tried once under reset."""
+
+    @staticmethod
+    def runner(fails):
+        calls = []
+
+        def run(cmd, **_):
+            calls.append(cmd)
+            ok = len(calls) > fails
+            return type("R", (), {"returncode": 0 if ok else 1, "stdout": "20000000: 0000c50f" if ok else "",
+                                  "stderr": "" if ok else "SwdDpWait"})()
+        return run, calls
+
+    def test_a_plain_read_is_used_when_it_works(self):
+        run, calls = self.runner(0)
+        words, cmd = measure.probe_read("STM32F401RETx", "0483:374b", 0x2000_0000, run=run)
+        self.assertEqual((words, len(calls)), ([0xC50F], 1))
+        self.assertNotIn("--connect-under-reset", cmd)
+
+    def test_a_refused_plain_read_is_tried_under_reset(self):
+        run, calls = self.runner(1)
+        words, cmd = measure.probe_read("STM32F401RETx", "0483:374b", 0x2000_0000, run=run)
+        self.assertEqual(words, [0xC50F])
+        self.assertEqual(cmd, ["probe-rs", "read", "--chip", "STM32F401RETx", "--probe", "0483:374b",
+                               "--connect-under-reset", "b32", "0x20000000", "1"])
+
+    def test_both_failures_are_reported(self):
+        run, calls = self.runner(2)
+        with self.assertRaises(SystemExit) as e:
+            measure.probe_read("STM32F401RETx", None, 0x2000_0000, run=run)
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(str(e.exception).count("SwdDpWait"), 2)
+
+
 class Readers(unittest.TestCase):
     def test_symbols_by_name(self):
         data = elf32({"DAGON_VERIFY_CYCLES": 0x2000_0010, "other": 4, "DAGON_VERIFY_COUNT": 0x2000_0014})

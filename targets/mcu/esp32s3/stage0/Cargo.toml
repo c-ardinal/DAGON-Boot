@@ -6,9 +6,10 @@ version = "0.0.0"
 publish = false
 
 # Firmware clippy runs in CI (scripts/ci_crates.py --firmware-lint), with
-# the QEMU layout (the only one until the definition gives stage0's).
+# the QEMU layout (the only one until the definition gives stage0's), and
+# with the measuring build of the hardware run.
 [package.metadata.dagon]
-lint = { features = ["qemu-layout"] }
+lint = { features = ["qemu-layout", "qemu-layout,measure"] }
 
 # Standalone: built for the ESP32-S3 only (the esp toolchain of
 # ../rust-toolchain.toml), so it stays out of the host workspace.
@@ -30,6 +31,10 @@ dagon-port = { path = "../../../../crates/dagon-port" }
 # lands after the hardware measurement; without this feature stage0 does
 # not build, so no image with these values reaches a node.
 qemu-layout = []
+# The hardware run's measuring build (src/measure.rs; with `qemu-layout`,
+# samples/hardware-test/esp_stage0.py): times the decision and records
+# what a reset leaves in RTC memory, for the test images to tell.
+measure = []
 
 [profile.release]
 opt-level = "z"

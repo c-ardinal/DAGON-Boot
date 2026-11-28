@@ -406,7 +406,9 @@ jobs:
   # core (targets/mcu/esp32s3/bootcore, the same layout) behind stage0, talked
   # to over UART0: its listen window, the app's hand-over, recovery mode
   # where the host writes the app, and the app it asks stage0 for
-  # (crates/dagon-cli/src/esp_image_qemu_bootcore.rs).
+  # (crates/dagon-cli/src/esp_image_qemu_bootcore.rs). Stage0's measuring
+  # build (feature `measure`, the hardware run of
+  # samples/hardware-test/esp_stage0.py) boots the good node as well.
   stage0-qemu:
     runs-on: ubuntu-24.04
     steps:
@@ -451,16 +453,19 @@ jobs:
           DAGON_TARGET_TAG: qemu-node
         run: |
           (cd targets/mcu/esp32s3/stage0 && cargo build --release --locked --features qemu-layout)
+          (cd targets/mcu/esp32s3/stage0 && cargo build --release --locked --features qemu-layout,measure --target-dir target/measure)
           (cd targets/mcu/esp32s3/stage0-qemu && cargo build --release --locked)
           (cd targets/mcu/esp32s3/bootcore && cargo build --release --locked --features qemu-layout)
       - name: Boot in QEMU
         run: |
           out=xtensa-esp32s3-none-elf/release
           export DAGON_STAGE0_ELF="$PWD/targets/mcu/esp32s3/stage0/target/$out/dagon-esp32s3-stage0"
+          export DAGON_STAGE0_MEASURE_ELF="$PWD/targets/mcu/esp32s3/stage0/target/measure/$out/dagon-esp32s3-stage0"
           export DAGON_QEMU_CORE_ELF="$PWD/targets/mcu/esp32s3/stage0-qemu/target/$out/core"
           export DAGON_QEMU_APP_ELF="$PWD/targets/mcu/esp32s3/stage0-qemu/target/$out/app"
           export DAGON_ESP32S3_BOOTCORE_ELF="$PWD/targets/mcu/esp32s3/bootcore/target/$out/dagon-esp32s3-bootcore"
           cargo test -p dagon-cli --locked --bin dagon esp32s3_stage0_in_qemu -- --ignored --nocapture
+          cargo test -p dagon-cli --locked --bin dagon esp32s3_stage0_measuring_build_in_qemu -- --ignored --nocapture
           cargo test -p dagon-cli --locked --bin dagon esp32s3_bootcore_in_qemu -- --ignored --nocapture
 
   # `dagon new` and `dagon gen`, then each self-boot node's generated boot

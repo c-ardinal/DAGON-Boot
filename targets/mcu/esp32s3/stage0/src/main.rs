@@ -30,6 +30,7 @@
 //! build.
 #![no_std]
 #![no_main]
+#![cfg_attr(feature = "measure", feature(asm_experimental_arch))]
 
 #[cfg(not(feature = "qemu-layout"))]
 compile_error!(
@@ -39,6 +40,8 @@ compile_error!(
 
 mod flash;
 mod load;
+#[cfg(feature = "measure")]
+mod measure;
 mod qemu_layout;
 mod rom;
 mod wdt;
@@ -111,8 +114,11 @@ pub extern "C" fn stage0_start() -> ! {
         }
     }
     wdt::hold();
+    #[cfg(feature = "measure")]
+    let begun = measure::begin();
     flash::attach();
     let mut f = RomFlash;
+    #[cfg(not(feature = "measure"))]
     let started = start_handed(
         &mut f,
         (&STAGE0, &APPS),
@@ -120,6 +126,30 @@ pub extern "C" fn stage0_start() -> ! {
         &VERIFIER,
         &mut NoDiag,
     );
+    #[cfg(feature = "measure")]
+    let started = {
+        let spent = measure::Spent::default();
+        let started = start_handed(
+            &mut measure::TimedFlash {
+                inner: &mut f,
+                spent: &spent,
+            },
+            (&STAGE0, &APPS),
+            (read_cell, write_cell),
+            &measure::TimedVerifier {
+                inner: &VERIFIER,
+                spent: &spent,
+            },
+            &mut NoDiag,
+        );
+        let path = match &started {
+            Ok(Handed::Core(_)) => measure::PATH_CORE,
+            Ok(Handed::App { .. }) => measure::PATH_APP,
+            Err(_) => 0,
+        };
+        measure::end(&begun, &spent, path);
+        started
+    };
     match started {
         Ok(Handed::Core(s)) => {
             s.cell
@@ -169,7 +199,13 @@ pub extern "C" fn stage0_start() -> ! {
 /// as the confirmed boot core runs); returns only when it is no image
 /// stage0 may load, having changed nothing.
 fn run(f: &mut RomFlash, at: Place, period: Option<u32>) -> Refused {
-    let p = match load::plan_at(f, at, (layout::CELL[0], layout::CELL[1] + 4)) {
+    // What an app may not load over: the retained cell (and, in the
+    // measuring build, the records below it).
+    #[cfg(not(feature = "measure"))]
+    let kept = (layout::CELL[0], layout::CELL[1] + 4);
+    #[cfg(feature = "measure")]
+    let kept = (measure::RECORD, layout::CELL[1] + 4);
+    let p = match load::plan_at(f, at, kept) {
         Ok(p) => p,
         Err(why) => return why,
     };

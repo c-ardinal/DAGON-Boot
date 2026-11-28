@@ -30,7 +30,9 @@ and the app with the same verifier and decision as the other MCUs
 loads the ESP image (`app_image`) and maps it through the MMU. It is not
 written to nodes yet: its layout (the retained cell, the two logs, the
 RTC slow clock) is the emulator's provisional one (`qemu-layout`) until
-the definition gives stage0's after the hardware measurement. CI boots it
+the definition gives stage0's after the hardware measurement (its
+measuring build, feature `measure`, on the M5StopWatch:
+`samples/hardware-test/esp_stage0.py`, README "ESP32-S3 stage0 run"). CI boots it
 in Espressif's QEMU with the test images of `stage0-qemu/`
 (`crates/dagon-cli/src/esp_image_qemu.rs`) and measures it against its
 30 KiB budget (`stage0/budget.toml`, `scripts/stage0_size.py`).

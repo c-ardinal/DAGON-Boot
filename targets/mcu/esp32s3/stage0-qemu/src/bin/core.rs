@@ -6,10 +6,11 @@
 #![no_main]
 
 use dagon_core::bootcore::{hand_off, HandOff, CLEARED, START_APP};
-use dagon_esp32s3_stage0_qemu::{read_cell, reset, say, say2, stay, write_cell};
+use dagon_esp32s3_stage0_qemu::{read_cell, reset, say, say2, stay, tell_measure, write_cell};
 
 #[no_mangle]
 pub extern "C" fn core_start() -> ! {
+    tell_measure();
     let cell = read_cell();
     say2(c"core: started, cell %08x %08x\n", cell[0], cell[1]);
     match hand_off(cell) {

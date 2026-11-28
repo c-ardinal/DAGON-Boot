@@ -16,7 +16,6 @@ use dagon_format::header::{port_kind, target_tag};
 pub use dagon_node::hooks::{always, App, AppEvents, BoardCore, Confirm, NodeChain, SelfCheck};
 use dagon_node::hooks::{node_chain, run_start, Events, Taken};
 use dagon_port::SlotStore;
-use dagon_proto::max_payload;
 use dagon_proto::payload::{mode, SlotState, StatusResp};
 use embassy_rp::peripherals::{FLASH, USB, WATCHDOG};
 use embassy_rp::{Peri, Peripherals};
@@ -86,16 +85,17 @@ pub const fn levels<const N: usize>() -> [crate::watchdog::Level; N] {
     crate::watchdog::levels::<N>(APP_TASKS)
 }
 
-/// The agent configuration of an RP2040 node reached over USB. `role` is
-/// its topology role (`dagon_proto::payload::role`).
-pub fn config(tag: &str, role: u8) -> Config {
+/// The agent configuration of an RP2040 node: `role` is its topology role
+/// (`dagon_proto::payload::role`), `max_payload` the largest payload of
+/// the link it is reached over (`dagon_proto::max_payload`).
+pub fn config(tag: &str, role: u8, max_payload: usize) -> Config {
     Config {
         mcu_id: crate::MCU_ID,
         port_kind: port_kind::SELF_BOOT,
         target_tag: target_tag(tag),
         role,
         mode: mode::APP,
-        max_payload: max_payload::USB as u16,
+        max_payload: max_payload as u16,
         trial_attempts: crate::TRIAL_ATTEMPTS,
     }
 }
@@ -110,8 +110,8 @@ pub fn on_trial(st: &StatusResp) -> bool {
 /// board's bring-up and, with [`Confirm::Own`], confirms the app's trial
 /// ([`run_start`]); returns the agent with the flash chip's [`serial`]
 /// and the node's events. `task` is the guard
-/// task that serves the agent; `tag` and `role` are the node's image
-/// target tag and topology role; `app` holds the self-check, the app's
+/// task that serves the agent; `config` is the agent's ([`config`]: the
+/// node's image target tag, topology role and link payload); `app` holds the self-check, the app's
 /// extensions and who confirms. Only the starts in this package hold the
 /// agent. Call once.
 pub(crate) fn open<B: BoardDef, const N: usize>(
@@ -119,8 +119,7 @@ pub(crate) fn open<B: BoardDef, const N: usize>(
     watchdog: Peri<'static, WATCHDOG>,
     guard: &'static Guard<N>,
     task: usize,
-    tag: &str,
-    role: u8,
+    config: Config,
     app: App,
 ) -> Opened {
     const {
@@ -163,7 +162,7 @@ pub(crate) fn open<B: BoardDef, const N: usize>(
         periods,
     );
     let verifier = Ed25519Compact::new(crate::PUBKEY);
-    let mut agent = Agent::new(config(tag, role), verifier, store, chain);
+    let mut agent = Agent::new(config, verifier, store, chain);
     let taken = Taken {
         reset: crate::reset::read(),
         watchdog_ms: crate::layout::watchdog_ms(trial),
@@ -280,8 +279,7 @@ mod usb_node {
             parts.watchdog,
             guard,
             task,
-            tag,
-            role::NODE,
+            config(tag, role::NODE, dagon_proto::max_payload::USB),
             app,
         );
         let high = crate::exec::start();

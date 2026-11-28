@@ -142,7 +142,7 @@ kinds this package offers (`links::LINK_KINDS`):
 | Kind | Up | Down |
 |---|---|---|
 | `usb-cdc` | Yes | NotYet |
-| `uart` | NotYet | Yes |
+| `uart` | Yes | Yes |
 | `i2c` | NotYet | Yes |
 | `ble` | NotYet | NotYet |
 | `wifi-tcp` | NotYet | NotYet |
@@ -151,6 +151,11 @@ kinds this package offers (`links::LINK_KINDS`):
 
 - Up `usb-cdc`: the PC link of the coordinator (`links::UsbCdc`, the USB CDC
   device; `Reconnect::Reenumerates`).
+- Up `uart`: a node reached over UART that relays as a node (`[relay]
+  relays_as_node`): `relay::Uplink::uart` with `relay::UartUp` on the port
+  its link end names (`uart0`/`uart1` the hardware UART, `pio-uart` PIO0,
+  `pio-uart1` PIO1); `Reconnect::Persistent`. Its agent tells the UART's
+  payload limit in HELLO.
 - Down `i2c`: I2C0 controller with the DAGON mailbox (`links::I2c`), and
   down `uart`: a PIO UART (`links::Uart`); the board package names the
   pins (`downlink_i2c()`, `downlink_uart()`).

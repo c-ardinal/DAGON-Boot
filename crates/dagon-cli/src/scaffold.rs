@@ -294,7 +294,10 @@ pub fn hop_placeholders(
 ///   (GPIO numbers; speeds default as in wiring.rs), with `{{if_down_i2c}}`
 ///   / `{{if_down_uart}}` `all()` when it has one, `any()` (the code is
 ///   left out; its names then render as placeholders that still parse)
-///   when not.
+///   when not;
+/// - `{{if_up_uart}}` (with `{{if_up_hw}}` or `{{if_up_pio}}`), `{{up_ctl}}`,
+///   `{{up_pio}}`, `{{up_tx}}`, `{{up_rx}}`, `{{up_baud}}`: a node reached
+///   over UART, on the port its end names ([`up_uart`]) and its pins.
 ///
 /// The template serves one I2C bus and one UART link: a coordinator with more, or
 /// an I2C node whose link names no pins the MCU knows, is refused, naming
@@ -430,12 +433,64 @@ pub fn wiring_placeholders(
         "down_uart_baud",
         uart.map_or("0".into(), |l| l.uart_baud().to_string()),
     );
+    // A node reached over UART: the peripheral of the port its end names.
+    let up = t
+        .reached_over(&n.id)
+        .filter(|l| l.kind == LinkKind::Uart)
+        .and_then(|l| Some((l, l.end(&n.id)?)))
+        .and_then(|(l, e)| Some((l, e, up_uart(&e.port)?)));
+    let up = match up {
+        Some((l, e, (ctl, pio))) => {
+            let pins = e.pins.ok_or_else(|| {
+                format!(
+                    "link {}: name {}'s UART pins on its end for the MCU template",
+                    l.named(),
+                    n.id
+                )
+            })?;
+            if ctl == "PIO0" && uart.is_some() {
+                return Err(format!(
+                    "{}: link {} and link {} both take PIO0 (port pio-uart): name pio-uart1 or a hardware UART for one",
+                    n.id,
+                    l.named(),
+                    uart.map(|u| u.named()).unwrap_or_default()
+                ));
+            }
+            Some((l, ctl, pio, pins))
+        }
+        None => None,
+    };
+    let on = |b: bool| if b { "all()" } else { "any()" }.to_string();
+    put("if_up_uart", on(up.is_some()));
+    put("if_up_hw", on(up.is_some_and(|u| u.2.is_none())));
+    put("if_up_pio", on(up.is_some_and(|u| u.2.is_some())));
+    put("up_ctl", up.map_or("NoUart", |u| u.1).into());
+    put("up_pio", up.and_then(|u| u.2).unwrap_or("none").into());
+    put("up_tx", up.map_or("none".into(), |u| u.3.tx.to_string()));
+    put("up_rx", up.map_or("none".into(), |u| u.3.rx.to_string()));
+    put(
+        "up_baud",
+        up.map_or("0".into(), |u| u.0.uart_baud().to_string()),
+    );
     Ok(out)
+}
+
+/// The peripheral (upper case) of a UART port an MCU template serves as
+/// the uplink, and for a PIO UART the `UartUp` constructor of that PIO;
+/// `None` for a port it does not know (another MCU's template).
+fn up_uart(port: &str) -> Option<(&'static str, Option<&'static str>)> {
+    match port {
+        "uart0" => Some(("UART0", None)),
+        "uart1" => Some(("UART1", None)),
+        "pio-uart" => Some(("PIO0", Some("pio0"))),
+        "pio-uart1" => Some(("PIO1", Some("pio1"))),
+        _ => None,
+    }
 }
 
 /// Whether a template uses [`wiring_placeholders`].
 fn wires(text: &str) -> bool {
-    ["{{link_", "{{down_", "{{if_down_"]
+    ["{{link_", "{{down_", "{{if_down_", "{{up_", "{{if_up_"]
         .iter()
         .any(|k| text.contains(k))
 }

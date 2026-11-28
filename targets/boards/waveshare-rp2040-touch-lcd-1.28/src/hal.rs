@@ -42,7 +42,8 @@ macro_rules! dagon_pins {
     };
 }
 
-/// Starts DAGON's relay on this board: over I2C0, the PIO UART and the
+/// Starts DAGON's relay on this board: up over USB, or over the PIO UART
+/// on a node reached over UART; down over I2C0, the PIO UART and the
 /// STM32 control lines (PC and link tasks on DAGON's high-priority
 /// executor, the feeder on `spawner`), with the touch controller held out
 /// of reset. Declare the guard with `dagon_mcu_rp2040::relay::levels()`;
@@ -61,9 +62,7 @@ pub fn start<const N: usize>(
     uplink: Kind,
     downlinks: &[Kind],
 ) -> (Spare, dagon_mcu_rp2040::node::AppEvents) {
-    // The only uplink this board offers (`require_uplink` checks it at
-    // compile time): the USB CDC device, built by the relay.
-    assert!(uplink == Kind::UsbCdc, "uplink: only usb-cdc on this board");
+    use dagon_mcu_rp2040::relay::{UartUp, Uplink};
     assert!(
         downlinks
             .iter()
@@ -71,13 +70,31 @@ pub fn start<const N: usize>(
         "downlinks: only i2c and uart on this board"
     );
     let wants = |k: Kind| downlinks.contains(&k);
+    // The uplink (`require_uplink` checks the kind at compile time): the
+    // USB CDC device, built by the relay, or on a node reached over UART
+    // the PIO UART of bus `child-uart`, where its boot core receives too.
+    // That bus is then no downlink.
+    let mut sub_uart = Some(io.sub_uart);
+    let up = match uplink {
+        Kind::UsbCdc => Uplink::Usb,
+        Kind::Uart => {
+            assert!(
+                !wants(Kind::Uart),
+                "uart: the uplink takes bus child-uart, so no uart downlink on this board"
+            );
+            let bus = sub_uart.take().expect("the bus is taken once");
+            Uplink::uart(UartUp::pio0(downlink_uart(bus)))
+        }
+        _ => panic!("uplink: usb-cdc or uart on this board"),
+    };
     // The STM32 recovery lines belong to the I2C downlink (ROM path): the
     // node on bus `child-i2c`.
     let lines = wants(Kind::I2c)
         .then(|| dagon_mcu_rp2040::relay::RecoveryLines::on_i2c0(io.sub_ctl.lines()));
     let links = dagon_mcu_rp2040::relay::Links {
+        up,
         lines: [lines, None],
-        uart: wants(Kind::Uart).then(|| downlink_uart(io.sub_uart)),
+        uart: sub_uart.filter(|_| wants(Kind::Uart)).map(downlink_uart),
         i2c: wants(Kind::I2c).then(|| downlink_i2c(io.sub_i2c)),
         ..dagon_mcu_rp2040::relay::Links::none()
     };

@@ -278,7 +278,7 @@ mod tests {
     }
 
     #[test]
-    fn a_second_hubs_tree_and_deeper_nodes_are_skipped_with_their_reason() {
+    fn a_second_hubs_tree_is_skipped_with_its_reason_and_a_relayed_node_kept() {
         let node = |id: &str, role: &str| {
             format!("  - id: {id}\n    mcu: rp2040\n    role: {role}\n    port: self-boot\n    tag: {id}\n")
         };
@@ -315,11 +315,12 @@ nodes:
                     ("b".into(), Skip::LinkKind),
                     ("h2".into(), Skip::SecondHub),
                     ("c".into(), Skip::SecondHub),
-                    ("d".into(), Skip::Deep),
                 ]
             );
-            assert_eq!(sub.update.order, ["a", "h"]);
-            assert_eq!(sub.links.len(), 1);
+            // The built-in RP2040 relays as a node, so d is reached through a
+            // (tests/deep.rs: skipped as Deep when the node between does not).
+            assert_eq!(sub.update.order, ["a", "d", "h"]);
+            assert_eq!(sub.links.len(), 2);
         }
     }
 

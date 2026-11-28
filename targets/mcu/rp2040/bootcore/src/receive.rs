@@ -151,7 +151,7 @@ pub fn serve(
     let cfg = dagon_agent::Config {
         mode: entry.mode(),
         max_payload: links.max_payload() as u16,
-        ..node::config(TARGET_TAG, role::NODE)
+        ..node::config(TARGET_TAG, role::NODE, dagon_proto::max_payload::USB)
     };
     let mut agent: Session = Agent::with_links(cfg, VERIFIER, store, chain);
     // The registers log each reset anew, so this is the reset that

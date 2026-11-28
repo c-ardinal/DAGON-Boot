@@ -58,27 +58,32 @@ fn chain(flip: bool) -> Topology {
 
 #[test]
 fn nodes_behind_a_node_that_relays_are_reached_whichever_end_is_listed_first() {
-    let reg = registry("reached", true);
-    for flip in [false, true] {
+    // The built-in RP2040 relays as a node; a project may say so too.
+    for (reg, flip) in [
+        (Registry::builtin(), false),
+        (&registry("reached", true), false),
+        (&registry("reached-flip", true), true),
+    ] {
         let t = chain(flip);
-        let report = check_with(&reg, &t);
+        let report = check_with(reg, &t);
         assert!(report.is_pushable(), "{:#?}", report.issues);
         assert!(
             report.issues.iter().all(|i| i.rule != "V-23"),
             "{:#?}",
             report.issues
         );
-        let cut = cut_with(&reg, &t);
+        let cut = cut_with(reg, &t);
         assert_eq!(cut.skipped, []);
         assert_eq!(cut.reach, ["hub", "mid", "leaf", "far"]);
         assert_eq!(cut.topology.unwrap().links.len(), 3);
-        assert!(compile_with(&reg, &t).is_ok());
+        assert!(compile_with(reg, &t).is_ok());
     }
 }
 
 #[test]
 fn they_are_skipped_when_the_node_between_does_not_relay() {
-    for reg in [&registry("skipped", false), Registry::builtin()] {
+    {
+        let reg = &registry("skipped", false);
         let cut = cut_with(reg, &chain(false));
         assert_eq!(
             cut.skipped,

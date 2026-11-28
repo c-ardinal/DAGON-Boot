@@ -1,7 +1,7 @@
-//! Your board, for DAGON: the coordinator's links to the other nodes. Written once by
-//! `dagon new` with this node's links in the 構成 (an I2C bus and a PIO
-//! UART, on the pins the 構成 gives); edit it for your board (dagon gen
-//! never rewrites it). The flash size is the one given for this board in
+//! Your board, for DAGON: this node's links to the other nodes. Written once by
+//! `dagon new` with this node's links in the 構成 (up: USB, or the UART from
+//! the node nearer the PC; down: an I2C bus and a PIO UART, on the pins the
+//! 構成 gives); edit it for your board (dagon gen never rewrites it). The flash size is the one given for this board in
 //! dagon.toml, else the least the MCU's layout needs.
 
 use dagon_mcu_rp2040::layout::MIN_FLASH_SIZE;
@@ -11,7 +11,11 @@ use dagon_mcu_rp2040::links::{I2cLink, RpI2c};
 #[cfg({{if_down_uart}})]
 use dagon_mcu_rp2040::links::PioStream;
 use dagon_mcu_rp2040::node::{BoardCore, BoardDef, DagonParts};
-use dagon_mcu_rp2040::relay::Links;
+use dagon_mcu_rp2040::relay::{Links, Uplink};
+#[cfg({{if_up_uart}})]
+use dagon_mcu_rp2040::relay::UartUp;
+#[cfg({{if_up_uart}})]
+use embassy_rp::peripherals::{{{up_ctl}}, PIN_{{up_tx}}, PIN_{{up_rx}}};
 use dagon_mcu_rp2040::EraseRegion;
 #[cfg({{if_down_i2c}})]
 use embassy_rp::i2c::{self, I2c};
@@ -35,6 +39,18 @@ bind_interrupts!(struct I2cIrqs {
 bind_interrupts!(struct PioIrqs {
     PIO0_IRQ_0 => pio::InterruptHandler<PIO0>;
 });
+#[cfg({{if_up_hw}})]
+bind_interrupts!(struct UpIrqs {
+    {{up_ctl}}_IRQ => embassy_rp::uart::BufferedInterruptHandler<{{up_ctl}}>;
+});
+#[cfg({{if_up_pio}})]
+bind_interrupts!(struct UpIrqs {
+    {{up_ctl}}_IRQ_0 => embassy_rp::pio::InterruptHandler<{{up_ctl}}>;
+});
+
+/// UART speed from the node nearer the PC (from the 構成).
+#[cfg({{if_up_uart}})]
+const UP_BAUD: u32 = {{up_baud}};
 
 /// I2C speed to the other nodes (from the 構成).
 #[cfg({{if_down_i2c}})]
@@ -47,6 +63,9 @@ pub struct Board;
 
 /// What DAGON's relay and your app get besides DAGON's own peripherals.
 pub struct Io {
+    /// The UART from the node nearer the PC (its port's peripheral, TX, RX).
+    #[cfg({{if_up_uart}})]
+    pub up: (Peri<'static, {{up_ctl}}>, Peri<'static, PIN_{{up_tx}}>, Peri<'static, PIN_{{up_rx}}>),
     #[cfg({{if_down_i2c}})]
     pub i2c: (Peri<'static, {{down_i2c}}>, Peri<'static, PIN_{{down_i2c_sda}}>, Peri<'static, PIN_{{down_i2c_scl}}>),
     #[cfg({{if_down_uart}})]
@@ -80,6 +99,8 @@ impl BoardDef for Board {
             usb: p.USB,
         };
         let io = Io {
+            #[cfg({{if_up_uart}})]
+            up: (p.{{up_ctl}}, p.PIN_{{up_tx}}, p.PIN_{{up_rx}}),
             #[cfg({{if_down_i2c}})]
             i2c: (p.{{down_i2c}}, p.PIN_{{down_i2c_sda}}, p.PIN_{{down_i2c_scl}}),
             #[cfg({{if_down_uart}})]
@@ -91,11 +112,27 @@ impl BoardDef for Board {
 }
 
 /// The relay's links for the 構成's hops (the uplink is the USB CDC
-/// device, built by the relay; no STM32 recovery lines on this wiring),
-/// and what is left for the app.
+/// device, built by the relay, or the UART from the node nearer the PC;
+/// no STM32 recovery lines on this wiring), and what is left for the app.
 pub fn links(io: Io, uplink: Kind, downlinks: &[Kind]) -> (Links, Spare) {
-    assert!(uplink == Kind::UsbCdc, "uplink: only usb-cdc on this board");
     let _ = downlinks;
+    #[cfg({{if_up_hw}})]
+    let up = {
+        let (uart, tx, rx) = io.up;
+        Uplink::uart(UartUp::hw_on(uart, tx, rx, UpIrqs, UP_BAUD))
+    };
+    #[cfg({{if_up_pio}})]
+    let up = {
+        let (pio, tx, rx) = io.up;
+        let stream = dagon_mcu_rp2040::links::PioStream::on(pio, tx, rx, UpIrqs, UP_BAUD);
+        Uplink::uart(UartUp::{{up_pio}}(stream))
+    };
+    #[cfg(not({{if_up_uart}}))]
+    let up = Uplink::Usb;
+    assert!(
+        matches!((uplink, &up), (Kind::UsbCdc, Uplink::Usb) | (Kind::Uart, Uplink::Uart(_))),
+        "uplink: the one dagon new wrote this file for"
+    );
     #[cfg({{if_down_i2c}})]
     let i2c = downlinks.contains(&Kind::I2c).then(|| {
         let (bus, sda, scl) = io.i2c;
@@ -128,6 +165,7 @@ pub fn links(io: Io, uplink: Kind, downlinks: &[Kind]) -> (Links, Spare) {
     #[cfg(not({{if_down_uart}}))]
     let uart = None;
     let links = Links {
+        up,
         i2c,
         uart,
         ..Links::none()

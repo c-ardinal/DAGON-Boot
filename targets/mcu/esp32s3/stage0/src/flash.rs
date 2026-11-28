@@ -21,7 +21,26 @@ const REGIONS: [FlashRegion; 1] = [FlashRegion {
 /// SHA-256 for `ets_sha_init` (ESP-IDF `rom/sha.h` `SHA_TYPE`, ESP32-S3).
 const SHA2_256: u32 = 2;
 
-/// Sets the ROM's driver up for the definition's flash and lets it write.
+/// SPI0 (the cache's reads) and SPI1 (the ROM driver's): SPI_MEM_CTRL,
+/// SPI_MEM_CTRL2 and SPI_MEM_USER (ESP-IDF v5.3 `soc/esp32s3/spi_mem_reg.h`).
+const SPI0: u32 = 0x6000_3000;
+const SPI1: u32 = 0x6000_2000;
+const CTRL: u32 = 0x08;
+const CTRL2: u32 = 0x10;
+const USER: u32 = 0x18;
+/// CTRL: FDUMMY_OUT (bit 3), Q_POL (bit 18), D_POL (bit 19).
+const DUMMY_OUT: u32 = 1 << 3 | 1 << 18 | 1 << 19;
+/// CTRL2: CS_SETUP_TIME (bits 0 to 4) and CS_HOLD_TIME (bits 5 to 9).
+const CS_TIMES: u32 = 0x3FF;
+/// USER: CS_HOLD (bit 6) and CS_SETUP (bit 7).
+const CS_HOLD_SETUP: u32 = 1 << 6 | 1 << 7;
+
+/// Sets the ROM's driver up for the definition's flash and lets it write,
+/// then SPI0 for the mapped reads as ESP-IDF's 2nd stage sets it
+/// (`bootloader_init_flash_configure` for a quad flash): the dummy phase
+/// driven by the controller on both SPI0 and SPI1, so a flash in a dual or
+/// quad read does not take floating lines for its mode bits, and the chip
+/// select's setup and hold on.
 pub fn attach() {
     // SAFETY: the ROM's driver, called once before any flash access.
     unsafe {
@@ -29,6 +48,11 @@ pub fn attach() {
         rom::spi_flash_attach(rom::ets_efuse_get_spiconfig(), false);
         rom::esp_rom_spiflash_unlock();
     }
+    for spi in [SPI0, SPI1] {
+        rom::reg_write(spi + CTRL, rom::reg_read(spi + CTRL) | DUMMY_OUT);
+    }
+    rom::reg_write(SPI0 + CTRL2, rom::reg_read(SPI0 + CTRL2) & !CS_TIMES);
+    rom::reg_write(SPI0 + USER, rom::reg_read(SPI0 + USER) | CS_HOLD_SETUP);
 }
 
 /// The flash, read and written through the ROM.

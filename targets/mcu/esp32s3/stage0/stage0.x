@@ -71,3 +71,6 @@ ets_sha_init = 0x40001d10;
 ets_sha_starts = 0x40001d28;
 ets_sha_update = 0x40001d34;
 ets_sha_finish = 0x40001d40;
+/* The measuring build's (feature `measure`). */
+ets_get_cpu_frequency = 0x40001a40;
+rtc_get_reset_reason = 0x4000057c;

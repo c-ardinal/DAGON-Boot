@@ -185,7 +185,13 @@ impl Node {
 
     /// The good node with the boot core the ELF that `core_elf` names.
     fn with_core(core_elf: &str) -> Node {
-        let stage0 = build_image(&env_file("DAGON_STAGE0_ELF"), s3(), "16mb").unwrap();
+        Node::of("DAGON_STAGE0_ELF", core_elf)
+    }
+
+    /// The good node with the stage0 and the boot core the ELFs that
+    /// `stage0_elf` and `core_elf` name.
+    fn of(stage0_elf: &str, core_elf: &str) -> Node {
+        let stage0 = build_image(&env_file(stage0_elf), s3(), "16mb").unwrap();
         let core = build_image(&env_file(core_elf), s3(), "16mb").unwrap();
         let app = app_image(&env_file("DAGON_QEMU_APP_ELF"));
         Node {
@@ -269,7 +275,10 @@ impl Node {
             match rx.recv_timeout(left) {
                 Ok(l) => {
                     let end = l.contains(done);
-                    if l.starts_with("core:") || l.starts_with("app:") {
+                    if ["core:", "app:", "measure"]
+                        .iter()
+                        .any(|p| l.starts_with(p))
+                    {
                         lines.push(l);
                     }
                     // A boot loop: stop early.
@@ -382,6 +391,73 @@ fn esp32s3_stage0_in_qemu() {
     n.core_hdr[HEADER_SIZE - 1] ^= 1;
     case("bad-core", &n, &[APP_RUNS]);
     assert!(failed.is_empty(), "{failed:#?}");
+}
+
+/// The measuring build of stage0 (`DAGON_STAGE0_MEASURE_ELF`, feature
+/// `measure`) on the good node: the boot core and the app each tell the
+/// record stage0 left (the app also the one of the start before, the boot
+/// core's), and the node starts as with the normal build.
+#[test]
+#[ignore = "needs QEMU and the images the CI job stage0-qemu builds"]
+fn esp32s3_stage0_measuring_build_in_qemu() {
+    let node = Node::of("DAGON_STAGE0_MEASURE_ELF", "DAGON_QEMU_CORE_ELF");
+    let got = node.boot("measure", APP_RUNS);
+    for l in &got {
+        eprintln!("  {l}");
+    }
+    let tagged =
+        |tag: &str| -> Vec<&String> { got.iter().filter(|l| l.starts_with(tag)).collect() };
+    let rest: Vec<&String> = got.iter().filter(|l| !l.starts_with("measure")).collect();
+    assert_eq!(rest.len(), 3, "{got:#?}");
+    assert!(rest[2].starts_with(APP_RUNS), "{got:#?}");
+    // Six lines from the boot core, six from the app; and the app tells
+    // the boot core's start before.
+    let last = tagged("measure:");
+    let before = tagged("measure-1:");
+    assert_eq!((last.len(), before.len()), (12, 6), "{got:#?}");
+    assert!(last[0].contains("path 1"), "{got:#?}");
+    assert!(last[6].contains("path 2"), "{got:#?}");
+    assert!(before[0].contains("path 1"), "{got:#?}");
+    // The app's start hashed its body: a count of bytes other than 0.
+    let hashed = last[8].rsplit("for ").next().unwrap();
+    assert!(!hashed.starts_with("0 "), "{got:#?}");
+}
+
+/// The flash images of the hardware run (samples/hardware-test/
+/// esp_stage0.py), written to `DAGON_STAGE0_HW_OUT`: the good
+/// node (`good.bin`), its app's signature broken (`bad-signature.bin`),
+/// and with `DAGON_STAGE0_HW_APP` (an ESP app image) that app in APP slot
+/// A (`own-app.bin`); each from flash 0x0 to the end of the app log's
+/// faces. Also stage0's ROM image (`stage0.bin`).
+#[test]
+#[ignore = "writes the hardware run's images from the ELFs esp_stage0.py builds"]
+fn esp32s3_stage0_hardware_images() {
+    const USED: usize = APP_LOG as usize + 0x4000;
+    const APP_MAX: usize = 0x30_0000;
+    let dir = std::path::PathBuf::from(
+        std::env::var("DAGON_STAGE0_HW_OUT").expect("DAGON_STAGE0_HW_OUT is not set"),
+    );
+    std::fs::create_dir_all(&dir).unwrap();
+    let put = |name: &str, b: &[u8]| {
+        let rel = crate::genfs::Rel::new(name).unwrap();
+        crate::genfs::write(&dir, &rel, b).unwrap();
+    };
+    let good = Node::good();
+    put("good.bin", &good.flash()[..USED]);
+    put("stage0.bin", &good.stage0);
+    let mut n = Node::good();
+    n.app_hdr[HEADER_SIZE - 1] ^= 1;
+    put("bad-signature.bin", &n.flash()[..USED]);
+    if let Ok(path) = std::env::var("DAGON_STAGE0_HW_APP") {
+        let mut n = Node::good();
+        n.app = std::fs::read(&path).unwrap_or_else(|e| panic!("{path}: {e}"));
+        assert!(
+            n.app.len() <= APP_MAX && n.app.first() == Some(&MAGIC),
+            "{path}: not an ESP app image of at most {APP_MAX} bytes"
+        );
+        n.app_hdr = header(image_kind::APP, APP.1, &n.app, TAG);
+        put("own-app.bin", &n.flash()[..USED]);
+    }
 }
 
 #[path = "esp_image_qemu_bootcore.rs"]

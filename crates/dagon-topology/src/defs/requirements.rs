@@ -329,10 +329,11 @@ pub const MCU: &[Requirement<McuCheck>] = &[
             "watchdog.trial_ms",
             "watchdog.confirmed_ms",
             "watchdog.trial_attempts",
+            "watchdog.start_ms",
             "watchdog.range_ms.min",
             "watchdog.range_ms.max",
         ],
-        rule: ">= 1; 1 <= range_ms.min <= range_ms.max (the periods the MCU's watchdog can run); trial_ms and confirmed_ms inside range_ms; flag a fact of none | register | package (lockup fuse only with a source)",
+        rule: ">= 1; 1 <= range_ms.min <= range_ms.max (the periods the MCU's watchdog can run); trial_ms and confirmed_ms inside range_ms; start_ms >= 1 when given; flag a fact of none | register | package (lockup fuse only with a source)",
         check: isolation::watchdog,
     },
     Requirement {

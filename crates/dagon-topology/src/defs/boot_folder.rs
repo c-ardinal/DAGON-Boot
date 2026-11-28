@@ -784,7 +784,11 @@ mod tests {
         let manifest = f.dir.join("Cargo.toml");
         let text = std::fs::read_to_string(&manifest).unwrap();
         let switch = |line: &str| {
-            std::fs::write(&manifest, text.replace("[features]\n", &format!("[features]\n{line}\n"))).unwrap();
+            std::fs::write(
+                &manifest,
+                text.replace("[features]\n", &format!("[features]\n{line}\n")),
+            )
+            .unwrap();
             BootFolder::read(&f.dir).unwrap().verify_stamp()
         };
         switch("default = [\"listen-time\"]").unwrap();

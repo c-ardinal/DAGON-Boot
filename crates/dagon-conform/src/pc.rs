@@ -10,9 +10,9 @@
 //! | CT-04 | XFER_BEGIN to the running slot (and the confirmed slot if different) | each answers E_STATE |
 //! | CT-20 | header re-signed with another `mcu_id`, then another `target_tag`, sent as XFER_BEGIN + XFER_HDR to the idle slot | the last XFER_HDR answers E_COMPAT, each time |
 //! | CT-09 | 20 HELLO, then `good` to the idle slot with full-size XFER_DATA | all OK, XFER_END digest matches, within [`timeout::transfer_ms`] |
-//! | CT-10 | REBOOT | HELLO within [`timeout::REBOOT_WAIT_MS`], same version, not on trial |
+//! | CT-10 | REBOOT | HELLO within [`NodeTimings::reboot_wait_ms`], same version, not on trial |
 //! | CT-11 | `good` to the idle slot, SET_PENDING, REBOOT, CONFIRM, REBOOT | new slot on trial, then confirmed, still confirmed after the second reboot |
-//! | CT-12 | `no_confirm` to the idle slot, SET_PENDING, REBOOT, never CONFIRM | back on the previous slot within [`timeout::REBOOT_WAIT_MS`], STATUS `last_reason` = TRIAL_EXHAUSTED, tried slot REVERTED |
+//! | CT-12 | `no_confirm` to the idle slot, SET_PENDING, REBOOT, never CONFIRM | back on the previous slot within [`NodeTimings::reboot_wait_ms`], STATUS `last_reason` = TRIAL_EXHAUSTED, tried slot REVERTED |
 //! | CT-18 | HELLO + STATUS after CT-11 and after CT-12 | every field matches the state those tests produced |
 
 use crate::report::{CtResult, Report, Verdict};
@@ -596,10 +596,11 @@ impl<'a, 's, C: Channel> Runner<'a, 's, C> {
         let n = payload::encode_reboot(reboot_mode::NORMAL, &mut p).unwrap_or(0);
         self.ok(Cmd::Reboot, &p[..n], timeout::REQUEST_MS)?;
         let t0 = self.ch.now_ms();
+        let wait = self.timings.reboot_wait_ms();
         let mut last: Option<HelloResp> = None;
         loop {
             let ms = (self.ch.now_ms() - t0) as u32;
-            if ms > timeout::REBOOT_WAIT_MS {
+            if ms > wait {
                 return Err(match last {
                     None => detail!("no HELLO {} ms after REBOOT", ms),
                     Some(h) => {

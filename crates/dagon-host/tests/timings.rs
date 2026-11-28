@@ -292,8 +292,8 @@ fn a_definition_breaking_a_timing_rule_is_refused_naming_its_mcu() {
     for (trial, attempts, rule) in [
         (900, 1, TimingError::PollMissesTrial),
         (3_000, 1, TimingError::ConfirmMissesTrial),
-        (6_000, 5, TimingError::RebootWaitMissesRollback),
-        (13_001, 2, TimingError::RebootWaitMissesRollback),
+        // 20 x (32 + 2) s + 2 s + 2 s: past REBOOT_WAIT_MAX_MS.
+        (32_000, 20, TimingError::RebootWaitTooLong),
     ] {
         let reg = registry(
             &format!("bad{trial}-{attempts}"),
@@ -310,7 +310,7 @@ fn a_definition_breaking_a_timing_rule_is_refused_naming_its_mcu() {
         assert!(e.to_string().contains("nova-m4"), "{e}");
     }
     // At each rule's limit the definition passes.
-    for (trial, attempts) in [(3_001, 1), (6_000, 4), (13_000, 2)] {
+    for (trial, attempts) in [(3_001, 1), (6_000, 5), (32_000, 17)] {
         let reg = registry(
             &format!("ok{trial}-{attempts}"),
             &nova(trial, attempts, 100)
@@ -318,6 +318,34 @@ fn a_definition_breaking_a_timing_rule_is_refused_naming_its_mcu() {
                 .replace("unit_max_ms = 1_500", "unit_max_ms = 100"),
         );
         node_timings(&reg, &topology("nova-m4")).unwrap();
+    }
+}
+
+/// The wait after REBOOT is the node's own: its trials and its start, as
+/// its definition gives them (`[watchdog] start_ms`).
+#[test]
+fn the_reboot_wait_follows_the_definition_s_start() {
+    let with_start = nova(8_000, 3, 100).replace(
+        "trial_attempts = 3\n",
+        "trial_attempts = 3\nstart_ms = 2_500\n",
+    );
+    for (name, mcu, start) in [
+        ("start", with_start, 2_500),
+        (
+            "nostart",
+            nova(8_000, 3, 100),
+            dagon_port::timeout::START_FALLBACK_MS,
+        ),
+    ] {
+        let reg = registry(name, &mcu);
+        let t = node_timings(&reg, &topology("nova-m4")).unwrap();
+        let node = &t.iter().find(|(n, _)| *n == NODE).unwrap().1;
+        assert_eq!(node.start_ms, start, "{name}");
+        assert_eq!(
+            node.reboot_wait_ms(),
+            3 * (8_000 + start) + start + dagon_port::timeout::REBOOT_MARGIN_MS,
+            "{name}"
+        );
     }
 }
 

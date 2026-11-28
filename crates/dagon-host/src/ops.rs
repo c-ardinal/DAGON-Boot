@@ -7,9 +7,7 @@ use dagon_format::bundle::BundleView;
 use dagon_format::header::{header_digest16, image_kind, slot_binding, McuId, HEADER_SIZE};
 use dagon_format::topology::TopologyView;
 use dagon_format::{sha256, ImageHeader, Version};
-use dagon_port::timeout::{
-    CONFIRM_RETRY_MS, ERASE_FALLBACK_MS, REBOOT_WAIT_MS, REQUEST_MS, VERIFY_MS,
-};
+use dagon_port::timeout::{CONFIRM_RETRY_MS, ERASE_FALLBACK_MS, REQUEST_MS, VERIFY_MS};
 use dagon_port::Addressing;
 use dagon_proto::payload::{
     self, phase, reboot_mode, target, HelloResp, Peer, PeersResp, SetPending, Show, SlotState,
@@ -652,7 +650,7 @@ impl<T: Transport, C: HostClock> Host<T, C> {
             Ok(_) | Err(Error::Timeout | Error::Relay(Status::Timeout)) => {}
             Err(e) => return Err(e),
         }
-        self.await_version(to, app).await?;
+        self.await_version(to, node, app).await?;
         let after = self.boot_core_status(to).await?;
         // The new core itself, confirmed: with one boot core slot the
         // record naming that slot may still be the old core's.
@@ -706,7 +704,7 @@ impl<T: Transport, C: HostClock> Host<T, C> {
         let img = image_for(b, node, slot).ok_or(Error::NoImage { node })?;
         // The app never writes the slot it runs from: its boot core does.
         let hello = if runs_from(st, slot) {
-            self.hand_over(to).await?
+            self.hand_over(to, node).await?
         } else {
             st.hello
         };
@@ -734,7 +732,7 @@ impl<T: Transport, C: HostClock> Host<T, C> {
 
     /// REBOOT mode 1: the app hands over to its boot core's update mode
     /// (DES-RB-030); the boot core's HELLO once it answers in that mode.
-    async fn hand_over(&mut self, to: Target) -> Result<HelloResp, T::Error> {
+    async fn hand_over(&mut self, to: Target, node: u8) -> Result<HelloResp, T::Error> {
         let p = request(|b| payload::encode_reboot(reboot_mode::UPDATE, b));
         // Not resent, as REBOOT mode 0: the HELLO polls settle a lost reply.
         match self.call(to, Cmd::Reboot, &p, REQUEST_MS).await {
@@ -742,7 +740,7 @@ impl<T: Transport, C: HostClock> Host<T, C> {
             Err(e) => return Err(e),
         }
         match self
-            .await_hello(to, |h| h.mode == payload::mode::UPDATE)
+            .await_hello(to, node, |h| h.mode == payload::mode::UPDATE)
             .await?
         {
             Ok(h) => Ok(h),
@@ -777,7 +775,7 @@ impl<T: Transport, C: HostClock> Host<T, C> {
             Err(e) => return Err(e),
         }
         self.set_applied(to, v);
-        let h = self.await_version(to, v).await?;
+        let h = self.await_version(to, node, v).await?;
         if h.trial {
             self.confirm_trial(to, v).await?;
         }
@@ -813,8 +811,16 @@ impl<T: Transport, C: HostClock> Host<T, C> {
     }
 
     /// Polls HELLO after REBOOT until `v` answers (hub: reopening the port).
-    async fn await_version(&mut self, to: Target, v: Version) -> Result<HelloResp, T::Error> {
-        match self.await_hello(to, |h| h.active_version == v).await? {
+    async fn await_version(
+        &mut self,
+        to: Target,
+        node: u8,
+        v: Version,
+    ) -> Result<HelloResp, T::Error> {
+        match self
+            .await_hello(to, node, |h| h.active_version == v)
+            .await?
+        {
             Ok(h) => Ok(h),
             Err(Some(h)) => Err(Error::WrongVersion {
                 expected: v,
@@ -827,15 +833,20 @@ impl<T: Transport, C: HostClock> Host<T, C> {
 
     /// Polls HELLO after REBOOT until one answers as `want` (hub: reopening
     /// the port); at the end of the window, `Err` with the last HELLO that
-    /// answered otherwise, if any.
+    /// answered otherwise, if any. The window covers a full rollback of
+    /// topology node `node` by its own definition
+    /// ([`NodeTimings::reboot_wait_ms`](dagon_port::timeout::NodeTimings::reboot_wait_ms)),
+    /// and for the hub at least [`HUB_RECONNECT_MS`].
     async fn await_hello(
         &mut self,
         to: Target,
+        node: u8,
         want: impl Fn(&HelloResp) -> bool,
     ) -> Result<core::result::Result<HelloResp, Option<HelloResp>>, T::Error> {
+        let rollback = self.timings_of(node).reboot_wait_ms();
         let (limit, pause) = match to {
-            Target::Local => (HUB_RECONNECT_MS, REOPEN_MS),
-            _ => (REBOOT_WAIT_MS, self.node_poll_ms),
+            Target::Local => (HUB_RECONNECT_MS.max(rollback), REOPEN_MS),
+            _ => (rollback, self.node_poll_ms),
         };
         let deadline = self.clock.now_ms() + limit as u64;
         // Another version may answer until the reset really happens (the
@@ -978,7 +989,7 @@ impl<T: Transport, C: HostClock> Host<T, C> {
             Err(e) => return Err(Error::Rom(e)),
         };
         self.set_applied(to, v);
-        self.await_version(to, v).await?;
+        self.await_version(to, node, v).await?;
         self.report(on_event, node, phase::CONFIRM, 100, v);
         Ok((RecoverPath::Rom(stats), v))
     }
@@ -1047,7 +1058,7 @@ impl<T: Transport, C: HostClock> Host<T, C> {
         };
         let stats = stats.map_err(Error::SerialRom)?;
         // The loader restarted the node: whatever it boots answers HELLO.
-        if self.await_hello(to, |_| true).await?.is_err() {
+        if self.await_hello(to, node, |_| true).await?.is_err() {
             return Err(Error::Timeout);
         }
         self.report(on_event, node, phase::CONFIRM, 100, v);
